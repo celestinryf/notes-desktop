@@ -69,7 +69,7 @@
     state.saving = true;
     try {
       const updated = await api.notes.update(id, { body });
-      if (updated) { state.note = updated; state.dirty = state.rich.getMarkdown() !== body; el.status.textContent = ''; }
+      if (updated) { state.note = updated; state.shownBody = body; state.dirty = state.rich.getMarkdown() !== body; el.status.textContent = ''; }
       else { state.dirty = false; setReadOnly(true, 'This note is gone.'); }
       if (state.dirty) scheduleSave();
     } catch (err) {
