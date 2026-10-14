@@ -9,7 +9,7 @@
   };
   const id = new URLSearchParams(location.search).get('id');
   const COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
-  const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches, settings: null };
+  const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches, settings: null };
 
   function effectiveTheme() {
     const t = state.settings && state.settings.theme;
@@ -38,10 +38,25 @@
     el.title.textContent = title;
     document.title = title;
     applySticky(note.sticky);
-    if (state.rich && !state.dirty) state.rich.setMarkdown(note.body);
+    if (state.rich && !state.dirty) {
+      const lossless = state.rich.setMarkdown(note.body);
+      // Same rule as the main window: the rendered view may only edit what it can reproduce. A real file
+      // gets the strict test. Otherwise the first keystroke would rewrite formatting the sticky cannot show.
+      const viewerOnly = !!(note.filePath && note.fileKind !== 'text');
+      const exactEnough = lossless && (!note.filePath || state.rich.lastRoundTripExact());
+      setReadOnly(viewerOnly || !exactEnough, viewerOnly ? 'Read-only file. Open in Notes to view it.' : 'Has formatting this sticky cannot show. Edit it in Notes (↗).');
+    }
+  }
+
+  function setReadOnly(on, why) {
+    state.readOnly = on;
+    if (state.rich) state.rich.setEditable(!on);
+    document.documentElement.classList.toggle('is-readonly', on);
+    el.status.textContent = on ? why : '';
   }
 
   function scheduleSave() {
+    if (state.readOnly) return;
     state.dirty = true;
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(save, 500);
@@ -71,10 +86,10 @@
     for (const c of COLORS) {
       const b = document.createElement('button');
       b.type = 'button'; b.dataset.color = c; b.title = c;
-      b.addEventListener('click', () => api.stickies.setColor(id, c));
+      b.addEventListener('click', () => api.stickies.setColor(id, c).catch((err) => { el.status.textContent = 'Could not save: ' + (err.message || err); }));
       el.colors.append(b);
     }
-    el.topBtn.addEventListener('click', () => { const on = el.topBtn.getAttribute('aria-pressed') === 'true'; api.stickies.setOnTop(id, !on); });
+    el.topBtn.addEventListener('click', () => { const on = el.topBtn.getAttribute('aria-pressed') === 'true'; api.stickies.setOnTop(id, !on).catch((err) => { el.status.textContent = 'Could not save: ' + (err.message || err); }); });
     el.openBtn.addEventListener('click', () => api.stickies.openInNotes(id));
     el.title.addEventListener('dblclick', () => api.stickies.openInNotes(id));
     el.closeBtn.addEventListener('click', async () => { await flush(); api.stickies.close(id, { forget: true }); });
@@ -83,12 +98,13 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); flush(); }
     });
     window.addEventListener('blur', () => { if (state.dirty) flush(); });
+    api.on.flush(async () => { try { await flush(); } finally { api.app.flushDone(); } });
     window.addEventListener('beforeunload', () => { if (state.dirty) { try { api.notes.update(id, { body: state.rich.getMarkdown() }); } catch (_) { /* best effort */ } } });
 
     if (window.NotesEditor) {
       state.rich = window.NotesEditor.create(el.editor, {
         placeholder: 'Jot something… - [ ] makes a checkbox.',
-        onUpdate: () => { if (state.note && state.rich.getMarkdown() !== state.note.body) scheduleSave(); },
+        onUpdate: () => { if (!state.readOnly && state.note && state.rich.getMarkdown() !== state.note.body) scheduleSave(); },
       });
       el.editor.addEventListener('click', (e) => {
         const a = e.target.closest('a[href]');

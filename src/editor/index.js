@@ -20,7 +20,8 @@ import { Markdown } from 'tiptap-markdown';
 function fingerprint(md) {
   let s = String(md || '').replace(/\r/g, '');
   // YAML front matter (a key: value block fenced by ---) turns into a rule plus paragraphs; never lossless.
-  if (/^---\n[A-Za-z_][\w-]*:[^\n]*\n[\s\S]*?\n---(\n|$)/.test(s)) return 'front-matter:' + s;
+  // A single key line counts too ("---\ntitle: x\n---" is the common case).
+  if (/^---\n[A-Za-z_][\w-]*:[^\n]*\n(?:[\s\S]*?\n)?---(\n|$)/.test(s)) return 'front-matter:' + s;
   // Fences other than three backticks are always re-emitted as three backticks, which can break a block
   // that itself contains backticks; treat such notes as lossy.
   if (/^(~~~|````)/m.test(s)) return 'odd-fence:' + s;

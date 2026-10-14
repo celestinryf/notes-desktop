@@ -41,7 +41,7 @@ function exportNotes(store, dir) {
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     const content = n.body;
     fs.writeFileSync(abs, content, 'utf8');
-    files.push({ id: n.id, rel, hash: hashOf(content), folderId: n.folderId || null });
+    files.push({ id: n.id, rel, hash: hashOf(content), folderId: n.folderId || null, updatedAt: n.updatedAt });
   }
   const manifest = { exportedAt: Date.now(), files };
   fs.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(manifest, null, 2), 'utf8');
@@ -56,10 +56,10 @@ function hashOf(text) {
 // folder, deleted files are reported but the notes are kept (deleting is a decision for a person).
 function importNotes(store, dir) {
   const manifestPath = path.join(dir, MANIFEST);
-  if (!fs.existsSync(manifestPath)) return { updated: 0, created: 0, missing: 0, details: [] };
+  if (!fs.existsSync(manifestPath)) return { updated: 0, created: 0, missing: 0, conflicts: 0, details: [] };
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const known = new Map(manifest.files.map((f) => [f.rel.toLowerCase(), f]));
-  let updated = 0, created = 0, missing = 0;
+  let updated = 0, created = 0, missing = 0, conflicts = 0;
   const details = [];
   for (const f of manifest.files) {
     const abs = path.join(dir, f.rel);
@@ -68,8 +68,19 @@ function importNotes(store, dir) {
     const h = hashOf(content);
     if (h !== f.hash) {
       const note = store.get(f.id);
-      if (note && !note.trashedAt) { store.update(f.id, { body: content }); updated++; details.push('updated: ' + f.rel); }
+      if (!note || note.trashedAt) {
+        details.push('skipped (note trashed meanwhile): ' + f.rel);
+      } else if (Number.isFinite(f.updatedAt) && note.updatedAt > f.updatedAt && note.body !== content) {
+        // Edited in the app while the agent also edited the file: keep the person's text and save the
+        // agent's version beside it, so nothing is lost and the choice stays with the person.
+        const copy = store.create({ title: (H.deriveTitle(note) || 'Untitled') + ' (bot)', body: content, folderId: note.folderId, tags: note.tags });
+        conflicts++;
+        details.push('conflict: ' + f.rel + ' kept yours; agent version saved as "' + copy.title + '"');
+      } else {
+        store.update(f.id, { body: content }); updated++; details.push('updated: ' + f.rel);
+      }
       f.hash = h; // the workspace now reflects this content; a later import must not re-apply it
+      if (note) f.updatedAt = store.get(f.id).updatedAt;
     }
   }
   const walk = (d, relDir) => {
@@ -83,7 +94,7 @@ function importNotes(store, dir) {
       const note = store.create({ title: e.name.replace(/\.(md|markdown|txt)$/i, ''), body: content, folderId });
       created++;
       details.push('created: ' + rel);
-      const entry = { id: note.id, rel, hash: hashOf(content), folderId };
+      const entry = { id: note.id, rel, hash: hashOf(content), folderId, updatedAt: note.updatedAt };
       manifest.files.push(entry);
       known.set(rel.toLowerCase(), entry);
     }
@@ -91,7 +102,7 @@ function importNotes(store, dir) {
   walk(dir, '');
   // Persist what the workspace now maps to, so repeated imports (or a terminal session) are incremental.
   try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8'); } catch (_) { /* best effort */ }
-  return { updated, created, missing, details };
+  return { updated, created, missing, conflicts, details };
 }
 
 // Finds (or creates) the plain folder chain matching a relative directory produced by folderRelPath.
@@ -105,4 +116,13 @@ function folderIdForRel(store, relDir) {
   return parentId;
 }
 
-module.exports = { exportNotes, importNotes, folderRelPath, MANIFEST };
+// Pulls in whatever changed in the workspace since the last export (a terminal session, an earlier run),
+// then writes a fresh export. Returns { imported, manifest }.
+function refreshWorkspace(store, dir) {
+  let imported = null;
+  try { imported = importNotes(store, dir); } catch (err) { imported = { error: err.message }; }
+  const manifest = exportNotes(store, dir);
+  return { imported, manifest };
+}
+
+module.exports = { exportNotes, importNotes, refreshWorkspace, folderRelPath, MANIFEST };

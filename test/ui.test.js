@@ -674,6 +674,15 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await waitFor('agent edit imported', () => findNote('Gamma (copy)').body === 'bot target body\n- added by the bot\n');
   await waitFor('agent-created note imported', () => findNote('Bot created this'));
   await waitForDom(() => document.getElementById('bodyInput').value.includes('added by the bot'));
+  // A terminal-style edit in the workspace folder comes back in via Run with an empty prompt.
+  const wsFile = path.join(dataDir, 'workspace', 'Gamma (copy).md');
+  assert.ok(fs.existsSync(wsFile), 'workspace export exists');
+  fs.writeFileSync(wsFile, 'bot target body\n- added by the bot\n- typed in a terminal\n', 'utf8');
+  await page.fill('#botPrompt', '');
+  await page.click('#botRunBtn');
+  await waitForDom(() => /Pulled in workspace edits/.test(document.getElementById('botOutput').textContent), 10000);
+  await waitFor('terminal edit imported', () => /typed in a terminal/.test(findNote('Gamma (copy)').body));
+  await waitForDom(() => document.getElementById('bodyInput').value.includes('typed in a terminal'));
   // Clean up the created note and restore the body for later tests.
   await page.evaluate((id) => window.notesApi.notes.destroy(id), findNote('Bot created this').id);
   await page.fill('#bodyInput', 'pure text');
@@ -751,6 +760,30 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await waitFor('window closed by trash', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
   await page.evaluate((id) => window.notesApi.notes.destroy(id), fresh.id);
 
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('stickies: a note the rendered view cannot reproduce opens read-only instead of being rewritten', { timeout: 30000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  const lossy = '---\ntitle: front matter\n---\n\nbody\n';
+  await page.fill('#bodyInput', lossy);
+  await waitFor('lossy body saved', () => findNote('Gamma (copy)').body === lossy);
+  const opened = app.waitForEvent('window', { timeout: 15000 });
+  await page.evaluate((id) => window.notesApi.stickies.open(id), findNote('Gamma (copy)').id);
+  const sticky = await opened;
+  sticky.on('pageerror', (e) => rendererErrors.push('sticky pageerror: ' + e.message));
+  await sticky.waitForSelector('#stickyEditor .rich-editor-content', { timeout: 15000 });
+  await waitFor('read-only', () => sticky.evaluate(() => document.documentElement.classList.contains('is-readonly')));
+  assert.match(await sticky.textContent('#stickyStatus'), /cannot show/);
+  assert.equal(await sticky.evaluate(() => document.querySelector('#stickyEditor .rich-editor-content').getAttribute('contenteditable')), 'false');
+  await sleep(800);
+  assert.equal(findNote('Gamma (copy)').body, lossy, 'nothing rewritten by just showing it');
+  await sticky.click('#stickyCloseBtn');
+  await waitFor('removed', () => !findNote('Gamma (copy)').sticky);
+  await waitFor('window closed', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });

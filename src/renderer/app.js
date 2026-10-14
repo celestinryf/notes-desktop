@@ -914,12 +914,16 @@
     const note = state.current;
     if (!note || el.stickyBtn.disabled) return;
     await flushSave();
-    if (note.sticky) {
-      await api.stickies.close(note.id, { forget: true });
-      toast('Removed from the desktop. The note is kept.');
-    } else {
-      await api.stickies.open(note.id);
-      toast('On the desktop. Drag its top bar to move it; ✕ on it removes it, Esc just hides it (tray → Stickies brings it back).');
+    try {
+      if (note.sticky) {
+        await api.stickies.close(note.id, { forget: true });
+        toast('Removed from the desktop. The note is kept.');
+      } else {
+        await api.stickies.open(note.id);
+        toast('On the desktop. Drag its top bar to move it; ✕ on it removes it, Esc just hides it (tray → Stickies brings it back).');
+      }
+    } catch (err) {
+      toast('Could not change the sticky: ' + (err.message || err));
     }
     await refreshCurrentMeta();
   }
@@ -966,9 +970,16 @@
   async function runBot() {
     if (bot.running) { await api.bot.cancel(); return; }
     const prompt = el.botPrompt.value.trim();
-    if (!prompt) { el.botPrompt.focus(); return; }
     await flushSave();
     el.botOutput.textContent = '';
+    if (!prompt) {
+      // Empty prompt: pull in whatever a terminal session changed in the workspace.
+      const r = await api.bot.importWorkspace();
+      botAppend(r.error ? ('Import failed: ' + r.error + '\n') : ('Pulled in workspace edits. ' + importSummary(r) + '\n' + (r.details || []).map((d) => '  ' + d).join('\n') + (r.details && r.details.length ? '\n' : '')), r.error ? 'bot-err' : 'bot-meta');
+      await refresh({ keepEditor: true });
+      el.botPrompt.focus();
+      return;
+    }
     const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
     if (!res.ok) { botAppend(res.error + '\n', 'bot-err'); return; }
   }
@@ -979,6 +990,7 @@
       el.botPanel.classList.add('is-running');
       el.botRunBtn.textContent = 'Stop';
       botAppend('Working in ' + ev.cwd + (ev.focus ? '  (looking at ' + ev.focus + ')' : '') + '\n', 'bot-meta');
+      if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend('Pulled in earlier workspace edits first. ' + importSummary(ev.imported) + '\n', 'bot-meta');
     } else if (ev.type === 'out') {
       botAppend(ev.text);
     } else if (ev.type === 'err') {
@@ -990,8 +1002,9 @@
       if (ev.error) botAppend('\n' + ev.error + '\n', 'bot-err');
       else {
         const imp = ev.imported;
-        const summary = imp && !imp.error ? ' Notes updated: ' + imp.updated + ', created: ' + imp.created + (imp.missing ? ', files removed by the agent (notes kept): ' + imp.missing : '') + '.' : '';
+        const summary = imp && !imp.error ? ' ' + importSummary(imp) : '';
         botAppend('\nDone' + (ev.code === 0 ? '' : ' (exit code ' + ev.code + ')') + '.' + summary + '\n', 'bot-meta');
+        if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith('conflict')).map((d) => '  ' + d).join('\n') + '\n', 'bot-err');
       }
       refresh({ keepEditor: true }).then(async () => {
         // Reload the open note from the store in case the agent edited it.
@@ -1002,11 +1015,15 @@
     }
   }
 
+  function importSummary(imp) {
+    return 'Notes updated: ' + imp.updated + ', created: ' + imp.created + (imp.conflicts ? ', conflicts: ' + imp.conflicts : '') + (imp.missing ? ', files removed by the agent (notes kept): ' + imp.missing : '') + '.';
+  }
+
   async function openBotTerminal() {
     await flushSave();
     const res = await api.bot.openTerminal(state.currentId);
     if (!res.ok) { toast('Could not open a terminal: ' + res.error); return; }
-    toast('Claude Code opened in a terminal at ' + res.cwd + (res.kind === 'workspace' ? '. When you are done, press Run with an empty prompt or reopen the app to pull its edits back in.' : ''));
+    toast('Claude Code opened in a terminal at ' + res.cwd + (res.kind === 'workspace' ? '. Its edits are pulled in on the next Run, or press Run with an empty prompt.' : ''));
   }
 
   // ---- speech: read aloud and dictate --------------------------------------
