@@ -483,7 +483,7 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   await useSourceMode(true);
 });
 
-test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', async () => {
+test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
   const fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-files-'));
   const mdPath = path.join(fileDir, 'External note.md');
   fs.writeFileSync(mdPath, '# From disk\n\nline one\n');
@@ -514,6 +514,23 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   fs.writeFileSync(mdPath, '# From disk\n\nreplaced by another program\n');
   await waitForDom(() => document.getElementById('bodyInput').value.includes('replaced by another program'), 10000);
 
+  // A file whose Markdown the rendered view would reformat (soft line breaks) opens in source mode even when the
+  // global preference is rendered, so the real file is never rewritten just by opening it.
+  const softPath = path.join(fileDir, 'soft.md');
+  fs.writeFileSync(softPath, 'first line\nsecond line\n');
+  await page.keyboard.press('Control+e'); // prefer rendered globally
+  await waitFor('rendered preferred', () => readNotes().settings.editorMode === 'rendered');
+  await page.evaluate((p) => window.notesApi.files.link([p]), softPath);
+  await waitFor('soft file linked', () => readNotes().notes.some((n) => n.filePath && n.filePath.endsWith('soft.md')));
+  await page.click('.nav-item[data-view="all"]'); // linking through the API does not refresh the list by itself
+  await page.waitForSelector('.note-card:has-text("soft.md")', { timeout: 8000 });
+  await page.click('.note-card:has-text("soft.md")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'soft.md');
+  await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
+  assert.equal(readNotes().settings.editorMode, 'rendered', 'global preference untouched');
+  await sleep(600);
+  assert.equal(fs.readFileSync(softPath, 'utf8'), 'first line\nsecond line\n', 'file untouched by opening it');
+
   // PDF opens in a viewer frame, read-only.
   await page.click('.note-card:has-text("paper.pdf")');
   await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
@@ -536,7 +553,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 
   // Clean up: unlink the test notes (files stay), delete the folder, go back to the usual state.
   await page.click('.nav-item[data-view="all"]');
-  for (const t of ['External note.md', 'paper.pdf']) {
+  for (const t of ['External note.md', 'paper.pdf', 'soft.md']) {
     await page.click(`.note-card:has-text("${t}")`);
     await waitForDom((x) => document.getElementById('titleInput').value === x, t);
     await page.keyboard.press('Control+Shift+Delete');
@@ -546,7 +563,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await page.click('.nav-item[data-view="trash"]');
   await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
   await page.click('#emptyTrashBtn');
-  await waitFor('file notes destroyed', () => !readNotes().notes.some((n) => n.title === 'External note.md' || n.title === 'paper.pdf'));
+  await waitFor('file notes destroyed', () => !readNotes().notes.some((n) => ['External note.md', 'paper.pdf', 'soft.md'].includes(n.title)));
   // Remove the agent-file links and their folder through the app's own API so later tests see the usual tree.
   const agentNoteIds = readNotes().notes.filter((x) => x.folderId === agentFolder.id).map((x) => x.id);
   await page.evaluate(async ({ ids, folderId }) => {

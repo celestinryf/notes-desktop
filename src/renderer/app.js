@@ -682,7 +682,12 @@
     el.bodyInput.value = note.body;
     const hasPending = applyPendingTo(note);
     let lossless = true;
-    if (state.rich) lossless = state.rich.setMarkdown(el.bodyInput.value);
+    if (state.rich) {
+      lossless = state.rich.setMarkdown(el.bodyInput.value);
+      // A real file on disk gets the strict test: the rendered view may only be used if it reproduces the
+      // file exactly, otherwise the first keystroke would reformat someone's CLAUDE.md or README.
+      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+    }
     state.currentLossless = lossless;
     state.lossyOverride = null;
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
@@ -690,7 +695,9 @@
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (!lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
-      toast('Opened as Markdown source: the rendered view would change some of this note’s formatting.');
+      toast(note.filePath
+        ? 'Opened as source: the rendered view would reformat this file. Ctrl+E switches anyway.'
+        : 'Opened as Markdown source: the rendered view would change some of this note’s formatting.');
     }
     autoGrow();
     const inTrash = !!note.trashedAt;
@@ -788,26 +795,39 @@
     if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
-      state.current = fresh;
-      el.bodyInput.value = fresh.body;
-      if (state.rich) state.currentLossless = state.rich.setMarkdown(fresh.body);
-      autoGrow();
-      updateStatus(fresh);
+      // Re-check after the second round trip: the user may have switched notes or started typing meanwhile.
+      if (state.currentId !== note.id || state.dirty || !fresh) return;
+      applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }
+  }
+
+  // Puts a re-read file body into the editor and re-applies the strict rendered/source decision for files.
+  function applyFreshFileBody(fresh) {
+    state.current = fresh;
+    el.bodyInput.value = fresh.body;
+    if (state.rich) {
+      let lossless = state.rich.setMarkdown(fresh.body);
+      if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+      state.currentLossless = lossless;
+      if (!lossless && !state.sourceMode && state.lossyOverride !== fresh.id) {
+        applyEditorMode(true);
+        toast('Switched to source: the file now contains formatting the rendered view would change.');
+      }
+    }
+    autoGrow();
+    updateStatus(fresh);
   }
 
   async function reloadCurrentFile() {
     if (!state.current || !state.current.filePath) return;
     if (state.dirty && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
+    const id = state.currentId;
     state.dirty = false;
-    const res = await api.files.refresh(state.currentId);
-    const fresh = await api.notes.get(state.currentId);
-    state.current = fresh;
-    el.bodyInput.value = fresh.body;
-    if (state.rich) state.currentLossless = state.rich.setMarkdown(fresh.body);
-    autoGrow();
-    updateStatus(fresh);
+    const res = await api.files.refresh(id);
+    const fresh = await api.notes.get(id);
+    if (state.currentId !== id || !fresh) return;
+    applyFreshFileBody(fresh);
     toast(res.missing ? 'File not found on disk.' : res.changed ? 'Reloaded from disk.' : 'Already up to date.');
   }
 
@@ -826,7 +846,6 @@
 
   function scheduleSave() {
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
-    if (state.current && state.current.filePath && state.current.fileKind !== 'text') return; // read-only kinds
     state.dirty = true;
     setSaved('Saving…');
     clearTimeout(state.saveTimer);
@@ -839,7 +858,10 @@
   state.pending = new Map();
 
   function currentPatch() {
-    return { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+    const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+    // Read-only file kinds (PDF, Word, binary) still take title and tag edits; their body is not ours to write.
+    if (state.current && state.current.filePath && state.current.fileKind !== 'text') delete patch.body;
+    return patch;
   }
 
   function scheduleRetry() {

@@ -305,16 +305,15 @@ class Store {
     patch = patch || {};
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
-    if (typeof patch.title === 'string' && patch.title !== note.title) { note.title = patch.title; changed = true; }
-    if (typeof patch.body === 'string' && patch.body !== note.body) {
-      if (note.filePath) {
-        // Only text files take edits; the file is the source of truth, written first, then the cache updated.
-        if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
-        note.fileMtime = F.writeTextInPlace(note.filePath, patch.body);
-      }
-      note.body = patch.body;
-      changed = true;
+    let fileWritten = false;
+    // File-backed: the file is the source of truth and is written first, before any field changes.
+    if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
+      if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
+      note.fileMtime = F.writeTextInPlace(note.filePath, patch.body);
+      fileWritten = true;
     }
+    if (typeof patch.title === 'string' && patch.title !== note.title) { note.title = patch.title; changed = true; }
+    if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
     if (patch.tags !== undefined) {
       const tags = H.parseTags(patch.tags);
       if (tags.join(',') !== note.tags.join(',')) { note.tags = tags; changed = true; }
@@ -329,8 +328,15 @@ class Store {
       try {
         this.save();
       } catch (err) {
-        // Roll back so a retry with the same patch is a real change and gets written.
-        Object.assign(note, before);
+        // Roll back so a retry with the same patch is a real change and gets written. When the file itself
+        // was already written, the cache must keep mirroring the file: the user's text is safe on disk, only
+        // the metadata write failed.
+        if (fileWritten) {
+          const keep = { body: note.body, fileMtime: note.fileMtime };
+          Object.assign(note, before, keep);
+        } else {
+          Object.assign(note, before);
+        }
         throw err;
       }
     }
@@ -441,10 +447,12 @@ class Store {
       await this.refreshFileNote(existing.id);
       return existing;
     }
-    const kind = F.kindOf(abs);
+    let kind = F.kindOf(abs);
     let body = '', mtime = F.mtimeOf(abs);
-    if (kind === 'text') ({ body, mtime } = F.readText(abs));
-    else if (kind === 'docx') ({ body, mtime } = await F.readDocxAsMarkdown(abs));
+    if (kind === 'text') {
+      try { ({ body, mtime } = F.readText(abs)); }
+      catch (err) { if (err.code === 'EENCODING') { kind = 'binary'; body = ''; } else throw err; }
+    } else if (kind === 'docx') ({ body, mtime } = await F.readDocxAsMarkdown(abs));
     return this.create({
       title: opts.title || path.basename(abs),
       body,

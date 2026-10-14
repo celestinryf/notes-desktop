@@ -169,10 +169,15 @@ export function create(element, options) {
 
   // Loads Markdown and reports whether the rendered view preserves it: true when serializing the loaded
   // document gives back the same content, false when some construct would be rewritten or dropped.
+  let lastExact = true;
   function setMarkdown(md) {
     suppress = true;
     try { editor.commands.setContent(md || '', false); } finally { suppress = false; }
-    return fingerprint(getMarkdown()) === fingerprint(md);
+    const out = getMarkdown();
+    // Exact: byte-for-byte apart from trailing whitespace. Used for file-backed notes, where even a changed
+    // line-break style in someone's CLAUDE.md is a rewrite they did not ask for.
+    lastExact = String(md || '').replace(/[ \t]+$/gm, '').trimEnd() === out.replace(/[ \t]+$/gm, '').trimEnd();
+    return fingerprint(out) === fingerprint(md);
   }
 
   return {
@@ -195,6 +200,7 @@ export function create(element, options) {
       return chain.extendMarkRange('link').setLink({ href }).run();
     },
     selectionRange: currentRange,
+    lastRoundTripExact: () => lastExact,
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
     hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
     destroy: () => editor.destroy(),
