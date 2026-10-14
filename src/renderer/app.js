@@ -42,6 +42,10 @@
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'),
     fileBanner: $('#fileBanner'), pdfFrame: $('#pdfFrame'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
+    vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
+    vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
+    vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
+    folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
   };
 
   const state = {
@@ -412,6 +416,14 @@
       icon.className = 'folder-icon';
       icon.textContent = '▰';
       row.append(icon);
+      if (node.isVaultRoot) {
+        const st = state.vaultStatus[node.vaultId] || {};
+        const badge = document.createElement('span');
+        badge.className = 'vault-badge' + (st.syncing ? ' is-syncing' : '') + (st.lastError || st.conflict ? ' is-error' : '');
+        badge.textContent = st.isRepo ? '⟳' : '⌂';
+        badge.title = st.isRepo ? ('git' + (st.remote ? ' · ' + st.remote : ' · no remote') + (st.lastError ? '\n' + st.lastError : '')) : 'Folder vault (no git)';
+        row.append(badge);
+      }
 
       if (editing && editing.mode === 'rename' && editing.id === node.id) {
         row.append(folderInput(node.name, (value) => commitFolderEdit(value)));
@@ -558,7 +570,9 @@
     const existing = state.notes.find((n) => n.id === noteId) || (state.currentId === noteId ? state.current : null);
     if (existing && (existing.folderId || null) === (folderId || null)) return; // already there
     await flushSave();
-    const updated = await api.notes.update(noteId, { folderId: folderId || null });
+    let updated;
+    try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
+    catch (err) { toast(err.message && /vault/i.test(err.message) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + (err.message || err)); return; }
     if (state.currentId === noteId && updated) state.current = updated;
     await refresh({ keepEditor: true });
     const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
@@ -614,6 +628,10 @@
   function openFolderMenu(id, anchor, ev) {
     state.menuFolderId = id;
     const menu = el.folderMenu;
+    const node = flattenTree(state.tree).find((n) => n.id === id) || {};
+    el.folderMenuSync.classList.toggle('hidden', !node.isVaultRoot);
+    el.folderMenuOpen.classList.toggle('hidden', !node.vaultId);
+    menu.querySelector('[data-action="delete"]').textContent = node.isVaultRoot ? 'Remove vault (keeps files)' : 'Delete folder';
     menu.classList.remove('hidden');
     const rect = anchor.getBoundingClientRect();
     let x = ev ? ev.clientX : rect.right - 4;
@@ -636,10 +654,147 @@
     const id = state.menuFolderId;
     closeFolderMenu();
     if (!id) return;
+    const node = flattenTree(state.tree).find((n) => n.id === id) || {};
     if (action === 'new-note') { await setView('folder', id); await newNote(); }
     else if (action === 'new-subfolder') startCreateFolder(id);
     else if (action === 'rename') startRename(id);
+    else if (action === 'sync' && node.vaultId) syncVault(node.vaultId);
+    else if (action === 'open-folder' && node.vaultId) api.vaults.openFolder(node.vaultId);
+    else if (action === 'delete' && node.isVaultRoot) removeVault(node.vaultId);
     else if (action === 'delete') deleteFolder(id);
+  }
+
+  // ---- vaults ----------------------------------------------------------------
+
+  state.vaultStatus = {};
+
+  async function syncVault(id) {
+    toast('Syncing vault…');
+    const r = await api.vaults.sync(id);
+    if (r.ok) toast('Vault synced.');
+    else if (r.skipped) toast('This vault is a plain folder (' + r.skipped + '). Add a remote in Settings to sync it.');
+    else toast('Vault sync failed: ' + r.error);
+    await refresh({ keepEditor: true });
+    renderVaultList();
+  }
+
+  async function removeVault(id) {
+    if (!window.confirm('Remove this vault from Notes? The folder and its files stay on disk untouched.')) return;
+    await flushSave();
+    await api.vaults.remove(id);
+    if (state.view === 'folder') await setView('all'); else await refresh({ keepEditor: true });
+    renderVaultList();
+    toast('Vault removed. Files kept.');
+  }
+
+  async function addVaultFolder() {
+    const dir = await api.vaults.pickFolder();
+    if (!dir) return;
+    try {
+      const v = await api.vaults.add({ path: dir });
+      el.settingsDialog.close();
+      await setView('folder', v.rootFolderId);
+      await setExpanded(v.rootFolderId, true);
+      toast('Vault "' + v.name + '" added' + (v.status.isRepo ? ' (git repository' + (v.status.remote ? ', syncing with ' + v.status.remote : ', no remote') + ')' : ''));
+    } catch (err) {
+      toast('Could not add vault: ' + (err.message || err));
+    }
+  }
+
+  function openCloneDialog() {
+    el.vaultUrlInput.value = '';
+    el.vaultNameInput.value = '';
+    el.vaultError.textContent = '';
+    if (!el.vaultDestInput.value && state.info && state.info.documentsDir) el.vaultDestInput.value = state.info.documentsDir;
+    el.vaultDialog.showModal();
+    el.vaultUrlInput.focus();
+  }
+
+  async function submitClone() {
+    const url = el.vaultUrlInput.value.trim();
+    const dest = el.vaultDestInput.value.trim();
+    if (!url) { el.vaultError.textContent = 'Enter a repository URL.'; return; }
+    if (!dest) { el.vaultError.textContent = 'Choose where to clone.'; return; }
+    el.vaultCloneSubmitBtn.disabled = true;
+    el.vaultError.textContent = 'Cloning…';
+    try {
+      const r = await api.vaults.clone(url, dest, el.vaultNameInput.value.trim());
+      if (!r.ok) { el.vaultError.textContent = r.error; return; }
+      el.vaultDialog.close();
+      el.settingsDialog.close();
+      await setView('folder', r.vault.rootFolderId);
+      await setExpanded(r.vault.rootFolderId, true);
+      toast('Cloned "' + r.vault.name + '". Changes will sync automatically.');
+    } catch (err) {
+      el.vaultError.textContent = String(err.message || err);
+    } finally {
+      el.vaultCloneSubmitBtn.disabled = false;
+    }
+  }
+
+  async function renderVaultList() {
+    if (!el.settingsDialog.open) return;
+    let list;
+    try { list = await api.vaults.list(); } catch (_) { return; }
+    el.vaultList.innerHTML = '';
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.className = 'vault-empty';
+      d.textContent = 'No vaults yet. Add a folder of Markdown files, or clone a repository.';
+      el.vaultList.append(d);
+      return;
+    }
+    for (const v of list) {
+      state.vaultStatus[v.id] = v.status;
+      const item = document.createElement('div');
+      item.className = 'vault-item';
+      const head = document.createElement('div');
+      head.className = 'vault-head';
+      head.innerHTML = '<span></span><span class="vault-path"></span>';
+      head.firstChild.textContent = v.name;
+      head.lastChild.textContent = v.path;
+      head.lastChild.title = v.path;
+      item.append(head);
+      const st = document.createElement('div');
+      st.className = 'vault-status' + (v.status.lastError || v.status.conflict ? ' is-error' : '');
+      st.textContent = describeVaultStatus(v);
+      item.append(st);
+      const actions = document.createElement('div');
+      actions.className = 'vault-actions';
+      const remote = document.createElement('input');
+      remote.className = 'input';
+      remote.placeholder = v.status.isRepo ? 'Remote URL (origin)' : 'Add a remote URL to turn this folder into a synced repo';
+      remote.value = v.remote || v.status.remote || '';
+      remote.addEventListener('change', async () => { await api.vaults.update(v.id, { remote: remote.value.trim() }); renderVaultList(); });
+      actions.append(remote);
+      const mk = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
+      mk('Sync now', () => syncVault(v.id));
+      mk('Rescan', async () => { const r = await api.vaults.scan(v.id); toast('Rescanned: +' + r.added + ' changed ' + r.updated + ' removed ' + r.removed); await refresh({ keepEditor: true }); });
+      mk('Open folder', () => api.vaults.openFolder(v.id));
+      const auto = document.createElement('label');
+      auto.className = 'field-check';
+      auto.innerHTML = '<input type="checkbox"><span>Auto-sync</span>';
+      auto.firstChild.checked = v.autoSync;
+      auto.firstChild.addEventListener('change', async () => { await api.vaults.update(v.id, { autoSync: auto.firstChild.checked }); renderVaultList(); });
+      actions.append(auto);
+      mk('Remove', () => removeVault(v.id), 'btn-danger');
+      item.append(actions);
+      el.vaultList.append(item);
+    }
+  }
+
+  function describeVaultStatus(v) {
+    const s = v.status || {};
+    if (!s.isRepo) return 'Plain folder: notes mirror the files, no git. Add a remote URL to start syncing.';
+    const parts = ['git on ' + (s.branch || '?')];
+    if (s.remote) parts.push(s.ahead || s.behind ? (s.ahead + ' ahead, ' + s.behind + ' behind') : 'in sync with remote');
+    else parts.push('no remote (local history only)');
+    if (s.dirty) parts.push('uncommitted changes');
+    if (s.syncing) parts.push('syncing…');
+    if (s.lastSyncAt) parts.push('last sync ' + H.relativeTime(s.lastSyncAt));
+    if (s.conflict) parts.push('CONFLICT: resolve in the folder');
+    if (s.lastError) parts.push('error: ' + s.lastError);
+    return parts.join(' · ');
   }
 
   // ---- editor --------------------------------------------------------------
@@ -1312,10 +1467,11 @@
     el.gitEnabledInput.checked = s.gitEnabled;
     el.gitRemoteInput.value = s.gitRemote;
     populateVoices();
+    el.settingsDialog.showModal();
+    renderVaultList();
     el.ttsRateInput.value = s.ttsRate;
     el.ttsRateValue.textContent = Number(s.ttsRate).toFixed(1) + '×';
     refreshGitStatus();
-    el.settingsDialog.showModal();
   }
 
   function syncAlignSeg(value) {
@@ -1448,6 +1604,18 @@
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
     el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
     el.agentFilesBtn.addEventListener('click', addAgentFiles);
+    el.vaultAddFolderBtn.addEventListener('click', addVaultFolder);
+    el.vaultCloneBtn.addEventListener('click', openCloneDialog);
+    el.vaultDestBtn.addEventListener('click', async () => { const d = await api.vaults.pickFolder(); if (d) el.vaultDestInput.value = d; });
+    el.vaultCancelBtn.addEventListener('click', () => el.vaultDialog.close());
+    el.vaultForm.addEventListener('submit', (e) => { e.preventDefault(); submitClone(); });
+    api.on.vaultStatus(({ id, status }) => {
+      const before = state.vaultStatus[id] || {};
+      state.vaultStatus[id] = status;
+      if (status.lastError && status.lastError !== before.lastError) toast('Vault: ' + status.lastError);
+      renderFolders();
+      renderVaultList();
+    });
     el.readAloudBtn.addEventListener('click', toggleReadAloud);
     el.dictateBtn.addEventListener('click', startDictation);
     if (window.speechSynthesis) { populateVoices(); window.speechSynthesis.addEventListener('voiceschanged', populateVoices); }

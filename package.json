@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test \"test/unit/**/*.test.js\"",
+    "test": "node --test --test-force-exit --test-timeout=60000 \"test/unit/**/*.test.js\"",
     "test:e2e": "node test/e2e.js",
     "icon": "electron scripts/make-icon.js",
     "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",

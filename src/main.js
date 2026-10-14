@@ -4,6 +4,7 @@ const fs = require('fs');
 const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen } = require('electron');
 const { Store } = require('./store');
 const { GitSync } = require('./gitSync');
+const { VaultManager } = require('./vaults');
 const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
@@ -46,6 +47,11 @@ function main() {
   let win = null;
   let tray = null;
   let quitting = false;
+  const vaults = new VaultManager(store, {
+    debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
+    onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
+    onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded'); },
+  });
   let hotkeyState = { hotkey: store.settings.hotkey, registered: false };
   let boundsTimer = null;
 
@@ -273,6 +279,7 @@ function main() {
       hotkeyDisplay: H.displayAccelerator(hotkeyState.hotkey),
       platform: process.platform,
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
+      documentsDir: app.getPath('documents'),
       saveBlocked: !!store.saveBlocked,
       recoveredNotes: store.recoveredFromBackup ? store.notes.length : null,
     };
@@ -282,8 +289,18 @@ function main() {
 
   ipcMain.handle('notes:list', (_e, opts) => store.list(opts));
   ipcMain.handle('notes:get', (_e, id) => store.get(id));
-  ipcMain.handle('notes:create', (_e, data) => store.create(data));
-  ipcMain.handle('notes:update', (_e, id, patch) => store.update(id, patch));
+  ipcMain.handle('notes:create', (_e, data) => {
+    data = data || {};
+    const folder = data.folderId ? store.getFolder(data.folderId) : null;
+    const note = folder && folder.vaultId ? store.createVaultNote(folder.id, data) : store.create(data);
+    if (note.vaultId) vaults.noteChanged(note.vaultId);
+    return note;
+  });
+  ipcMain.handle('notes:update', (_e, id, patch) => {
+    const note = store.update(id, patch);
+    if (note && note.vaultId) vaults.noteChanged(note.vaultId);
+    return note;
+  });
   ipcMain.handle('notes:togglePin', (_e, id) => store.togglePin(id));
   ipcMain.handle('notes:duplicate', (_e, id) => store.duplicate(id));
   ipcMain.handle('notes:trash', (_e, id) => store.trash(id));
@@ -342,6 +359,37 @@ function main() {
     }
     return Object.assign(res, { folderId: folder.id, found: found.length });
   });
+
+  // ---- vaults --------------------------------------------------------------
+
+  const vaultView = (v) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
+  ipcMain.handle('vaults:list', () => store.vaults.map(vaultView));
+  ipcMain.handle('vaults:pickFolder', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
+    return canceled || !filePaths.length ? null : filePaths[0];
+  });
+  ipcMain.handle('vaults:add', async (_e, data) => {
+    const v = store.addVault(data);
+    await vaults.open(v.id, { pull: true });
+    return vaultView(v);
+  });
+  ipcMain.handle('vaults:clone', async (_e, url, parentDir, name) => {
+    const safe = String(name || path.basename(String(url).replace(/\.git$/, '').replace(/[\\/]+$/, '')) || 'vault').replace(/[<>:"/\\|?*]/g, '-');
+    const dest = path.join(parentDir, safe);
+    if (fs.existsSync(dest)) return { ok: false, error: 'A folder named "' + safe + '" already exists there.' };
+    const r = await VaultManager.clone(url, dest);
+    if (!r.ok) return r;
+    const v = store.addVault({ path: dest, name: safe, remote: url });
+    await vaults.open(v.id, { pull: false });
+    return { ok: true, vault: vaultView(v) };
+  });
+  ipcMain.handle('vaults:update', async (_e, id, patch) => { const v = store.updateVault(id, patch); if (v) { vaults.schedulePull(id); if (patch && patch.remote !== undefined) await vaults.initRepo(id, patch.remote); } return v ? vaultView(v) : null; });
+  ipcMain.handle('vaults:remove', (_e, id) => { vaults.close(id); return store.removeVault(id); });
+  ipcMain.handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));
+  ipcMain.handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); return r; });
+  ipcMain.handle('vaults:initRepo', (_e, id, remote) => vaults.initRepo(id, remote));
+  ipcMain.handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
+  ipcMain.handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
 
   ipcMain.handle('folders:tree', () => store.folderTree());
   ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
@@ -498,9 +546,9 @@ function main() {
     // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
     // cannot keep the tray icon alive for a minute after Quit.
     rendererFlushed
-      .then(() => Promise.race([git.flush(), new Promise((r) => setTimeout(r, 5000))]))
+      .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()]), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => app.quit());
+      .finally(() => { vaults.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
@@ -522,5 +570,6 @@ function main() {
     step('hotkey', () => registerHotkey(store.settings.hotkey));
     step('login item', applyLoginItem);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
+    vaults.start().catch((err) => console.error('[vaults] start failed', err));
   });
 }
