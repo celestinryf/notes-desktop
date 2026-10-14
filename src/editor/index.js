@@ -27,6 +27,9 @@ function fingerprint(md) {
   // A hard break followed directly by a block marker (quote, heading, list) splits the paragraph on reload.
   // Checked outside fenced code, and only on the very next line (a blank line in between is a normal break).
   if (/(\\| {2,})\n[ \t]*(>|#{1,6}\s|[-+*]\s|\d+[.)]\s)/.test(s.replace(/```[\s\S]*?```/g, ''))) return 'break-before-block:' + s;
+  // Spacing inside inline code is content, but the HTML parser collapses runs of spaces; keep each space as a
+  // letter-class marker so a collapse shows up as a difference and the note opens in source instead.
+  s = s.replace(/`[^`\n]*`/g, (span) => span.replace(/ /g, 'ꞏ'));
   s = s
     .replace(/\\\n/g, '\n')                      // backslash hard break == newline
     .replace(/ {2,}\n/g, '\n')                   // two-space hard break == newline
