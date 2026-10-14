@@ -750,6 +750,7 @@
       state.vaultStatus[v.id] = v.status;
       const item = document.createElement('div');
       item.className = 'vault-item';
+      item.dataset.id = v.id;
       const head = document.createElement('div');
       head.className = 'vault-head';
       head.innerHTML = '<span></span><span class="vault-path"></span>';
@@ -1692,7 +1693,12 @@
       state.vaultStatus[id] = status;
       if (status.lastError && status.lastError !== before.lastError) toast('Vault: ' + status.lastError);
       renderFolders();
-      renderVaultList();
+      // Never rebuild the list under a field the user is typing in; just refresh that vault's status line.
+      const typing = document.activeElement && el.vaultList.contains(document.activeElement);
+      if (typing) {
+        const item = el.vaultList.querySelector('.vault-item[data-id="' + id + '"] .vault-status');
+        if (item) { item.textContent = describeVaultStatus({ status }); item.classList.toggle('is-error', !!(status.lastError || status.conflict)); }
+      } else renderVaultList();
     });
     el.readAloudBtn.addEventListener('click', toggleReadAloud);
     el.dictateBtn.addEventListener('click', startDictation);
@@ -1867,7 +1873,20 @@
     });
     api.on.newNote(newNote);
     api.on.flush(async () => { try { await flushSave(); await retryPending(); } finally { api.app.flushDone(); } });
-    api.on.reloaded(async () => { await refresh(); toast('Your notes file is readable again; saving resumed.'); });
+    api.on.reloaded(async (info) => {
+      const reason = info && info.reason;
+      await refresh({ keepEditor: true });
+      // The store may now hold a newer body for the open note (a pull, a rescan, the bot). Show it, unless
+      // the user is mid-edit; in that case leave their text and tell them.
+      if (state.currentId) {
+        const fresh = await api.notes.get(state.currentId);
+        if (fresh && fresh.body !== el.bodyInput.value) {
+          if (!state.dirty) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
+          else toast('This note changed on disk while you were editing. Your text is kept; use Reload to take the disk version.');
+        }
+      }
+      if (reason === 'recovered') toast('Your notes file is readable again; saving resumed.');
+    });
     api.on.settingsChanged((s) => applySettings(s));
     api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });

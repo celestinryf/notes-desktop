@@ -103,8 +103,10 @@ class VaultManager {
     clearTimeout(t.rescan);
     t.rescan = setTimeout(async () => {
       try {
-        const r = await this.store.scanVault(id);
+        // While a sync is replaying commits, files come and go; never treat that as deletions.
+        const r = await this.store.scanVault(id, { allowRemovals: !this.busy.has(id) });
         if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r);
+        if (this.busy.has(id)) this.scheduleRescan(id);
       } catch (err) { this._set(id, { lastError: 'scan: ' + err.message }); }
     }, this.rescanDebounceMs);
   }
@@ -193,7 +195,8 @@ class VaultManager {
           const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], v.path, 10000)).stdout.trim() || 'main';
           const remoteHas = await git(['ls-remote', '--heads', 'origin', branch], v.path, 60000);
           const remoteHasBranch = remoteHas.ok && remoteHas.stdout.trim().length > 0;
-          const pull = remoteHasBranch ? await git(['pull', '--rebase', '--autostash', '-q', 'origin', branch], v.path, 120000) : { ok: true };
+          // Rebase and autostash create commits too, so the identity goes on the pull as well.
+          const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true };
           if (!pull.ok) {
             await git(['rebase', '--abort'], v.path);
             await this.refreshRepoStatus(id);
