@@ -514,6 +514,16 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   pointer-events: none;
 }
 
+/* Locked notes */
+.lock-screen { display: flex; align-items: center; justify-content: center; padding: 40px 16px; }
+.lock-screen-card { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(360px, 100%); padding: 24px; border: 2px solid var(--line); border-radius: 14px; background: var(--bg-raised); box-shadow: 5px 5px 0 var(--shadow); }
+.lock-screen-icon { font-size: 32px; }
+.lock-screen-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; }
+.lock-screen-card .input { width: 100%; }
+.lock-screen-error { margin: 0; min-height: 1em; font-size: 12px; color: var(--ember); }
+.lock-mark { color: var(--fg-muted); font-size: 12px; margin-right: 2px; }
+.note-card-snippet.is-locked { font-style: italic; color: var(--fg-muted); }
+
 /* Reminders */
 .remind-mark { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
 .remind-mark.is-overdue { color: var(--ember); font-weight: 600; }

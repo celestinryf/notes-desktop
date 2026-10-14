@@ -944,6 +944,74 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
+test('locking: a password locks the note, the file holds no plaintext, wrong password is refused, hiding the app relocks', { timeout: 60000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'the launch code is 4242-flamingo');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === 'the launch code is 4242-flamingo');
+  const id = findNote('Gamma (copy)').id;
+  await page.keyboard.press('Control+l');
+  await page.waitForSelector('#lockDialog[open]');
+  await page.fill('#lockPassword', 'pw-one');
+  await page.fill('#lockPassword2', 'pw-two');
+  await page.click('#lockSubmitBtn');
+  await waitForDom(() => /differ/.test(document.getElementById('lockError').textContent));
+  await page.fill('#lockPassword2', 'pw-one');
+  await page.click('#lockSubmitBtn');
+  await waitFor('locked on disk', () => { const n = findNote('Gamma (copy)'); return n.lock && n.lock.ct && n.body === ''; });
+  assert.ok(!fs.readFileSync(notesFile, 'utf8').includes('flamingo'), 'no plaintext in notes.json');
+  await waitForDom(() => document.getElementById('lockBtn').textContent === '🔓 Unlocked');
+  assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 4242-flamingo', 'still readable right after locking');
+  // Editing while unlocked re-encrypts.
+  await page.fill('#bodyInput', 'the launch code is 9999-pelican');
+  await sleep(900);
+  await waitFor('edit encrypted', () => !fs.readFileSync(notesFile, 'utf8').includes('pelican') && findNote('Gamma (copy)').body === '');
+  // Lock now from the lock menu.
+  await page.click('#lockBtn');
+  await page.waitForSelector('#lockMenu:not(.hidden)');
+  await page.click('#lockMenu [data-action="relock"]');
+  await page.waitForSelector('#lockScreen:not(.hidden)');
+  assert.ok(await page.evaluate(() => document.getElementById('bodyInput').classList.contains('hidden') && document.getElementById('richEditor').classList.contains('hidden')), 'editors hidden while locked');
+  await waitForDom(() => /Locked note/.test(document.querySelector('.note-card.is-active').textContent));
+  assert.equal(await page.evaluate(() => document.getElementById('stickyBtn').disabled), true, 'no stickies for locked notes');
+  // Search finds the title, not the body.
+  await page.fill('#searchInput', 'pelican');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 0 && /No|Nothing/.test(document.querySelector('.list-pane').textContent));
+  await page.fill('#searchInput', '');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.waitForSelector('#lockScreen:not(.hidden)');
+  // Wrong password, then right password.
+  await page.fill('#lockScreenPassword', 'nope');
+  await page.click('#lockScreenBtn');
+  await waitForDom(() => /Wrong password/.test(document.getElementById('lockScreenError').textContent));
+  await page.fill('#lockScreenPassword', 'pw-one');
+  await page.keyboard.press('Enter');
+  await waitForDom(() => document.getElementById('lockScreen').classList.contains('hidden'));
+  assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 9999-pelican');
+  // Hiding the app relocks (the window is shown again by the test harness through the main process).
+  await page.evaluate(() => window.notesApi.app.hide());
+  await waitFor('hidden', () => app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isVisible()));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].showInactive());
+  await page.waitForSelector('#lockScreen:not(.hidden)', { timeout: 8000 });
+  assert.equal(await page.inputValue('#bodyInput'), '', 'plaintext cleared from the editor');
+  // Remove the lock: body back in clear.
+  await page.fill('#lockScreenPassword', 'pw-one');
+  await page.keyboard.press('Enter');
+  await waitForDom(() => document.getElementById('lockScreen').classList.contains('hidden'));
+  await page.click('#lockBtn');
+  await page.waitForSelector('#lockMenu:not(.hidden)');
+  await page.click('#lockMenu [data-action="remove"]');
+  await page.waitForSelector('#lockDialog[open]');
+  await page.fill('#lockPassword', 'pw-one');
+  await page.click('#lockSubmitBtn');
+  await waitFor('lock removed', () => { const n = findNote('Gamma (copy)'); return !n.lock && n.body === 'the launch code is 9999-pelican'; });
+  await waitForDom(() => document.getElementById('lockBtn').textContent === '🔒 Lock');
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+  void id;
+});
+
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

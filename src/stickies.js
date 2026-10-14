@@ -31,7 +31,7 @@ class StickyManager {
   open(id, opts) {
     opts = opts || {};
     const note = this.store.get(id);
-    if (!note || note.trashedAt) return null;
+    if (!note || note.trashedAt || note.lock) return null; // a locked note never sits on the desktop
     if (!note.sticky) this.store.setSticky(id, { x: null, y: null });
     const sticky = this.store.get(id).sticky;
     if (this.isOpen(id)) {

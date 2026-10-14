@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('notesApi', {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  lock: {
+    set: invoke('lock:set'),
+    unlock: invoke('lock:unlock'),
+    relock: invoke('lock:relock'),
+    remove: invoke('lock:remove'),
+  },
   stickies: {
     list: invoke('stickies:list'),
     open: invoke('stickies:open'),
@@ -115,5 +121,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     stickiesChanged: on('stickies:changed'),
     openNote: on('app:open-note'),
     reminderFired: on('reminder:fired'),
+    relocked: on('lock:relocked'),
   },
 });

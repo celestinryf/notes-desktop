@@ -96,6 +96,7 @@
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
             <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
             <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
+            <button class="tool-btn" id="lockBtn" title="Lock this note with a password (Ctrl+L)" aria-label="Lock">🔒 Lock</button>
             <button class="tool-btn" id="remindBtn" title="Remind me about this note (Ctrl+Shift+M)" aria-label="Reminder">⏰ Remind</button>
             <button class="tool-btn" id="printBtn" title="Print this note (Ctrl+Shift+P)" aria-label="Print">🖨 Print</button>
             <button class="tool-btn" id="stickyBtn" title="Put this note on the desktop as a sticky (Ctrl+Shift+T)" aria-label="Sticky">📌 Stick</button>
@@ -123,6 +124,15 @@
               <button class="tool-btn" id="fileReloadBtn" title="Re-read from disk">Reload</button>
             </div>
             <div class="file-banner hidden" id="fileBanner"></div>
+            <form class="lock-screen hidden" id="lockScreen" aria-label="Locked note">
+              <div class="lock-screen-card">
+                <div class="lock-screen-icon" aria-hidden="true">🔒</div>
+                <p class="lock-screen-title">This note is locked</p>
+                <input id="lockScreenPassword" class="input" type="password" placeholder="Password" autocomplete="current-password" />
+                <button type="submit" class="btn btn-primary btn-small" id="lockScreenBtn">Unlock</button>
+                <p class="lock-screen-error" id="lockScreenError" role="alert"></p>
+              </div>
+            </form>
             <div class="editor-body">
               <div id="richEditor" class="rich-editor"></div>
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
@@ -292,6 +302,26 @@
       </form>
     </dialog>
 
+    <dialog id="lockDialog" class="dialog dialog-small">
+      <form method="dialog" class="dialog-form" id="lockForm">
+        <h2 class="dialog-title" id="lockDialogTitle">Lock note</h2>
+        <p class="field-hint" id="lockDialogHint">The text is encrypted with this password. There is no recovery: if you forget it, the note stays locked.</p>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input id="lockPassword" class="input" type="password" autocomplete="new-password" />
+        </label>
+        <label class="field" id="lockConfirmRow">
+          <span class="field-label">Confirm</span>
+          <input id="lockPassword2" class="input" type="password" autocomplete="new-password" />
+        </label>
+        <p class="lock-screen-error" id="lockError" role="alert"></p>
+        <div class="dialog-actions">
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="lockCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="lockSubmitBtn">Lock</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="remindDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="remindForm">
         <h2 class="dialog-title">Remind me</h2>
@@ -340,6 +370,10 @@
       <button role="menuitem" data-action="html">Save as HTML…</button>
       <button role="menuitem" data-action="md">Save as Markdown…</button>
       <button role="menuitem" data-action="reveal" id="shareReveal">Show file in Explorer</button>
+    </div>
+    <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
+      <button role="menuitem" data-action="relock">Lock now</button>
+      <button role="menuitem" data-action="remove" class="danger">Remove lock…</button>
     </div>
     <div class="popover hidden" id="folderMenu" role="menu">
       <button role="menuitem" data-action="new-note">New note here</button>
