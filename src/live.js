@@ -229,11 +229,12 @@ class LiveShare {
 
   _scheduleReconnect(noteId, session, why) {
     if (session.stopped) return;
+    if (session.timer) return; // a destroyed request reports on both req and res; one reconnect is enough
     clearInterval(session.idleTimer);
     session.connected = false; session.error = why;
     this._emit(noteId);
     const delay = Math.min(10000, 1000 * Math.pow(2, Math.min(session.retry++, 4)));
-    session.timer = setTimeout(() => this._listen(noteId, session), delay);
+    session.timer = setTimeout(() => { session.timer = null; this._listen(noteId, session); }, delay);
     if (session.timer.unref) session.timer.unref();
   }
 
