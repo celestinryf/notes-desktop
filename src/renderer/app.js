@@ -206,7 +206,8 @@
     el.hotkeyHint.textContent = text;
     el.hotkeyHint2.textContent = text;
     el.settingsInfo.textContent = 'Data: ' + info.dataDir + (info.hotkeyFallback ? '   (preferred hotkey was taken; using ' + info.hotkeyDisplay + ')' : '');
-    if (info.loadError) toast('Notes file was unreadable; restored from the newest backup.');
+    if (info.saveBlocked) toast('Your notes file could not be read (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once it is free.');
+    else if (info.loadError) toast('Notes file was unreadable; restored from the newest backup.');
   }
 
   async function updateSettings(patch) {
@@ -827,7 +828,7 @@
       const prevTags = (state.notes[idx].tags || []).join(',');
       state.notes[idx] = updated;
       refreshCard(updated);
-      if (state.settings.sort === 'updated' && idx !== 0 && !updated.pinned) await refresh({ keepEditor: true });
+      if (state.settings.sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
       else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
     // Tags may have changed: cheap to refresh the tag list.
@@ -1132,7 +1133,9 @@
     const ignore = ['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'OS'];
     if (ignore.includes(e.key)) return { partial: mods.join('+') + '+' };
     let key = e.key;
-    if (e.code === 'NumpadAdd') key = 'numadd';
+    const numpad = { NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult', NumpadDivide: 'numdiv', NumpadDecimal: 'numdec' };
+    if (numpad[e.code]) key = numpad[e.code];
+    else if (/^Numpad[0-9]$/.test(e.code)) key = 'num' + e.code.slice(-1);
     else if (key === '+') key = 'Plus';
     else if (key === ' ') key = 'Space';
     else if (key === 'Escape') key = 'Esc';

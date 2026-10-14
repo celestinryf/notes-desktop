@@ -254,6 +254,7 @@ function main() {
       hotkeyDisplay: H.displayAccelerator(hotkeyState.hotkey),
       platform: process.platform,
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
+      saveBlocked: !!store.saveBlocked,
     };
   }
 

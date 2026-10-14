@@ -143,14 +143,29 @@ class Store {
   load() {
     fs.mkdirSync(this.dir, { recursive: true });
     let raw = null;
-    try {
-      if (fs.existsSync(this.file)) raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-    } catch (err) {
-      // Keep the corrupt file for the user and start from the newest backup.
-      this.loadError = err;
-      const quarantined = this.file + '.corrupt-' + this.now();
-      try { fs.renameSync(this.file, quarantined); } catch (_) { /* ignore */ }
-      raw = this._loadNewestBackup();
+    this.saveBlocked = false;
+    if (fs.existsSync(this.file)) {
+      let text = null;
+      let ioError = null;
+      // A locked or busy file is not a corrupt file: retry the read briefly before deciding anything.
+      for (let attempt = 0; attempt < 6 && text === null; attempt++) {
+        try { text = fs.readFileSync(this.file, 'utf8'); ioError = null; } catch (err) { ioError = err; sleepSync(50 * (attempt + 1)); }
+      }
+      if (text === null) {
+        // Still unreadable: never overwrite a file we could not read. Run with an empty view and refuse to save.
+        this.loadError = ioError;
+        this.saveBlocked = true;
+      } else {
+        try {
+          raw = JSON.parse(text);
+        } catch (err) {
+          // Genuinely corrupt: keep the file for the user and start from the newest backup.
+          this.loadError = err;
+          const quarantined = this.file + '.corrupt-' + this.now();
+          try { fs.renameSync(this.file, quarantined); } catch (_) { /* ignore */ }
+          raw = this._loadNewestBackup();
+        }
+      }
     }
     const now = this.now();
     const notes = Array.isArray(raw && raw.notes) ? raw.notes : [];
@@ -199,6 +214,11 @@ class Store {
   }
 
   save() {
+    if (this.saveBlocked) {
+      const err = new Error('Your notes file could not be read when Notes started (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once the file is free.');
+      err.code = 'ESAVEBLOCKED';
+      throw err;
+    }
     fs.mkdirSync(this.dir, { recursive: true });
     this._maybeBackup();
     const tmp = this.file + '.tmp';
@@ -302,37 +322,53 @@ class Store {
     return this.create({ title: note.title ? note.title + ' (copy)' : '', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
 
+  // Run a mutation and persist it; if the write fails, put memory back exactly as it was so the store
+  // never claims a change the disk does not have.
+  _commit(mutate) {
+    const snapshot = {
+      notes: this.notes.map((n) => Object.assign({}, n, { tags: n.tags.slice() })),
+      folders: this.folders.map((f) => Object.assign({}, f)),
+      settings: Object.assign({}, this.settings, { expandedFolders: this.settings.expandedFolders.slice() }),
+    };
+    try {
+      const result = mutate();
+      this.save();
+      return result;
+    } catch (err) {
+      this.notes = snapshot.notes;
+      this.folders = snapshot.folders;
+      this.settings = snapshot.settings;
+      throw err;
+    }
+  }
+
   trash(id) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
-    note.trashedAt = this.now(); // pinned is kept, so a restored note comes back where it was
-    this.save();
-    return note;
+    return this._commit(() => { note.trashedAt = this.now(); return note; }); // pinned is kept for restore
   }
 
   restore(id) {
     const note = this.get(id);
     if (!note || !note.trashedAt) return note;
-    note.trashedAt = null;
-    if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
-    note.updatedAt = this.now();
-    this.save();
-    return note;
+    return this._commit(() => {
+      note.trashedAt = null;
+      if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
+      note.updatedAt = this.now();
+      return note;
+    });
   }
 
   destroy(id) {
     const idx = this.notes.findIndex((n) => n.id === id);
     if (idx === -1) return false;
-    this.notes.splice(idx, 1);
-    this.save();
-    return true;
+    return this._commit(() => { this.notes.splice(idx, 1); return true; });
   }
 
   emptyTrash() {
     const before = this.notes.length;
-    this.notes = this.notes.filter((n) => !n.trashedAt);
-    if (this.notes.length !== before) this.save();
-    return before - this.notes.length;
+    if (!this.notes.some((n) => n.trashedAt)) return 0;
+    return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
   }
 
   tags() {
@@ -419,7 +455,7 @@ class Store {
     const f = this.getFolder(id);
     if (!f) return null;
     const next = cleanFolderName(name);
-    if (next !== f.name) { f.name = next; this.save(); }
+    if (next !== f.name) this._commit(() => { f.name = next; });
     return f;
   }
 
@@ -432,7 +468,7 @@ class Store {
       if (!this.getFolder(parentId)) return { error: 'Target folder not found.' };
       if (this.descendantIds(id).has(parentId)) return { error: 'A folder cannot be moved into one of its own subfolders.' };
     }
-    if ((f.parentId || null) !== parentId) { f.parentId = parentId; this.save(); }
+    if ((f.parentId || null) !== parentId) this._commit(() => { f.parentId = parentId; });
     return { folder: f };
   }
 
@@ -441,13 +477,14 @@ class Store {
     const f = this.getFolder(id);
     if (!f) return null;
     const parent = f.parentId || null;
-    let movedNotes = 0, movedFolders = 0;
-    for (const n of this.notes) if (n.folderId === id) { n.folderId = parent; movedNotes++; }
-    for (const c of this.folders) if (c.parentId === id) { c.parentId = parent; movedFolders++; }
-    this.folders = this.folders.filter((x) => x.id !== id);
-    this.settings.expandedFolders = this.settings.expandedFolders.filter((x) => x !== id);
-    this.save();
-    return { movedNotes, movedFolders, parentId: parent };
+    return this._commit(() => {
+      let movedNotes = 0, movedFolders = 0;
+      for (const n of this.notes) if (n.folderId === id) { n.folderId = parent; movedNotes++; }
+      for (const c of this.folders) if (c.parentId === id) { c.parentId = parent; movedFolders++; }
+      this.folders = this.folders.filter((x) => x.id !== id);
+      this.settings.expandedFolders = this.settings.expandedFolders.filter((x) => x !== id);
+      return { movedNotes, movedFolders, parentId: parent };
+    });
   }
 
   // ---- settings ----------------------------------------------------------
@@ -457,8 +494,9 @@ class Store {
   }
 
   setSettings(patch) {
+    const previous = this.settings;
     this.settings = sanitizeSettings(Object.assign({}, this.settings, patch || {}));
-    this.save();
+    try { this.save(); } catch (err) { this.settings = previous; throw err; }
     return this.getSettings();
   }
 
