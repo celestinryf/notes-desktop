@@ -250,7 +250,13 @@ class Store {
     const note = sanitizeNote(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
     if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
     this.notes.unshift(note);
-    this.save();
+    try {
+      this.save();
+    } catch (err) {
+      // A note the disk refused must not linger in memory and ride along on a later, unrelated save.
+      this.notes = this.notes.filter((n) => n !== note);
+      throw err;
+    }
     return note;
   }
 
@@ -400,7 +406,12 @@ class Store {
     const parentId = data.parentId && this.getFolder(data.parentId) ? data.parentId : null;
     const folder = { id: crypto.randomUUID(), name: cleanFolderName(data.name), parentId, createdAt: this.now() };
     this.folders.push(folder);
-    this.save();
+    try {
+      this.save();
+    } catch (err) {
+      this.folders = this.folders.filter((f) => f !== folder);
+      throw err;
+    }
     return folder;
   }
 

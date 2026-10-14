@@ -272,6 +272,20 @@ test('folders: load repairs cycles, dangling parents, duplicates, and orphaned n
   assert.ok(store.folderTree().length >= 1, 'tree renders after repair');
 });
 
+test('a failed save during create leaves nothing behind in memory', () => {
+  const { store } = makeStore();
+  store.create({ title: 'existing' });
+  const realSave = store.save.bind(store);
+  store.save = () => { throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); };
+  assert.throws(() => store.create({ title: 'ghost' }), /ENOSPC/);
+  assert.throws(() => store.createFolder({ name: 'ghost folder' }), /ENOSPC/);
+  store.save = realSave;
+  store.setSettings({ theme: 'dark' }); // an unrelated later save
+  const reloaded = new Store(store.dir).load();
+  assert.deepEqual(reloaded.notes.map((n) => n.title), ['existing']);
+  assert.deepEqual(reloaded.folders, []);
+});
+
 test('a failed save rolls the note back so the retry really writes', () => {
   const { store } = makeStore();
   const n = store.create({ title: 'orig', body: 'one' });
