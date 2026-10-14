@@ -150,3 +150,12 @@ test('safeFilename strips characters Windows rejects', () => {
   assert.ok(!/[. ]$/.test(H.safeFilename('x'.repeat(79) + '. tail')), 'no trailing dot after truncation');
   assert.equal(H.safeFilename('x'.repeat(100)).length, 80);
 });
+
+test('safeFilename never cuts through a surrogate pair', () => {
+  const H = require('../../src/shared/helpers');
+  const name = 'a'.repeat(79) + '😀' + 'b'.repeat(10);
+  const out = H.safeFilename(name);
+  assert.equal(out, 'a'.repeat(79) + '😀', 'cut by code point');
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out), 'no lone surrogate');
+  assert.equal(Array.from(out).length, 80);
+});

@@ -76,6 +76,8 @@
       if (/changed on disk/i.test(String(err.message))) {
         // The file moved on under us; a sticky has no room for a merge choice: take the disk version and say so.
         state.dirty = false;
+        try { await api.files.refresh(id); } catch (_) { /* the store copy may already be current */ } // read the disk version into the store
+        state.shownBody = null; // force the editor to take it even if the store text equals what was shown before
         await reload();
         el.status.textContent = 'The file changed on disk; showing the new version. Your last edit was not saved.';
         return;
