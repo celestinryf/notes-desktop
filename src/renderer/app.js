@@ -1493,7 +1493,7 @@
     if (state.sourceMode) {
       const at = find.sourceHits[find.active];
       if (at === undefined) return;
-      el.bodyInput.focus();
+      if (document.activeElement !== el.replaceInput) el.bodyInput.focus(); // Enter in the replace box keeps replacing
       el.bodyInput.setSelectionRange(at, at + q.length);
       scrollTextareaToSelection(at);
       el.findCount.textContent = (find.active + 1) + '/' + find.sourceHits.length;
@@ -2142,7 +2142,7 @@
     if (state.currentId === id) {
       state.current = updated;
       updateStatus(updated);
-      setSaved('Saved');
+      setSaved(state.dirty ? 'Saving…' : 'Saved'); // typing during the write means another save is coming
       // A vault note's title is its file name: the store may have settled it (illegal characters, a clash),
       // and the file row must show the renamed path.
       if (updated.filePath && el.filePath.textContent !== updated.filePath) { el.filePath.textContent = updated.filePath; el.filePath.title = updated.filePath; }
@@ -2385,6 +2385,7 @@
   }
 
   function handleEditorKeydown(e) {
+    if (e.isComposing || e.keyCode === 229) return; // an IME is composing (CJK input): Enter and Tab belong to it
     // While the find bar is open, Enter in the text steps between matches instead of replacing the selected
     // match with a newline (focus lands here after Enter in the bar, so that would eat the match).
     if (find.open && e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); runFind(!e.shiftKey); return; }
@@ -2518,6 +2519,7 @@
   // ---- global keyboard -----------------------------------------------------
 
   function onKeydown(e) {
+    if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
     const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
     if (e.key === 'Escape') {

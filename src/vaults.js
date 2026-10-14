@@ -223,6 +223,14 @@ class VaultManager {
               this._set(id, { lastError: 'pull: ' + msg, syncing: false });
               return { ok: false, error: msg };
             }
+            // An autostash that failed to re-apply leaves unmerged paths with git exiting zero: that is a
+            // conflict too, and conflict markers must never be committed and pushed.
+            const after = await git(['status', '--porcelain'], v.path, 20000);
+            if (after.ok && /^(UU|AA|DD|AU|UA|DU|UD) /m.test(after.stdout)) {
+              const msg = 'Conflicting changes from another device; open the folder and resolve them, then Sync again.';
+              this._set(id, { lastError: 'pull: ' + msg, conflict: true, syncing: false });
+              return { ok: false, error: msg };
+            }
             // Pulled files may be new or changed: bring the notes in line before pushing.
             try { const r = await this.store.scanVault(id); if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r); } catch (_) { /* ignore */ }
             const push = await git(['push', '-q', '-u', 'origin', 'HEAD'], v.path, 120000);
