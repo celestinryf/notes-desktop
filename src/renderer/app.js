@@ -1059,15 +1059,20 @@
 
     // Main-process events
     api.on.shown(async () => {
+      await state.initDone; // the first show can arrive before the initial load has finished
       if (el.settingsDialog.open) return;
       if (state.current) {
         (state.current.title || state.current.body ? el.bodyInput : el.titleInput).focus();
-      } else if (state.notes.length) {
+        return;
+      }
+      if (state.notes.length) {
         await selectNote(state.notes[0].id);
         el.bodyInput.focus();
-      } else {
-        await newNote();
+        return;
       }
+      // Only start a fresh note when there truly are none, not when the current view is just empty.
+      const counts = await api.notes.counts();
+      if (counts.all === 0) await newNote();
     });
     api.on.newNote(newNote);
     api.on.settingsChanged((s) => applySettings(s));
@@ -1090,8 +1095,11 @@
   window.addEventListener('error', (e) => console.error('Uncaught: ' + e.message));
   window.addEventListener('unhandledrejection', (e) => console.error('Unhandled rejection: ' + (e.reason && e.reason.message || e.reason)));
 
+  let markInitDone;
+  state.initDone = new Promise((resolve) => { markInitDone = resolve; });
+
   init().catch((err) => {
     console.error(err);
     toast('Something went wrong starting Notes: ' + err.message);
-  });
+  }).finally(() => markInitDone());
 })();

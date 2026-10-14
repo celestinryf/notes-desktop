@@ -66,6 +66,16 @@ async function typeNote(title, body) {
   return findNote(title);
 }
 
+test('showing the window does not create stray notes once notes exist', async () => {
+  // Regression: the first show arrives before the initial load; it must not spawn an empty note when notes exist.
+  // This instance started with zero notes, so exactly one fresh note is expected, and a second show must add none.
+  await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
+  await waitFor('exactly one note after first show', () => readNotes().notes.length === 1);
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.hide(); w.show(); w.webContents.send('app:shown'); });
+  await sleep(600);
+  assert.equal(readNotes().notes.length, 1, 'second show created no extra note');
+});
+
 test('first run opens on a fresh note and typing autosaves', async () => {
   await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
   await page.fill('#titleInput', 'Alpha');
