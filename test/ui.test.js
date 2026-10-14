@@ -1,0 +1,329 @@
+'use strict';
+/* Drives the real app through every UI feature with Playwright's Electron launcher.
+   Native file dialogs are stubbed inside the main process so export and import actually write and read files.
+   Run with: npm run test:ui */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+const { _electron: electron } = require('playwright-core');
+
+const ROOT = path.resolve(__dirname, '..');
+const ELECTRON_PATH = require('electron');
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-'));
+const notesFile = path.join(dataDir, 'notes.json');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const readNotes = () => JSON.parse(fs.readFileSync(notesFile, 'utf8'));
+const findNote = (title) => readNotes().notes.find((n) => n.title === title);
+
+async function waitFor(label, fn, timeout = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const v = await fn();
+    if (v) return v;
+    await sleep(100);
+  }
+  throw new Error('Timed out: ' + label);
+}
+
+let app, page;
+const rendererErrors = [];
+// The renderer's CSP forbids eval, which page.waitForFunction relies on; page.evaluate goes through CDP and is allowed.
+const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
+
+test.before(async () => {
+  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light' }, notes: [] }));
+  app = await electron.launch({
+    executablePath: ELECTRON_PATH,
+    args: [ROOT],
+    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1' }),
+  });
+  page = await app.firstWindow();
+  page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(m.text()); });
+  page.on('pageerror', (e) => rendererErrors.push('pageerror: ' + e.message));
+  await page.waitForSelector('#app');
+  await page.evaluate(() => { window.confirm = () => true; });
+});
+
+test.after(async () => {
+  // The window's close handler hides to the tray, so ask the app to exit instead of closing windows.
+  if (app) {
+    await app.evaluate(({ app: a }) => setTimeout(() => a.exit(0), 50)).catch(() => {});
+    await Promise.race([app.waitForEvent('close'), sleep(5000)]).catch(() => {});
+    await app.close().catch(() => {});
+  }
+  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (_) { /* ignore */ }
+});
+
+async function typeNote(title, body) {
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', title);
+  await page.fill('#bodyInput', body);
+  await waitFor('note "' + title + '" saved', () => { const n = findNote(title); return n && n.body === body; });
+  return findNote(title);
+}
+
+test('first run opens on a fresh note and typing autosaves', async () => {
+  await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
+  await page.fill('#titleInput', 'Alpha');
+  await page.fill('#bodyInput', 'first body');
+  await waitFor('Alpha saved', () => { const n = findNote('Alpha'); return n && n.body === 'first body'; });
+  assert.equal(await page.textContent('#statusSaved'), 'Saved');
+  assert.match(await page.textContent('#statusWords'), /2 words/);
+});
+
+test('search filters and highlights; clearing restores', async () => {
+  await typeNote('Beta', 'kiwi and mango');
+  await typeNote('Gamma', 'pure text');
+  await page.fill('#searchInput', 'MANGO');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  assert.equal(await page.textContent('.note-card .note-card-title'), 'Beta');
+  assert.ok(await page.$('.note-card .mark'), 'match highlighted');
+  assert.equal(await page.textContent('#listTitle'), 'Results');
+  await page.fill('#searchInput', 'nothing-matches-this');
+  await waitForDom(() => !document.getElementById('listEmpty').classList.contains('hidden'));
+  await page.fill('#searchInput', '');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+});
+
+test('sort options reorder the list', async () => {
+  await page.selectOption('#sortSelect', 'title');
+  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent === 'Alpha');
+  const titles = await page.$$eval('.note-card .note-card-title', (els) => els.map((e) => e.textContent));
+  assert.deepEqual(titles, ['Alpha', 'Beta', 'Gamma']);
+  assert.equal(readNotes().settings.sort, 'title');
+  await page.selectOption('#sortSelect', 'updated');
+  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent === 'Gamma');
+});
+
+test('pin button, pinned view, and pinned-first ordering', async () => {
+  await page.click('.note-card:has-text("Alpha")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
+  await page.click('#pinBtn');
+  await waitFor('Alpha pinned', () => findNote('Alpha').pinned);
+  assert.equal(await page.textContent('#pinBtn'), '★');
+  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent.includes('Alpha'));
+  await page.click('.nav-item[data-view="pinned"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  assert.equal(await page.textContent('#countPinned'), '1');
+  await page.click('.nav-item[data-view="all"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+});
+
+test('tags filter in the sidebar', async () => {
+  await page.click('.note-card:has-text("Beta")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Beta');
+  await page.fill('#tagsInput', 'Fruit, snacks');
+  await page.press('#tagsInput', 'Enter');
+  await waitFor('tags saved', () => findNote('Beta').tags.join(',') === 'fruit,snacks');
+  await page.waitForSelector('#tagList .nav-item:has-text("fruit")');
+  await page.click('#tagList .nav-item:has-text("fruit")');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  assert.equal(await page.textContent('#listTitle'), '#fruit');
+  await page.click('.nav-item[data-view="all"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+});
+
+test('duplicate creates a copy and selects it', async () => {
+  await page.click('.note-card:has-text("Gamma")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma');
+  await page.click('#duplicateBtn');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  const copy = findNote('Gamma (copy)');
+  assert.equal(copy.body, 'pure text');
+  assert.equal(await page.textContent('#countAll'), '4');
+});
+
+test('Ctrl+B / Ctrl+I / Ctrl+K wrap the selection and toggle off again', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await page.focus('#bodyInput');
+  await page.evaluate(() => { const t = document.getElementById('bodyInput'); t.setSelectionRange(0, 4); });
+  await page.keyboard.press('Control+b');
+  assert.equal(await page.inputValue('#bodyInput'), '**pure** text');
+  await page.keyboard.press('Control+b');
+  assert.equal(await page.inputValue('#bodyInput'), 'pure text');
+  await page.keyboard.press('Control+i');
+  assert.equal(await page.inputValue('#bodyInput'), '_pure_ text');
+  await page.keyboard.press('Control+i');
+  await page.keyboard.press('Control+k');
+  assert.equal(await page.inputValue('#bodyInput'), '[pure](url) text');
+  await waitFor('wrap saved', () => findNote('Gamma (copy)').body === '[pure](url) text');
+});
+
+test('Tab indents, Shift+Tab outdents, Enter continues lists', async () => {
+  await page.fill('#bodyInput', '- item one');
+  await page.focus('#bodyInput');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('item two');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two  ');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.inputValue('#bodyInput'), '- item one\n  - item two  ');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two  ');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two  \n', 'empty bullet ends the list');
+});
+
+test('preview renders Markdown and checkbox clicks write back to the source', async () => {
+  await page.fill('#bodyInput', '# Head\n\n- [ ] alpha\n- [x] beta\n\n[site](https://example.com)');
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#preview:not(.hidden) h1');
+  assert.equal(await page.textContent('#preview h1'), 'Head');
+  assert.equal(await page.$$eval('#preview input[type=checkbox]', (b) => b.length), 2);
+  await page.click('#preview input[type=checkbox] >> nth=0');
+  await waitFor('checkbox toggled in source', () => findNote('Gamma (copy)').body.includes('- [x] alpha'));
+  assert.equal(await page.$eval('#preview li.task-item >> nth=0', (li) => li.classList.contains('is-done')), true);
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#bodyInput:not(.hidden)');
+});
+
+test('Alt+Arrow moves between notes', async () => {
+  await page.click('.note-card >> nth=0');
+  const first = await page.inputValue('#titleInput');
+  await page.focus('#bodyInput');
+  await page.keyboard.press('Alt+ArrowDown');
+  await waitForDom((f) => document.getElementById('titleInput').value !== f, first);
+  const second = await page.inputValue('#titleInput');
+  await page.keyboard.press('Alt+ArrowUp');
+  await waitForDom((f) => document.getElementById('titleInput').value === f, first);
+  assert.notEqual(first, second);
+});
+
+test('trash with undo, restore, delete forever, empty trash', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await page.click('#deleteBtn');
+  await waitFor('trashed', () => findNote('Gamma (copy)').trashedAt);
+  await page.click('#toast button:has-text("Undo")');
+  await waitFor('undo restored', () => !findNote('Gamma (copy)').trashedAt);
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+
+  await page.keyboard.press('Control+Delete');
+  await waitFor('trashed again', () => findNote('Gamma (copy)').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  assert.equal(await page.textContent('#listTitle'), 'Trash');
+  assert.equal(await page.$eval('#titleInput', (i) => i.readOnly), true, 'trashed note is read only');
+  assert.equal(await page.$eval('#restoreBtn', (b) => b.classList.contains('hidden')), false);
+  await page.click('#restoreBtn');
+  await waitFor('restored', () => !findNote('Gamma (copy)').trashedAt);
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 0);
+
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('#deleteBtn');
+  await page.click('.nav-item[data-view="trash"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('#destroyBtn');
+  await waitFor('destroyed', () => !findNote('Gamma (copy)'));
+
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Beta")');
+  await page.click('#deleteBtn');
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)');
+  await page.click('#emptyTrashBtn');
+  await waitFor('trash emptied', () => !findNote('Beta'));
+  assert.equal(await page.textContent('#countTrash'), '0');
+  await page.click('.nav-item[data-view="all"]');
+});
+
+test('settings: theme, font size, always on top, sidebar toggle, hotkey change', async () => {
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+
+  await page.selectOption('#themeSelect', 'dark');
+  await waitForDom(() => document.documentElement.dataset.theme === 'dark');
+  assert.equal(readNotes().settings.theme, 'dark');
+
+  await page.$eval('#fontSizeInput', (i) => { i.value = '20'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
+  await waitFor('font size saved', () => readNotes().settings.fontSize === 20);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--editor-font-size').trim()), '20px');
+
+  await page.check('#alwaysOnTopInput');
+  await waitFor('always on top applied', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
+  await page.uncheck('#alwaysOnTopInput');
+  await waitFor('always on top cleared', async () => !(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop())));
+
+  await page.focus('#hotkeyInput');
+  await page.keyboard.press('Control+Alt+F10');
+  await waitFor('hotkey re-registered', () => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('Control+Alt+F10')));
+  assert.equal(readNotes().settings.hotkey, 'Control+Alt+F10');
+  assert.equal(await page.textContent('#hotkeyError'), '');
+  assert.equal(await page.textContent('#hotkeyHint'), 'Ctrl + Alt + F10');
+
+  await page.click('#closeSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await page.click('#toggleSidebarBtn');
+  await waitForDom(() => document.getElementById('app').classList.contains('sidebar-collapsed'));
+  await page.keyboard.press('Control+\\');
+  await waitForDom(() => !document.getElementById('app').classList.contains('sidebar-collapsed'));
+  await page.keyboard.press('Control+Shift+l');
+  await waitForDom(() => document.documentElement.dataset.theme === 'light');
+});
+
+test('export note, export all, and import through stubbed dialogs', async () => {
+  const outMd = path.join(dataDir, 'exported.md');
+  const outJson = path.join(dataDir, 'all.json');
+  const inMd = path.join(dataDir, 'incoming.md');
+  fs.writeFileSync(inMd, '# Imported note\n\nhello from disk\n\nTags: #inbox\n');
+  await app.evaluate(({ dialog }, paths) => {
+    dialog.showSaveDialog = async (_w, opts) => ({ canceled: false, filePath: /json/i.test(opts.title) || /all notes/i.test(opts.title) ? paths.outJson : paths.outMd });
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [paths.inMd] });
+  }, { outMd, outJson, inMd });
+
+  await page.click('.note-card:has-text("Alpha")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
+  await page.click('#exportBtn');
+  await waitFor('note exported', () => fs.existsSync(outMd));
+  assert.equal(fs.readFileSync(outMd, 'utf8'), '# Alpha\n\nfirst body\n');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.click('#exportAllBtn');
+  await waitFor('all exported', () => fs.existsSync(outJson));
+  assert.ok(JSON.parse(fs.readFileSync(outJson, 'utf8')).notes.length >= 2);
+
+  await page.click('#importBtn');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Imported note');
+  const imported = findNote('Imported note');
+  assert.equal(imported.body, 'hello from disk');
+  assert.deepEqual(imported.tags, ['inbox']);
+});
+
+test('window state: Esc hides, a second launch re-shows the first instance, data survives reload', async () => {
+  const step = (s) => console.log('  [window-state] ' + s);
+  const win = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
+  await page.keyboard.press('Escape');
+  await waitFor('hidden by Esc', async () => !(await win()));
+  step('hidden by Esc');
+
+  const second = spawn(ELECTRON_PATH, [ROOT], { env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1' }), stdio: 'ignore' });
+  const secondExit = new Promise((r) => second.on('exit', (code) => r(code)));
+  await waitFor('second instance re-shows the window', win, 10000);
+  step('re-shown by second instance');
+  const code = await Promise.race([secondExit, sleep(8000).then(() => 'timeout')]);
+  step('second instance exit: ' + code);
+  if (code === 'timeout') second.kill();
+  assert.notEqual(code, 'timeout', 'second instance should quit on its own after handing off');
+
+  const before = readNotes().notes.length;
+  await page.reload({ timeout: 8000 });
+  step('reloaded');
+  await page.waitForSelector('.note-card', { timeout: 8000 });
+  assert.equal(await page.$$eval('.note-card', (c) => c.length), before);
+  step('data survived reload');
+});
+
+test('no renderer errors were logged during the run', () => {
+  assert.deepEqual(rendererErrors, []);
+});

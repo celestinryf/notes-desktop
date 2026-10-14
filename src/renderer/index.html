@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notes</title>
+  <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1 class="brand-name">Notes</h1>
+      </div>
+
+      <button class="btn btn-primary btn-block" id="newNoteBtn" title="New note (Ctrl+N)">
+        <span class="plus" aria-hidden="true">+</span> New note
+      </button>
+
+      <nav class="nav" aria-label="Views">
+        <button class="nav-item is-active" data-view="all"><span>All notes</span><span class="count" id="countAll">0</span></button>
+        <button class="nav-item" data-view="pinned"><span>Pinned</span><span class="count" id="countPinned">0</span></button>
+        <button class="nav-item" data-view="trash"><span>Trash</span><span class="count" id="countTrash">0</span></button>
+      </nav>
+
+      <div class="nav-heading">Tags</div>
+      <nav class="nav tags" id="tagList" aria-label="Tags"></nav>
+
+      <div class="sidebar-foot">
+        <button class="icon-btn" id="themeBtn" title="Toggle theme (Ctrl+Shift+L)" aria-label="Toggle theme">◐</button>
+        <button class="icon-btn" id="settingsBtn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
+        <span class="hotkey-hint" id="hotkeyHint" title="Global hotkey"></span>
+      </div>
+    </aside>
+
+    <!-- Note list -->
+    <section class="list-pane" aria-label="Note list">
+      <div class="list-head">
+        <div class="search-wrap">
+          <input id="searchInput" class="search" type="search" placeholder="Search notes…  (Ctrl+F)" autocomplete="off" spellcheck="false" />
+        </div>
+        <select id="sortSelect" class="select" title="Sort notes" aria-label="Sort notes">
+          <option value="updated">Last edited</option>
+          <option value="created">Newest</option>
+          <option value="title">Title</option>
+        </select>
+      </div>
+      <div class="list-title-row">
+        <h2 class="list-title" id="listTitle">All notes</h2>
+        <button class="btn btn-small btn-danger hidden" id="emptyTrashBtn">Empty trash</button>
+      </div>
+      <ul class="note-list" id="noteList" role="listbox" aria-label="Notes"></ul>
+      <div class="empty hidden" id="listEmpty">
+        <p class="empty-title">Nothing here yet</p>
+        <p class="empty-sub">Press <kbd>Ctrl</kbd> + <kbd>N</kbd> to write your first note.</p>
+      </div>
+    </section>
+
+    <!-- Editor -->
+    <section class="editor-pane" id="editorPane" aria-label="Editor">
+      <div class="editor-empty" id="editorEmpty">
+        <div class="editor-empty-card">
+          <p class="editor-empty-title">Pick a note, or start a new one.</p>
+          <ul class="shortcut-list">
+            <li><kbd>Ctrl</kbd>+<kbd>N</kbd> New note</li>
+            <li><kbd>Ctrl</kbd>+<kbd>F</kbd> Search</li>
+            <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Toggle preview</li>
+            <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Pin</li>
+            <li><kbd>Ctrl</kbd>+<kbd>Del</kbd> Move to trash</li>
+            <li><kbd>Esc</kbd> Hide window</li>
+          </ul>
+          <p class="editor-empty-sub">Bring Notes back any time with <span id="hotkeyHint2"></span>.</p>
+        </div>
+      </div>
+
+      <div class="editor hidden" id="editor">
+        <div class="editor-toolbar">
+          <div class="toolbar-left">
+            <button class="tool-btn" id="toggleSidebarBtn" title="Toggle sidebar (Ctrl+\)" aria-label="Toggle sidebar">☰</button>
+            <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
+            <button class="tool-btn" id="previewBtn" title="Preview (Ctrl+E)" aria-label="Toggle preview">Preview</button>
+          </div>
+          <div class="toolbar-right">
+            <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
+            <button class="tool-btn" id="duplicateBtn" title="Duplicate note">Duplicate</button>
+            <button class="tool-btn" id="restoreBtn" title="Restore from trash">Restore</button>
+            <button class="tool-btn tool-danger" id="deleteBtn" title="Move to trash (Ctrl+Del)">Trash</button>
+            <button class="tool-btn tool-danger" id="destroyBtn" title="Delete forever">Delete forever</button>
+          </div>
+        </div>
+
+        <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
+        <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
+
+        <div class="editor-body">
+          <textarea id="bodyInput" class="body-input" placeholder="Start writing… Markdown works here. Try - [ ] for a checklist." spellcheck="true"></textarea>
+          <article id="preview" class="preview hidden"></article>
+        </div>
+
+        <div class="status-bar">
+          <span id="statusWords">0 words</span>
+          <span class="dot">·</span>
+          <span id="statusChars">0 characters</span>
+          <span class="dot">·</span>
+          <span id="statusUpdated"></span>
+          <span class="status-right" id="statusSaved">Saved</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings dialog -->
+    <dialog id="settingsDialog" class="dialog">
+      <form method="dialog" class="dialog-form" id="settingsForm">
+        <h2 class="dialog-title">Settings</h2>
+
+        <label class="field">
+          <span class="field-label">Global hotkey</span>
+          <input id="hotkeyInput" class="input" type="text" placeholder="Ctrl+Alt+N" autocomplete="off" spellcheck="false" />
+          <span class="field-help">Press the combination you want, or type it. Toggles the window from anywhere.</span>
+          <span class="field-error" id="hotkeyError"></span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Theme</span>
+          <select id="themeSelect" class="select">
+            <option value="system">Follow system</option>
+            <option value="light">Light (cream)</option>
+            <option value="dark">Dark (ink)</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Editor font size <span id="fontSizeValue"></span></span>
+          <input id="fontSizeInput" type="range" min="12" max="28" step="1" />
+        </label>
+
+        <label class="field field-check">
+          <input id="openAtLoginInput" type="checkbox" />
+          <span>Start Notes when I log in (so the hotkey always works)</span>
+        </label>
+
+        <label class="field field-check">
+          <input id="alwaysOnTopInput" type="checkbox" />
+          <span>Keep the window above other windows</span>
+        </label>
+
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small" id="importBtn">Import .md files</button>
+          <button type="button" class="btn btn-small" id="exportAllBtn">Export all</button>
+          <button type="button" class="btn btn-small" id="dataFolderBtn">Data folder</button>
+          <span class="spacer"></span>
+          <button type="submit" class="btn btn-primary btn-small" id="closeSettingsBtn">Done</button>
+        </div>
+        <p class="dialog-foot" id="settingsInfo"></p>
+      </form>
+    </dialog>
+
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="vendor/marked.umd.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="../shared/helpers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

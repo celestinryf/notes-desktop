@@ -1,0 +1,25 @@
+{
+  "name": "notes-app",
+  "version": "1.0.0",
+  "description": "Tray-resident notes app launched by a global hotkey",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/unit/**/*.test.js\"",
+    "test:e2e": "node test/e2e.js",
+    "icon": "electron scripts/make-icon.js",
+    "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",
+    "test:ui": "node --test --test-timeout=25000 test/ui.test.js",
+    "test:all": "npm test && npm run test:ui && npm run test:e2e"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "playwright-core": "^1.49.1"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "marked": "^15.0.12"
+  }
+}
