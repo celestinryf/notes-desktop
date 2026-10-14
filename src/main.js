@@ -50,7 +50,7 @@ function main() {
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
-    onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded'); },
+    onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'vault' }); },
   });
   let hotkeyState = { hotkey: store.settings.hotkey, registered: false };
   let boundsTimer = null;
@@ -177,7 +177,7 @@ function main() {
       if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!store.settings.alwaysOnTop);
       applyLoginItem();
       git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
-      if (win && !win.isDestroyed()) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded'); }
+      if (win && !win.isDestroyed()) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
     }
   }
 
@@ -380,6 +380,7 @@ function main() {
     const r = await VaultManager.clone(url, dest);
     if (!r.ok) return r;
     const v = store.addVault({ path: dest, name: safe, remote: url });
+    await vaults.initRepo(v.id, url); // ensures .gitignore (.trash) in a freshly cloned vault
     await vaults.open(v.id, { pull: false });
     return { ok: true, vault: vaultView(v) };
   });
@@ -459,7 +460,7 @@ function main() {
       lastContentHash = contentHash();
       if (store.settings.gitEnabled) git.noteChanged();
       botSend('end', { ok: code === 0, code, imported });
-      if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded');
+      if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' });
     });
     return { ok: true, cwd: target.cwd, kind: target.kind };
   });
@@ -558,7 +559,7 @@ function main() {
   ipcMain.handle('app:rendererReady', () => {
     rendererReady = true;
     const visible = !!(win && !win.isDestroyed() && win.isVisible());
-    if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded'); }
+    if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
     if (visible) win.webContents.send('app:shown');
     if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
     return { visible };

@@ -619,6 +619,13 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   fs.writeFileSync(path.join(vaultDir, 'Work', 'External.md'), 'external\n');
   await waitFor('external file became a note', () => readNotes().notes.some((n) => n.title === 'External' && n.vaultId === vault.id), 15000);
 
+  // The open note is refreshed when its file changes underneath it (as after a git pull) while it is clean.
+  await page.click('.note-card:has-text("Groceries")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
+  await sleep(600);
+  fs.writeFileSync(path.join(vaultDir, 'Groceries.md'), '- eggs\n- milk from another device\n');
+  await waitForDom(() => document.getElementById('bodyInput').value.includes('milk from another device'), 15000);
+
   // Trash moves the file into .trash; empty trash deletes it.
   await page.click('.note-card:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');

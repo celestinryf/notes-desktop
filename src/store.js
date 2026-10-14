@@ -161,6 +161,7 @@ function sanitizeNote(raw, now) {
     fileKind: ['text', 'pdf', 'docx', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
     fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
+    trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     pinned: !!raw.pinned,
     createdAt,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
@@ -348,7 +349,8 @@ class Store {
     patch = patch || {};
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
-    let fileWritten = false;
+    let fileWritten = false; // the body landed in the file
+    let fileMoved = false;   // the file was renamed, moved, or created on disk
     // File-backed: the file is the source of truth and is written first, before any field changes.
     if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
       if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
@@ -357,7 +359,8 @@ class Store {
     }
     if (typeof patch.title === 'string' && patch.title !== note.title) {
       // In a vault the title is the file name: rename the file first, then record what it became.
-      note.title = note.vaultId && note.filePath && note.fileKind === 'text' ? this._renameVaultFile(note, patch.title) : patch.title;
+      if (note.vaultId && note.filePath && note.fileKind === 'text') { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
+      else note.title = patch.title;
       changed = true;
     }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
@@ -366,9 +369,21 @@ class Store {
       if (fid !== (note.folderId || null)) {
         if (!fid) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
         note.filePath = this._moveVaultFile(note, fid);
-        note.folderId = fid; changed = true;
+        note.folderId = fid; changed = true; fileMoved = true;
       }
       delete patch.folderId;
+    } else if (patch.folderId && !note.filePath) {
+      // A plain note dropped into a vault folder becomes a file there, so it is synced like the others.
+      const target = this.getFolder(patch.folderId);
+      if (target && target.vaultId && target.dirPath) {
+        fs.mkdirSync(target.dirPath, { recursive: true });
+        const name = uniqueName(target.dirPath, H.safeFilename(H.deriveTitle(note)), '.md');
+        const full = path.join(target.dirPath, name);
+        fs.writeFileSync(full, note.body, 'utf8');
+        note.filePath = full; note.fileKind = 'text'; note.fileMtime = F.mtimeOf(full); note.vaultId = target.vaultId;
+        note.title = stem(name); note.folderId = target.id; changed = true; fileMoved = true;
+        delete patch.folderId;
+      }
     }
     if (patch.tags !== undefined) {
       const tags = H.parseTags(patch.tags);
@@ -384,15 +399,13 @@ class Store {
       try {
         this.save();
       } catch (err) {
-        // Roll back so a retry with the same patch is a real change and gets written. When the file itself
-        // was already written, the cache must keep mirroring the file: the user's text is safe on disk, only
-        // the metadata write failed.
-        if (fileWritten) {
-          const keep = { body: note.body, fileMtime: note.fileMtime };
-          Object.assign(note, before, keep);
-        } else {
-          Object.assign(note, before);
-        }
+        // Roll back so a retry with the same patch is a real change and gets written. Whatever already
+        // happened on disk (a written body, a renamed or moved file) must stay reflected in memory: the
+        // user's text and the file's location are the truth, only the metadata write failed.
+        const keep = {};
+        if (fileWritten) Object.assign(keep, { body: note.body, fileMtime: note.fileMtime });
+        if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime });
+        Object.assign(note, before, keep);
         throw err;
       }
     }
@@ -493,7 +506,10 @@ class Store {
   }
 
   // Makes the folder tree and notes match the directory. Returns counts. Idempotent and safe to call often.
-  async scanVault(id) {
+  // opts.allowRemovals=false keeps mirrors of files that are momentarily absent (e.g. during a git rebase).
+  async scanVault(id, opts) {
+    opts = opts || {};
+    const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
     const root = this.vaultRootFolder(id) || this._commit(() => { const f = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path }; this.folders.push(f); return f; });
@@ -537,8 +553,8 @@ class Store {
     };
     await walk(vault.path, root.id);
     // Files or directories that vanished (deleted elsewhere, or moved out by git): drop their mirrors.
-    const gone = this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !seenNotes.has(n.id) && !(n.filePath && fs.existsSync(n.filePath)));
-    const goneFolders = this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath)));
+    const gone = allowRemovals ? this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !seenNotes.has(n.id) && !(n.filePath && fs.existsSync(n.filePath))) : [];
+    const goneFolders = allowRemovals ? this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))) : [];
     if (gone.length || goneFolders.length) {
       this._commit(() => {
         const goneIds = new Set(gone.map((n) => n.id));
@@ -604,25 +620,38 @@ class Store {
   trash(id) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
+    let moved = null;
     if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
       const next = path.join(dir, uniqueName(dir, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md'));
       fs.renameSync(note.filePath, next);
+      moved = { from: note.filePath, to: next };
       note.trashedFrom = note.filePath;
       note.filePath = next;
     }
-    return this._commit(() => { note.trashedAt = this.now(); return note; }); // pinned is kept for restore
+    try {
+      return this._commit(() => { note.trashedAt = this.now(); return note; }); // pinned is kept for restore
+    } catch (err) {
+      // The metadata write failed: put the file back so disk and memory agree again.
+      if (moved) { try { fs.renameSync(moved.to, moved.from); } catch (_) { /* best effort */ } }
+      throw err;
+    }
   }
 
   restore(id) {
     const note = this.get(id);
     if (!note || !note.trashedAt) return note;
-    if (note.vaultId && note.filePath && note.trashedFrom && fs.existsSync(note.filePath)) {
-      const dir = path.dirname(note.trashedFrom);
+    if (note.vaultId && note.filePath && fs.existsSync(note.filePath) && /[\\/]\.trash[\\/]/.test(note.filePath)) {
+      // Back to where it came from; if that is unknown (older data) or gone, the vault root is the fallback.
+      const v = this.getVault(note.vaultId);
+      const origin = note.trashedFrom || (v ? path.join(v.path, path.basename(note.filePath)) : null);
+      const dir = path.dirname(origin);
       fs.mkdirSync(dir, { recursive: true });
-      const next = path.join(dir, uniqueName(dir, stem(path.basename(note.trashedFrom)), path.extname(note.trashedFrom) || '.md'));
+      const next = path.join(dir, uniqueName(dir, stem(path.basename(origin)), path.extname(origin) || '.md'));
       fs.renameSync(note.filePath, next);
       note.filePath = next;
+      const folder = this.folders.find((f) => f.vaultId === note.vaultId && f.dirPath && F.pathKey(f.dirPath) === F.pathKey(dir));
+      if (folder) note.folderId = folder.id;
       delete note.trashedFrom;
     }
     return this._commit(() => {
@@ -818,7 +847,10 @@ class Store {
     const oldKey = F.pathKey(oldDir);
     const under = (p) => p && (F.pathKey(p) === oldKey || F.pathKey(p).startsWith(oldKey + '\\'));
     const swap = (p) => newDir + path.resolve(p).slice(path.resolve(oldDir).length);
-    for (const n of this.notes) if (under(n.filePath)) n.filePath = swap(n.filePath);
+    for (const n of this.notes) {
+      if (under(n.filePath)) n.filePath = swap(n.filePath);
+      if (under(n.trashedFrom)) n.trashedFrom = swap(n.trashedFrom);
+    }
     for (const d of this.folders) if (d.dirPath && under(d.dirPath) && F.pathKey(d.dirPath) !== oldKey) d.dirPath = swap(d.dirPath);
   }
 
@@ -865,6 +897,9 @@ class Store {
         if (e.isDirectory()) this._retargetVaultPaths(from, to);
         else { const n = this.findByPath(from); if (n) n.filePath = to; }
       }
+      // Trashed notes that came from this directory should restore into the parent now.
+      const dirKey = F.pathKey(f.dirPath);
+      for (const n of this.notes) if (n.trashedFrom && F.pathKey(path.dirname(n.trashedFrom)) === dirKey) n.trashedFrom = path.join(parentDir, path.basename(n.trashedFrom));
       try { fs.rmdirSync(f.dirPath); } catch (_) { /* leave non-empty leftovers */ }
     }
     return this._commit(() => {

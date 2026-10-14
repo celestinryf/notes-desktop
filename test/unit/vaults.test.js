@@ -110,6 +110,52 @@ test('vault notes: create writes a file, rename renames it, move moves it, trash
   assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')), 'files untouched by removing the vault');
 });
 
+test('vault trash survives a restart, restores to the original folder, and a plain note dropped into a vault becomes a file', async () => {
+  const dir = makeVaultDir();
+  const dataDir = tmp();
+  let store = new Store(dataDir).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const projects = store.folders.find((f) => f.name === 'Projects');
+  const plan = store.notes.find((n) => n.title === 'Plan');
+  store.trash(plan.id);
+  assert.ok(fs.existsSync(path.join(dir, '.trash', 'Plan.md')));
+  // Restart.
+  store = new Store(dataDir).load();
+  const reloaded = store.get(plan.id);
+  assert.ok(reloaded.trashedFrom, 'origin path persisted');
+  store.restore(plan.id);
+  assert.ok(fs.existsSync(path.join(dir, 'Projects', 'Plan.md')), 'restored to its original directory, not left in .trash');
+  assert.equal(store.get(plan.id).folderId, projects.id);
+  assert.equal(store.get(plan.id).trashedFrom, undefined);
+  // A trashed note whose origin directory was deleted restores into the parent.
+  const deep = store.notes.find((n) => n.title === 'notes');
+  const deepFolder = store.getFolder(deep.folderId);
+  store.trash(deep.id);
+  store.deleteFolder(deepFolder.id);
+  store.restore(deep.id);
+  assert.ok(fs.existsSync(path.join(dir, 'Projects', 'notes.txt')), 'restored into the parent after its folder was deleted');
+  // Older data without trashedFrom restores to the vault root.
+  const inbox = store.notes.find((n) => n.title === 'Inbox');
+  store.trash(inbox.id);
+  delete store.get(inbox.id).trashedFrom;
+  store.restore(inbox.id);
+  assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')));
+  // Plain note into a vault folder: becomes a file, synced like the rest.
+  const plain = store.create({ title: 'Loose idea', body: 'loose\n' });
+  store.update(plain.id, { folderId: projects.id });
+  const after = store.get(plain.id);
+  assert.equal(after.vaultId, v.id);
+  assert.equal(after.filePath, path.join(dir, 'Projects', 'Loose idea.md'));
+  assert.equal(fs.readFileSync(after.filePath, 'utf8'), 'loose\n');
+  // allowRemovals=false keeps mirrors of momentarily missing files.
+  fs.renameSync(path.join(dir, 'Inbox.md'), path.join(dir, 'Inbox.md.tmp'));
+  const r = await store.scanVault(v.id, { allowRemovals: false });
+  assert.equal(r.removed, 0);
+  assert.ok(store.get(inbox.id), 'kept during a transient absence');
+  fs.renameSync(path.join(dir, 'Inbox.md.tmp'), path.join(dir, 'Inbox.md'));
+});
+
 test('VaultManager syncs with a bare remote: commit, push, pull from another clone, conflict leaves work intact', { skip: !gitAvailable && 'git not installed' }, async () => {
   const bare = tmp();
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
