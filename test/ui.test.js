@@ -85,12 +85,15 @@ test('showing the window does not create stray notes once notes exist', async ()
 });
 
 test('rendered editor: ## becomes a heading, lists and checklists render, Markdown round-trips', async () => {
+  const step = (s) => console.log('  [rendered] ' + s);
+  const T = { timeout: 8000 };
   await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
   assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true, 'rendered view is the default');
   await page.fill('#titleInput', 'Rendered');
-  await page.click('#richEditor .rich-editor-content');
+  await page.click('#richEditor .rich-editor-content', T);
   await page.keyboard.type('## Big heading');
-  await page.waitForSelector('#richEditor h2:has-text("Big heading")');
+  await page.waitForSelector('#richEditor h2:has-text("Big heading")', T);
+  step('heading rendered');
   await page.keyboard.press('Enter');
   await page.keyboard.type('Plain paragraph with ');
   await page.keyboard.press('Control+b');
@@ -98,23 +101,27 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
   await page.keyboard.press('Control+b');
   await page.keyboard.press('Enter');
   await page.keyboard.type('- [ ] a task');
-  await page.waitForSelector('#richEditor li[data-type="taskItem"]');
+  await page.waitForSelector('#richEditor li[data-type="taskItem"]', T);
+  step('task item rendered');
   await waitFor('markdown saved from rendered editor', () => {
     const n = findNote('Rendered');
     return n && n.body.includes('## Big heading') && n.body.includes('**bold**') && n.body.includes('- [ ] a task');
   });
+  step('markdown saved');
   // Ticking the checkbox writes back to the Markdown.
-  await page.click('#richEditor li[data-type="taskItem"] input[type="checkbox"]');
+  await page.click('#richEditor li[data-type="taskItem"] input[type="checkbox"]', T);
   await waitFor('checkbox toggled in markdown', () => findNote('Rendered').body.includes('- [x] a task'));
+  step('checkbox toggled');
 
   // Ctrl+K opens the link dialog and applies a link to the selection.
-  await page.click('#richEditor h2');
+  await page.click('#richEditor h2', T);
   await page.keyboard.press('End');
   await page.keyboard.press('Shift+Home');
   await page.keyboard.press('Control+k');
-  await page.waitForSelector('#linkDialog[open]');
-  await page.fill('#linkInput', 'https://example.com');
-  await page.click('#linkApplyBtn');
+  await page.waitForSelector('#linkDialog[open]', T);
+  step('link dialog open');
+  await page.fill('#linkInput', 'https://example.com', T);
+  await page.click('#linkApplyBtn', T);
   try {
     await waitFor('link in markdown', () => /\[Big heading\]\(https:\/\/example\.com\)/.test(findNote('Rendered').body));
   } catch (err) {
@@ -129,28 +136,33 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
     throw new Error(err.message + ' | file=' + JSON.stringify(findNote('Rendered').body) + ' | ' + JSON.stringify(diag));
   }
 
+  step('link applied');
+
   // Ctrl+E shows the raw source with the same text; editing there flows back into the rendered view.
   await page.keyboard.press('Control+e');
   await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   assert.equal(readNotes().settings.editorMode, 'source', 'mode persists');
   assert.match(await page.inputValue('#bodyInput'), /^## \[Big heading\]/);
-  await page.fill('#bodyInput', '# From source\n\n- [ ] one');
+  step('source view');
+  await page.fill('#bodyInput', '# From source\n\n- [ ] one', T);
   await page.keyboard.press('Control+e');
-  await page.waitForSelector('#richEditor h1:has-text("From source")');
+  await page.waitForSelector('#richEditor h1:has-text("From source")', T);
   assert.equal(await page.$$eval('#richEditor li[data-type="taskItem"]', (l) => l.length), 1);
   await waitFor('source edit saved', () => findNote('Rendered').body.startsWith('# From source'));
+  step('round trip');
 
   // Leave the editor in source mode: the older tests below drive the textarea directly.
   await useSourceMode(true);
   await page.keyboard.press('Control+Delete'); // trash this note so the following tests start as before
   await waitFor('rendered note trashed', () => findNote('Rendered').trashedAt);
-  await page.click('.nav-item[data-view="trash"]');
-  await page.click('.note-card:has-text("Rendered")');
-  await page.click('#destroyBtn');
+  await page.click('.nav-item[data-view="trash"]', T);
+  await page.click('.note-card:has-text("Rendered")', T);
+  await page.click('#destroyBtn', T);
   await waitFor('rendered note destroyed', () => !findNote('Rendered'));
-  await page.click('.nav-item[data-view="all"]');
-  await page.click('#newNoteBtn');
+  await page.click('.nav-item[data-view="all"]', T);
+  await page.click('#newNoteBtn', T);
   await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  step('cleaned up');
 });
 
 test('first run opens on a fresh note and typing autosaves', async () => {
