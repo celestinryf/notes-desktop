@@ -68,12 +68,13 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // Match on the raw text and escape each piece afterwards, so entities in notes are never split by a mark.
   function highlight(text, query) {
-    const safe = escapeHtml(text);
+    const raw = String(text);
     const tokens = H.tokenize(query);
-    if (!tokens.length) return safe;
+    if (!tokens.length) return escapeHtml(raw);
     const re = new RegExp('(' + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'ig');
-    return safe.replace(re, '<span class="mark">$1</span>');
+    return raw.split(re).map((part, i) => (i % 2 ? '<span class="mark">' + escapeHtml(part) + '</span>' : escapeHtml(part))).join('');
   }
 
   let toastTimer = null;
@@ -111,7 +112,7 @@
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
     // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it.
-    const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId;
+    const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich;
     const wantSource = settings.editorMode === 'source' || forcedSource;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
@@ -529,7 +530,7 @@
     if (!node) return;
     const what = [];
     if (node.count) what.push(node.count + (node.count === 1 ? ' note' : ' notes'));
-    if (node.children.length) what.push(node.children.length + (node.children.length === 1 ? ' subfolder' : ' subfolders'));
+    if (node.children.length) what.push(node.children.length + (node.children.length === 1 ? ' subfolder (with its contents)' : ' subfolders (with their contents)'));
     const detail = what.length ? ' Its ' + what.join(' and ') + ' move up one level; nothing is deleted.' : '';
     if (!window.confirm('Delete folder "' + node.name + '"?' + detail)) return;
     await flushSave();
@@ -672,7 +673,7 @@
     state.currentLossless = lossless;
     state.lossyOverride = null;
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
-    const wantSource = state.settings.editorMode === 'source' || !lossless;
+    const wantSource = state.settings.editorMode === 'source' || !lossless || !state.rich;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (!lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
@@ -888,12 +889,17 @@
   }
 
   async function emptyTrash() {
-    const n = state.notes.length;
-    if (!n || !window.confirm('Permanently delete ' + n + (n === 1 ? ' note' : ' notes') + ' in the trash?')) return;
-    await api.notes.emptyTrash();
+    // Only what is listed: with a search active, "Empty trash" must not delete trashed notes the user cannot see.
+    const listed = state.notes.slice();
+    const n = listed.length;
+    if (!n) return;
+    const scope = state.query ? ' matching your search' : ' in the trash';
+    if (!window.confirm('Permanently delete ' + n + (n === 1 ? ' note' : ' notes') + scope + '? This cannot be undone.')) return;
+    if (state.query) { for (const note of listed) await api.notes.destroy(note.id); }
+    else await api.notes.emptyTrash();
     clearEditor();
     await refresh();
-    toast('Trash emptied');
+    toast(state.query ? 'Deleted ' + n + (n === 1 ? ' note' : ' notes') : 'Trash emptied');
   }
 
   async function duplicateCurrent() {
@@ -908,8 +914,12 @@
   async function exportCurrent() {
     if (!state.current) return;
     await flushSave();
-    const res = await api.app.exportNote(state.currentId);
-    if (res.ok) toast('Exported to ' + res.filePath);
+    try {
+      const res = await api.app.exportNote(state.currentId);
+      if (res.ok) toast('Exported to ' + res.filePath);
+    } catch (err) {
+      toast('Export failed: ' + (err.message || err));
+    }
   }
 
   // ---- rendered editor vs. Markdown source --------------------------------
@@ -1299,7 +1309,10 @@
       const res = await api.app.importMarkdown();
       if (res.ok) { el.settingsDialog.close(); await refresh({ keepEditor: true }); if (res.firstId) await selectNote(res.firstId); toast('Imported ' + res.count + (res.count === 1 ? ' note' : ' notes')); }
     });
-    el.exportAllBtn.addEventListener('click', async () => { const res = await api.app.exportAll(); if (res.ok) toast('Exported to ' + res.filePath); });
+    el.exportAllBtn.addEventListener('click', async () => {
+      try { const res = await api.app.exportAll(); if (res.ok) toast('Exported to ' + res.filePath); }
+      catch (err) { toast('Export failed: ' + (err.message || err)); }
+    });
     el.dataFolderBtn.addEventListener('click', () => api.app.openDataFolder());
     el.settingsDialog.addEventListener('close', () => { if (state.current) focusBody(); });
 

@@ -137,6 +137,8 @@
     const key = parts[parts.length - 1];
     const mods = parts.slice(0, -1);
     if (!mods.every((m) => MODIFIERS.has(m.toLowerCase()))) return { ok: false, reason: 'Unknown modifier in "' + str + '".' };
+    // Shift alone would make an ordinary capital letter or symbol unusable in every application.
+    if (!mods.some((m) => m.toLowerCase() !== 'shift')) return { ok: false, reason: 'Use Ctrl, Alt, or Win together with the key (Shift alone would block normal typing).' };
     if (!isBindableKey(key)) return { ok: false, reason: '"' + key + '" is not a key that can be bound.' };
     const normMods = mods.map((m) => {
       const l = m.toLowerCase();

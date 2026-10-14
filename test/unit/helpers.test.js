@@ -83,6 +83,9 @@ test('parseAccelerator validates and normalizes', () => {
   assert.deepEqual(H.parseAccelerator('CommandOrControl+Shift+F9'), { ok: true, value: 'CommandOrControl+Shift+F9' });
   assert.deepEqual(H.parseAccelerator('Control+Alt+Space'), { ok: true, value: 'Control+Alt+Space' });
   assert.equal(H.parseAccelerator('N').ok, false);
+  assert.equal(H.parseAccelerator('Shift+A').ok, false, 'Shift alone is not a usable global modifier');
+  assert.equal(H.parseAccelerator('Shift+F9').ok, false);
+  assert.equal(H.parseAccelerator('Alt+Shift+A').ok, true);
   assert.equal(H.parseAccelerator('Bogus+N').ok, false);
   assert.equal(H.parseAccelerator('Control+NotAKey').ok, false);
   assert.equal(H.parseAccelerator('').ok, false);
