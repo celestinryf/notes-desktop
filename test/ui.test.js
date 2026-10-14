@@ -981,6 +981,11 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.fill('#searchInput', '');
   await page.click('.note-card:has-text("Gamma (copy)")');
   await page.waitForSelector('#lockScreen:not(.hidden)');
+  // Title and tags still save while the body is locked.
+  await page.fill('#titleInput', 'Gamma (copy) renamed');
+  await waitFor('title saved while locked', () => findNote('Gamma (copy) renamed') && findNote('Gamma (copy) renamed').body === '');
+  await page.fill('#titleInput', 'Gamma (copy)');
+  await waitFor('title back', () => !!findNote('Gamma (copy)'));
   // Wrong password, then right password.
   await page.fill('#lockScreenPassword', 'nope');
   await page.click('#lockScreenBtn');

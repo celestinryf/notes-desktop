@@ -376,8 +376,10 @@ class Store {
     let fileWritten = false; // the body landed in the file
     let plainBefore;          // the cached plaintext to restore if the save fails
     if (note.lock && typeof patch.body === 'string') {
-      if (!this.plain.has(id)) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
-      if (patch.body !== this.plain.get(id)) {
+      // A locked view can only ever send an empty body (that is all it has): ignore it, so title and tag
+      // edits still save. Any other body while locked is a mistake.
+      if (!this.plain.has(id) && patch.body !== '') throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
+      if (this.plain.has(id) && patch.body !== this.plain.get(id)) {
         plainBefore = this.plain.get(id);
         note.lock = L.encrypt(patch.body, this.keys.get(id), note.lock.salt);
         this.plain.set(id, patch.body);
@@ -410,6 +412,7 @@ class Store {
     } else if (patch.folderId && !note.filePath) {
       // A plain note dropped into a vault folder becomes a file there, so it is synced like the others.
       const target = this.getFolder(patch.folderId);
+      if (target && target.vaultId && note.lock) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
       if (target && target.vaultId && target.dirPath) {
         fs.mkdirSync(target.dirPath, { recursive: true });
         const name = uniqueName(target.dirPath, H.safeFilename(H.deriveTitle(note)), '.md');
@@ -546,9 +549,9 @@ class Store {
     if (!note) return null;
     if (note.lock) {
       if (!this.plain.has(id)) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
-      const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false });
       const key = this.keys.get(id);
-      this._commit(() => { copy.lock = L.encrypt(this.plain.get(id), key, note.lock.salt); return copy; });
+      // One write: the copy is created already locked (a failed save leaves nothing behind).
+      const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false, lock: L.encrypt(this.plain.get(id), key, note.lock.salt) });
       this.plain.set(copy.id, this.plain.get(id));
       this.keys.set(copy.id, key);
       return this.publicNote(copy);
@@ -752,6 +755,7 @@ class Store {
   trash(id) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
+    this.relock(id); // a trashed locked note needs its password again
     let moved = null;
     if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
@@ -807,6 +811,7 @@ class Store {
     const before = this.notes.length;
     if (!this.notes.some((n) => n.trashedAt)) return 0;
     for (const n of this.notes) if (n.trashedAt && n.vaultId && n.filePath && fs.existsSync(n.filePath)) { try { fs.rmSync(n.filePath); } catch (_) { /* leave it */ } }
+    for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
     return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
   }
 

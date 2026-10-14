@@ -594,7 +594,7 @@
     await flushSave();
     let updated;
     try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
-    catch (err) { toast(err.message && /vault/i.test(err.message) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + (err.message || err)); return; }
+    catch (err) { const msg = String(err.message || err).replace(/^.*Error: /, ''); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); return; }
     if (state.currentId === noteId && updated) state.current = updated;
     await refresh({ keepEditor: true });
     const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
@@ -1006,9 +1006,14 @@
   function applyLockedNote(updated) {
     if (!updated || updated.id !== state.currentId) return;
     state.current = updated;
-    state.dirty = false;
-    el.bodyInput.value = updated.body;
-    if (state.rich) state.currentLossless = state.rich.setMarkdown(updated.body);
+    // Keystrokes that landed while the lock call ran (scrypt takes a moment) are kept and saved again;
+    // a relocked note, on the other hand, must show no plaintext at all.
+    const keepTyping = state.dirty && updated.unlocked;
+    if (!keepTyping) {
+      state.dirty = false;
+      el.bodyInput.value = updated.body;
+      if (state.rich) state.currentLossless = state.rich.setMarkdown(updated.body);
+    } else scheduleSave();
     renderLockState(updated);
     renderStickyButton(updated);
     updateStatus(updated);
@@ -1020,7 +1025,13 @@
     el.lockMenu.classList.add('hidden');
     const note = state.current;
     if (!note || !note.locked) return;
-    if (action === 'relock') { await flushSave(); applyLockedNote(await api.lock.relock(note.id)); toast('Locked.'); }
+    if (action === 'relock') {
+      const saved = await flushSave();
+      if (!saved) { toast('Your latest typing could not be saved yet, so the note was not locked. Try again in a moment.'); return; }
+      state.pending.delete(note.id);
+      applyLockedNote(await api.lock.relock(note.id));
+      toast('Locked.');
+    }
     else if (action === 'remove') openLockDialog('remove');
   }
 
@@ -1634,6 +1645,7 @@
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
     // Read-only file kinds (PDF, Word, binary) still take title and tag edits; their body is not ours to write.
     if (state.current && state.current.filePath && state.current.fileKind !== 'text') delete patch.body;
+    if (lockedNow()) delete patch.body; // the locked view has no body to offer
     return patch;
   }
 
@@ -1687,7 +1699,7 @@
     if (!p) return false;
     el.titleInput.value = p.title;
     el.tagsInput.value = p.tags;
-    el.bodyInput.value = p.body;
+    if (typeof p.body === 'string' && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body; // never show a stale plaintext on a relocked note
     return true;
   }
 
@@ -2181,7 +2193,9 @@
     el.lockDialog.addEventListener('close', () => focusBody());
     el.lockScreen.addEventListener('submit', (e) => { e.preventDefault(); unlockFromScreen(); });
     api.on.relocked(async (ids) => {
-      if (state.currentId && ids.includes(state.currentId)) { const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
+      // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
+      for (const id of ids) state.pending.delete(id);
+      if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
       refresh({ keepEditor: true });
     });
     el.remindQuick.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) setReminder(quickPick(b.dataset.pick)); });

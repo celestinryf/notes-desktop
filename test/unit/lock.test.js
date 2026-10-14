@@ -91,3 +91,35 @@ test('a save failure while editing an unlocked note rolls the in-memory plaintex
   store.relock(n.id);
   assert.equal(store.unlockNote(n.id, 'pw').body, 'v2');
 });
+
+test('locked notes: title edits with an empty body are accepted, vault moves are refused, trash and emptyTrash forget the key, duplicate is one write', () => {
+  const dir = tmp();
+  const store = new Store(dir).load();
+  const n = store.create({ title: 'T', body: 'secret' });
+  store.lockNote(n.id, 'pw');
+  store.relock(n.id);
+  // What a locked view sends: title/tags plus an empty body.
+  store.update(n.id, { title: 'T2', body: '', tags: 'a' });
+  assert.equal(store.get(n.id).title, 'T2');
+  assert.equal(store.unlockNote(n.id, 'pw').body, 'secret', 'body untouched by the empty-body patch');
+  assert.throws(() => { store.relock(n.id); store.update(n.id, { body: 'x' }); }, /locked/i);
+  // Vault move refused for a locked note.
+  const vdir = tmp();
+  const v = store.addVault({ path: vdir });
+  const root = store.vaultRootFolder(v.id);
+  assert.throws(() => store.update(n.id, { folderId: root.id }), /locked/i);
+  assert.equal(fs.readdirSync(vdir).length, 0, 'nothing written to the vault');
+  // Trash forgets the key; emptyTrash too.
+  store.unlockNote(n.id, 'pw');
+  store.trash(n.id);
+  assert.equal(store.publicNote(store.get(n.id)).unlocked, false);
+  store.restore(n.id);
+  store.unlockNote(n.id, 'pw');
+  const dup = store.duplicate(n.id);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'notes.json'), 'utf8')).notes.filter((x) => x.title === 'T2 (copy)').length, 1);
+  assert.ok(dup.locked && dup.unlocked);
+  store.trash(dup.id);
+  store.unlockNote(dup.id, 'pw');
+  store.emptyTrash();
+  assert.equal(store.plain.has(dup.id), false);
+});
