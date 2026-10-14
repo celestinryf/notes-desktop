@@ -123,6 +123,9 @@ test('settings are sanitized on load and on set', () => {
   assert.equal(sanitizeSettings({ sidebarWidth: 9999 }).sidebarWidth, 420);
   assert.equal(sanitizeSettings({ listWidth: 'wide' }).listWidth, 300);
   assert.equal(sanitizeSettings({ listWidth: 333.6 }).listWidth, 334);
+  assert.equal(sanitizeSettings({ window: { width: 1100, height: 720 } }).window, null, 'a rectangle without x/y is dropped');
+  assert.equal(sanitizeSettings({ window: { x: 'a', y: 0, width: 1100, height: 720 } }).window, null);
+  assert.deepEqual(sanitizeSettings({ window: { x: 10.4, y: 20.6, width: 800, height: 600 } }).window, { x: 10, y: 21, width: 800, height: 600 });
   assert.equal(sanitizeSettings({ fontSize: '18' }).fontSize, 18);
   assert.equal(sanitizeSettings({ hotkey: 'ctrl+alt+k' }).hotkey, 'Control+Alt+K');
   const { store } = makeStore();

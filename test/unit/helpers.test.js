@@ -117,5 +117,10 @@ test('clampPane keeps pane widths inside their limits', () => {
 test('safeFilename strips characters Windows rejects', () => {
   assert.equal(H.safeFilename('a/b\\c:d*e?f"g<h>i|j'), 'abcdefghij');
   assert.equal(H.safeFilename('   '), 'Untitled');
+  assert.equal(H.safeFilename('con'), 'note-con');
+  assert.equal(H.safeFilename('NUL.txt'), 'note-NUL.txt');
+  assert.equal(H.safeFilename('COM1'), 'note-COM1');
+  assert.equal(H.safeFilename('console'), 'console');
+  assert.equal(H.safeFilename('ends with dot.'), 'ends with dot');
   assert.equal(H.safeFilename('x'.repeat(100)).length, 80);
 });

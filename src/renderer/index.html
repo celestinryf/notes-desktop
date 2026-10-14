@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
@@ -78,7 +78,7 @@
             <li><kbd>Ctrl</kbd>+<kbd>F</kbd> Search</li>
             <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Show Markdown source</li>
             <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Pin</li>
-            <li><kbd>Ctrl</kbd>+<kbd>Del</kbd> Move to trash</li>
+            <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Del</kbd> Move to trash</li>
             <li><kbd>Esc</kbd> Hide window</li>
           </ul>
           <p class="editor-empty-sub">Bring Notes back any time with <span id="hotkeyHint2"></span>.</p>
@@ -97,7 +97,7 @@
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
             <button class="tool-btn" id="duplicateBtn" title="Duplicate note">Duplicate</button>
             <button class="tool-btn" id="restoreBtn" title="Restore from trash">Restore</button>
-            <button class="tool-btn tool-danger" id="deleteBtn" title="Move to trash (Ctrl+Del)">Trash</button>
+            <button class="tool-btn tool-danger" id="deleteBtn" title="Move to trash (Ctrl+Shift+Del)">Trash</button>
             <button class="tool-btn tool-danger" id="destroyBtn" title="Delete forever">Delete forever</button>
           </div>
         </div>

@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
     rendererReady: invoke('app:rendererReady'),
+    flushDone: () => ipcRenderer.send('app:flush-done'),
     openDataFolder: invoke('app:openDataFolder'),
     openExternal: invoke('app:openExternal'),
     exportNote: invoke('app:exportNote'),
@@ -57,5 +58,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     settingsChanged: on('settings:changed'),
     systemTheme: on('theme:system'),
     gitStatus: on('git:status'),
+    flush: on('app:flush'),
   },
 });

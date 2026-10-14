@@ -48,6 +48,12 @@ test.before(async () => {
   await page.evaluate(() => { window.confirm = () => true; });
 });
 
+// A failed test must not leave a modal dialog open for the next one.
+test.beforeEach(async () => {
+  if (!page) return;
+  await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }).catch(() => {});
+});
+
 async function useSourceMode(on) {
   const isSource = async () => page.evaluate(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   if ((await isSource()) === on) return;
@@ -153,7 +159,7 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
 
   // Leave the editor in source mode: the older tests below drive the textarea directly.
   await useSourceMode(true);
-  await page.keyboard.press('Control+Delete'); // trash this note so the following tests start as before
+  await page.keyboard.press('Control+Shift+Delete'); // trash this note so the following tests start as before
   await waitFor('rendered note trashed', () => findNote('Rendered').trashedAt);
   await page.click('.nav-item[data-view="trash"]', T);
   await page.click('.note-card:has-text("Rendered")', T);
@@ -288,6 +294,77 @@ test('switching source to rendered shows the same Markdown and checkbox clicks w
   await page.waitForSelector('#bodyInput:not(.hidden)');
 });
 
+test('tables and images render; Markdown the rendered view would alter opens as source and is not rewritten', async () => {
+  await useSourceMode(true);
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Rich constructs');
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  const table = '| Name | Qty |\n| --- | --- |\n| Apple | 3 |\n\n![Diagram](' + png + ')\n\nDone.';
+  await page.fill('#bodyInput', table);
+  await waitFor('table note saved', () => findNote('Rich constructs') && findNote('Rich constructs').body === table);
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
+  assert.equal(await page.$$eval('#richEditor td', (c) => c.length), 2);
+  assert.equal(await page.$eval('#richEditor img', (i) => i.getAttribute('src')), png);
+  assert.equal(readNotes().settings.editorMode, 'rendered');
+  // Enter inside a cell used to replace the whole table with "[table]" on autosave.
+  await page.click('#richEditor td >> nth=0');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('more');
+  await waitFor('cell edit saved', () => findNote('Rich constructs').body.includes('more'));
+  const afterEnter = findNote('Rich constructs').body;
+  assert.ok(!afterEnter.includes('[table]'), 'no placeholder: ' + afterEnter);
+  assert.ok(/Apple/.test(afterEnter) && /Qty/.test(afterEnter), 'table content kept: ' + afterEnter);
+  // Ctrl+Backspace in a text field deletes a word and must not trash the note.
+  await page.keyboard.press('Control+Backspace');
+  await sleep(500);
+  assert.equal(findNote('Rich constructs').trashedAt, null, 'Ctrl+Backspace did not trash');
+
+  // A note with constructs the editor cannot keep (inline HTML, a footnote) must open as source untouched.
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Lossy');
+  // The new note opened in rendered mode (persisted setting); switch to source to type raw Markdown.
+  await useSourceMode(true);
+  const lossy = 'Keyboard: <kbd>Ctrl</kbd>+<kbd>K</kbd>\n\nA claim.[^1]\n\n[^1]: The footnote text.';
+  await page.fill('#bodyInput', lossy);
+  await waitFor('lossy note saved', () => findNote('Lossy') && findNote('Lossy').body === lossy);
+  // Prefer rendered globally again, then re-open the lossy note: it must stay in source with a notice.
+  await page.click('.note-card:has-text("Rich constructs")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Rich constructs');
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
+  await page.click('.note-card:has-text("Lossy")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Lossy');
+  await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
+  await page.waitForSelector('#toast:not(.hidden)', { timeout: 8000 });
+  assert.match(await page.textContent('#toast'), /Opened as Markdown source/);
+  await sleep(800);
+  assert.equal(findNote('Lossy').body, lossy, 'viewing did not rewrite the note');
+  assert.equal(readNotes().settings.editorMode, 'rendered', 'the global preference is untouched');
+  // And a normal note after it goes back to the rendered view automatically.
+  await page.click('.note-card:has-text("Rich constructs")');
+  await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
+
+  // Clean up so later tests see the same notes as before.
+  for (const title of ['Lossy', 'Rich constructs']) {
+    await page.click(`.note-card:has-text("${title}")`);
+    await waitForDom((t) => document.getElementById('titleInput').value === t, title);
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor(title + ' trashed', () => findNote(title).trashedAt);
+  }
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('trash emptied', () => !findNote('Lossy') && !findNote('Rich constructs'));
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+});
+
 test('writing column: alignment and width settings move and size the block', async () => {
   const col = () => page.evaluate(() => {
     const c = document.getElementById('editorColumn');
@@ -375,7 +452,7 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
   await waitFor('undo restored', () => !findNote('Gamma (copy)').trashedAt);
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
 
-  await page.keyboard.press('Control+Delete');
+  await page.keyboard.press('Control+Shift+Delete');
   await waitFor('trashed again', () => findNote('Gamma (copy)').trashedAt);
   await page.click('.nav-item[data-view="trash"]');
   await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
@@ -417,10 +494,13 @@ test('settings: theme, font size, always on top, sidebar toggle, hotkey change',
   await waitFor('font size saved', () => readNotes().settings.fontSize === 20);
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--editor-font-size').trim()), '20px');
 
+  // Windows refuses topmost changes from a background process while another app holds the foreground, so the
+  // OS flag is not assertable from an inactive test window; the setting and the request are.
   await page.check('#alwaysOnTopInput');
-  await waitFor('always on top applied', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
+  await waitFor('always on top persisted', () => readNotes().settings.alwaysOnTop === true);
+  console.log('  [settings] OS reports alwaysOnTop =', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
   await page.uncheck('#alwaysOnTopInput');
-  await waitFor('always on top cleared', async () => !(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop())));
+  await waitFor('always on top cleared', () => readNotes().settings.alwaysOnTop === false);
 
   await page.focus('#hotkeyInput');
   await page.keyboard.press('Control+Alt+F10');

@@ -103,8 +103,8 @@ function sanitizeSettings(input) {
   s.sort = ['updated', 'created', 'title'].includes(s.sort) ? s.sort : 'updated';
   if (s.window && typeof s.window === 'object') {
     const w = s.window;
-    const ok = ['width', 'height'].every((k) => Number.isFinite(w[k]) && w[k] > 100);
-    s.window = ok ? { x: w.x, y: w.y, width: w.width, height: w.height } : null;
+    const ok = ['width', 'height'].every((k) => Number.isFinite(w[k]) && w[k] > 100) && ['x', 'y'].every((k) => Number.isFinite(w[k]));
+    s.window = ok ? { x: Math.round(w.x), y: Math.round(w.y), width: Math.round(w.width), height: Math.round(w.height) } : null;
   } else s.window = null;
   return s;
 }

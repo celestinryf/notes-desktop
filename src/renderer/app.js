@@ -110,7 +110,10 @@
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
-    if ((settings.editorMode === 'source') !== state.sourceMode) applyEditorMode(settings.editorMode === 'source');
+    // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it.
+    const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId;
+    const wantSource = settings.editorMode === 'source' || forcedSource;
+    if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
 
   function applyEditorLayout(settings) {
@@ -636,16 +639,29 @@
 
   async function selectNote(id) {
     if (state.currentId === id && state.current) return;
-    await flushSave();
     const note = await api.notes.get(id);
     if (!note) return;
+    // Flush the outgoing note last, and again if keystrokes landed while the flush was in flight,
+    // so nothing typed during the switch is dropped.
+    let guard = 0;
+    while (state.dirty && guard++ < 5) await flushSave();
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
-    if (state.rich) state.rich.setMarkdown(note.body);
+    let lossless = true;
+    if (state.rich) lossless = state.rich.setMarkdown(note.body);
+    state.currentLossless = lossless;
+    state.lossyOverride = null;
+    // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
+    const wantSource = state.settings.editorMode === 'source' || !lossless;
+    if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
+    if (!lossless && state.lossyToastFor !== note.id) {
+      state.lossyToastFor = note.id;
+      toast('Opened as Markdown source: the rendered view would change some of this note’s formatting.');
+    }
     autoGrow();
     const inTrash = !!note.trashedAt;
     [el.titleInput, el.tagsInput, el.bodyInput].forEach((i) => { i.readOnly = inTrash; });
@@ -695,7 +711,15 @@
     const id = state.currentId;
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
     state.dirty = false;
-    const updated = await api.notes.update(id, patch);
+    let updated;
+    try {
+      updated = await api.notes.update(id, patch);
+    } catch (err) {
+      // Disk full, file locked, or similar: keep the edit marked dirty and retry rather than forgetting it.
+      if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); clearTimeout(state.saveTimer); state.saveTimer = setTimeout(flushSave, 3000); }
+      if (!state.saveErrorShown) { state.saveErrorShown = true; toast('Could not save: ' + (err.message || err) + '. Retrying.'); setTimeout(() => { state.saveErrorShown = false; }, 10000); }
+      return;
+    }
     if (!updated) return;
     if (state.currentId === id) {
       state.current = updated;
@@ -704,10 +728,11 @@
     }
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx !== -1) {
+      const prevTags = (state.notes[idx].tags || []).join(',');
       state.notes[idx] = updated;
       refreshCard(updated);
       if (state.settings.sort === 'updated' && idx !== 0 && !updated.pinned) await refresh({ keepEditor: true });
-      else if (updated.tags.join(',') !== (state.notes[idx].tags || []).join(',')) await refresh({ keepEditor: true });
+      else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
     // Tags may have changed: cheap to refresh the tag list.
     api.notes.tags().then(renderTags);
@@ -831,6 +856,10 @@
   function toggleSource(force) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (next === state.sourceMode) return;
+    if (!next && state.currentLossless === false) {
+      state.lossyOverride = state.currentId;
+      toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
+    }
     applyEditorMode(next);
     updateSettings({ editorMode: next ? 'source' : 'rendered' });
     focusBody();
@@ -839,6 +868,11 @@
   function focusBody() {
     if (state.sourceMode || !state.rich) el.bodyInput.focus();
     else state.rich.focus();
+  }
+
+  function inTextField() {
+    const a = document.activeElement;
+    return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || el.richEditor.contains(a));
   }
 
   function bodyHasFocus() {
@@ -1030,7 +1064,8 @@
         case 's': e.preventDefault(); flushSave().then(() => toast('Saved')); return;
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }); return;
-        case 'delete': e.preventDefault(); trashCurrent(); return;
+        // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
+        case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
         // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
         case 'b': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('**', '**'); } return;
         case 'i': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('_', '_'); } return;
@@ -1040,8 +1075,8 @@
           return;
         default: break;
       }
-      if (e.key === 'Backspace') { e.preventDefault(); trashCurrent(); return; }
     }
+    if (ctrl && e.shiftKey && e.key === 'Delete') { e.preventDefault(); trashCurrent(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
       updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
@@ -1203,6 +1238,7 @@
       }
     });
     api.on.newNote(newNote);
+    api.on.flush(async () => { try { await flushSave(); } finally { api.app.flushDone(); } });
     api.on.settingsChanged((s) => applySettings(s));
     api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
