@@ -78,6 +78,8 @@ async function main() {
 
     // The first show on an empty store opens a fresh note with the title focused.
     await waitFor('fresh note ready', () => page.evaluate(() => document.activeElement && document.activeElement.id === 'titleInput'), 8000);
+    // The hotkey focused this window for real, so a person typing elsewhere can land a stray key here first.
+    await page.keyboard.press('Control+a');
     await page.keyboard.type('E2E Title');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Body text typed into the hotkey window.');

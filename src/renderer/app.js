@@ -534,6 +534,7 @@
     if (!window.confirm('Delete folder "' + node.name + '"?' + detail)) return;
     await flushSave();
     const res = await api.folders.delete(id);
+    if (state.current && state.current.folderId === id) state.current.folderId = res ? res.parentId : null;
     if (state.view === 'folder' && (state.folderId === id || !flattenTree(state.tree).some((n) => n.id === state.folderId))) {
       if (res && res.parentId) await setView('folder', res.parentId); else await setView('all');
     } else await refresh({ keepEditor: true });
@@ -541,6 +542,8 @@
   }
 
   async function moveNoteToFolder(noteId, folderId) {
+    const existing = state.notes.find((n) => n.id === noteId) || (state.currentId === noteId ? state.current : null);
+    if (existing && (existing.folderId || null) === (folderId || null)) return; // already there
     await flushSave();
     const updated = await api.notes.update(noteId, { folderId: folderId || null });
     if (state.currentId === noteId && updated) state.current = updated;
@@ -629,6 +632,7 @@
   // ---- editor --------------------------------------------------------------
 
   function clearEditor() {
+    stashIfDirty();
     state.currentId = null;
     state.current = null;
     state.dirty = false;
@@ -644,15 +648,17 @@
     // Flush the outgoing note last, and again if keystrokes landed while the flush was in flight,
     // so nothing typed during the switch is dropped.
     let guard = 0;
-    while (state.dirty && guard++ < 5) await flushSave();
+    while (state.dirty && guard++ < 3) await flushSave();
+    stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
+    const hasPending = applyPendingTo(note);
     let lossless = true;
-    if (state.rich) lossless = state.rich.setMarkdown(note.body);
+    if (state.rich) lossless = state.rich.setMarkdown(el.bodyInput.value);
     state.currentLossless = lossless;
     state.lossyOverride = null;
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
@@ -679,7 +685,8 @@
     el.editor.classList.remove('hidden');
     el.noteList.querySelectorAll('.note-card').forEach((c) => c.classList.toggle('is-active', c.dataset.id === id));
     updateStatus(note);
-    setSaved('Saved');
+    if (hasPending) { state.dirty = true; setSaved('Save failed'); scheduleRetry(); }
+    else setSaved('Saved');
   }
 
   function updateStatus(note) {
@@ -705,19 +712,81 @@
     if (state.current) updateStatus(state.current);
   }
 
+  // Patches that failed to save are kept per note (state.pending: id -> patch) and retried until they land,
+  // even after the user has switched notes, so a locked or full disk never discards an edit.
+  state.pending = new Map();
+
+  function currentPatch() {
+    return { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+  }
+
+  function scheduleRetry() {
+    clearTimeout(state.retryTimer);
+    state.retryTimer = setTimeout(async () => {
+      if (state.pending.has(state.currentId)) { state.dirty = true; await flushSave(); }
+      await retryPending();
+    }, 3000);
+  }
+
+  function reportSaveFailure(err) {
+    if (state.saveErrorShown) return;
+    state.saveErrorShown = true;
+    toast('Could not save: ' + (err && err.message ? err.message : err) + '. Retrying.');
+    setTimeout(() => { state.saveErrorShown = false; }, 10000);
+  }
+
+  // Retry every pending patch except the open note's, whose latest text lives in the fields and goes through flushSave.
+  async function retryPending() {
+    let failed = false;
+    for (const [id, patch] of Array.from(state.pending.entries())) {
+      if (id === state.currentId) continue;
+      try {
+        const updated = await api.notes.update(id, patch);
+        state.pending.delete(id);
+        if (updated) {
+          const idx = state.notes.findIndex((n) => n.id === id);
+          if (idx !== -1) { state.notes[idx] = updated; refreshCard(updated); }
+          toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
+        }
+      } catch (err) {
+        failed = true;
+        reportSaveFailure(err);
+      }
+    }
+    if (failed) scheduleRetry();
+  }
+
+  // Called before the editor moves away from a note: keep unsaved input alive as that note's pending patch.
+  function stashIfDirty() {
+    if (state.dirty && state.currentId) state.pending.set(state.currentId, currentPatch());
+    if (state.pending.size) scheduleRetry();
+  }
+
+  // When a note with a pending patch is opened, show the unsaved text, not the stale disk copy.
+  function applyPendingTo(note) {
+    const p = state.pending.get(note.id);
+    if (!p) return false;
+    el.titleInput.value = p.title;
+    el.tagsInput.value = p.tags;
+    el.bodyInput.value = p.body;
+    return true;
+  }
+
   async function flushSave() {
     clearTimeout(state.saveTimer);
     if (!state.dirty || !state.currentId) return;
     const id = state.currentId;
-    const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+    const patch = currentPatch();
     state.dirty = false;
     let updated;
     try {
       updated = await api.notes.update(id, patch);
+      state.pending.delete(id);
     } catch (err) {
-      // Disk full, file locked, or similar: keep the edit marked dirty and retry rather than forgetting it.
-      if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); clearTimeout(state.saveTimer); state.saveTimer = setTimeout(flushSave, 3000); }
-      if (!state.saveErrorShown) { state.saveErrorShown = true; toast('Could not save: ' + (err.message || err) + '. Retrying.'); setTimeout(() => { state.saveErrorShown = false; }, 10000); }
+      state.pending.set(id, patch);
+      if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); }
+      reportSaveFailure(err);
+      scheduleRetry();
       return;
     }
     if (!updated) return;
@@ -790,6 +859,8 @@
   async function destroyCurrent() {
     if (!state.current) return;
     if (!window.confirm('Delete "' + H.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
+    state.pending.delete(state.currentId);
+    state.dirty = false;
     await api.notes.destroy(state.currentId);
     clearEditor();
     await refresh();

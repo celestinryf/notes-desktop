@@ -54,6 +54,21 @@ test('does nothing while disabled', { skip: !gitAvailable && 'git not installed'
   assert.equal(fs.existsSync(path.join(dir, 'history', '.git')), false);
 });
 
+test('a read-only notes file does not poison later snapshots', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const file = path.join(dir, 'notes.json');
+  fs.writeFileSync(file, '{"v":1}');
+  fs.chmodSync(file, 0o444);
+  const sync = new GitSync(dir, { debounceMs: 10 });
+  await sync.configure({ gitEnabled: true });
+  assert.deepEqual(await sync.commit(), { ok: true }, 'snapshot of a read-only source commits');
+  fs.chmodSync(file, 0o666);
+  fs.writeFileSync(file, '{"v":2}');
+  assert.deepEqual(await sync.commit(), { ok: true }, 'second snapshot overwrites the first');
+  assert.equal(sync.status().commits, 2);
+  assert.equal(sync.status().lastError, null);
+});
+
 test('a missing notes file is not an error', { skip: !gitAvailable && 'git not installed' }, async () => {
   const dir = tmp();
   const sync = new GitSync(dir, { debounceMs: 10 });
