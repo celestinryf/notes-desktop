@@ -37,7 +37,7 @@ test.before(async () => {
   fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light' }, notes: [] }));
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
-    args: [ROOT],
+    args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
     env: Object.assign({}, process.env, {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_REMINDER_TICK_MS: '300',
@@ -1127,6 +1127,119 @@ test('hardening: the page cannot be navigated away, and "Open with…" refuses p
   const res = await page.evaluate((id) => window.notesApi.files.openExternal(id), note.id);
   assert.match(String(res), /does not launch/);
   await page.evaluate((id) => window.notesApi.notes.destroy(id), note.id);
+});
+
+test('replace in note: one at a time and all, in source and rendered views', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'cat sat\ncat ran\n');
+  await waitFor('saved', () => findNote('Gamma (copy)').body === 'cat sat\ncat ran\n');
+  await page.keyboard.press('Control+h');
+  await page.waitForSelector('#replaceRow:not(.hidden)');
+  await page.fill('#findInput', 'cat');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  await page.fill('#replaceInput', 'dog');
+  await page.click('#replaceOneBtn');
+  await waitFor('one replaced', () => findNote('Gamma (copy)').body === 'dog sat\ncat ran\n');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/1');
+  await page.click('#replaceAllBtn');
+  await waitFor('all replaced', () => findNote('Gamma (copy)').body === 'dog sat\ndog ran\n');
+  await waitForDom(() => document.getElementById('findCount').textContent === 'No matches');
+  // Rendered view.
+  await page.keyboard.press('Escape');
+  await useSourceMode(false);
+  await page.keyboard.press('Control+h');
+  await page.waitForSelector('#replaceRow:not(.hidden)');
+  await page.fill('#findInput', 'dog');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  await page.fill('#replaceInput', 'fox');
+  await page.click('#replaceAllBtn');
+  // The rendered view serializes without a trailing newline; the replacement itself is what matters.
+  await waitFor('rendered all replaced', () => /^fox sat\\?\nfox ran\n?$/.test(findNote('Gamma (copy)').body), 8000); // a hard break may serialize as backslash-newline
+  await page.keyboard.press('Escape');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('history: earlier versions are listed and one can be restored', { timeout: 40000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'version one');
+  await waitFor('v1 saved', () => findNote('Gamma (copy)').body === 'version one');
+  await sleep(1200); // the history commit debounce in tests is 300 ms
+  await page.fill('#bodyInput', 'version two');
+  await waitFor('v2 saved', () => findNote('Gamma (copy)').body === 'version two');
+  await sleep(1200);
+  await page.keyboard.press('Control+Shift+h');
+  await page.waitForSelector('#historyDialog[open]');
+  await waitForDom(() => document.querySelectorAll('#historyList li').length >= 1, 15000);
+  await waitForDom(() => /version one/.test(document.getElementById('historyList').textContent) || /version one/.test(document.getElementById('historyPreview').textContent));
+  const items = await page.$$eval('#historyList li', (els) => els.map((e) => e.textContent));
+  const idx = items.findIndex((t) => /version one/.test(t));
+  await page.click('#historyList li:nth-child(' + (idx + 1) + ')');
+  await waitForDom(() => document.getElementById('historyPreview').textContent === 'version one');
+  await page.click('#historyRestoreBtn');
+  await waitFor('restored', () => findNote('Gamma (copy)').body === 'version one');
+  assert.equal(await page.inputValue('#bodyInput'), 'version one');
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('attachments and voice memos: files are copied in and linked; links open through the app; note links jump', { timeout: 40000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'files:');
+  await waitFor('saved', () => findNote('Gamma (copy)').body === 'files:');
+  const src = path.join(dataDir, 'budget.csv');
+  fs.writeFileSync(src, 'a,b\n1,2\n');
+  await app.evaluate(({ dialog, shell }, p) => {
+    dialog.showOpenDialog = async (_w, opts) => (/Attach/.test(opts.title) ? { canceled: false, filePaths: [p] } : { canceled: true, filePaths: [] });
+    global.__opened = []; shell.openPath = async (x) => { global.__opened.push(x); return ''; };
+  }, src);
+  await page.keyboard.press('Control+Shift+o');
+  await waitFor('attachment copied', () => fs.existsSync(path.join(dataDir, 'attachments', 'budget.csv')));
+  await waitFor('link in note', () => /\[📎 budget\.csv\]\(attachment:\/\/budget\.csv\)/.test(findNote('Gamma (copy)').body));
+  // Ctrl+click in the rendered view opens the attachment through the app's guard.
+  await useSourceMode(false);
+  await page.waitForSelector('.rich-editor-content a[href^="attachment://"]');
+  await page.click('.rich-editor-content a[href^="attachment://"]', { modifiers: ['Control'] });
+  await waitFor('opened', () => app.evaluate(() => global.__opened).then((o) => o.length === 1 && /attachments[\\/]budget\.csv$/.test(o[0])));
+  // A forged link cannot escape the attachments folder or run a program.
+  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://..%2F..%2Fnotes.json'))), /Not an attachment|not found/);
+  fs.writeFileSync(path.join(dataDir, 'attachments', 'evil.bat'), '@echo off');
+  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat'))), /does not launch/);
+  // Voice memo with the fake microphone.
+  await page.keyboard.press('Control+Shift+v');
+  await waitForDom(() => document.getElementById('recordBtn').classList.contains('is-recording'), 8000);
+  await sleep(1200);
+  await page.click('#recordBtn');
+  await waitFor('recording saved', () => fs.existsSync(path.join(dataDir, 'attachments')) && fs.readdirSync(path.join(dataDir, 'attachments')).some((f) => /^Recording .*\.webm$/.test(f) && fs.statSync(path.join(dataDir, 'attachments', f)).size > 0), 15000);
+  await waitFor('memo linked', () => /🎙 Voice memo \d\d:\d\d\]\(attachment:\/\/Recording/.test(findNote('Gamma (copy)').body));
+  // Note link: pick another note in the link dialog, then Ctrl+click jumps to it.
+  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && !n.filePath && !n.locked);
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'see also');
+  await waitFor('saved2', () => findNote('Gamma (copy)').body === 'see also');
+  await useSourceMode(false);
+  await page.click('.rich-editor-content');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+k');
+  await page.waitForSelector('#linkDialog[open]');
+  await waitForDom((id) => !!document.querySelector('#linkNoteSelect option[value="note://' + id + '"]'), other.id);
+  await page.selectOption('#linkNoteSelect', 'note://' + other.id);
+  await page.click('#linkApplyBtn');
+  await waitFor('note link saved', () => findNote('Gamma (copy)').body === '[see also](note://' + other.id + ')');
+  await page.click('.rich-editor-content a[href^="note://"]', { modifiers: ['Control'] });
+  await waitForDom((id) => !!document.querySelector('.note-card.is-active[data-id="' + id + '"]'), other.id);
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {

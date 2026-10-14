@@ -56,7 +56,10 @@
     vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
     folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
     stickyBtn: $('#stickyBtn'), botBtn: $('#botBtn'), printBtn: $('#printBtn'),
-    findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrevBtn: $('#findPrevBtn'), findNextBtn: $('#findNextBtn'), findCloseBtn: $('#findCloseBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
+    findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrevBtn: $('#findPrevBtn'), findNextBtn: $('#findNextBtn'), findCloseBtn: $('#findCloseBtn'),
+    findReplaceToggle: $('#findReplaceToggle'), replaceRow: $('#replaceRow'), replaceInput: $('#replaceInput'), replaceOneBtn: $('#replaceOneBtn'), replaceAllBtn: $('#replaceAllBtn'),
+    attachBtn: $('#attachBtn'), recordBtn: $('#recordBtn'), historyBtn: $('#historyBtn'), linkNoteSelect: $('#linkNoteSelect'),
+    historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
   };
 
@@ -900,6 +903,9 @@
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
     el.lockBtn.classList.toggle('hidden', inTrash || !!note.filePath || !!note.vaultId);
+    el.attachBtn.classList.toggle('hidden', inTrash || fileReadOnly);
+    el.recordBtn.classList.toggle('hidden', inTrash || fileReadOnly);
+    el.historyBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
@@ -1232,6 +1238,7 @@
       if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
       else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
       else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
+      else if (action === 'copy-note-link') { await api.app.copy({ text: '[' + (H.deriveTitle(note) || 'Note') + '](note://' + note.id + ')' }); toast('Copied. Paste it into another note to link here.'); }
       else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
       else if (action === 'pdf') {
         if (find.open) closeFind();
@@ -1254,6 +1261,129 @@
     }
   }
 
+  // ---- attachments and voice memos --------------------------------------------
+
+  function insertAttachmentLinks(items) {
+    const ok = items.filter((x) => x && !x.error);
+    const bad = items.filter((x) => x && x.error);
+    for (const it of ok) insertLinkIntoNote('📎 ' + it.name, it.href);
+    if (ok.length) toast(ok.length === 1 ? 'Attached ' + ok[0].name : 'Attached ' + ok.length + ' files');
+    for (const b of bad) toast('Could not attach ' + b.name + ': ' + b.error);
+  }
+
+  // Puts a Markdown link at the caret in whichever view is up, and saves.
+  function insertLinkIntoNote(text, href) {
+    if (!state.current || lockedNow()) return;
+    if (state.sourceMode || !state.rich) {
+      const ta = el.bodyInput;
+      if (ta.readOnly) return;
+      const at = ta.selectionStart || ta.value.length;
+      const md = '[' + text.replace(/[\[\]]/g, '') + '](' + href + ')';
+      const before = ta.value.slice(0, at), after = ta.value.slice(ta.selectionEnd || at);
+      const sep = before && !/\s$/.test(before) ? ' ' : '';
+      ta.value = before + sep + md + ' ' + after;
+      const pos = (before + sep + md + ' ').length;
+      ta.setSelectionRange(pos, pos);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      state.rich.insertLink(text, href);
+    }
+  }
+
+  async function attachFiles() {
+    if (!state.current || lockedNow() || state.current.trashedAt) { toast('Open an unlocked note first.'); return; }
+    await flushSave();
+    const items = await api.attachments.pick();
+    insertAttachmentLinks(items);
+  }
+
+  const rec = { recorder: null, chunks: [], startedAt: 0, timer: null };
+
+  async function toggleRecording() {
+    if (rec.recorder) { rec.recorder.stop(); return; }
+    if (!state.current || lockedNow() || state.current.trashedAt) { toast('Open an unlocked note first.'); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (err) { toast('Microphone not available: ' + (err.message || err)); return; }
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    rec.recorder = recorder; rec.chunks = []; rec.startedAt = Date.now();
+    recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) rec.chunks.push(ev.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(rec.timer);
+      el.recordBtn.classList.remove('is-recording');
+      el.recordBtn.textContent = '🎙 Record';
+      const seconds = Math.max(1, Math.round((Date.now() - rec.startedAt) / 1000));
+      rec.recorder = null;
+      const blob = new Blob(rec.chunks, { type: 'audio/webm' });
+      if (!blob.size) { toast('Nothing was recorded.'); return; }
+      try {
+        const saved = await api.attachments.saveRecording(new Uint8Array(await blob.arrayBuffer()), 'webm');
+        const mm = String(Math.floor(seconds / 60)).padStart(2, '0'), ss = String(seconds % 60).padStart(2, '0');
+        insertLinkIntoNote('🎙 Voice memo ' + mm + ':' + ss, saved.href);
+        toast('Voice memo saved (' + mm + ':' + ss + '). Ctrl+click the link to play it.');
+      } catch (err) { toast('Could not save the recording: ' + (err.message || err)); }
+    };
+    recorder.start(250);
+    el.recordBtn.classList.add('is-recording');
+    const tick = () => { const s = Math.round((Date.now() - rec.startedAt) / 1000); el.recordBtn.textContent = '⏹ ' + String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+    tick(); rec.timer = setInterval(tick, 500);
+  }
+
+  // ---- earlier versions ----------------------------------------------------------
+
+  const hist = { versions: [], index: -1 };
+
+  async function openHistory() {
+    const note = state.current;
+    if (!note) return;
+    await flushSave();
+    el.historyList.innerHTML = '';
+    el.historyPreview.textContent = '';
+    el.historyRestoreBtn.disabled = true;
+    el.historyStatus.textContent = 'Loading…';
+    el.historyDialog.showModal();
+    const r = await api.app.historyVersions(note.id, 80);
+    if (!r.ok) { el.historyStatus.textContent = r.error; return; }
+    hist.versions = r.versions.filter((v) => v.body !== r.current); // what differs from now
+    hist.index = -1;
+    el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : 'No earlier version differs from the current text yet.';
+    hist.versions.forEach((v, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.dataset.index = i;
+      const first = (v.body.split('\n').find((l) => l.trim()) || '(empty)').replace(/^#+\s*/, '');
+      li.innerHTML = '<span class="when"></span><span class="first"></span>';
+      li.querySelector('.when').textContent = new Date(v.at).toLocaleString() + ' · ' + v.chars + ' chars';
+      li.querySelector('.first').textContent = H.truncate(first, 48);
+      li.addEventListener('click', () => showVersion(i));
+      el.historyList.append(li);
+    });
+    if (hist.versions.length) showVersion(0);
+  }
+
+  function showVersion(i) {
+    hist.index = i;
+    for (const li of el.historyList.children) li.classList.toggle('is-active', Number(li.dataset.index) === i);
+    el.historyPreview.textContent = hist.versions[i].body;
+    el.historyRestoreBtn.disabled = false;
+  }
+
+  async function restoreVersion() {
+    const v = hist.versions[hist.index];
+    const note = state.current;
+    if (!v || !note) return;
+    el.historyDialog.close();
+    el.bodyInput.value = v.body;
+    if (state.rich && !state.sourceMode) state.rich.setMarkdown(v.body);
+    autoGrow();
+    scheduleSave();
+    const ok = await flushSave();
+    toast(ok ? 'Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.' : 'Could not save the restored text yet; it will retry.');
+  }
+
   // ---- find in note, print ---------------------------------------------------
 
   // Done in the page, not with Chromium's page-wide find: only the note is searched, the count is exact,
@@ -1274,10 +1404,65 @@
     runFind(true, true);
   }
 
+  function toggleReplace(force) {
+    const on = typeof force === 'boolean' ? force : el.replaceRow.classList.contains('hidden');
+    el.replaceRow.classList.toggle('hidden', !on);
+    el.findReplaceToggle.setAttribute('aria-pressed', String(on));
+    if (on) el.replaceInput.focus();
+  }
+
+  function replaceCurrent() {
+    const q = el.findInput.value;
+    const text = el.replaceInput.value;
+    if (!q || lockedNow() || (state.current && state.current.trashedAt)) return;
+    if (state.sourceMode) {
+      if (!find.sourceHits.length || find.active < 0) { runFind(true, true); return; }
+      const at = find.sourceHits[find.active];
+      const ta = el.bodyInput;
+      if (ta.readOnly) return;
+      ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
+      ta.setSelectionRange(at + text.length, at + text.length);
+      ta.dispatchEvent(new Event('input', { bubbles: true })); // autosave + recount
+      runFind(true, true, true);
+      if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; runFind(true, false); }
+      return;
+    }
+    if (!state.rich || !find.ranges.length || find.active < 0) { runFind(true, true); return; }
+    state.rich.replaceRanges([find.ranges[find.active]], text);
+    runFind(true, true, true);
+    if (find.ranges.length) runFind(true, false);
+  }
+
+  function replaceAll() {
+    const q = el.findInput.value;
+    const text = el.replaceInput.value;
+    if (!q || lockedNow() || (state.current && state.current.trashedAt)) return;
+    let n = 0;
+    if (state.sourceMode) {
+      const ta = el.bodyInput;
+      if (ta.readOnly) return;
+      const hits = findOffsets(ta.value, q);
+      n = hits.length;
+      if (!n) { toast('No matches'); return; }
+      let out = '', last = 0;
+      for (const at of hits) { out += ta.value.slice(last, at) + text; last = at + q.length; }
+      ta.value = out + ta.value.slice(last);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      if (!state.rich) return;
+      runFind(true, true, true);
+      n = state.rich.replaceRanges(find.ranges, text);
+      if (!n) { toast('No matches'); return; }
+    }
+    runFind(true, true, true);
+    toast('Replaced ' + n + (n === 1 ? ' match' : ' matches'));
+  }
+
   function closeFind() {
     if (!find.open) return;
     find.open = false;
     el.findBar.classList.add('hidden');
+    toggleReplace(false);
     el.findCount.textContent = '';
     clearFindHighlights();
     focusBody();
@@ -2010,7 +2195,7 @@
     });
     el.richEditor.addEventListener('click', (e) => {
       const a = e.target.closest('a[href]');
-      if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); api.app.openExternal(a.getAttribute('href')); }
+      if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); followLink(a.getAttribute('href')); }
     });
   }
 
@@ -2067,11 +2252,32 @@
     ta.style.height = Math.max(320, ta.scrollHeight + 2) + 'px';
   }
 
+  // Ctrl+click on a link: a note link opens that note, an attachment opens with its app, the web goes outside.
+  async function followLink(href) {
+    href = String(href || '');
+    if (/^note:\/\//i.test(href)) {
+      const id = href.replace(/^note:\/\//i, '').replace(/\/$/, '');
+      const target = await api.notes.get(id);
+      if (!target) { toast('That note no longer exists.'); return; }
+      if (target.trashedAt) await setView('trash'); else if (state.view === 'trash') await setView('all');
+      await selectNoteNow(id);
+      return;
+    }
+    if (/^attachment:\/\//i.test(href)) { const r = await api.attachments.open(href); if (r) toast(String(r)); return; }
+    api.app.openExternal(href);
+  }
+
   function openLinkDialog() {
     if (!state.rich || state.sourceMode) return;
     const existing = state.rich.activeLink();
     if (!existing && !state.rich.hasSelection()) { toast('Select the text to link first'); return; }
     state.linkRange = state.rich.selectionRange();
+    // The note picker lists every other live note by title.
+    el.linkNoteSelect.innerHTML = '<option value="">— pick a note —</option>';
+    api.notes.list({ sort: 'title' }).then((notes) => {
+      for (const n of notes) { if (n.id === state.currentId) continue; const o = document.createElement('option'); o.value = 'note://' + n.id; o.textContent = H.truncate(H.deriveTitle(n), 60); el.linkNoteSelect.append(o); }
+      if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
+    });
     el.linkInput.value = existing || 'https://';
     el.linkRemoveBtn.classList.toggle('hidden', !existing);
     el.linkDialog.showModal();
@@ -2231,7 +2437,7 @@
 
   function onKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open;
+    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
@@ -2254,6 +2460,7 @@
         case 'n': e.preventDefault(); newNote(); return;
         case 'o': e.preventDefault(); openFiles(); return;
         case 'l': e.preventDefault(); onLockButton(); return;
+        case 'h': e.preventDefault(); if (!find.open) openFind(); toggleReplace(true); return;
         case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
@@ -2287,6 +2494,9 @@
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); attachFiles(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'v') { e.preventDefault(); toggleRecording(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); openHistory(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); openRemindDialog(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
@@ -2367,6 +2577,20 @@
     el.shareBtn.addEventListener('click', () => { if (el.shareMenu.classList.contains('hidden')) openShareMenu(); else closeShareMenu(); });
     el.shareMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-action]'); if (b) shareAction(b.dataset.action); });
     el.findNextBtn.addEventListener('click', () => runFind(true));
+    el.findReplaceToggle.addEventListener('click', () => toggleReplace());
+    el.replaceOneBtn.addEventListener('click', replaceCurrent);
+    el.replaceAllBtn.addEventListener('click', replaceAll);
+    el.replaceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (e.ctrlKey || e.metaKey || e.altKey) replaceAll(); else replaceCurrent(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
+    });
+    el.attachBtn.addEventListener('click', attachFiles);
+    el.recordBtn.addEventListener('click', toggleRecording);
+    el.historyBtn.addEventListener('click', openHistory);
+    el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
+    el.historyRestoreBtn.addEventListener('click', restoreVersion);
+    el.historyDialog.addEventListener('close', () => focusBody());
+    el.linkNoteSelect.addEventListener('change', () => { if (el.linkNoteSelect.value) el.linkInput.value = el.linkNoteSelect.value; });
     el.findPrevBtn.addEventListener('click', () => runFind(false));
     el.findCloseBtn.addEventListener('click', closeFind);
     el.findInput.addEventListener('input', () => runFind(true, true));

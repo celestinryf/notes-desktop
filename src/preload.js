@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld('notesApi', {
     stop: invoke('live:stop'),
     status: invoke('live:status'),
   },
+  attachments: {
+    pick: invoke('attachments:pick'),
+    addPaths: invoke('attachments:addPaths'),
+    saveRecording: invoke('attachments:saveRecording'),
+    open: invoke('attachments:open'),
+    reveal: invoke('attachments:reveal'),
+  },
   lock: {
     set: invoke('lock:set'),
     unlock: invoke('lock:unlock'),
@@ -112,6 +119,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     exportNote: invoke('app:exportNote'),
     exportAll: invoke('app:exportAll'),
     importMarkdown: invoke('app:importMarkdown'),
+    historyVersions: invoke('history:versions'),
   },
   on: {
     shown: on('app:shown'),

@@ -98,6 +98,9 @@
             <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
             <button class="tool-btn" id="lockBtn" title="Lock this note with a password (Ctrl+L)" aria-label="Lock">🔒 Lock</button>
             <button class="tool-btn" id="remindBtn" title="Remind me about this note (Ctrl+Shift+M)" aria-label="Reminder">⏰ Remind</button>
+            <button class="tool-btn" id="attachBtn" title="Attach files to this note (Ctrl+Shift+O)" aria-label="Attach">📎 Attach</button>
+            <button class="tool-btn" id="recordBtn" title="Record a voice memo into this note (Ctrl+Shift+V)" aria-label="Record">🎙 Record</button>
+            <button class="tool-btn" id="historyBtn" title="Earlier versions of this note (Ctrl+Shift+H)" aria-label="History">🕘 History</button>
             <button class="tool-btn" id="printBtn" title="Print this note (Ctrl+Shift+P)" aria-label="Print">🖨 Print</button>
             <button class="tool-btn" id="stickyBtn" title="Put this note on the desktop as a sticky (Ctrl+Shift+T)" aria-label="Sticky">📌 Stick</button>
             <button class="tool-btn" id="botBtn" title="Ask Claude Code to work on your notes (Ctrl+Shift+A)" aria-label="Bot">🤖 Bot</button>
@@ -152,7 +155,13 @@
           <span class="find-count" id="findCount"></span>
           <button class="tool-btn" id="findPrevBtn" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button>
           <button class="tool-btn" id="findNextBtn" title="Next (Enter)" aria-label="Next match">↓</button>
+          <button class="tool-btn" id="findReplaceToggle" title="Replace (Ctrl+H)" aria-label="Show replace" aria-pressed="false">⇄</button>
           <button class="tool-btn" id="findCloseBtn" title="Close (Esc)" aria-label="Close find">✕</button>
+          <div class="replace-row hidden" id="replaceRow">
+            <input id="replaceInput" class="input find-input" type="text" placeholder="Replace with…" autocomplete="off" spellcheck="false" />
+            <button class="tool-btn" id="replaceOneBtn" title="Replace the current match and move on">Replace</button>
+            <button class="tool-btn" id="replaceAllBtn" title="Replace every match in this note">All</button>
+          </div>
         </div>
         <section class="bot-panel hidden" id="botPanel" aria-label="Bot">
           <div class="bot-head">
@@ -308,6 +317,22 @@
       </form>
     </dialog>
 
+    <dialog id="historyDialog" class="dialog dialog-wide">
+      <form method="dialog" class="dialog-form" id="historyForm">
+        <h2 class="dialog-title">Earlier versions</h2>
+        <p class="field-hint" id="historyHint">Every saved change is kept in the local history. Pick a version to preview it; Restore puts that text back into the note (the current text stays in history too).</p>
+        <div class="history-layout">
+          <ul class="history-list" id="historyList" role="listbox" aria-label="Versions"></ul>
+          <pre class="history-preview" id="historyPreview"></pre>
+        </div>
+        <div class="dialog-actions">
+          <span class="field-hint" id="historyStatus"></span>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="historyCloseBtn">Close</button>
+          <button type="button" class="btn btn-primary btn-small" id="historyRestoreBtn" disabled>Restore this version</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="liveDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="liveForm">
         <h2 class="dialog-title" id="liveDialogTitle">Live share</h2>
@@ -374,6 +399,10 @@
           <span class="field-label">URL</span>
           <input id="linkInput" class="input" type="text" placeholder="https://" autocomplete="off" spellcheck="false" />
         </label>
+        <label class="field">
+          <span class="field-label">Or link to one of your notes</span>
+          <select id="linkNoteSelect" class="input"><option value="">— pick a note —</option></select>
+        </label>
         <div class="dialog-actions">
           <button type="button" class="btn btn-small" id="linkRemoveBtn">Remove link</button>
           <span class="spacer"></span>
@@ -388,6 +417,7 @@
       <button role="menuitem" data-action="copy-md">Copy as Markdown</button>
       <button role="menuitem" data-action="copy-html">Copy as rich text</button>
       <button role="menuitem" data-action="copy-text">Copy as plain text</button>
+      <button role="menuitem" data-action="copy-note-link">Copy link to this note</button>
       <button role="menuitem" data-action="email">Email…</button>
       <button role="menuitem" data-action="pdf">Save as PDF…</button>
       <button role="menuitem" data-action="html">Save as HTML…</button>
