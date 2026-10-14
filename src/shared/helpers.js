@@ -176,7 +176,7 @@
       body = text.slice(m[0].length);
     }
     const tags = [];
-    body = body.replace(/\n*Tags:\s*((?:#[\w-]+\s*)+)\s*$/i, (_, t) => {
+    body = body.replace(/\n*Tags:\s*((?:#[\p{L}\p{N}_-]+\s*)+)\s*$/iu, (_, t) => {
       tags.push(...parseTags(t));
       return '';
     });

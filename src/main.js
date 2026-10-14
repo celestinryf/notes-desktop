@@ -51,7 +51,7 @@ function main() {
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
-    onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'vault' }); },
+    onNotesChanged: () => { lastContentHash = contentHash(); fanReloaded({ reason: 'vault' }); },
   });
   const { ReminderScheduler } = require('./reminders');
   const reminders = new ReminderScheduler(store, {
@@ -70,7 +70,7 @@ function main() {
   const live = new LiveShare(store, {
     pushDelayMs: Number(process.env.NOTES_APP_LIVE_PUSH_MS) || 250,
     // A remote edit landed in the store: the open editor and any sticky showing the note follow it.
-    onRemote: (id) => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
+    onRemote: (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
     onStatus: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('live:status', { id, status }); },
   });
   const { StickyManager } = require('./stickies');
@@ -84,8 +84,11 @@ function main() {
 
   const iconImage = () => nativeImage.createFromBitmap(drawIconBitmap(32), { width: 32, height: 32 });
 
+  let rendererShown = false; // first paint done; survives later runtime writes
   function writeRuntime(extra) {
+    if (extra && extra.ready) rendererShown = true;
     const data = Object.assign({
+      ready: rendererShown,
       pid: process.pid,
       hotkey: hotkeyState.hotkey,
       registered: hotkeyState.registered,
@@ -177,7 +180,8 @@ function main() {
       return { action: 'deny' };
     });
     win.webContents.on('will-navigate', (e, url) => {
-      if (!url.startsWith('file:')) { e.preventDefault(); shell.openExternal(url); }
+      e.preventDefault(); // the app page never navigates (a dropped file must not replace it)
+      if (/^https?:/i.test(url)) shell.openExternal(url);
     });
 
     if (process.env.NOTES_APP_DEVTOOLS === '1') win.webContents.openDevTools({ mode: 'detach' });
@@ -205,7 +209,8 @@ function main() {
       if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!store.settings.alwaysOnTop);
       applyLoginItem();
       git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
-      if (win && !win.isDestroyed()) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
+      if (win && !win.isDestroyed()) win.webContents.send('settings:changed', store.getSettings());
+      fanReloaded({ reason: 'recovered' });
     }
   }
 
@@ -348,20 +353,33 @@ function main() {
   });
 
   // ---- locking ---------------------------------------------------------------
-  ipcMain.handle('lock:set', (_e, id, password) => { live.stop(id); const n = store.lockNote(id, password); stickies.close(id, { forget: true }); return n; });
+  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); live.stop(id); stickies.close(id, { forget: true }); return n; });
   ipcMain.handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
   ipcMain.handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
   ipcMain.handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
   // Hiding the window locks everything again (after the renderer has written what it was typing).
   function relockOnHide() {
     flushWindow(win, 800).then(() => {
+      if (win && !win.isDestroyed() && win.isVisible()) return; // shown again before the flush finished
       const ids = store.relockAll();
       if (ids.length && win && !win.isDestroyed()) win.webContents.send('lock:relocked', ids);
     });
   }
   // Edits made in one window reach the others: the main window reloads the open note when clean,
   // and each sticky showing that note does the same.
+  // Something other than the main window changed notes (vault, bot, live, recovery, sticky edit): every
+  // window that shows notes reloads what it has, when it is clean.
+  function fanReloaded(payload) {
+    if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', payload);
+    stickies.broadcast('notes:reloaded', payload);
+  }
+
+  let trayRefreshTimer = null;
+  function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
+
   function notifyNoteChanged(id, sender) {
+    const changed = store.get(id);
+    if (changed && changed.sticky) refreshTraySoon();
     if (win && !win.isDestroyed() && (!sender || win.webContents.id !== sender.id)) win.webContents.send('notes:reloaded', { reason: 'sticky', id });
     stickies.broadcast('notes:changed', { id }, sender);
     live.noteChanged(id);
@@ -371,7 +389,7 @@ function main() {
   ipcMain.handle('live:host', async (_e, id) => { try { return { ok: true, status: await live.host(id) }; } catch (err) { return { ok: false, error: err.message }; } });
   ipcMain.handle('live:join', async (_e, url, folderId) => {
     const folder = folderId ? store.getFolder(folderId) : null;
-    try { const r = await live.join(url, { folderId: folder && !folder.vaultId ? folder.id : null }); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
+    try { const r = await live.join(url, { folderId: folder && !folder.vaultId ? folder.id : null }); fanReloaded({ reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
     catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('live:stop', (_e, id) => live.stop(id));
@@ -389,7 +407,7 @@ function main() {
   function newSticky() {
     const note = store.create({ title: '', body: '' });
     stickies.open(note.id);
-    if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'sticky' });
+    fanReloaded({ reason: 'sticky' });
     return pub(note);
   }
   ipcMain.handle('stickies:list', () => store.stickies().map(stickyView));
@@ -429,7 +447,13 @@ function main() {
   ipcMain.handle('files:link', (_e, paths, opts) => linkPaths(Array.isArray(paths) ? paths : [], opts || {}));
   ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
   ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
-  ipcMain.handle('files:openExternal', async (_e, id) => { const n = store.get(id); return n && n.filePath ? shell.openPath(n.filePath) : 'No file'; });
+  const EXEC_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|lnk|url|jar|hta|reg|cpl)$/i;
+  ipcMain.handle('files:openExternal', async (_e, id) => {
+    const n = store.get(id);
+    if (!n || !n.filePath) return 'No file';
+    if (EXEC_EXT.test(n.filePath)) return 'Notes does not launch programs or scripts; open it from Explorer if you mean to run it.';
+    return shell.openPath(n.filePath);
+  });
   ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
 
   const { discoverAgentFiles } = require('./files');
@@ -503,7 +527,9 @@ function main() {
     if (note && note.vaultId) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
     if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
     const { imported, manifest } = workspace.refreshWorkspace(store, WORKSPACE_DIR);
-    if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' }); }
+    if (!manifest) throw new Error('the earlier workspace could not be read back (' + imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
+    for (const nid of imported.updatedIds || []) live.noteChanged(nid);
+    if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentHash = contentHash(); fanReloaded({ reason: 'bot' }); }
     const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
     return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null, imported };
   }
@@ -568,7 +594,7 @@ function main() {
       if (ended) return;
       let imported = null;
       if (target.kind === 'workspace') {
-        try { imported = workspace.importNotes(store, WORKSPACE_DIR); } catch (err) { imported = { error: err.message }; }
+        try { imported = workspace.importNotes(store, WORKSPACE_DIR); for (const nid of imported.updatedIds || []) live.noteChanged(nid); } catch (err) { imported = { error: err.message }; }
       } else if (target.kind === 'vault') {
         const note = store.get(opts.noteId);
         if (note && note.vaultId) { store.scanVault(note.vaultId).then((r) => { if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); }).catch(() => {}); vaults.noteChanged(note.vaultId); }
@@ -576,7 +602,7 @@ function main() {
       lastContentHash = contentHash();
       if (store.settings.gitEnabled) git.noteChanged();
       end({ ok: code === 0, code, imported });
-      if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' });
+      fanReloaded({ reason: 'bot' });
     });
     return { ok: true, cwd: target.cwd, kind: target.kind };
   });
@@ -610,7 +636,7 @@ function main() {
   ipcMain.handle('bot:importWorkspace', () => {
     const r = workspace.importNotes(store, WORKSPACE_DIR);
     lastContentHash = contentHash();
-    if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' });
+    fanReloaded({ reason: 'bot' });
     return r;
   });
 
@@ -737,14 +763,18 @@ function main() {
     return true;
   });
   ipcMain.handle('app:emailNote', async (_e, id) => {
-    const note = store.get(id);
+    const note = store.publicNote(store.get(id));
     if (!note) return { ok: false, error: 'Note not found' };
+    if (note.locked && !note.unlocked) return { ok: false, error: 'Unlock the note first.' };
     const m = H.mailtoFor(note);
     try { await shell.openExternal(m.url); } catch (err) { return { ok: false, error: 'No mail app could open the message: ' + err.message }; }
     return { ok: true, truncated: m.truncated };
   });
-  ipcMain.handle('app:exportPdf', async (e, id) => {
-    const note = store.get(id);
+  // Two steps, because the page is what gets printed: the renderer asks for a path, then (if it still shows
+  // that same note) asks for the print. A note switched or relocked while the dialog was up is never printed
+  // under the wrong name.
+  ipcMain.handle('app:pdfPath', async (_e, id) => {
+    const note = store.publicNote(store.get(id));
     if (!note) return { ok: false, error: 'Note not found' };
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       title: 'Save as PDF',
@@ -752,6 +782,10 @@ function main() {
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (canceled || !filePath) return { ok: false, canceled: true };
+    return { ok: true, filePath };
+  });
+  ipcMain.handle('app:writePdf', async (e, filePath) => {
+    if (typeof filePath !== 'string' || !/\.pdf$/i.test(filePath)) return { ok: false, error: 'Not a PDF path' };
     try {
       // The print stylesheet leaves only the note on the page.
       const data = await e.sender.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } });
@@ -841,7 +875,7 @@ function main() {
     rendererFlushed
       .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()].concat(Array.from(live.sessions.keys()).map((id) => live.flush(id)))), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { reminders.stop(); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server.close(); } catch (_) { /* ignore */ } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
+      .finally(() => { reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server.close(); } catch (_) { /* ignore */ } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });

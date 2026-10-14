@@ -2,6 +2,7 @@
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
 import { Editor, Extension, InputRule } from '@tiptap/core';
+import { EditorState } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
@@ -65,10 +66,16 @@ const NotesKeys = Extension.create({
   priority: 1000, // ahead of StarterKit so these bindings win
   addKeyboardShortcuts() {
     return {
-      Tab: () => this.editor.commands.sinkListItem('listItem') || this.editor.commands.sinkListItem('taskItem') || true,
+      Tab: () => {
+        if (this.editor.isActive('table')) return false; // the table extension moves between cells
+        if (this.editor.isActive('codeBlock')) return this.editor.commands.insertContent('\t');
+        return this.editor.commands.sinkListItem('listItem') || this.editor.commands.sinkListItem('taskItem') || true;
+      },
       'Shift-Tab': () => this.editor.commands.liftListItem('listItem') || this.editor.commands.liftListItem('taskItem'),
       // The app uses Ctrl+E to switch between rendered and source views; Tiptap would otherwise toggle inline code.
       'Mod-e': () => true,
+      // Ctrl+Shift+S opens the app's Share menu; strikethrough keeps Ctrl+Shift+X.
+      'Mod-Shift-s': () => true,
     };
   },
 });
@@ -173,7 +180,11 @@ export function create(element, options) {
   let lastExact = true;
   function setMarkdown(md) {
     suppress = true;
-    try { editor.commands.setContent(md || '', false); } finally { suppress = false; }
+    try {
+      editor.commands.setContent(md || '', false);
+      // Loading a note is not an edit: a fresh state means Ctrl+Z cannot bring the previous note's text back.
+      editor.view.updateState(EditorState.create({ doc: editor.state.doc, plugins: editor.state.plugins }));
+    } finally { suppress = false; }
     const out = getMarkdown();
     // Exact: byte-for-byte apart from trailing whitespace. Used for file-backed notes, where even a changed
     // line-break style in someone's CLAUDE.md is a rewrite they did not ask for.

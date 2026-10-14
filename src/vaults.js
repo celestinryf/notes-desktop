@@ -163,8 +163,9 @@ class VaultManager {
     if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '.trash/\n.obsidian/workspace*\n', 'utf8');
     if (remote) {
       const have = (await git(['remote', 'get-url', 'origin'], v.path)).stdout.trim();
-      if (!have) await git(['remote', 'add', 'origin', remote], v.path);
-      else if (have !== remote) await git(['remote', 'set-url', 'origin', remote], v.path);
+      if (/^\s*-/.test(String(remote))) return { ok: false, error: 'That does not look like a repository URL.' };
+      if (!have) await git(['remote', 'add', '--', 'origin', remote], v.path);
+      else if (have !== remote) await git(['remote', 'set-url', '--', 'origin', remote], v.path);
       this.store.updateVault(id, { remote });
     }
     await this.refreshRepoStatus(id);
@@ -245,8 +246,9 @@ class VaultManager {
   }
 
   static async clone(url, destDir) {
+    if (/^\s*-/.test(String(url))) return { ok: false, error: 'That does not look like a repository URL.' };
     fs.mkdirSync(path.dirname(destDir), { recursive: true });
-    const r = await git(['clone', '-q', url, destDir], path.dirname(destDir), 300000);
+    const r = await git(['clone', '-q', '--', url, destDir], path.dirname(destDir), 300000);
     return r.ok ? { ok: true, path: destDir } : { ok: false, error: r.error };
   }
 }

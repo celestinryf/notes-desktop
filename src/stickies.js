@@ -63,7 +63,7 @@ class StickyManager {
     this.windows.set(id, w);
     // Same guards as the main window: nothing navigates or opens windows from the privileged page.
     w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); return { action: 'deny' }; });
-    w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); } });
+    w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); });
     w.loadFile(path.join(__dirname, 'renderer', 'sticky.html'), { query: { id } });
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;

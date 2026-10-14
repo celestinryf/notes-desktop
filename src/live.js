@@ -40,6 +40,7 @@ class LiveShare {
     this.onStatus = opts.onStatus || (() => {});   // (noteId, status)
     this.pushDelayMs = opts.pushDelayMs == null ? 250 : opts.pushDelayMs;
     this.sessions = new Map(); // noteId -> session
+    this.hosting = new Map();  // noteId -> promise of host() in progress
     this.clientId = crypto.randomBytes(8).toString('hex');
   }
 
@@ -60,11 +61,12 @@ class LiveShare {
     if (note.lock) throw new Error('A locked note cannot be shared live.');
     if (note.filePath) throw new Error('A file-backed note cannot be shared live; copy it into a plain note first.');
     if (this.sessions.has(noteId)) return Promise.resolve(this.statusOf(noteId));
+    if (this.hosting.has(noteId)) return this.hosting.get(noteId); // a second click while the first listen() is pending
     const token = opts.token || crypto.randomBytes(16).toString('hex');
     const session = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null };
     const server = http.createServer((req, res) => this._handle(session, noteId, req, res));
     server.on('clientError', (_err, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch (_) { /* ignore */ } });
-    return new Promise((resolve, reject) => {
+    const p = new Promise((resolve, reject) => {
       server.once('error', (err) => {
         // The remembered port is taken (after a restart): take any free port; the link changes and the
         // status says so, which is better than a share that silently never comes back.
@@ -84,6 +86,9 @@ class LiveShare {
         resolve(this.statusOf(noteId));
       });
     });
+    this.hosting.set(noteId, p);
+    p.finally(() => { if (this.hosting.get(noteId) === p) this.hosting.delete(noteId); }).catch(() => {});
+    return p;
   }
 
   _state(noteId, session) {
