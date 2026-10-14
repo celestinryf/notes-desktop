@@ -46,6 +46,8 @@
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
     vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
     folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
+    botBtn: $('#botBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
+    botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
   };
 
   const state = {
@@ -863,6 +865,7 @@
     el.bodyInput.readOnly = inTrash || fileReadOnly;
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
+    if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
@@ -892,6 +895,80 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- bot: Claude Code over the notes -------------------------------------
+
+  const bot = { open: false, running: false };
+
+  function toggleBot(force) {
+    bot.open = typeof force === 'boolean' ? force : !bot.open;
+    el.botPanel.classList.toggle('hidden', !bot.open);
+    el.botBtn.classList.toggle('is-on', bot.open);
+    if (bot.open) { describeBotScope(); el.botPrompt.focus(); }
+  }
+
+  function describeBotScope() {
+    const n = state.current;
+    let text = 'Scope: all plain notes (exported to a workspace folder for the run)';
+    if (n && n.vaultId) text = 'Scope: this note’s vault folder';
+    else if (n && n.filePath) text = 'Scope: the folder containing this file';
+    el.botScope.textContent = text;
+    el.botScope.title = text;
+  }
+
+  function botAppend(text, cls) {
+    const span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    el.botOutput.append(span);
+    el.botOutput.scrollTop = el.botOutput.scrollHeight;
+  }
+
+  async function runBot() {
+    if (bot.running) { await api.bot.cancel(); return; }
+    const prompt = el.botPrompt.value.trim();
+    if (!prompt) { el.botPrompt.focus(); return; }
+    await flushSave();
+    el.botOutput.textContent = '';
+    const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
+    if (!res.ok) { botAppend(res.error + '\n', 'bot-err'); return; }
+  }
+
+  function onBotEvent(ev) {
+    if (ev.type === 'start') {
+      bot.running = true;
+      el.botPanel.classList.add('is-running');
+      el.botRunBtn.textContent = 'Stop';
+      botAppend('Working in ' + ev.cwd + (ev.focus ? '  (looking at ' + ev.focus + ')' : '') + '\n', 'bot-meta');
+    } else if (ev.type === 'out') {
+      botAppend(ev.text);
+    } else if (ev.type === 'err') {
+      botAppend(ev.text, 'bot-err');
+    } else if (ev.type === 'end') {
+      bot.running = false;
+      el.botPanel.classList.remove('is-running');
+      el.botRunBtn.textContent = 'Run';
+      if (ev.error) botAppend('\n' + ev.error + '\n', 'bot-err');
+      else {
+        const imp = ev.imported;
+        const summary = imp && !imp.error ? ' Notes updated: ' + imp.updated + ', created: ' + imp.created + (imp.missing ? ', files removed by the agent (notes kept): ' + imp.missing : '') + '.' : '';
+        botAppend('\nDone' + (ev.code === 0 ? '' : ' (exit code ' + ev.code + ')') + '.' + summary + '\n', 'bot-meta');
+      }
+      refresh({ keepEditor: true }).then(async () => {
+        // Reload the open note from the store in case the agent edited it.
+        if (state.currentId && !state.dirty) { const fresh = await api.notes.get(state.currentId); if (fresh && fresh.body !== el.bodyInput.value) { applyFreshFileBody(fresh); toast('This note was updated by the bot.'); } }
+      });
+    } else if (ev.type === 'reloaded') {
+      refresh({ keepEditor: true });
+    }
+  }
+
+  async function openBotTerminal() {
+    await flushSave();
+    const res = await api.bot.openTerminal(state.currentId);
+    if (!res.ok) { toast('Could not open a terminal: ' + res.error); return; }
+    toast('Claude Code opened in a terminal at ' + res.cwd + (res.kind === 'workspace' ? '. When you are done, press Run with an empty prompt or reopen the app to pull its edits back in.' : ''));
   }
 
   // ---- speech: read aloud and dictate --------------------------------------
@@ -1586,6 +1663,7 @@
       return;
     }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
@@ -1618,6 +1696,12 @@
     });
     el.readAloudBtn.addEventListener('click', toggleReadAloud);
     el.dictateBtn.addEventListener('click', startDictation);
+    el.botBtn.addEventListener('click', () => toggleBot());
+    el.botCloseBtn.addEventListener('click', () => toggleBot(false));
+    el.botRunBtn.addEventListener('click', runBot);
+    el.botTerminalBtn.addEventListener('click', openBotTerminal);
+    el.botPrompt.addEventListener('keydown', (e) => { e.stopPropagation(); if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runBot(); } if (e.key === 'Escape') { e.preventDefault(); toggleBot(false); } });
+    api.on.botEvent(onBotEvent);
     if (window.speechSynthesis) { populateVoices(); window.speechSynthesis.addEventListener('voiceschanged', populateVoices); }
     el.ttsVoiceSelect.addEventListener('change', () => updateSettings({ ttsVoice: el.ttsVoiceSelect.value }));
     el.ttsRateInput.addEventListener('input', () => { el.ttsRateValue.textContent = Number(el.ttsRateInput.value).toFixed(1) + '×'; });

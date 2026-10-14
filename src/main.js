@@ -391,6 +391,95 @@ function main() {
   ipcMain.handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
   ipcMain.handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
 
+  // ---- bot: Claude Code over the notes -------------------------------------
+
+  const workspace = require('./workspace');
+  const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
+  const CLAUDE_BIN = process.env.NOTES_APP_CLAUDE_BIN || 'claude';
+  let botChild = null;
+
+  // Where the agent should work for the note in front of the user: the vault folder for vault notes, the
+  // file's folder for other file notes, otherwise the exported workspace of plain notes.
+  function botCwdFor(noteId) {
+    const note = noteId ? store.get(noteId) : null;
+    if (note && note.vaultId) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
+    if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
+    const manifest = workspace.exportNotes(store, WORKSPACE_DIR);
+    const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
+    return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null };
+  }
+
+  function botSend(type, data) {
+    if (win && !win.isDestroyed()) win.webContents.send('bot:event', Object.assign({ type }, data || {}));
+  }
+
+  ipcMain.handle('bot:run', async (_e, opts) => {
+    opts = opts || {};
+    if (botChild) return { ok: false, error: 'A run is already in progress.' };
+    const prompt = String(opts.prompt || '').trim();
+    if (!prompt) return { ok: false, error: 'Type what you want done.' };
+    let target;
+    try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not prepare the workspace: ' + err.message }; }
+    const intro = target.kind === 'workspace'
+      ? 'You are working inside a folder of Markdown notes exported from a notes app. Each .md file is one note; folders mirror the app\'s folders. Edit files in place; create new .md files for new notes; do not create other file types.'
+      : 'You are working inside the user\'s notes folder. Each Markdown file is a note.';
+    const focusLine = target.focus ? ' The user is currently looking at "' + target.focus + '".' : '';
+    const fullPrompt = intro + focusLine + '\n\nTask: ' + prompt;
+    const allowed = opts.allowEdits === false ? 'Read,Glob,Grep' : 'Read,Glob,Grep,Edit,Write,MultiEdit';
+    const args = ['-p', fullPrompt, '--output-format', 'text', '--permission-mode', 'dontAsk', '--allowedTools', allowed];
+    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus });
+    const { spawn } = require('child_process');
+    let child;
+    try {
+      const env = Object.assign({}, process.env, { CLAUDE_CODE_NONINTERACTIVE: '1' });
+      if (/\.js$/i.test(CLAUDE_BIN)) {
+        // A script stand-in (tests): run it with this executable acting as plain Node.
+        child = spawn(process.execPath, [CLAUDE_BIN].concat(args), { cwd: target.cwd, windowsHide: true, env: Object.assign(env, { ELECTRON_RUN_AS_NODE: '1' }) });
+      } else {
+        // `claude` on Windows is an npm .cmd shim, which needs a shell to resolve; a full path to an .exe does not.
+        child = spawn(CLAUDE_BIN, args, { cwd: target.cwd, windowsHide: true, shell: process.platform === 'win32' && !/\.exe$/i.test(CLAUDE_BIN), env });
+      }
+    } catch (err) {
+      botSend('end', { ok: false, error: err.message });
+      return { ok: false, error: err.message };
+    }
+    botChild = child;
+    child.stdout.on('data', (d) => botSend('out', { text: String(d) }));
+    child.stderr.on('data', (d) => botSend('err', { text: String(d) }));
+    child.on('error', (err) => { botSend('end', { ok: false, error: 'Could not start "' + CLAUDE_BIN + '": ' + err.message + '. Is Claude Code installed and on PATH?' }); botChild = null; });
+    child.on('close', (code) => {
+      botChild = null;
+      let imported = null;
+      if (target.kind === 'workspace') {
+        try { imported = workspace.importNotes(store, WORKSPACE_DIR); } catch (err) { imported = { error: err.message }; }
+      } else if (target.kind === 'vault') {
+        const note = store.get(opts.noteId);
+        if (note && note.vaultId) { store.scanVault(note.vaultId).then((r) => { if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); }).catch(() => {}); vaults.noteChanged(note.vaultId); }
+      }
+      lastContentHash = contentHash();
+      if (store.settings.gitEnabled) git.noteChanged();
+      botSend('end', { ok: code === 0, code, imported });
+      if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded');
+    });
+    return { ok: true, cwd: target.cwd, kind: target.kind };
+  });
+  ipcMain.handle('bot:cancel', () => { if (botChild) { try { botChild.kill(); } catch (_) { /* ignore */ } return true; } return false; });
+  ipcMain.handle('bot:openTerminal', (_e, noteId) => {
+    let target;
+    try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
+    const { spawn } = require('child_process');
+    try {
+      // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.
+      const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
+      if (hasWt) spawn('wt', ['-d', target.cwd, 'powershell', '-NoExit', '-Command', CLAUDE_BIN], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      else spawn('powershell', ['-NoExit', '-Command', 'Set-Location -LiteralPath \'' + target.cwd.replace(/'/g, "''") + "'; " + CLAUDE_BIN], { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
+      return { ok: true, cwd: target.cwd, kind: target.kind };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('bot:importWorkspace', () => { const r = workspace.importNotes(store, WORKSPACE_DIR); lastContentHash = contentHash(); return r; });
+
   ipcMain.handle('folders:tree', () => store.folderTree());
   ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
   ipcMain.handle('folders:create', (_e, data) => store.createFolder(data));
