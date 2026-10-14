@@ -299,8 +299,7 @@ class Store {
   trash(id) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
-    note.trashedAt = this.now();
-    note.pinned = false;
+    note.trashedAt = this.now(); // pinned is kept, so a restored note comes back where it was
     this.save();
     return note;
   }
@@ -371,7 +370,7 @@ class Store {
     return path;
   }
 
-  // Nested tree with recursive live-note counts, children sorted by name.
+  // Nested tree; count is the number of live notes directly in the folder (what the folder view lists).
   folderTree() {
     const direct = new Map();
     for (const n of this.notes) {
@@ -389,8 +388,9 @@ class Store {
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt)
       .map((f) => {
         const children = build(f.id, depth + 1);
-        const count = (direct.get(f.id) || 0) + children.reduce((s, c) => s + c.count, 0);
-        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, children };
+        const count = direct.get(f.id) || 0;
+        const total = count + children.reduce((s, c) => s + c.total, 0);
+        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, total, children };
       });
     return build(null, 0);
   }

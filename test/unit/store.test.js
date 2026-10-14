@@ -77,10 +77,12 @@ test('trash unpins, restore brings back, destroy removes, emptyTrash clears only
   const b = store.create({ title: 'b' });
   store.togglePin(a.id);
   store.trash(a.id);
-  assert.equal(store.get(a.id).pinned, false);
+  assert.equal(store.get(a.id).pinned, true, 'pin survives the trash');
   assert.ok(store.get(a.id).trashedAt);
+  assert.deepEqual(store.list({ pinned: true }), [], 'but a trashed note is not in the pinned view');
   store.restore(a.id);
   assert.equal(store.get(a.id).trashedAt, null);
+  assert.equal(store.get(a.id).pinned, true, 'restored note is pinned again');
   store.trash(a.id);
   store.trash(b.id);
   store.restore(b.id);
@@ -189,7 +191,8 @@ test('folders: create, nest, tree with recursive counts, path', () => {
   const tree = store.folderTree();
   assert.deepEqual(tree.map((f) => f.name), ['Home', 'Work']);
   const w = tree[1];
-  assert.equal(w.count, 2, 'recursive count excludes trashed');
+  assert.equal(w.count, 1, 'direct count: what the folder view lists');
+  assert.equal(w.total, 2, 'total includes subfolders and excludes trashed');
   assert.equal(w.children[0].name, 'Clients');
   assert.equal(w.children[0].children[0].name, 'Acme');
   assert.equal(w.children[0].children[0].depth, 2);

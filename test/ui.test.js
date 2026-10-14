@@ -722,8 +722,9 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await waitFor('Imported note dragged into Work', () => findNote('Imported note').folderId === folderByName('Work').id);
   step('moved via drag');
 
-  // Recursive count on the parent: In Work + Imported note + Gamma (in Clients).
-  await waitForCount('Work', 3);
+  // Direct count on the parent (what its view lists): In Work + Imported note; Gamma sits in Clients.
+  await waitForCount('Work', 2);
+  await waitForCount('Clients', 1);
   step('recursive count');
 
   // Collapse and expand persist.
@@ -771,6 +772,27 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await waitFor('Customers deleted', () => !folderByName('Customers'));
   assert.equal(findNote('Gamma').folderId, folderByName('Work').id, 'Gamma lifted into Work');
   await waitForCount('Work', 3);
+
+  // Emptying the trash while a search is active deletes only the listed notes.
+  await page.click('.nav-item[data-view="all"]');
+  for (const t of ['In Work', 'Imported note']) {
+    await page.click(`.note-card:has-text("${t}")`);
+    await waitForDom((x) => document.getElementById('titleInput').value === x, t);
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor(t + ' trashed', () => findNote(t).trashedAt);
+  }
+  await page.click('.nav-item[data-view="trash"]');
+  await page.fill('#searchInput', 'Imported');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  await page.click('#emptyTrashBtn');
+  await waitFor('only the searched note destroyed', () => !findNote('Imported note'));
+  assert.ok(findNote('In Work') && findNote('In Work').trashedAt, 'the other trashed note survives');
+  await page.fill('#searchInput', '');
+  await page.click('.note-card:has-text("In Work")');
+  await page.click('#restoreBtn');
+  await waitFor('In Work restored', () => !findNote('In Work').trashedAt);
+  await page.click('.nav-item[data-view="all"]');
+  await waitForCount('Work', 2);
   step('deleted folder');
 
   // Survives a reload.

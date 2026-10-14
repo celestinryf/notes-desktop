@@ -388,7 +388,9 @@ function main() {
       ipcMain.once('app:flush-done', () => { clearTimeout(timer); resolve(); });
       try { win.webContents.send('app:flush'); } catch (_) { clearTimeout(timer); resolve(); }
     });
-    rendererFlushed.then(() => git.flush()).catch(() => {}).finally(() => app.quit());
+    // Cap the git step: an unreachable remote must not keep the tray icon alive for a minute after Quit.
+    const gitFlushed = Promise.race([git.flush(), new Promise((r) => setTimeout(r, 5000))]);
+    rendererFlushed.then(() => gitFlushed).catch(() => {}).finally(() => app.quit());
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
