@@ -167,6 +167,94 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   text-transform: uppercase;
   color: var(--fg-muted);
 }
+.nav-heading-row { display: flex; align-items: center; justify-content: space-between; padding-right: 4px; }
+.mini-btn {
+  width: 22px; height: 22px;
+  border: 1.5px solid var(--line); border-radius: 6px;
+  background: var(--bg-raised);
+  font-size: 15px; line-height: 1;
+  transition: background 120ms, transform 80ms;
+}
+.mini-btn:hover { background: var(--accent); color: var(--accent-ink); }
+.mini-btn:active { transform: scale(0.95); }
+
+/* ---- folder tree ----------------------------------------------------- */
+.nav.folders { overflow-y: auto; flex: 0 1 auto; max-height: 45%; min-height: 0; gap: 2px; }
+.folder-row {
+  display: flex; align-items: center; gap: 4px;
+  width: 100%;
+  padding: 5px 6px 5px calc(6px + var(--depth, 0) * 14px);
+  border: 2px solid transparent; border-radius: 8px;
+  background: transparent;
+  text-align: left; font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, transform 80ms;
+}
+.folder-row:hover { background: var(--bg-sunken); }
+.folder-row.is-active { background: var(--bg-raised); border-color: var(--line); box-shadow: 3px 3px 0 var(--shadow); }
+.folder-row.is-drop-target { border-color: var(--accent-strong); background: var(--peach); color: var(--ink); }
+.folder-row.is-dragging { opacity: 0.5; }
+.folder-chevron {
+  width: 18px; height: 18px; flex: none;
+  border: none; background: transparent; padding: 0;
+  font-size: 11px; color: var(--fg-muted);
+  transition: transform 160ms var(--ease);
+}
+.folder-chevron.is-open { transform: rotate(90deg); }
+.folder-chevron.is-leaf { visibility: hidden; }
+.folder-icon { flex: none; font-size: 13px; color: var(--accent-strong); }
+.folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-row .count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted); }
+.folder-menu-btn {
+  width: 20px; height: 20px; flex: none;
+  border: none; border-radius: 5px; background: transparent;
+  color: var(--fg-muted); font-size: 14px; line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms;
+}
+.folder-row:hover .folder-menu-btn, .folder-row.is-active .folder-menu-btn, .folder-menu-btn:focus-visible { opacity: 1; }
+.folder-menu-btn:hover { background: var(--bg-raised); color: var(--fg); }
+.folder-input {
+  flex: 1; min-width: 0;
+  padding: 2px 6px;
+  border: 1.5px solid var(--accent-strong); border-radius: 6px;
+  background: var(--bg-raised); color: var(--fg);
+  font: inherit;
+}
+.folder-input:focus { outline: none; box-shadow: 2px 2px 0 var(--shadow); }
+.folders-empty { padding: 2px 10px; color: var(--fg-muted); font-size: 12px; }
+.nav-item.is-drop-target { border-color: var(--accent-strong); background: var(--peach); color: var(--ink); }
+.note-card.is-dragging { opacity: 0.5; }
+.folder-select {
+  max-width: 220px;
+  padding: 4px 24px 4px 8px;
+  border: 2px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--fg);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+}
+.folder-select:hover, .folder-select:focus { border-color: var(--line); background: var(--bg-sunken); outline: none; }
+.list-crumb { color: var(--fg-muted); font-weight: 400; }
+
+/* ---- popover menu ---------------------------------------------------- */
+.popover {
+  position: fixed; z-index: 20;
+  display: flex; flex-direction: column;
+  min-width: 170px;
+  padding: 6px;
+  border: 2px solid var(--line); border-radius: 10px;
+  background: var(--bg-raised); color: var(--fg);
+  box-shadow: 4px 4px 0 var(--shadow);
+  animation: rise 0.18s var(--ease) both;
+}
+.popover button {
+  padding: 7px 10px;
+  border: none; border-radius: 6px; background: transparent;
+  text-align: left; font-weight: 500;
+}
+.popover button:hover { background: var(--bg-sunken); }
+.popover button.danger:hover { background: var(--ember); color: var(--cream); }
+
 .nav.tags { overflow-y: auto; flex: 1; min-height: 0; }
 .nav.tags .nav-item { font-weight: 400; }
 .nav.tags .nav-item span:first-child::before { content: '#'; color: var(--accent-strong); margin-right: 4px; font-family: var(--font-mono); }

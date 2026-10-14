@@ -14,6 +14,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 ## Features
 
 - Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
+- Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
 - Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
 - Markdown preview (Ctrl+E) with clickable checklists that write back to the source
 - List continuation on Enter, Tab indents, Ctrl+B / Ctrl+I / Ctrl+K wrap selection
@@ -29,6 +30,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 | Ctrl+Alt+N | Show / hide from anywhere (changeable in Settings) |
 | Esc | Hide window |
 | Ctrl+N | New note |
+| Ctrl+Shift+N | New folder (inside the current folder) |
 | Ctrl+F | Search |
 | Ctrl+E | Toggle preview |
 | Ctrl+P | Pin / unpin |
