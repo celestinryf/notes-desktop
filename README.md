@@ -18,6 +18,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Markdown preview (Ctrl+E) with clickable checklists that write back to the source
 - List continuation on Enter, Tab indents, Ctrl+B / Ctrl+I / Ctrl+K wrap selection
 - Light (cream) and dark (ink) themes, follows the system by default; adjustable editor font size; always-on-top option
+- Drag the edge of the sidebar or the note list to resize them; widths persist, double-click an edge to reset
 - Export a note as `.md`, export everything as JSON, import `.md`/`.txt` files
 - Data lives in `%APPDATA%\notes-app\notes.json`, written atomically, with rolling backups in `backups\`
 

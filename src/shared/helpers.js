@@ -178,6 +178,21 @@
     return { title, body: body.replace(/\s+$/, ''), tags };
   }
 
+  // Draggable pane widths, in CSS px. The editor always keeps at least EDITOR_MIN.
+  const PANE_LIMITS = {
+    sidebarWidth: { min: 160, max: 420, def: 232 },
+    listWidth: { min: 220, max: 560, def: 300 },
+  };
+  const EDITOR_MIN = 320;
+
+  function clampPane(name, value) {
+    const lim = PANE_LIMITS[name];
+    const v = Number(value);
+    if (!lim) return value;
+    if (!Number.isFinite(v)) return lim.def;
+    return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
+  }
+
   function safeFilename(name) {
     const s = String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim();
     return (s || UNTITLED).slice(0, 80);
@@ -186,6 +201,6 @@
   return {
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
-    noteToMarkdown, markdownToNote, safeFilename,
+    noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
   };
 });

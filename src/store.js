@@ -16,6 +16,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   alwaysOnTop: false,
   sort: 'updated',          // updated | created | title
   sidebarCollapsed: false,
+  sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
+  listWidth: H.PANE_LIMITS.listWidth.def,
   window: null,             // { x, y, width, height }
 });
 
@@ -35,6 +37,8 @@ function sanitizeSettings(input) {
   s.openAtLogin = !!s.openAtLogin;
   s.alwaysOnTop = !!s.alwaysOnTop;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
+  s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
+  s.listWidth = H.clampPane('listWidth', s.listWidth);
   s.sort = ['updated', 'created', 'title'].includes(s.sort) ? s.sort : 'updated';
   if (s.window && typeof s.window === 'object') {
     const w = s.window;
