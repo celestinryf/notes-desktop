@@ -158,11 +158,19 @@ function main() {
   }
 
   // While saving is paused because the file was unreadable at startup, try again whenever the window is shown.
+  let reloadedSinceStart = false;
   function retryLoadIfBlocked() {
     if (!store.saveBlocked) return;
     try { store.load(); } catch (_) { return; }
     if (!store.saveBlocked) {
       lastContentHash = contentHash();
+      reloadedSinceStart = true;
+      // The file's settings may differ from the defaults we started with: apply them for real.
+      applyTheme();
+      registerHotkey(store.settings.hotkey);
+      if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!store.settings.alwaysOnTop);
+      applyLoginItem();
+      git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
       if (win && !win.isDestroyed()) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded'); }
     }
   }
@@ -266,6 +274,7 @@ function main() {
       platform: process.platform,
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
       saveBlocked: !!store.saveBlocked,
+      recoveredNotes: store.recoveredFromBackup ? store.notes.length : null,
     };
   }
 
@@ -341,6 +350,7 @@ function main() {
   ipcMain.handle('app:rendererReady', () => {
     rendererReady = true;
     const visible = !!(win && !win.isDestroyed() && win.isVisible());
+    if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded'); }
     if (visible) win.webContents.send('app:shown');
     if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
     return { visible };

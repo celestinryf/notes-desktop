@@ -155,6 +155,32 @@ test('corrupt data file is quarantined and the newest backup is used', () => {
   assert.ok(relaunched.get(a.id), 'relaunch after recovery keeps the notes');
 });
 
+test('a corrupt file that cannot be moved aside is never backed up and prunes nothing', () => {
+  const { store, clock } = makeStore();
+  const a = store.create({ title: 'keep me' });
+  clock.tick(11 * 60 * 1000);
+  store.create({ title: 'makes a backup' });
+  const goodBackups = fs.readdirSync(store.backupDir);
+  assert.equal(goodBackups.length, 1);
+  fs.writeFileSync(store.file, '{broken', 'utf8');
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => { if (String(to).includes('.corrupt-')) throw Object.assign(new Error('EPERM: locked'), { code: 'EPERM' }); return realRename(from, to); };
+  try {
+    for (let launch = 0; launch < 3; launch++) {
+      const s = new Store(store.dir).load();
+      assert.ok(s.get(a.id), 'recovered from the good backup on launch ' + launch);
+      // The write-back succeeds here (only the quarantine rename is stuck), which lifts the suspension again;
+      // what matters is that backups/ was never touched by the corrupt file on the way.
+      fs.writeFileSync(store.file, '{broken', 'utf8');
+    }
+  } finally {
+    fs.renameSync = realRename;
+  }
+  const after = fs.readdirSync(store.backupDir);
+  assert.deepEqual(after, goodBackups, 'no corrupt copy added, no good backup pruned');
+  for (const f of after) assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(store.backupDir, f), 'utf8')));
+});
+
 test('backups are rate limited and capped', () => {
   const { store, clock } = makeStore();
   store.create({ title: 'seed' });
