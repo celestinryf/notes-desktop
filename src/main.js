@@ -463,6 +463,14 @@ function main() {
     return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null, imported };
   }
 
+  // The app may itself have been started from inside a Claude Code session (a terminal, a script); those
+  // session variables must not leak into the agent we launch, or it would attach to that session.
+  function cleanEnv() {
+    const env = Object.assign({}, process.env);
+    for (const k of Object.keys(env)) if (/^CLAUDE(CODE|_CODE_|_PID|_EFFORT)/i.test(k)) delete env[k];
+    return env;
+  }
+
   function botSend(type, data) {
     if (win && !win.isDestroyed()) win.webContents.send('bot:event', Object.assign({ type }, data || {}));
   }
@@ -499,7 +507,8 @@ function main() {
     const { spawn } = require('child_process');
     let child;
     try {
-      child = spawn(launch.file, launch.args, { cwd: target.cwd, windowsHide: true, shell: false, env: Object.assign({}, process.env, { CLAUDE_CODE_NONINTERACTIVE: '1' }, launch.env) });
+      // stdin closed: with a pipe left open, claude waits a few seconds for piped input before starting.
+      child = spawn(launch.file, launch.args, { cwd: target.cwd, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign(cleanEnv(), { CLAUDE_CODE_NONINTERACTIVE: '1' }, launch.env) });
     } catch (err) {
       botSend('end', { ok: false, error: err.message });
       return { ok: false, error: err.message };
@@ -545,8 +554,8 @@ function main() {
       fs.writeFileSync(script, '﻿' + lines.join('\r\n') + '\r\n', 'utf8');
       const psArgs = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', script];
       const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
-      if (hasWt) spawn('wt', ['powershell'].concat(psArgs), { detached: true, stdio: 'ignore', windowsHide: false }).unref();
-      else spawn('powershell', psArgs, { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
+      if (hasWt) spawn('wt', ['powershell'].concat(psArgs), { detached: true, stdio: 'ignore', windowsHide: false, env: cleanEnv() }).unref();
+      else spawn('powershell', psArgs, { detached: true, stdio: 'ignore', windowsHide: false, shell: false, env: cleanEnv() }).unref();
       return { ok: true, cwd: target.cwd, kind: target.kind };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -632,6 +641,11 @@ function main() {
 
   ipcMain.handle('app:info', () => info());
   ipcMain.handle('app:hide', () => hideWindow());
+  ipcMain.handle('app:print', (e) => new Promise((resolve) => {
+    if (process.env.NOTES_APP_DRY_PRINT === '1') return resolve({ ok: true, dry: true });
+    try { e.sender.print({ printBackground: true }, (ok, reason) => resolve({ ok, error: ok ? null : (reason || 'print failed') })); }
+    catch (err) { resolve({ ok: false, error: err.message }); }
+  }));
   // The first 'app:shown' can be sent before the renderer has registered its listener (ready-to-show fires
   // before the scripts finish). Once the renderer is ready it asks, and we replay the signal if visible.
   let rendererReady = false;

@@ -40,7 +40,7 @@ test.before(async () => {
     args: [ROOT],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
     env: Object.assign({}, process.env, {
-      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1',
+      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1',
       // The bot panel is exercised against a fake `claude` so no real agent (or tokens) is involved.
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
     }),
@@ -784,6 +784,50 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
   await sticky.click('#stickyCloseBtn');
   await waitFor('removed', () => !findNote('Gamma (copy)').sticky);
   await waitFor('window closed', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('find in note counts and steps through matches; print asks the system to print', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'needle one\nhay\nneedle two\n');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === 'needle one\nhay\nneedle two\n');
+  await page.keyboard.press('Control+Shift+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'needle');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  await page.keyboard.press('Enter');
+  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['needle one\nhay\n'.length, 'needle one\nhay\nneedle'.length], 'source view selects the active match');
+  await page.keyboard.press('Shift+Enter');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  // Rendered view: the same search highlights ranges inside the editor only.
+  await page.keyboard.press('Escape');
+  await useSourceMode(false);
+  await page.keyboard.press('Control+Shift+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'NEEDLE');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  assert.equal(await page.evaluate(() => CSS.highlights.get('notes-find').size), 2, 'two highlighted ranges');
+  await page.keyboard.press('Enter');
+  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !CSS.highlights.has('notes-find'));
+  await useSourceMode(true);
+  await page.keyboard.press('Control+Shift+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'zzzz-not-here');
+  await waitForDom(() => document.getElementById('findCount').textContent === 'No matches', 8000);
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+  await waitForDom(() => !document.getElementById('app').classList.contains('hidden'), 2000); // Esc closed the bar, not the window
+  const visible = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
+  assert.equal(visible, true, 'Escape in the find bar must not hide the app');
+  // Print (dry run in tests) goes through the main process and reports back.
+  await page.keyboard.press('Control+Shift+p');
+  await waitForDom(() => /Print: dry run/.test(document.getElementById('toast').textContent), 8000);
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
