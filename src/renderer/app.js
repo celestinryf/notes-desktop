@@ -513,14 +513,19 @@
     state.editingFolder = null;
     if (!edit) return;
     const name = String(value || '').trim();
-    if (edit.mode === 'create') {
-      if (!name) { renderFolders(); return; }
-      const folder = await api.folders.create({ name, parentId: edit.parentId });
-      await setView('folder', folder.id);
-      toast('Folder "' + H.truncate(folder.name, 30) + '" created');
-    } else {
-      if (name) await api.folders.rename(edit.id, name);
-      await refresh({ keepEditor: true });
+    try {
+      if (edit.mode === 'create') {
+        if (!name) { renderFolders(); return; }
+        const folder = await api.folders.create({ name, parentId: edit.parentId });
+        await setView('folder', folder.id);
+        toast('Folder "' + H.truncate(folder.name, 30) + '" created');
+      } else {
+        if (name) await api.folders.rename(edit.id, name);
+        await refresh({ keepEditor: true });
+      }
+    } catch (err) {
+      renderFolders(); // never leave a dead name field behind
+      toast('Could not save the folder: ' + (err.message || err));
     }
   }
 
@@ -838,7 +843,9 @@
     if (state.view === 'tag' && state.tag) data.tags = [state.tag];
     if (state.view === 'pinned') data.pinned = true;
     if (state.view === 'folder' && state.folderId) data.folderId = state.folderId;
-    const note = await api.notes.create(data);
+    let note;
+    try { note = await api.notes.create(data); }
+    catch (err) { toast('Could not create a note: ' + (err.message || err)); return; }
     state.query = '';
     el.searchInput.value = '';
     await refresh({ keepEditor: true });
@@ -905,7 +912,9 @@
   async function duplicateCurrent() {
     if (!state.current) return;
     await flushSave();
-    const copy = await api.notes.duplicate(state.currentId);
+    let copy;
+    try { copy = await api.notes.duplicate(state.currentId); }
+    catch (err) { toast('Could not duplicate: ' + (err.message || err)); return; }
     await refresh({ keepEditor: true });
     await selectNote(copy.id);
     toast('Duplicated');
