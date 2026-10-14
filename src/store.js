@@ -1042,7 +1042,9 @@ class Store {
     if (f.vaultId && f.dirPath && f.parentId) {
       // Rename the directory and re-point every note and subfolder underneath it.
       const parentDir = path.dirname(f.dirPath);
-      next = uniqueName(parentDir, H.safeFilename(next), '');
+      const wanted = H.safeFilename(next);
+      // Only the case changed (notes -> Notes): Windows would find the folder itself in the way; rename directly.
+      next = wanted.toLowerCase() === path.basename(f.dirPath).toLowerCase() ? wanted : uniqueName(parentDir, wanted, '');
       const newDir = path.join(parentDir, next);
       fs.renameSync(f.dirPath, newDir);
       this._retargetVaultPaths(f.dirPath, newDir);

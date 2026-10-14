@@ -75,9 +75,10 @@ class GitSync {
     if (!this.state.initialized) return;
     const current = await run(['remote', 'get-url', 'origin'], this.dir);
     const have = current.ok ? current.stdout.trim() : '';
+    if (url && /^\s*-/.test(String(url))) { this._set({ lastError: 'That does not look like a repository URL.' }); return; } // never read as a git option
     if (!url && have) await run(['remote', 'remove', 'origin'], this.dir);
-    else if (url && !have) await run(['remote', 'add', 'origin', url], this.dir);
-    else if (url && have !== url) await run(['remote', 'set-url', 'origin', url], this.dir);
+    else if (url && !have) await run(['remote', 'add', '--', 'origin', url], this.dir);
+    else if (url && have !== url) await run(['remote', 'set-url', '--', 'origin', url], this.dir);
     this._set({ remote: url || '' });
   }
 

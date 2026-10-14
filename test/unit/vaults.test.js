@@ -320,3 +320,37 @@ test('a failed save during trash or restore leaves the live note object exactly 
   store.restore(inbox.id);
   assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')));
 });
+
+test('renaming a vault subfolder by case only keeps its name instead of adding " 2"', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const projects = store.folders.find((f) => f.name === 'Projects');
+  store.renameFolder(projects.id, 'projects');
+  assert.equal(store.getFolder(projects.id).name, 'projects');
+  assert.ok(fs.readdirSync(dir).includes('projects'), 'directory renamed in place');
+  assert.ok(!fs.readdirSync(dir).includes('projects 2'));
+});
+
+test('clearing a vault remote detaches origin so nothing is pushed any more', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const bare = tmp();
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir, autoSync: false });
+  const vm = new VaultManager(store, { debounceMs: 50 });
+  await vm.open(v.id, { pull: false });
+  assert.equal((await vm.initRepo(v.id, bare)).ok, true);
+  assert.equal((await vm.sync(v.id, 'test')).ok, true);
+  assert.equal(git(bare, ['rev-list', '--count', 'main']), '1');
+  assert.equal((await vm.initRepo(v.id, '')).ok, true);
+  assert.equal(store.getVault(v.id).remote, '');
+  assert.equal(git(dir, ['remote']), '', 'origin removed');
+  fs.writeFileSync(path.join(dir, 'Later.md'), 'later\n');
+  const r = await vm.sync(v.id, 'test');
+  assert.equal(r.ok, true, 'local commit still fine');
+  assert.equal(git(bare, ['rev-list', '--count', 'main']), '1', 'nothing pushed after detaching');
+  assert.equal(vm.statusOf(v.id).remote, '', 'status does not resurrect the old URL');
+  vm.closeAll();
+});

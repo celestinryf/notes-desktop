@@ -116,7 +116,13 @@
       });
       el.editor.addEventListener('click', (e) => {
         const a = e.target.closest('a[href]');
-        if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); api.app.openExternal(a.getAttribute('href')); }
+        if (a && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          const href = a.getAttribute('href') || '';
+          if (/^note:\/\//i.test(href)) api.stickies.openInNotes(href.replace(/^note:\/\//i, '').replace(/\/$/, ''));
+          else if (/^attachment:\/\//i.test(href)) api.attachments.open(href).then((r) => { if (r) el.status.textContent = String(r); });
+          else api.app.openExternal(href);
+        }
       });
     } else {
       el.status.textContent = 'Editor failed to load';

@@ -1293,9 +1293,20 @@
 
   async function attachFiles() {
     if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
+    const forNote = state.current.id;
     await flushSave();
     const items = await api.attachments.pick();
-    insertAttachmentLinks(items);
+    if (state.currentId === forNote) { insertAttachmentLinks(items); return; }
+    // The person moved to another note while the picker was open: the files belong to the note they chose.
+    const ok = items.filter((x) => x && !x.error);
+    if (!ok.length) { insertAttachmentLinks(items); return; }
+    const target = await api.notes.get(forNote);
+    if (target && !target.locked && !target.trashedAt && !(target.filePath && target.fileKind !== 'text')) {
+      const links = ok.map((it) => '[📎 ' + it.name.replace(/[[\]]/g, '') + '](' + it.href + ')').join('\n');
+      await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + links + '\n' });
+      toast('Attached to "' + H.truncate(H.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
+      refresh({ keepEditor: true });
+    } else toast('Attached files are kept in the attachments folder; that note can no longer take them.');
   }
 
   const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
@@ -1304,9 +1315,9 @@
     if (rec.recorder) { rec.recorder.stop(); return; }
     if (rec.starting) return; // the microphone prompt is still up
     if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
     rec.noteId = state.current.id;
     rec.starting = true;
-    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
     let stream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch (err) { rec.starting = false; toast('Microphone not available: ' + (err.message || err)); return; }
@@ -1350,7 +1361,7 @@
 
   // ---- earlier versions ----------------------------------------------------------
 
-  const hist = { versions: [], index: -1 };
+  const hist = { versions: [], index: -1, noteId: null };
 
   async function openHistory() {
     const note = state.current;
@@ -1364,6 +1375,7 @@
     el.historyDialog.showModal();
     const r = await api.app.historyVersions(note.id, 80);
     if (!r.ok) { el.historyStatus.textContent = r.error; return; }
+    hist.noteId = note.id; // Restore only ever writes into the note these versions belong to
     hist.versions = r.versions.filter((v) => v.body !== r.current); // what differs from now
     hist.index = -1;
     el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : 'No earlier version differs from the current text yet.';
@@ -1393,10 +1405,13 @@
     const note = state.current;
     if (!v || !note) return;
     el.historyDialog.close();
-    if (state.currentId !== note.id || note.trashedAt || lockedNow() || (note.filePath && note.fileKind !== 'text')) { toast('This note cannot take the restored text right now.'); return; }
+    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || (note.filePath && note.fileKind !== 'text')) { toast('This note cannot take the restored text right now.'); return; }
     el.bodyInput.value = v.body;
     if (state.rich) {
-      const lossless = state.rich.setMarkdown(v.body);
+      let lossless = state.rich.setMarkdown(v.body);
+      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false; // a real file gets the strict test
+      state.currentLossless = lossless;
+      state.lossyOverride = null;
       if (!lossless && !state.sourceMode) applyEditorMode(true); // text the rendered view would rewrite opens as source
     }
     autoGrow();
@@ -1438,10 +1453,16 @@
     const text = el.replaceInput.value;
     if (!q || lockedNow() || !state.current || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) return;
     if (state.sourceMode) {
-      if (!find.sourceHits.length || find.active < 0) { runFind(true, true); return; }
+      // Offsets can be stale (Tab, list keys and Restore change the text without an input event): recount
+      // first, and only replace text that really is the query.
+      const wanted = find.active;
+      runFind(true, true, true);
+      if (!find.sourceHits.length) { runFind(true, true); return; }
+      find.active = Math.min(Math.max(wanted, 0), find.sourceHits.length - 1);
       const at = find.sourceHits[find.active];
       const ta = el.bodyInput;
       if (ta.readOnly) return;
+      if (ta.value.slice(at, at + q.length).toLowerCase() !== q.toLowerCase()) { showActiveMatch(); return; }
       ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
       ta.setSelectionRange(at + text.length, at + text.length);
       ta.dispatchEvent(new Event('input', { bubbles: true })); // autosave + recount
@@ -1454,7 +1475,9 @@
     const idx = find.active;
     state.rich.replaceRanges([find.ranges[idx]], text);
     runFind(true, true, true); // the quiet re-find keeps the index, which now points at the following match
-    if (find.ranges.length) { find.active = Math.min(idx, find.ranges.length - 1); showActiveMatch(); }
+    // A replacement that itself contains the query ("cat" -> "cats") creates matches at the same spot: skip them.
+    const inside = findOffsets(text, q).length;
+    if (find.ranges.length) { find.active = (idx + inside) % find.ranges.length; showActiveMatch(); }
   }
 
   // Selects / highlights and scrolls to find.active without changing it.
@@ -1927,7 +1950,7 @@
     if (!state.dirty) state.pending.delete(fresh.id);
     el.bodyInput.value = fresh.body;
     if (state.rich) {
-      let lossless = state.rich.setMarkdown(fresh.body);
+      let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true }); // same note, new text: keep the caret
       if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
       if (!lossless && !state.sourceMode && state.lossyOverride !== fresh.id) {
