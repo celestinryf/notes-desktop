@@ -354,3 +354,15 @@ test('clearing a vault remote detaches origin so nothing is pushed any more', { 
   assert.equal(vm.statusOf(v.id).remote, '', 'status does not resurrect the old URL');
   vm.closeAll();
 });
+
+test('a vault subfolder cannot be given a dot name the scan would skip', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const root = store.vaultRootFolder(v.id);
+  assert.throws(() => store.createFolder({ name: '.hidden', parentId: root.id }), /dot/);
+  assert.ok(!fs.existsSync(path.join(dir, '.hidden')));
+  const ok = store.createFolder({ name: 'visible', parentId: root.id });
+  assert.ok(fs.existsSync(ok.dirPath));
+});
