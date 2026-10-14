@@ -167,3 +167,27 @@ test('restore() with a busy remembered port falls back to a free port instead of
   live.stopAll();
   blocker.close();
 });
+
+test('a malformed request to a live host gets a response instead of an unhandled rejection', async () => {
+  const hostStore = new Store(tmp()).load();
+  const note = hostStore.create({ title: 'H', body: 'h' });
+  const live = new LiveShare(hostStore, {});
+  const status = await live.host(note.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
+  const u = new URL(status.url);
+  let unhandled = null;
+  const onRej = (err) => { unhandled = err; };
+  process.on('unhandledRejection', onRej);
+  const code = await new Promise((resolve, reject) => {
+    const s = require('net').connect(Number(u.port), '127.0.0.1', () => { s.write('GET // HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'); });
+    let text = '';
+    s.on('data', (d) => (text += d));
+    s.on('end', () => resolve(parseInt((text.match(/^HTTP\/1\.1 (\d+)/) || [])[1], 10)));
+    s.on('error', reject);
+    setTimeout(() => { s.destroy(); resolve(0); }, 3000);
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  process.off('unhandledRejection', onRej);
+  assert.equal(unhandled, null, 'no unhandled rejection');
+  assert.ok(code === 400 || code === 404, 'got a response: ' + code);
+  live.stop(note.id);
+});

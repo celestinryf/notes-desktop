@@ -167,6 +167,12 @@ class VaultManager {
       if (!have) await git(['remote', 'add', '--', 'origin', remote], v.path);
       else if (have !== remote) await git(['remote', 'set-url', '--', 'origin', remote], v.path);
       this.store.updateVault(id, { remote });
+    } else if (remote === '') {
+      // An emptied Remote field detaches the repository: no origin, nothing pushed, history stays local.
+      const have = (await git(['remote', 'get-url', 'origin'], v.path)).stdout.trim();
+      if (have) await git(['remote', 'remove', 'origin'], v.path);
+      this.store.updateVault(id, { remote: '' });
+      const t = this.timers.get(id); if (t && t.pull) { clearTimeout(t.pull); t.pull = null; }
     }
     await this.refreshRepoStatus(id);
     return { ok: true };

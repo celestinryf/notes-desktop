@@ -343,7 +343,9 @@ function main() {
   ipcMain.handle('notes:list', (_e, opts) => store.list(opts).map(pub));
   ipcMain.handle('notes:get', (_e, id) => pub(store.get(id)));
   ipcMain.handle('notes:create', (_e, data) => {
-    data = data || {};
+    data = Object.assign({}, data || {});
+    // The page may only name content and placement; file links, vault membership and locks are the store's.
+    for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) delete data[k];
     const folder = data.folderId ? store.getFolder(data.folderId) : null;
     const note = folder && folder.vaultId ? store.createVaultNote(folder.id, data) : store.create(data);
     if (note.vaultId) vaults.noteChanged(note.vaultId);
@@ -516,7 +518,9 @@ function main() {
     if (fs.existsSync(dest)) return { ok: false, error: 'A folder named "' + safe + '" already exists there.' };
     const r = await VaultManager.clone(url, dest);
     if (!r.ok) return r;
-    const v = store.addVault({ path: dest, name: safe, remote: url });
+    let v;
+    try { v = store.addVault({ path: dest, name: safe, remote: url }); }
+    catch (err) { try { fs.rmSync(dest, { recursive: true, force: true }); } catch (_) { /* leave it */ } return { ok: false, error: err.message }; } // no orphan clone on disk
     await vaults.initRepo(v.id, url); // ensures .gitignore (.trash) in a freshly cloned vault
     await vaults.open(v.id, { pull: false });
     return { ok: true, vault: vaultView(v) };
@@ -560,7 +564,9 @@ function main() {
   // session variables must not leak into the agent we launch, or it would attach to that session.
   function cleanEnv() {
     const env = Object.assign({}, process.env);
-    for (const k of Object.keys(env)) if (/^CLAUDE(CODE|_CODE_|_PID|_EFFORT)/i.test(k)) delete env[k];
+    // Only the variables that attach a process to a running Claude Code session; auth and provider
+    // settings such as CLAUDE_CODE_OAUTH_TOKEN or CLAUDE_CODE_GIT_BASH_PATH must stay.
+    for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CODE_(ENTRYPOINT|EXECPATH|SESSION_ID|SESSION_ATTENDED|CHILD_SESSION|MESSAGING_SOCKET|MESSAGING_TOKEN))$/i.test(k)) delete env[k];
     return env;
   }
 
@@ -630,6 +636,7 @@ function main() {
   });
   ipcMain.handle('bot:cancel', () => { if (botChild) { killTree(botChild); return true; } return false; });
   ipcMain.handle('bot:openTerminal', (_e, noteId) => {
+    if (botChild) return { ok: false, error: 'A run is in progress; wait for it to finish (or stop it) first.' }; // the workspace is in use
     let target;
     try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
     const spec = findClaude();
@@ -656,6 +663,7 @@ function main() {
   });
   // Pulls edits made in the workspace (e.g. in a terminal session) back into the notes.
   ipcMain.handle('bot:importWorkspace', () => {
+    if (botChild) return { error: 'A run is in progress; its edits are imported when it finishes.' };
     const r = workspace.importNotes(store, WORKSPACE_DIR);
     lastContentHash = contentHash();
     fanReloaded({ reason: 'bot' });

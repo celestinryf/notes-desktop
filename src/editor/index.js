@@ -74,7 +74,8 @@ const NotesKeys = Extension.create({
       'Shift-Tab': () => this.editor.commands.liftListItem('listItem') || this.editor.commands.liftListItem('taskItem'),
       // The app uses Ctrl+E to switch between rendered and source views; Tiptap would otherwise toggle inline code.
       'Mod-e': () => true,
-      // Ctrl+Shift+S opens the app's Share menu; strikethrough keeps Ctrl+Shift+X.
+      // Ctrl+Shift+S opens the app's Share menu; strikethrough moves to Ctrl+Shift+X.
+      'Mod-Shift-x': () => this.editor.commands.toggleStrike(),
       'Mod-Shift-s': () => true,
     };
   },
@@ -180,7 +181,9 @@ export function create(element, options) {
   // Loads Markdown and reports whether the rendered view preserves it: true when serializing the loaded
   // document gives back the same content, false when some construct would be rewritten or dropped.
   let lastExact = true;
-  function setMarkdown(md) {
+  // opts.keepSelection: an in-place reload of the same note keeps the caret; opening another note starts at the top.
+  function setMarkdown(md, opts) {
+    const keepSelection = !!(opts && opts.keepSelection);
     suppress = true;
     try {
       const prev = editor.state.selection;
@@ -190,7 +193,7 @@ export function create(element, options) {
       const doc = editor.state.doc;
       const clamp = (p) => Math.max(0, Math.min(p, doc.content.size));
       let selection;
-      try { selection = TextSelection.create(doc, clamp(prev.from), clamp(prev.to)); } catch (_) { selection = undefined; }
+      try { selection = keepSelection ? TextSelection.create(doc, clamp(prev.from), clamp(prev.to)) : undefined; } catch (_) { selection = undefined; }
       editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins, selection }));
     } finally { suppress = false; }
     const out = getMarkdown();

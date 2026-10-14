@@ -101,6 +101,13 @@ class LiveShare {
   }
 
   async _handle(session, noteId, req, res) {
+    // Anything the handler cannot cope with (a malformed path such as "//" makes new URL throw) must still
+    // get a response: an async handler's rejection would otherwise be unhandled and the socket left open.
+    try { await this._route(session, noteId, req, res); }
+    catch (_) { try { if (!res.headersSent) res.statusCode = 400; res.end('bad request'); } catch (_e) { /* socket gone */ } }
+  }
+
+  async _route(session, noteId, req, res) {
     const url = new URL(req.url, 'http://x');
     const parts = url.pathname.split('/').filter(Boolean); // ['live', token, ('events')?]
     res.setHeader('Cache-Control', 'no-store');
