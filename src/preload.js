@@ -37,6 +37,15 @@ contextBridge.exposeInMainWorld('notesApi', {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  stickies: {
+    list: invoke('stickies:list'),
+    open: invoke('stickies:open'),
+    close: invoke('stickies:close'),
+    create: invoke('stickies:create'),
+    setColor: invoke('stickies:setColor'),
+    setOnTop: invoke('stickies:setOnTop'),
+    openInNotes: invoke('stickies:openInNotes'),
+  },
   bot: {
     run: invoke('bot:run'),
     cancel: invoke('bot:cancel'),
@@ -96,5 +105,9 @@ contextBridge.exposeInMainWorld('notesApi', {
     reloaded: on('notes:reloaded'),
     vaultStatus: on('vault:status'),
     botEvent: on('bot:event'),
+    noteChanged: on('notes:changed'),
+    stickyChanged: on('sticky:changed'),
+    stickiesChanged: on('stickies:changed'),
+    openNote: on('app:open-note'),
   },
 });

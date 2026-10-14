@@ -47,10 +47,17 @@ function main() {
   let win = null;
   let tray = null;
   let quitting = false;
+  let pendingOpenNote = null;
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
     onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'vault' }); },
+  });
+  const { StickyManager } = require('./stickies');
+  const stickies = new StickyManager(store, {
+    themeFor: effectiveTheme,
+    showInactive: SHOW_INACTIVE,
+    onChange: () => { refreshTray(); if (win && !win.isDestroyed()) win.webContents.send('stickies:changed'); },
   });
   let hotkeyState = { hotkey: store.settings.hotkey, registered: false };
   let boundsTimer = null;
@@ -249,6 +256,8 @@ function main() {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Show / hide notes', accelerator: hotkeyState.registered ? hotkeyState.hotkey : undefined, click: toggleWindow },
       { label: 'New note', click: requestNewNote },
+      { label: 'New sticky note', click: newSticky },
+      { label: 'Stickies', submenu: stickyMenu() },
       { type: 'separator' },
       { label: 'Start at login', type: 'checkbox', checked: !!store.settings.openAtLogin, click: (item) => { try { store.setSettings({ openAtLogin: item.checked }); applyLoginItem(); } catch (_) { /* paused */ } broadcastSettings(); refreshTray(); } },
       { label: 'Always on top', type: 'checkbox', checked: !!store.settings.alwaysOnTop, click: (item) => { try { store.setSettings({ alwaysOnTop: item.checked }); if (win) win.setAlwaysOnTop(item.checked); } catch (_) { /* paused */ } broadcastSettings(); refreshTray(); } },
@@ -256,6 +265,18 @@ function main() {
       { type: 'separator' },
       { label: 'Quit Notes', click: () => { quitting = true; app.quit(); } },
     ]));
+  }
+
+  function stickyMenu() {
+    const items = store.stickies().map((n) => ({
+      label: (stickies.isOpen(n.id) ? '' : '(hidden) ') + (H.deriveTitle(n) || 'Untitled').slice(0, 60),
+      click: () => stickies.open(n.id),
+    }));
+    if (!items.length) items.push({ label: 'No stickies yet', enabled: false });
+    items.push({ type: 'separator' });
+    items.push({ label: 'Show all', enabled: store.stickies().length > 0, click: () => { for (const n of store.stickies()) stickies.open(n.id, { focus: false }); } });
+    items.push({ label: 'Hide all (keep as stickies)', enabled: stickies.openIds().length > 0, click: () => { for (const id of stickies.openIds()) stickies.close(id); } });
+    return items;
   }
 
   function createTray() {
@@ -267,6 +288,7 @@ function main() {
 
   function broadcastSettings() {
     if (win && !win.isDestroyed()) win.webContents.send('settings:changed', store.getSettings());
+    stickies.broadcast('settings:changed', store.getSettings());
   }
 
   function info() {
@@ -296,17 +318,41 @@ function main() {
     if (note.vaultId) vaults.noteChanged(note.vaultId);
     return note;
   });
-  ipcMain.handle('notes:update', (_e, id, patch) => {
+  ipcMain.handle('notes:update', (e, id, patch) => {
     const note = store.update(id, patch);
     if (note && note.vaultId) vaults.noteChanged(note.vaultId);
+    if (note) notifyNoteChanged(note.id, e.sender);
     return note;
   });
+  // Edits made in one window reach the others: the main window reloads the open note when clean,
+  // and each sticky showing that note does the same.
+  function notifyNoteChanged(id, sender) {
+    if (win && !win.isDestroyed() && (!sender || win.webContents.id !== sender.id)) win.webContents.send('notes:reloaded', { reason: 'sticky', id });
+    stickies.broadcast('notes:changed', { id }, sender);
+  }
   ipcMain.handle('notes:togglePin', (_e, id) => store.togglePin(id));
   ipcMain.handle('notes:duplicate', (_e, id) => store.duplicate(id));
-  ipcMain.handle('notes:trash', (_e, id) => store.trash(id));
+  ipcMain.handle('notes:trash', (_e, id) => { const n = store.trash(id); stickies.close(id); return n; });
   ipcMain.handle('notes:restore', (_e, id) => store.restore(id));
-  ipcMain.handle('notes:destroy', (_e, id) => store.destroy(id));
+  ipcMain.handle('notes:destroy', (_e, id) => { stickies.close(id); return store.destroy(id); });
   ipcMain.handle('notes:emptyTrash', () => store.emptyTrash());
+
+  // ---- desktop stickies ------------------------------------------------------
+
+  const stickyView = (n) => ({ id: n.id, title: H.deriveTitle(n), sticky: n.sticky, open: stickies.isOpen(n.id) });
+  function newSticky() {
+    const note = store.create({ title: '', body: '' });
+    stickies.open(note.id);
+    if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'sticky' });
+    return note;
+  }
+  ipcMain.handle('stickies:list', () => store.stickies().map(stickyView));
+  ipcMain.handle('stickies:open', (_e, id) => !!stickies.open(id));
+  ipcMain.handle('stickies:close', (_e, id, opts) => { stickies.close(id, opts || {}); return true; });
+  ipcMain.handle('stickies:create', () => newSticky());
+  ipcMain.handle('stickies:setColor', (_e, id, color) => stickies.setColor(id, color));
+  ipcMain.handle('stickies:setOnTop', (_e, id, onTop) => stickies.setOnTop(id, onTop));
+  ipcMain.handle('stickies:openInNotes', (_e, id) => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   ipcMain.handle('notes:tags', () => store.tags());
   ipcMain.handle('notes:counts', () => store.counts());
 
@@ -521,6 +567,7 @@ function main() {
       if (settings.gitEnabled) git.noteChanged();
     }
     refreshTray();
+    stickies.broadcast('settings:changed', settings);
     return { settings, info: info(), error };
   });
 
@@ -562,6 +609,7 @@ function main() {
     if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
     if (visible) win.webContents.send('app:shown');
     if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
+    if (pendingOpenNote) { win.webContents.send('app:open-note', pendingOpenNote); pendingOpenNote = null; }
     return { visible };
   });
   function requestNewNote() {
@@ -638,7 +686,7 @@ function main() {
     rendererFlushed
       .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()]), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { vaults.closeAll(); app.quit(); });
+      .finally(() => { vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
@@ -649,6 +697,7 @@ function main() {
       win.setBackgroundColor(THEME_BG[effectiveTheme()]);
       win.webContents.send('theme:system', nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
     }
+    stickies.broadcast('settings:changed', store.getSettings());
   });
 
   app.whenReady().then(() => {
@@ -661,5 +710,6 @@ function main() {
     step('login item', applyLoginItem);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
+    step('stickies', () => stickies.restoreAll());
   });
 }
