@@ -348,7 +348,7 @@ function main() {
   });
 
   // ---- locking ---------------------------------------------------------------
-  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); stickies.close(id, { forget: true }); return n; });
+  ipcMain.handle('lock:set', (_e, id, password) => { live.stop(id); const n = store.lockNote(id, password); stickies.close(id, { forget: true }); return n; });
   ipcMain.handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
   ipcMain.handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
   ipcMain.handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
@@ -370,7 +370,8 @@ function main() {
   // ---- live share -------------------------------------------------------------
   ipcMain.handle('live:host', async (_e, id) => { try { return { ok: true, status: await live.host(id) }; } catch (err) { return { ok: false, error: err.message }; } });
   ipcMain.handle('live:join', async (_e, url, folderId) => {
-    try { const r = await live.join(url, { folderId: folderId || null }); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
+    const folder = folderId ? store.getFolder(folderId) : null;
+    try { const r = await live.join(url, { folderId: folder && !folder.vaultId ? folder.id : null }); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
     catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('live:stop', (_e, id) => live.stop(id));

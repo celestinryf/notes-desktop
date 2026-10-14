@@ -108,3 +108,44 @@ test('a guest keeps edits made while the host is unreachable and pushes them whe
   guestLive.stop(joined.noteId);
   hostLive2.stop(note.id);
 });
+
+test('end event stops the guest cleanly; a stuck flag clears with stop(); a resumed guest pushes offline edits instead of taking the host text; POST needs JSON', async () => {
+  const hostStore = new Store(tmp()).load();
+  const guestStore = new Store(tmp()).load();
+  const statuses = [];
+  const hostLive = new LiveShare(hostStore, { pushDelayMs: 20 });
+  const guestLive = new LiveShare(guestStore, { pushDelayMs: 20, onStatus: (id, s) => statuses.push(s) });
+  const note = hostStore.create({ title: 'N', body: 'host text' });
+  const status = await hostLive.host(note.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
+  const joined = await guestLive.join(status.url);
+  await until('connected', () => guestLive.statusOf(joined.noteId).connected);
+  // Host stops -> the guest's session ends by itself (no endless reconnect), flag cleared, note kept.
+  hostLive.stop(note.id);
+  await until('guest ended', () => !guestLive.sessions.has(joined.noteId));
+  assert.equal(guestStore.get(joined.noteId).live, null);
+  assert.ok(statuses.some((s) => s && s.ended), 'ended status reported');
+  assert.equal(guestStore.get(joined.noteId).body, 'host text');
+  // A flag without a session (failed resume) is cleared by stop().
+  guestStore.setLive(joined.noteId, { role: 'guest', url: status.url });
+  assert.equal(guestLive.stop(joined.noteId), true);
+  assert.equal(guestStore.get(joined.noteId).live, null);
+  // Resume with pending offline edits: the local text wins and reaches the host.
+  const note2 = hostStore.create({ title: 'M', body: 'host v1' });
+  const s2 = await hostLive.host(note2.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
+  const local = guestStore.create({ title: 'M', body: 'typed offline' });
+  guestStore.setLive(local.id, { role: 'guest', url: s2.url, pending: true });
+  const guestLive2 = new LiveShare(guestStore, { pushDelayMs: 20 });
+  await guestLive2.restore();
+  await until('offline text reached the host', () => hostStore.get(note2.id).body === 'typed offline');
+  assert.equal(guestStore.get(local.id).body, 'typed offline', 'local copy not overwritten by the host state');
+  await until('pending flag cleared', () => !guestStore.get(local.id).live.pending);
+  // POST without a JSON content type is refused.
+  const code = await new Promise((resolve) => { const u = new URL(s2.url); const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'text/plain' } }, (res) => { res.resume(); resolve(res.statusCode); }); req.end('{"body":"x"}'); });
+  assert.equal(code, 415);
+  // Locking a hosted note ends the share for guests (410 on their next push) rather than wiping them.
+  hostStore.lockNote(note2.id, 'pw');
+  guestStore.update(local.id, { body: 'after lock' }); guestLive2.noteChanged(local.id);
+  await until('guest ended after lock', () => !guestLive2.sessions.has(local.id), 8000);
+  assert.equal(guestStore.get(local.id).body, 'after lock', 'guest copy intact');
+  hostLive.stopAll(); guestLive2.stopAll();
+});

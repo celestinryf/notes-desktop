@@ -165,7 +165,7 @@ function sanitizeSticky(raw) {
 // A live-share session recorded on a note so it can be resumed after a restart.
 function sanitizeLive(raw) {
   if (!raw || typeof raw !== 'object' || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
-  return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined };
+  return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
 }
 
 function sanitizeNote(raw, now) {

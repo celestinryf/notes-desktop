@@ -943,8 +943,8 @@
     const connected = s ? s.connected : false;
     el.liveRow.classList.toggle('is-off', !connected);
     el.liveText.textContent = live.role === 'host'
-      ? ('Live: you are sharing this note · ' + peers + (peers === 1 ? ' person' : ' people') + ' connected')
-      : (connected ? 'Live: following a shared note' : 'Live: reconnecting to the host…' + (s && s.error ? ' (' + s.error + ')' : ''));
+      ? ('Live: you are sharing this note · ' + peers + (peers === 1 ? ' person' : ' people') + ' connected' + (s && s.localOnly ? ' · no network found, the link only works on this computer' : '') + (s && s.error ? ' · ' + s.error : ''))
+      : (connected ? ('Live: following a shared note' + (s && s.pending ? ' · sending your edits…' : '')) : ('Live: reconnecting to the host…' + (s && s.error ? ' (' + s.error + ')' : '') + (s && s.pending ? ' · your edits will be sent when it is back' : '')));
   }
 
   async function startLiveHost() {
@@ -971,7 +971,7 @@
     const hosting = mode === 'link';
     el.liveDialogTitle.textContent = hosting ? 'Live share link' : 'Join a live share';
     el.liveDialogHint.textContent = hosting
-      ? 'Anyone on your network with this link edits this note with you, live. Stop sharing from the Share menu when you are done.'
+      ? 'Anyone on your local network with this link edits this note with you, live. The link is not encrypted, so use it on networks you trust. Windows may ask once to allow Notes through the firewall; say yes or nobody can connect. Stop sharing from the Share menu when you are done.'
       : 'Paste the link the other person shared. You get your own copy of the note that stays in step while the share lasts.';
     el.liveLinkLabel.textContent = hosting ? 'Link' : 'Link to join';
     el.liveLinkInput.value = hosting ? url : '';
@@ -2282,6 +2282,7 @@
     el.liveCopyBtn.addEventListener('click', async () => { await api.app.copy({ text: el.liveLinkInput.value }); toast('Link copied'); });
     el.liveDialog.addEventListener('close', () => focusBody());
     api.on.liveStatus(({ id, status }) => {
+      if (status && status.ended) { delete state.liveStatus[id]; if (state.current && state.current.id === id) { refreshCurrentMeta(); toast('The host ended the live share. Your copy of the note stays.'); } return; }
       if (status) state.liveStatus[id] = status; else delete state.liveStatus[id];
       if (state.current && state.current.id === id) { if (!status && state.current.live) refreshCurrentMeta(); else renderLiveRow(state.current); }
     });
@@ -2500,10 +2501,12 @@
       // the user is mid-edit; in that case leave their text and tell them.
       if (state.currentId) {
         const fresh = await api.notes.get(state.currentId);
+        if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
         if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
-            // Someone else typed. Take their text unless this person is typing right now; their next save wins then.
-            if (!state.dirty || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
+            // Someone else typed. Take their text unless this person is typing right now or a save of their
+            // text is still in flight; their next save wins then.
+            if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
           } else if (!state.dirty) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
           else toast('This note changed on disk while you were editing. Your text is kept; use Reload to take the disk version.');
         }
