@@ -17,6 +17,9 @@
     shareBtn: $('#shareBtn'), shareMenu: $('#shareMenu'), shareReveal: $('#shareReveal'),
     lockBtn: $('#lockBtn'), lockMenu: $('#lockMenu'), lockDialog: $('#lockDialog'), lockForm: $('#lockForm'), lockDialogTitle: $('#lockDialogTitle'), lockDialogHint: $('#lockDialogHint'),
     lockPassword: $('#lockPassword'), lockPassword2: $('#lockPassword2'), lockConfirmRow: $('#lockConfirmRow'), lockError: $('#lockError'), lockCancelBtn: $('#lockCancelBtn'), lockSubmitBtn: $('#lockSubmitBtn'),
+    liveRow: $('#liveRow'), liveText: $('#liveText'), liveLinkBtn: $('#liveLinkBtn'), liveStopBtn: $('#liveStopBtn'), shareLiveHost: $('#shareLiveHost'), shareLiveStop: $('#shareLiveStop'),
+    liveDialog: $('#liveDialog'), liveForm: $('#liveForm'), liveDialogTitle: $('#liveDialogTitle'), liveDialogHint: $('#liveDialogHint'), liveLinkLabel: $('#liveLinkLabel'), liveLinkInput: $('#liveLinkInput'),
+    liveError: $('#liveError'), liveCopyBtn: $('#liveCopyBtn'), liveCancelBtn: $('#liveCancelBtn'), liveSubmitBtn: $('#liveSubmitBtn'),
     lockScreen: $('#lockScreen'), lockScreenPassword: $('#lockScreenPassword'), lockScreenBtn: $('#lockScreenBtn'), lockScreenError: $('#lockScreenError'),
     tagList: $('#tagList'),
     themeBtn: $('#themeBtn'), settingsBtn: $('#settingsBtn'),
@@ -356,7 +359,8 @@
     const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
     const marks = (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '')
       + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '')
-      + (n.locked ? '<span class="lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + (n.unlocked ? '🔓' : '🔒') + '</span>' : '');
+      + (n.locked ? '<span class="lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + (n.unlocked ? '🔓' : '🔒') + '</span>' : '')
+      + (n.live ? '<span class="live-mark" title="Live share (' + n.live.role + ')">LIVE</span>' : '');
     const snippet = n.locked && !n.unlocked ? '<div class="note-card-snippet is-locked">Locked note</div>' : '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>';
     return '<div class="note-card-title">' + marks + highlight(H.deriveTitle(n), q) + fileMark + '</div>' + snippet +
       '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + reminderMark(n) + tags + '</div>';
@@ -889,6 +893,7 @@
     renderFileRow(note);
     renderStickyButton(note);
     renderRemindButton(note);
+    renderLiveRow(note);
     el.shareBtn.classList.toggle('hidden', !!note.trashedAt);
     if (find.open) closeFind();
     if (bot.open) describeBotScope();
@@ -922,6 +927,81 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- live share --------------------------------------------------------------
+
+  state.lastTypedAt = 0;
+  state.liveStatus = {};
+
+  function renderLiveRow(note) {
+    const live = note && note.live;
+    el.liveRow.classList.toggle('hidden', !live);
+    if (!live) return;
+    const s = state.liveStatus[note.id];
+    const peers = s ? s.peers : 0;
+    const connected = s ? s.connected : false;
+    el.liveRow.classList.toggle('is-off', !connected);
+    el.liveText.textContent = live.role === 'host'
+      ? ('Live: you are sharing this note · ' + peers + (peers === 1 ? ' person' : ' people') + ' connected' + (s && s.localOnly ? ' · no network found, the link only works on this computer' : '') + (s && s.error ? ' · ' + s.error : ''))
+      : (connected ? ('Live: following a shared note' + (s && s.pending ? ' · sending your edits…' : '')) : ('Live: reconnecting to the host…' + (s && s.error ? ' (' + s.error + ')' : '') + (s && s.pending ? ' · your edits will be sent when it is back' : '')));
+  }
+
+  async function startLiveHost() {
+    const note = state.current;
+    if (!note) return;
+    const r = await api.live.host(note.id);
+    if (!r.ok) { toast('Could not share: ' + r.error); return; }
+    await refreshCurrentMeta();
+    openLiveDialog('link', r.status.url);
+  }
+
+  async function stopLive() {
+    const note = state.current;
+    if (!note || !note.live) return;
+    await flushSave();
+    await api.live.stop(note.id);
+    delete state.liveStatus[note.id];
+    await refreshCurrentMeta();
+    toast('Live share ended. The note stays.');
+  }
+
+  function openLiveDialog(mode, url) {
+    el.liveDialog.dataset.mode = mode;
+    const hosting = mode === 'link';
+    el.liveDialogTitle.textContent = hosting ? 'Live share link' : 'Join a live share';
+    el.liveDialogHint.textContent = hosting
+      ? 'Anyone on your local network with this link edits this note with you, live. The link is not encrypted, so use it on networks you trust. Windows may ask once to allow Notes through the firewall; say yes or nobody can connect. Stop sharing from the Share menu when you are done.'
+      : 'Paste the link the other person shared. You get your own copy of the note that stays in step while the share lasts.';
+    el.liveLinkLabel.textContent = hosting ? 'Link' : 'Link to join';
+    el.liveLinkInput.value = hosting ? url : '';
+    el.liveLinkInput.readOnly = hosting;
+    el.liveCopyBtn.classList.toggle('hidden', !hosting);
+    el.liveSubmitBtn.classList.toggle('hidden', hosting);
+    el.liveCancelBtn.textContent = hosting ? 'Close' : 'Cancel';
+    el.liveError.textContent = '';
+    el.liveDialog.showModal();
+    el.liveLinkInput.focus();
+    el.liveLinkInput.select();
+  }
+
+  async function submitLiveDialog() {
+    if (el.liveDialog.dataset.mode !== 'join') { el.liveDialog.close(); return; }
+    const url = el.liveLinkInput.value.trim();
+    if (!url) { el.liveError.textContent = 'Paste a link.'; return; }
+    el.liveSubmitBtn.disabled = true;
+    el.liveError.textContent = 'Connecting…';
+    try {
+      const r = await api.live.join(url, state.view === 'folder' ? state.folderId : null);
+      if (!r.ok) { el.liveError.textContent = r.error; return; }
+      el.liveDialog.close();
+      state.liveStatus[r.noteId] = r.status;
+      await setView('all');
+      await selectNoteNow(r.noteId);
+      toast('Joined. Edits on either side show up here as they happen.');
+    } finally {
+      el.liveSubmitBtn.disabled = false;
+    }
   }
 
   // ---- locking -----------------------------------------------------------------
@@ -1103,6 +1183,8 @@
   function openShareMenu() {
     if (!state.current || state.current.trashedAt) return;
     el.shareReveal.classList.toggle('hidden', !state.current.filePath);
+    el.shareLiveHost.classList.toggle('hidden', !!state.current.live || !!state.current.locked || !!state.current.filePath);
+    el.shareLiveStop.classList.toggle('hidden', !state.current.live);
     placePopover(el.shareMenu, el.shareBtn);
     const first = el.shareMenu.querySelector('button:not(.hidden)');
     if (first) first.focus();
@@ -1146,6 +1228,9 @@
       else if (action === 'html') { const r = await api.app.exportHtml(note.id, currentHtml()); if (r.ok) toast('Saved HTML to ' + r.filePath); else if (!r.canceled) toast('Could not save HTML: ' + r.error); }
       else if (action === 'md') { await exportCurrent(); }
       else if (action === 'reveal') { await api.files.reveal(note.id); }
+      else if (action === 'live-host') { await startLiveHost(); }
+      else if (action === 'live-join') { openLiveDialog('join'); }
+      else if (action === 'live-stop') { await stopLive(); }
     } catch (err) {
       toast('Share failed: ' + (err.message || err));
     }
@@ -1341,8 +1426,10 @@
     state.current.pinned = fresh.pinned;
     state.current.remindAt = fresh.remindAt;
     state.current.remindedAt = fresh.remindedAt;
+    state.current.live = fresh.live;
     renderStickyButton(state.current);
     renderRemindButton(state.current);
+    renderLiveRow(state.current);
     await refresh({ keepEditor: true });
   }
 
@@ -1629,6 +1716,7 @@
   }
 
   function scheduleSave() {
+    state.lastTypedAt = Date.now();
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
     state.dirty = true;
     setSaved('Saving…');
@@ -2086,7 +2174,7 @@
 
   function onKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open;
+    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
@@ -2187,6 +2275,17 @@
     el.printBtn.addEventListener('click', printNote);
     el.remindBtn.addEventListener('click', openRemindDialog);
     el.lockBtn.addEventListener('click', onLockButton);
+    el.liveLinkBtn.addEventListener('click', async () => { const s = state.current && (await api.live.status(state.current.id)); if (s && s.url) openLiveDialog('link', s.url); });
+    el.liveStopBtn.addEventListener('click', stopLive);
+    el.liveForm.addEventListener('submit', (e) => { e.preventDefault(); submitLiveDialog(); });
+    el.liveCancelBtn.addEventListener('click', () => el.liveDialog.close());
+    el.liveCopyBtn.addEventListener('click', async () => { await api.app.copy({ text: el.liveLinkInput.value }); toast('Link copied'); });
+    el.liveDialog.addEventListener('close', () => focusBody());
+    api.on.liveStatus(({ id, status }) => {
+      if (status && status.ended) { delete state.liveStatus[id]; if (state.current && state.current.id === id) { refreshCurrentMeta(); toast('The host ended the live share. Your copy of the note stays.'); } return; }
+      if (status) state.liveStatus[id] = status; else delete state.liveStatus[id];
+      if (state.current && state.current.id === id) { if (!status && state.current.live) refreshCurrentMeta(); else renderLiveRow(state.current); }
+    });
     el.lockMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-action]'); if (b) lockMenuAction(b.dataset.action); });
     el.lockForm.addEventListener('submit', (e) => { e.preventDefault(); submitLockDialog(); });
     el.lockCancelBtn.addEventListener('click', () => el.lockDialog.close());
@@ -2402,8 +2501,13 @@
       // the user is mid-edit; in that case leave their text and tell them.
       if (state.currentId) {
         const fresh = await api.notes.get(state.currentId);
+        if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
         if (fresh && fresh.body !== el.bodyInput.value) {
-          if (!state.dirty) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
+          if (reason === 'live') {
+            // Someone else typed. Take their text unless this person is typing right now or a save of their
+            // text is still in flight; their next save wins then.
+            if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
+          } else if (!state.dirty) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
           else toast('This note changed on disk while you were editing. Your text is kept; use Reload to take the disk version.');
         }
       }

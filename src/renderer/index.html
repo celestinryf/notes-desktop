@@ -116,6 +116,12 @@
           <div class="editor-column align-left" id="editorColumn">
             <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
             <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
+            <div class="live-row hidden" id="liveRow">
+              <span class="live-dot" aria-hidden="true"></span>
+              <span id="liveText"></span>
+              <button class="tool-btn" id="liveLinkBtn" title="Show the link">Link</button>
+              <button class="tool-btn" id="liveStopBtn" title="Stop sharing (the note stays)">Stop</button>
+            </div>
             <div class="file-row hidden" id="fileRow">
               <span class="file-kind" id="fileKind"></span>
               <span class="file-path" id="filePath" title=""></span>
@@ -302,6 +308,23 @@
       </form>
     </dialog>
 
+    <dialog id="liveDialog" class="dialog dialog-small">
+      <form method="dialog" class="dialog-form" id="liveForm">
+        <h2 class="dialog-title" id="liveDialogTitle">Live share</h2>
+        <p class="field-hint" id="liveDialogHint"></p>
+        <label class="field">
+          <span class="field-label" id="liveLinkLabel">Link</span>
+          <input id="liveLinkInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="lock-screen-error" id="liveError" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small hidden" id="liveCopyBtn">Copy link</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="liveCancelBtn">Close</button>
+          <button type="submit" class="btn btn-primary btn-small" id="liveSubmitBtn">Join</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="lockDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="lockForm">
         <h2 class="dialog-title" id="lockDialogTitle">Lock note</h2>
@@ -370,6 +393,9 @@
       <button role="menuitem" data-action="html">Save as HTML…</button>
       <button role="menuitem" data-action="md">Save as Markdown…</button>
       <button role="menuitem" data-action="reveal" id="shareReveal">Show file in Explorer</button>
+      <button role="menuitem" data-action="live-host" id="shareLiveHost">Live share this note…</button>
+      <button role="menuitem" data-action="live-join">Join a live share…</button>
+      <button role="menuitem" data-action="live-stop" id="shareLiveStop" class="danger">Stop live share</button>
     </div>
     <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
       <button role="menuitem" data-action="relock">Lock now</button>

@@ -162,6 +162,12 @@ function sanitizeSticky(raw) {
   };
 }
 
+// A live-share session recorded on a note so it can be resumed after a restart.
+function sanitizeLive(raw) {
+  if (!raw || typeof raw !== 'object' || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
+  return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
+}
+
 function sanitizeNote(raw, now) {
   if (!raw || typeof raw !== 'object') return null;
   const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
@@ -178,6 +184,7 @@ function sanitizeNote(raw, now) {
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     sticky: sanitizeSticky(raw.sticky),
+    live: sanitizeLive(raw.live),
     // A locked note stores only ciphertext; its body field is always empty on disk.
     lock: L.sanitizeLock(raw.lock),
     remindAt: Number.isFinite(raw.remindAt) ? Math.round(raw.remindAt) : null,
@@ -532,6 +539,14 @@ class Store {
     const next = sticky ? sanitizeSticky(Object.assign({}, note.sticky || {}, sticky)) : null;
     if (JSON.stringify(next) === JSON.stringify(note.sticky || null)) return note;
     return this._commit(() => { note.sticky = next; return note; });
+  }
+
+  setLive(id, live) {
+    const note = this.get(id);
+    if (!note) return null;
+    const next = sanitizeLive(live);
+    if (JSON.stringify(next) === JSON.stringify(note.live || null)) return note;
+    return this._commit(() => { note.live = next; return note; });
   }
 
   stickies() {
