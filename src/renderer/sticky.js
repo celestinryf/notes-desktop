@@ -38,7 +38,8 @@
     el.title.textContent = title;
     document.title = title;
     applySticky(note.sticky);
-    if (state.rich && !state.dirty) {
+    if (state.rich && !state.dirty && (note.body !== state.shownBody || !state.shownOnce)) {
+      state.shownBody = note.body; state.shownOnce = true; // an unchanged body is not re-set: the caret would jump
       const lossless = state.rich.setMarkdown(note.body);
       // Same rule as the main window: the rendered view may only edit what it can reproduce. A real file
       // gets the strict test. Otherwise the first keystroke would rewrite formatting the sticky cannot show.
@@ -69,7 +70,7 @@
     try {
       const updated = await api.notes.update(id, { body });
       if (updated) { state.note = updated; state.dirty = state.rich.getMarkdown() !== body; el.status.textContent = ''; }
-      else { el.status.textContent = 'Note is gone'; }
+      else { state.dirty = false; setReadOnly(true, 'This note is gone.'); }
       if (state.dirty) scheduleSave();
     } catch (err) {
       el.status.textContent = 'Save failed: ' + (err.message || err);
@@ -94,7 +95,7 @@
     el.title.addEventListener('dblclick', () => api.stickies.openInNotes(id));
     el.closeBtn.addEventListener('click', async () => { await flush(); api.stickies.close(id, { forget: true }); });
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); api.stickies.close(id, { forget: false }); }
+      if (e.key === 'Escape') { e.preventDefault(); flush().finally(() => api.stickies.close(id, { forget: false })); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); flush(); }
     });
     window.addEventListener('blur', () => { if (state.dirty) flush(); });

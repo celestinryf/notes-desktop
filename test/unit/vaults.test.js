@@ -237,3 +237,60 @@ test('initRepo turns a plain folder into a repository with a remote and ignores 
   assert.equal(git(bare, ['rev-list', '--count', 'main']), '1');
   vm.closeAll();
 });
+
+test('vault scan: an unavailable folder removes nothing; an external rename keeps the note; one bad file does not stop the scan; trash/delete only touch .trash', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const plan = store.notes.find((n) => n.title === 'Plan');
+  store.update(plan.id, { tags: 'keep', pinned: true });
+  // External rename: same content, new name -> same note id, tags and pin kept.
+  fs.renameSync(path.join(dir, 'Projects', 'Plan.md'), path.join(dir, 'Projects', 'Roadmap.md'));
+  const r1 = await store.scanVault(v.id);
+  assert.equal(r1.removed, 0);
+  const same = store.get(plan.id);
+  assert.equal(same.title, 'Roadmap');
+  assert.deepEqual(same.tags, ['keep']);
+  assert.equal(same.pinned, true);
+  // A file that is not UTF-8 any more does not abort the scan.
+  fs.writeFileSync(path.join(dir, 'Inbox.md'), Buffer.from([0xff, 0xfe, 0x41]));
+  fs.writeFileSync(path.join(dir, 'New.md'), 'new\n');
+  const r2 = await store.scanVault(v.id);
+  assert.equal(r2.added, 1, 'the new file after the bad one was still linked');
+  // The vault folder disappears: nothing is removed.
+  const away = dir + '-away';
+  fs.renameSync(dir, away);
+  const r3 = await store.scanVault(v.id);
+  assert.equal(r3.unavailable, true);
+  assert.ok(store.notes.some((n) => n.id === plan.id), 'notes kept while the folder is away');
+  fs.renameSync(away, dir);
+  // Overlapping vaults are refused.
+  assert.throws(() => store.addVault({ path: path.join(dir, 'Projects') }), /overlaps/);
+  // Delete forever only removes files inside .trash: a trashed note pointing at a live file is left alone.
+  const deep = store.notes.find((n) => n.title === 'notes');
+  store.trash(deep.id);
+  assert.ok(fs.existsSync(path.join(dir, '.trash', 'notes.txt')));
+  deep.filePath = path.join(dir, 'Projects', 'Roadmap.md'); // simulate a stale record pointing at a live file
+  store.destroy(deep.id);
+  assert.ok(fs.existsSync(path.join(dir, 'Projects', 'Roadmap.md')), 'live file untouched');
+});
+
+test('a file changed on disk is not overwritten by a stale save unless forced', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const inbox = store.notes.find((n) => n.title === 'Inbox');
+  await new Promise((r) => setTimeout(r, 20));
+  fs.writeFileSync(path.join(dir, 'Inbox.md'), '# Inbox\nedited by git\n');
+  assert.throws(() => store.update(inbox.id, { body: 'my version\n' }), /changed on disk/);
+  assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), '# Inbox\nedited by git\n', 'their edit kept');
+  store.update(inbox.id, { body: 'my version\n', force: true });
+  assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), 'my version\n');
+  // Reading the file first (as the app does on a rescan) makes a later save fine again.
+  fs.writeFileSync(path.join(dir, 'Inbox.md'), 'theirs 2\n');
+  await store.refreshFileNote(inbox.id);
+  store.update(inbox.id, { body: 'theirs 2 plus mine\n' });
+  assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), 'theirs 2 plus mine\n');
+});

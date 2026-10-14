@@ -788,6 +788,42 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
+test('undo after switching notes does nothing; typing with the find bar open does not eat text', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'gamma text');
+  await waitFor('gamma saved', () => findNote('Gamma (copy)').body === 'gamma text');
+  await useSourceMode(false);
+  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && !n.filePath);
+  await page.click('.note-card[data-id="' + other.id + '"]');
+  await waitForDom((id) => !!document.querySelector('.note-card.is-active[data-id="' + id + '"]'), other.id);
+  const before = await page.evaluate(() => document.getElementById('bodyInput').value);
+  await page.click('.rich-editor-content');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await sleep(600);
+  assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), before, 'undo did not bring the other note back');
+  assert.equal(findNote(other.title).body, before);
+  // Find bar open, typing in source view appends where the caret is.
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.keyboard.press('Control+Shift+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'gamma');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/1');
+  await page.click('#bodyInput');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' plus gamma');
+  await waitFor('typed intact', () => findNote('Gamma (copy)').body === 'gamma text plus gamma');
+  await waitForDom(() => /\/2$/.test(document.getElementById('findCount').textContent));
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
 test('find in note counts and steps through matches; print asks the system to print', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
@@ -1077,6 +1113,20 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   void id;
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('hardening: the page cannot be navigated away, and "Open with…" refuses programs', async () => {
+  const opened = await page.evaluate(() => { const w = window.open('file:///C:/Windows/win.ini'); return w === null; });
+  assert.equal(opened, true, 'window.open is denied');
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1, 'no extra window');
+  const bat = path.join(dataDir, 'danger.bat');
+  fs.writeFileSync(bat, '@echo off\r\n');
+  const linked = await page.evaluate((p) => window.notesApi.files.link([p]), bat);
+  const note = (Array.isArray(linked) ? linked : linked.notes || [])[0] || readNotes().notes.find((n) => n.filePath && /danger\.bat$/.test(n.filePath));
+  assert.ok(note, 'linked');
+  const res = await page.evaluate((id) => window.notesApi.files.openExternal(id), note.id);
+  assert.match(String(res), /does not launch/);
+  await page.evaluate((id) => window.notesApi.notes.destroy(id), note.id);
 });
 
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {

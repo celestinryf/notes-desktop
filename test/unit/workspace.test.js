@@ -101,3 +101,16 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   assert.ok(manifest.files.some((f) => f.rel === 'Terminal note.md'), 're-exported with the new note');
   assert.equal(fs.readFileSync(path.join(dir, 'Plan.md'), 'utf8'), 'v3 from terminal');
 });
+
+test('refreshWorkspace does not export (and so delete) when the import failed', () => {
+  const store = new Store(tmp()).load();
+  store.create({ title: 'A', body: 'a' });
+  const dir = tmp();
+  W.exportNotes(store, dir);
+  fs.writeFileSync(path.join(dir, 'A.md'), 'edited in a terminal');
+  fs.writeFileSync(path.join(dir, W.MANIFEST), '{ not json');
+  const r = W.refreshWorkspace(store, dir);
+  assert.equal(r.manifest, null);
+  assert.match(r.imported.error, /JSON/i);
+  assert.equal(fs.readFileSync(path.join(dir, 'A.md'), 'utf8'), 'edited in a terminal', 'the folder was left alone');
+});

@@ -61,6 +61,7 @@ function importNotes(store, dir) {
   const known = new Map(manifest.files.map((f) => [f.rel.toLowerCase(), f]));
   let updated = 0, created = 0, missing = 0, conflicts = 0;
   const details = [];
+  const updatedIds = [];
   for (const f of manifest.files) {
     const abs = path.join(dir, f.rel);
     if (!fs.existsSync(abs)) { missing++; details.push('missing: ' + f.rel); continue; }
@@ -79,7 +80,7 @@ function importNotes(store, dir) {
         conflicts++;
         details.push('conflict: ' + f.rel + ' kept yours; agent version saved as "' + copy.title + '"');
       } else {
-        store.update(f.id, { body: content }); updated++; details.push('updated: ' + f.rel);
+        store.update(f.id, { body: content }); updated++; updatedIds.push(f.id); details.push('updated: ' + f.rel);
       }
       f.hash = h; // the workspace now reflects this content; a later import must not re-apply it
     }
@@ -103,7 +104,7 @@ function importNotes(store, dir) {
   walk(dir, '');
   // Persist what the workspace now maps to, so repeated imports (or a terminal session) are incremental.
   try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8'); } catch (_) { /* best effort */ }
-  return { updated, created, missing, conflicts, details };
+  return { updated, created, missing, conflicts, details, updatedIds };
 }
 
 // Finds (or creates) the plain folder chain matching a relative directory produced by folderRelPath.
@@ -119,9 +120,11 @@ function folderIdForRel(store, relDir) {
 
 // Pulls in whatever changed in the workspace since the last export (a terminal session, an earlier run),
 // then writes a fresh export. Returns { imported, manifest }.
+// If the import fails, nothing is exported: exporting starts by deleting the folder, which would throw
+// away whatever the import could not read.
 function refreshWorkspace(store, dir) {
   let imported = null;
-  try { imported = importNotes(store, dir); } catch (err) { imported = { error: err.message }; }
+  try { imported = importNotes(store, dir); } catch (err) { return { imported: { error: err.message }, manifest: null }; }
   const manifest = exportNotes(store, dir);
   return { imported, manifest };
 }

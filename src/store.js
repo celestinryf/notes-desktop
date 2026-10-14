@@ -244,6 +244,8 @@ class Store {
           }
           raw = this._loadNewestBackup();
           this.recoveredFromBackup = true;
+          // Nothing to recover from and the damaged file cannot be moved aside: never write over it.
+          if (!raw && this.backupSuspended) this.saveBlocked = true;
         }
       }
     }
@@ -395,16 +397,33 @@ class Store {
       patch = Object.assign({}, patch); delete patch.body; // the record's body stays empty
     }
     let fileMoved = false;   // the file was renamed, moved, or created on disk
+    // Refusals first, before anything touches the disk.
+    if (patch.folderId !== undefined && note.vaultId && note.filePath && !patch.folderId && (note.folderId || null) !== null) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
+    if (patch.folderId && note.filePath && !note.vaultId) {
+      const t = this.getFolder(patch.folderId);
+      if (t && t.vaultId) throw Object.assign(new Error('A linked file cannot be moved into a vault; copy its text into a new note there instead.'), { code: 'EVAULT' });
+    }
     // File-backed: the file is the source of truth and is written first, before any field changes.
     if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
       if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
+      // Someone else (git, another editor) changed the file since it was last read: do not overwrite them.
+      if (!patch.force && note.fileMtime !== null) {
+        const diskM = F.mtimeOf(note.filePath);
+        if (diskM !== null && diskM !== note.fileMtime) {
+          let onDisk = null;
+          try { onDisk = F.readText(note.filePath).body; } catch (_) { /* unreadable: treat as changed */ }
+          if (onDisk !== note.body && onDisk !== patch.body) throw Object.assign(new Error('This file changed on disk since it was opened.'), { code: 'ECONFLICT' });
+        }
+      }
       note.fileMtime = F.writeTextInPlace(note.filePath, patch.body);
       fileWritten = true;
     }
     if (typeof patch.title === 'string' && patch.title !== note.title) {
       // In a vault the title is the file name: rename the file first, then record what it became.
-      if (note.vaultId && note.filePath && note.fileKind === 'text') { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
-      else note.title = patch.title;
+      if (note.vaultId && note.filePath && note.fileKind === 'text') {
+        try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
+        catch (err) { if (fileWritten) { note.body = patch.body; } throw err; } // the body did land; keep memory honest
+      } else note.title = patch.title;
       changed = true;
     }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
@@ -571,7 +590,9 @@ class Store {
       this.keys.set(copy.id, key);
       return this.publicNote(copy);
     }
-    // A duplicate of a file-backed note is an ordinary note holding a copy of the text, not a second link.
+    // A duplicate inside a vault is a new file there; of any other file-backed note, an ordinary note holding a copy.
+    const folder = note.folderId ? this.getFolder(note.folderId) : null;
+    if (note.vaultId && folder && folder.vaultId && folder.dirPath) return this.createVaultNote(folder.id, { title: note.title + ' (copy)', body: note.body, tags: note.tags });
     return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
 
@@ -623,6 +644,9 @@ class Store {
     if (!fs.existsSync(vault.path) || !fs.statSync(vault.path).isDirectory()) throw Object.assign(new Error('Folder not found: ' + vault.path), { code: 'ENOENT' });
     const dup = this.vaults.find((v) => F.pathKey(v.path) === F.pathKey(vault.path));
     if (dup) return dup;
+    const inside = (a, b) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
+    const overlap = this.vaults.find((v) => inside(vault.path, v.path) || inside(v.path, vault.path));
+    if (overlap) throw Object.assign(new Error('That folder overlaps the vault "' + overlap.name + '"; one vault cannot sit inside another.'), { code: 'EOVERLAP' });
     return this._commit(() => {
       this.vaults.push(vault);
       this.folders.push({ id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: vault.id, dirPath: vault.path });
@@ -662,6 +686,9 @@ class Store {
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
+    // An unplugged drive or an unmounted share is not an empty vault: touch nothing until it is back.
+    let rootEntries = null;
+    try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
     const root = this.vaultRootFolder(id) || this._commit(() => { const f = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path }; this.folders.push(f); return f; });
     const seenFolders = new Set([root.id]);
     const seenNotes = new Set();
@@ -685,13 +712,25 @@ class Store {
           if (!VAULT_EXT.has(F.extOf(e.name))) continue;
           let note = this.findByPath(full);
           if (!note) {
-            try {
-              note = await this.linkFile(full, { folderId, title: stem(e.name) });
-              this._commit(() => { note.vaultId = id; });
-              added++;
-            } catch (_) { continue; }
+            // A file renamed or moved outside the app: the note whose file vanished and whose text matches
+            // keeps its id, tags, pin, reminder and sticky instead of being deleted and re-created.
+            let text = null;
+            try { text = F.readText(full).body; } catch (_) { continue; }
+            const orphan = this.notes.find((n) => n.vaultId === id && !n.trashedAt && n.filePath && !seenNotes.has(n.id) && n.body === text && !fs.existsSync(n.filePath));
+            if (orphan) {
+              this._commit(() => { orphan.filePath = full; orphan.title = stem(e.name); orphan.folderId = folderId; orphan.fileMtime = F.mtimeOf(full); });
+              note = orphan; updated++;
+            } else {
+              try {
+                note = await this.linkFile(full, { folderId, title: stem(e.name) });
+                this._commit(() => { note.vaultId = id; });
+                added++;
+              } catch (_) { continue; }
+            }
           } else {
-            const r = await this.refreshFileNote(note.id);
+            // One unreadable file (too big, not UTF-8) must not stop the rest of the scan.
+            let r;
+            try { r = await this.refreshFileNote(note.id); } catch (_) { seenNotes.add(note.id); continue; }
             if (r.changed) updated++;
             if (note.folderId !== folderId || note.vaultId !== id || note.trashedAt) {
               this._commit(() => { note.folderId = folderId; note.vaultId = id; note.trashedAt = null; });
@@ -740,7 +779,8 @@ class Store {
     const ext = path.extname(note.filePath) || '.md';
     const base = H.safeFilename(String(title || '').trim() || 'Untitled');
     if (base === stem(path.basename(note.filePath))) return note.title;
-    const name = uniqueName(dir, base, ext);
+    // Only the case changed (notes -> Notes): Windows would find the file itself in the way; rename directly.
+    const name = base.toLowerCase() === stem(path.basename(note.filePath)).toLowerCase() ? base + ext : uniqueName(dir, base, ext);
     const next = path.join(dir, name);
     fs.renameSync(note.filePath, next);
     note.filePath = next;
@@ -784,7 +824,7 @@ class Store {
       return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; }); // pinned is kept for restore
     } catch (err) {
       // The metadata write failed: put the file back so disk and memory agree again.
-      if (moved) { try { fs.renameSync(moved.to, moved.from); } catch (_) { /* best effort */ } }
+      if (moved) { try { fs.renameSync(moved.to, moved.from); note.filePath = moved.from; delete note.trashedFrom; } catch (_) { /* best effort */ } }
       throw err;
     }
   }
@@ -799,11 +839,21 @@ class Store {
       const dir = path.dirname(origin);
       fs.mkdirSync(dir, { recursive: true });
       const next = path.join(dir, uniqueName(dir, stem(path.basename(origin)), path.extname(origin) || '.md'));
+      const wasAt = note.filePath, wasFrom = note.trashedFrom, wasFolder = note.folderId;
       fs.renameSync(note.filePath, next);
       note.filePath = next;
       const folder = this.folders.find((f) => f.vaultId === note.vaultId && f.dirPath && F.pathKey(f.dirPath) === F.pathKey(dir));
       if (folder) note.folderId = folder.id;
       delete note.trashedFrom;
+      try {
+        return this._commit(() => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
+      } catch (err) {
+        // Save failed: the file goes back to .trash and the record stays trashed, so "delete forever" can
+        // never remove a live file.
+        try { fs.renameSync(next, wasAt); } catch (_) { /* best effort */ }
+        note.filePath = wasAt; note.trashedFrom = wasFrom; note.folderId = wasFolder;
+        throw err;
+      }
     }
     return this._commit(() => {
       note.trashedAt = null;
@@ -813,19 +863,24 @@ class Store {
     });
   }
 
+  // Only a file that sits in the vault's .trash is ours to delete for good.
+  _inVaultTrash(note) {
+    return !!(note.vaultId && note.trashedAt && note.filePath && /[\\/]\.trash[\\/]/.test(note.filePath) && fs.existsSync(note.filePath));
+  }
+
   destroy(id) {
     const idx = this.notes.findIndex((n) => n.id === id);
     if (idx === -1) return false;
     this.relock(id);
     const note = this.notes[idx];
-    if (note.vaultId && note.trashedAt && note.filePath && fs.existsSync(note.filePath)) fs.rmSync(note.filePath);
+    if (this._inVaultTrash(note)) fs.rmSync(note.filePath);
     return this._commit(() => { this.notes.splice(idx, 1); return true; });
   }
 
   emptyTrash() {
     const before = this.notes.length;
     if (!this.notes.some((n) => n.trashedAt)) return 0;
-    for (const n of this.notes) if (n.trashedAt && n.vaultId && n.filePath && fs.existsSync(n.filePath)) { try { fs.rmSync(n.filePath); } catch (_) { /* leave it */ } }
+    for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) { /* leave it */ } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
     return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
   }
@@ -1090,7 +1145,8 @@ class Store {
   }
 
   exportAll() {
-    return JSON.stringify({ exportedAt: this.now(), folders: this.folders, notes: this.notes.filter((n) => !n.trashedAt) }, null, 2);
+    const notes = this.notes.filter((n) => !n.trashedAt).map((n) => { const c = Object.assign({}, n); delete c.live; return c; }); // live tokens stay on this machine
+    return JSON.stringify({ exportedAt: this.now(), folders: this.folders, notes }, null, 2);
   }
 
   importMarkdown(filename, content) {

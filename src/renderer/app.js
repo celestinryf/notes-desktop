@@ -310,7 +310,7 @@
     el.noteList.innerHTML = '';
     el.listEmpty.classList.toggle('hidden', state.notes.length > 0);
     el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
-    const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', tag: '#' + state.tag };
+    const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', reminders: 'Reminders', tag: '#' + state.tag };
     el.listTitle.innerHTML = '';
     if (q) el.listTitle.textContent = 'Results';
     else if (state.view === 'folder') {
@@ -1092,7 +1092,12 @@
     if (!keepTyping) {
       state.dirty = false;
       el.bodyInput.value = updated.body;
-      if (state.rich) state.currentLossless = state.rich.setMarkdown(updated.body);
+      if (state.rich) {
+        state.currentLossless = state.rich.setMarkdown(updated.body);
+        // Same rule as opening a note: text the rendered view would rewrite opens as source.
+        if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) { applyEditorMode(true); toast('Switched to source: this note contains formatting the rendered view would change.'); }
+      }
+      if (find.open) runFind(true, true, true);
     } else scheduleSave();
     renderLockState(updated);
     renderStickyButton(updated);
@@ -1224,7 +1229,16 @@
       else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
       else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
       else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
-      else if (action === 'pdf') { if (find.open) closeFind(); const r = await api.app.exportPdf(note.id); if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error); }
+      else if (action === 'pdf') {
+        if (find.open) closeFind();
+        const chosen = await api.app.pdfPath(note.id);
+        if (!chosen.ok) { if (!chosen.canceled) toast('Could not save PDF: ' + chosen.error); return; }
+        // The page is what prints: it must still show this very note, unlocked, with nothing unsaved.
+        if (state.currentId !== note.id || lockedNow()) { toast('The note changed while the dialog was open; nothing was saved.'); return; }
+        await flushSave();
+        const r = await api.app.writePdf(chosen.filePath);
+        if (r.ok) toast('Saved PDF to ' + r.filePath); else toast('Could not save PDF: ' + r.error);
+      }
       else if (action === 'html') { const r = await api.app.exportHtml(note.id, currentHtml()); if (r.ok) toast('Saved HTML to ' + r.filePath); else if (!r.canceled) toast('Could not save HTML: ' + r.error); }
       else if (action === 'md') { await exportCurrent(); }
       else if (action === 'reveal') { await api.files.reveal(note.id); }
@@ -1310,7 +1324,8 @@
     }).filter(Boolean);
   }
 
-  function runFind(forward, fresh) {
+  // quiet: recount and re-highlight after the text changed, without moving the selection or scrolling.
+  function runFind(forward, fresh, quiet) {
     const q = el.findInput.value;
     const sameQuery = q === find.query;
     find.query = q;
@@ -1326,7 +1341,7 @@
         find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
       }
       const n = find.sourceHits.length;
-      if (n && find.active >= 0) {
+      if (n && find.active >= 0 && !quiet) {
         const at = find.sourceHits[find.active];
         // A textarea shows its selection only while focused, so stepping (Enter, F3) moves focus to the
         // text and keeps it there; F3 / Shift+F3 keep stepping from the text, Esc closes the bar.
@@ -1349,7 +1364,7 @@
       CSS.highlights.set('notes-find-active', new Highlight(...(find.active >= 0 ? [find.ranges[find.active]] : [])));
     }
     const n = find.ranges.length;
-    if (n && find.active >= 0) {
+    if (n && find.active >= 0 && !quiet) {
       const r = find.ranges[find.active];
       const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
       if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -1502,7 +1517,7 @@
       }
       refresh({ keepEditor: true }).then(async () => {
         // Reload the open note from the store in case the agent edited it.
-        if (state.currentId && !state.dirty) { const fresh = await api.notes.get(state.currentId); if (fresh && fresh.body !== el.bodyInput.value) { applyFreshFileBody(fresh); toast('This note was updated by the bot.'); } }
+        if (state.currentId && !state.dirty) { const wanted = state.currentId; const fresh = await api.notes.get(wanted); if (fresh && fresh.id === state.currentId && !state.dirty && !state.inflight.has(fresh.id) && fresh.body !== el.bodyInput.value) { applyFreshFileBody(fresh); toast('This note was updated by the bot.'); } }
       });
     } else if (ev.type === 'reloaded') {
       refresh({ keepEditor: true });
@@ -1688,6 +1703,7 @@
     }
     autoGrow();
     updateStatus(fresh);
+    if (find.open) runFind(true, true, true);
   }
 
   async function reloadCurrentFile() {
@@ -1743,6 +1759,20 @@
       if (state.pending.has(state.currentId)) { state.dirty = true; await flushSave(); }
       await retryPending();
     }, 3000);
+  }
+
+  function offerConflictChoice(id, patch) {
+    if (state.conflictShown === id) return;
+    state.conflictShown = id;
+    toast('This file changed on disk while you were editing. Reload it (your edit is dropped) or keep yours.', {
+      label: 'Keep mine',
+      run: async () => {
+        state.conflictShown = null;
+        try { const updated = await api.notes.update(id, Object.assign({}, patch, { force: true })); state.pending.delete(id); if (state.currentId === id && updated) { state.dirty = false; state.current = updated; setSaved('Saved'); refreshCard(updated); } }
+        catch (err) { reportSaveFailure(err); scheduleRetry(); }
+      },
+    });
+    setTimeout(() => { if (state.conflictShown === id) state.conflictShown = null; }, 12000);
   }
 
   function reportSaveFailure(err) {
@@ -1809,6 +1839,11 @@
     } catch (err) {
       state.pending.set(id, patch);
       if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); }
+      if (/changed on disk/i.test(String(err && err.message))) {
+        // Someone else changed the file: no silent retry. Reload takes theirs; Keep mine writes yours over it.
+        offerConflictChoice(id, patch);
+        return false;
+      }
       reportSaveFailure(err);
       scheduleRetry();
       return false;
@@ -1949,7 +1984,7 @@
         if (md === el.bodyInput.value) return;
         el.bodyInput.value = md;
         scheduleSave();
-        if (find.open) runFind(true, true);
+        if (find.open) runFind(true, true, true);
       },
     });
     el.richEditor.addEventListener('click', (e) => {
@@ -1978,6 +2013,7 @@
     if (!next && state.currentId) {
       // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
       state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false; // a real file gets the strict test
       if (state.currentLossless === false) {
         state.lossyOverride = state.currentId;
         toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
@@ -2312,7 +2348,7 @@
     el.findPrevBtn.addEventListener('click', () => runFind(false));
     el.findCloseBtn.addEventListener('click', closeFind);
     el.findInput.addEventListener('input', () => runFind(true, true));
-    el.bodyInput.addEventListener('input', () => { if (find.open && state.sourceMode) runFind(true, true); });
+    el.bodyInput.addEventListener('input', () => { if (find.open && state.sourceMode) runFind(true, true, true); });
     el.findInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); runFind(!e.shiftKey); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
@@ -2500,15 +2536,17 @@
       // The store may now hold a newer body for the open note (a pull, a rescan, the bot). Show it, unless
       // the user is mid-edit; in that case leave their text and tell them.
       if (state.currentId) {
-        const fresh = await api.notes.get(state.currentId);
+        const wanted = state.currentId;
+        const fresh = await api.notes.get(wanted);
+        if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
         if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
         if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
             // Someone else typed. Take their text unless this person is typing right now or a save of their
             // text is still in flight; their next save wins then.
             if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
-          } else if (!state.dirty) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
-          else toast('This note changed on disk while you were editing. Your text is kept; use Reload to take the disk version.');
+          } else if (!state.dirty && !state.inflight.has(fresh.id)) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
+          else toast('This note changed elsewhere while you were editing. Your text is kept; ' + (fresh.filePath ? 'use Reload to take the disk version.' : 'reopen the note to see the other version.'));
         }
       }
       if (reason === 'recovered') toast('Your notes file is readable again; saving resumed.');
