@@ -37,6 +37,19 @@ contextBridge.exposeInMainWorld('notesApi', {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  vaults: {
+    list: invoke('vaults:list'),
+    pickFolder: invoke('vaults:pickFolder'),
+    add: invoke('vaults:add'),
+    clone: invoke('vaults:clone'),
+    update: invoke('vaults:update'),
+    remove: invoke('vaults:remove'),
+    sync: invoke('vaults:sync'),
+    scan: invoke('vaults:scan'),
+    initRepo: invoke('vaults:initRepo'),
+    status: invoke('vaults:status'),
+    openFolder: invoke('vaults:openFolder'),
+  },
   folders: {
     tree: invoke('folders:tree'),
     path: invoke('folders:path'),
@@ -75,5 +88,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     gitStatus: on('git:status'),
     flush: on('app:flush'),
     reloaded: on('notes:reloaded'),
+    vaultStatus: on('vault:status'),
   },
 });

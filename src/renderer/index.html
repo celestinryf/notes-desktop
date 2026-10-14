@@ -200,6 +200,16 @@
         </div>
 
         <div class="field">
+          <span class="field-label">Vaults (folders and git repos as notes)</span>
+          <span class="field-help">A vault is a folder on this computer whose Markdown files are notes. If it is a git repository with a remote, changes are committed, pulled, and pushed automatically, so the same notes follow you across devices.</span>
+          <div id="vaultList" class="vault-list"></div>
+          <div class="dialog-actions">
+            <button type="button" class="btn btn-small" id="vaultAddFolderBtn">Add a folder</button>
+            <button type="button" class="btn btn-small" id="vaultCloneBtn">Clone a repository…</button>
+          </div>
+        </div>
+
+        <div class="field">
           <span class="field-label">Speech</span>
           <label class="field">
             <span class="field-help">Read-aloud voice</span>
@@ -229,6 +239,31 @@
       </form>
     </dialog>
 
+    <dialog id="vaultDialog" class="dialog">
+      <form method="dialog" class="dialog-form" id="vaultForm">
+        <h2 class="dialog-title" id="vaultDialogTitle">Clone a repository</h2>
+        <label class="field">
+          <span class="field-label">Repository URL</span>
+          <input id="vaultUrlInput" class="input" type="text" placeholder="https://github.com/you/notes.git or git@github.com:you/notes.git" autocomplete="off" spellcheck="false" />
+          <span class="field-help">Uses your existing git credentials (for GitHub, the gh CLI login or Git Credential Manager).</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Clone into</span>
+          <div class="dialog-actions"><input id="vaultDestInput" class="input" type="text" readonly /><button type="button" class="btn btn-small" id="vaultDestBtn">Choose…</button></div>
+        </label>
+        <label class="field">
+          <span class="field-label">Vault name (folder name)</span>
+          <input id="vaultNameInput" class="input" type="text" placeholder="Taken from the URL if empty" autocomplete="off" />
+        </label>
+        <span class="field-error" id="vaultError"></span>
+        <div class="dialog-actions">
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="vaultCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="vaultCloneSubmitBtn">Clone</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="linkDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="linkForm">
         <h2 class="dialog-title">Link</h2>
@@ -250,6 +285,8 @@
       <button role="menuitem" data-action="new-note">New note here</button>
       <button role="menuitem" data-action="new-subfolder">New subfolder</button>
       <button role="menuitem" data-action="rename">Rename</button>
+      <button role="menuitem" data-action="sync" id="folderMenuSync">Sync vault now</button>
+      <button role="menuitem" data-action="open-folder" id="folderMenuOpen">Open folder in Explorer</button>
       <button role="menuitem" data-action="delete" class="danger">Delete folder</button>
     </div>
   </div>

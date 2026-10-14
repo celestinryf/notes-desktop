@@ -579,6 +579,71 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await useSourceMode(true);
 });
 
+test('vaults: a folder of Markdown becomes notes; new note writes a file; rename renames; external files appear', { timeout: 60000 }, async () => {
+  const vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-vault-'));
+  fs.mkdirSync(path.join(vaultDir, 'Work'));
+  fs.writeFileSync(path.join(vaultDir, 'Hello.md'), '# Hello\n\nfrom the vault\n');
+  fs.writeFileSync(path.join(vaultDir, 'Work', 'Plan.md'), 'plan\n');
+  await app.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = async (_w, opts) => (/vault/i.test(opts.title) ? { canceled: false, filePaths: [dir] } : { canceled: true, filePaths: [] });
+  }, vaultDir);
+
+  await useSourceMode(true);
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.click('#vaultAddFolderBtn');
+  await waitFor('vault recorded', () => readNotes().vaults && readNotes().vaults.length === 1);
+  const vault = readNotes().vaults[0];
+  await waitFor('vault notes mirrored', () => readNotes().notes.filter((n) => n.vaultId === vault.id).length === 2);
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await page.waitForSelector('.folder-row .vault-badge', { timeout: 8000 });
+  const root = readNotes().folders.find((f) => f.vaultId === vault.id && !f.parentId);
+  assert.equal(root.name, path.basename(vaultDir));
+  assert.ok(readNotes().folders.some((f) => f.vaultId === vault.id && f.name === 'Work'));
+
+  // New note inside the vault root creates a file named after the title.
+  await page.keyboard.press('Control+n');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Shopping');
+  await page.fill('#bodyInput', '- eggs\n');
+  await waitFor('file created from note', () => fs.existsSync(path.join(vaultDir, 'Shopping.md')) && fs.readFileSync(path.join(vaultDir, 'Shopping.md'), 'utf8') === '- eggs\n');
+  // Renaming the title renames the file.
+  await page.fill('#titleInput', 'Groceries');
+  await waitFor('file renamed', () => fs.existsSync(path.join(vaultDir, 'Groceries.md')) && !fs.existsSync(path.join(vaultDir, 'Shopping.md')));
+
+  // A file dropped into the folder by another program shows up through the watcher.
+  fs.writeFileSync(path.join(vaultDir, 'Work', 'External.md'), 'external\n');
+  await waitFor('external file became a note', () => readNotes().notes.some((n) => n.title === 'External' && n.vaultId === vault.id), 15000);
+
+  // Trash moves the file into .trash; empty trash deletes it.
+  await page.click('.note-card:has-text("Groceries")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('moved to .trash', () => fs.existsSync(path.join(vaultDir, '.trash', 'Groceries.md')) && !fs.existsSync(path.join(vaultDir, 'Groceries.md')));
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('deleted from .trash', () => !fs.existsSync(path.join(vaultDir, '.trash', 'Groceries.md')));
+
+  // Settings shows the vault with a status line; Sync on a plain folder explains itself.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.waitForSelector('.vault-item', { timeout: 8000 });
+  assert.match(await page.textContent('.vault-item .vault-status'), /Plain folder/);
+  await page.click('.vault-item button:has-text("Sync now")');
+  await waitForDom(() => /plain folder/i.test(document.getElementById('toast').textContent));
+
+  // Remove the vault: notes and folders go, files stay.
+  await page.click('.vault-item button:has-text("Remove")');
+  await waitFor('vault removed', () => readNotes().vaults.length === 0 && !readNotes().notes.some((n) => n.vaultId));
+  assert.ok(fs.existsSync(path.join(vaultDir, 'Hello.md')) && fs.existsSync(path.join(vaultDir, 'Work', 'Plan.md')), 'files untouched');
+  await waitForDom(() => !document.getElementById('settingsDialog').open).catch(() => {});
+  await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); });
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+});
+
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
