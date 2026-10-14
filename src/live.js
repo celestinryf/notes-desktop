@@ -151,6 +151,7 @@ class LiveShare {
   // Joins a share: fetches the note, creates a local copy flagged live, then follows the event stream.
   async join(url, opts) {
     opts = opts || {};
+    if (opts.noteId && this.sessions.has(opts.noteId)) return { noteId: opts.noteId, status: this.statusOf(opts.noteId) }; // already following
     const parsed = new URL(String(url).trim());
     if (!/^https?:$/.test(parsed.protocol) || !/^\/live\/[0-9a-f]{16,}$/i.test(parsed.pathname)) throw new Error('That is not a live share link.');
     let note, version = 0;
