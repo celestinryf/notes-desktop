@@ -105,6 +105,15 @@ test('markdownToNote falls back to the filename when there is no heading', () =>
   assert.deepEqual(H.markdownToNote('Shopping list.txt', 'eggs\r\nmilk\r\n'), { title: 'Shopping list', body: 'eggs\nmilk', tags: [] });
 });
 
+test('clampPane keeps pane widths inside their limits', () => {
+  assert.equal(H.clampPane('sidebarWidth', 100), 160);
+  assert.equal(H.clampPane('sidebarWidth', 1000), 420);
+  assert.equal(H.clampPane('listWidth', NaN), 300);
+  assert.equal(H.clampPane('listWidth', '250'), 250);
+  assert.equal(H.clampPane('unknown', 7), 7);
+  assert.ok(H.EDITOR_MIN >= 300);
+});
+
 test('safeFilename strips characters Windows rejects', () => {
   assert.equal(H.safeFilename('a/b\\c:d*e?f"g<h>i|j'), 'abcdefghij');
   assert.equal(H.safeFilename('   '), 'Untitled');

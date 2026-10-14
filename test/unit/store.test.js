@@ -119,6 +119,10 @@ test('settings are sanitized on load and on set', () => {
   assert.deepEqual(sanitizeSettings(['x']), DEFAULT_SETTINGS);
   assert.equal(sanitizeSettings({ fontSize: 900 }).fontSize, 28);
   assert.equal(sanitizeSettings({ fontSize: 3 }).fontSize, 12);
+  assert.equal(sanitizeSettings({ sidebarWidth: 50 }).sidebarWidth, 160);
+  assert.equal(sanitizeSettings({ sidebarWidth: 9999 }).sidebarWidth, 420);
+  assert.equal(sanitizeSettings({ listWidth: 'wide' }).listWidth, 300);
+  assert.equal(sanitizeSettings({ listWidth: 333.6 }).listWidth, 334);
   assert.equal(sanitizeSettings({ fontSize: '18' }).fontSize, 18);
   assert.equal(sanitizeSettings({ hotkey: 'ctrl+alt+k' }).hotkey, 'Control+Alt+K');
   const { store } = makeStore();

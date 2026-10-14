@@ -76,13 +76,37 @@ kbd {
 
 /* ---- layout ---------------------------------------------------------- */
 .app {
+  --sidebar-w: 232px;
+  --list-w: 300px;
   display: grid;
-  grid-template-columns: 232px 300px 1fr;
+  grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr);
   height: 100vh;
   animation: rise 0.5s var(--ease) both;
 }
-.app.sidebar-collapsed { grid-template-columns: 0 300px 1fr; }
+.app.sidebar-collapsed { grid-template-columns: 0 var(--list-w) minmax(0, 1fr); }
 .app.sidebar-collapsed .sidebar { display: none; }
+
+/* Drag handles on the right edge of the sidebar and the list pane. */
+.sidebar, .list-pane { position: relative; }
+.resizer {
+  position: absolute;
+  top: 0; right: -5px;
+  width: 10px; height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.resizer::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 0;
+  width: 2px; height: 100%;
+  background: transparent;
+  transition: background 120ms;
+}
+.resizer:hover::after, .resizer.is-dragging::after { background: var(--accent); }
+body.is-resizing { cursor: col-resize; user-select: none; }
+body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(12px); }
@@ -372,7 +396,4 @@ input[type="range"] { accent-color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-@media (max-width: 900px) {
-  .app { grid-template-columns: 200px 240px 1fr; }
 }

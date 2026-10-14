@@ -31,6 +31,7 @@
     importBtn: $('#importBtn'), exportAllBtn: $('#exportAllBtn'), dataFolderBtn: $('#dataFolderBtn'),
     settingsInfo: $('#settingsInfo'),
     toast: $('#toast'),
+    sidebarResizer: $('#sidebarResizer'), listResizer: $('#listResizer'),
   };
 
   const state = {
@@ -95,6 +96,83 @@
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
     el.app.classList.toggle('sidebar-collapsed', !!settings.sidebarCollapsed);
     el.sortSelect.value = settings.sort;
+    applyPaneWidths(settings.sidebarWidth, settings.listWidth);
+  }
+
+  // ---- resizable panes -----------------------------------------------------
+
+  function paneBudget() {
+    // Space the two left panes may share while the editor keeps its minimum width.
+    return Math.max(0, window.innerWidth - H.EDITOR_MIN);
+  }
+
+  function fitPaneWidths(sidebar, list) {
+    sidebar = H.clampPane('sidebarWidth', sidebar);
+    list = H.clampPane('listWidth', list);
+    const sidebarShown = state.settings && state.settings.sidebarCollapsed ? 0 : sidebar;
+    const over = sidebarShown + list - paneBudget();
+    if (over > 0) {
+      // Shrink the list first, then the sidebar, never below their minimums.
+      const listGive = Math.min(over, list - H.PANE_LIMITS.listWidth.min);
+      list -= listGive;
+      const rest = over - listGive;
+      if (rest > 0 && sidebarShown) sidebar = Math.max(H.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
+    }
+    return { sidebar, list };
+  }
+
+  function applyPaneWidths(sidebar, list) {
+    const fit = fitPaneWidths(sidebar, list);
+    el.app.style.setProperty('--sidebar-w', fit.sidebar + 'px');
+    el.app.style.setProperty('--list-w', fit.list + 'px');
+    return fit;
+  }
+
+  function currentPaneWidths() {
+    return {
+      sidebar: parseInt(el.app.style.getPropertyValue('--sidebar-w'), 10) || H.PANE_LIMITS.sidebarWidth.def,
+      list: parseInt(el.app.style.getPropertyValue('--list-w'), 10) || H.PANE_LIMITS.listWidth.def,
+    };
+  }
+
+  function setupResizer(handle, key) {
+    const other = key === 'sidebarWidth' ? 'list' : 'sidebar';
+    const mine = key === 'sidebarWidth' ? 'sidebar' : 'list';
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const start = currentPaneWidths();
+      const startX = e.clientX;
+      handle.setPointerCapture(e.pointerId);
+      handle.classList.add('is-dragging');
+      document.body.classList.add('is-resizing');
+      let latest = start[mine];
+      const onMove = (ev) => {
+        const widths = { sidebar: start.sidebar, list: start.list };
+        widths[mine] = start[mine] + (ev.clientX - startX);
+        const fit = applyPaneWidths(widths.sidebar, widths.list);
+        latest = fit[mine];
+        // Dragging the sidebar can squeeze the list; keep both panes honest.
+        if (fit[other] !== start[other]) start[other] = fit[other];
+      };
+      const onUp = () => {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+        handle.classList.remove('is-dragging');
+        document.body.classList.remove('is-resizing');
+        const widths = currentPaneWidths();
+        updateSettings({ sidebarWidth: widths.sidebar, listWidth: widths.list });
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
+    handle.addEventListener('dblclick', () => {
+      const patch = {};
+      patch[key] = H.PANE_LIMITS[key].def;
+      updateSettings(patch);
+    });
   }
 
   function applyInfo(info) {
@@ -572,6 +650,9 @@
     el.themeBtn.addEventListener('click', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }));
     el.settingsBtn.addEventListener('click', openSettings);
     el.toggleSidebarBtn.addEventListener('click', () => updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }));
+    setupResizer(el.sidebarResizer, 'sidebarWidth');
+    setupResizer(el.listResizer, 'listWidth');
+    window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });
 
     let searchTimer = null;
     el.searchInput.addEventListener('input', () => {

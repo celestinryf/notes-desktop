@@ -300,6 +300,56 @@ test('export note, export all, and import through stubbed dialogs', async () => 
   assert.deepEqual(imported.tags, ['inbox']);
 });
 
+test('drag handles resize the sidebar and list, persist, clamp, and reset on double-click', async () => {
+  const widths = () => page.evaluate(() => {
+    const s = getComputedStyle(document.getElementById('app')).gridTemplateColumns.split(' ').map((v) => parseFloat(v));
+    return { sidebar: s[0], list: s[1] };
+  });
+  const before = await widths();
+  assert.equal(before.sidebar, 232);
+  assert.equal(before.list, 300);
+
+  const drag = async (selector, dx) => {
+    const box = await page.locator(selector).boundingBox();
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 4 });
+    await page.mouse.move(x + dx, y, { steps: 4 });
+    await page.mouse.up();
+  };
+
+  await drag('#sidebarResizer', 60);
+  await waitFor('sidebar width persisted', () => readNotes().settings.sidebarWidth === 292);
+  assert.equal((await widths()).sidebar, 292);
+
+  await drag('#listResizer', -40);
+  await waitFor('list width persisted', () => readNotes().settings.listWidth === 260);
+  assert.equal((await widths()).list, 260);
+
+  await drag('#sidebarResizer', -500);
+  await waitFor('sidebar clamped at minimum', () => readNotes().settings.sidebarWidth === 160);
+  await drag('#listResizer', 2000);
+  await waitFor('list clamped at maximum', () => readNotes().settings.listWidth === 560);
+
+  await page.dblclick('#sidebarResizer');
+  await waitFor('sidebar reset', () => readNotes().settings.sidebarWidth === 232);
+  await page.dblclick('#listResizer');
+  await waitFor('list reset', () => readNotes().settings.listWidth === 300);
+  const after = await widths();
+  assert.deepEqual(after, { sidebar: 232, list: 300 });
+
+  // A narrow window must still leave the editor its minimum width.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(760, 600));
+  await waitForDom(() => parseFloat(getComputedStyle(document.getElementById('app')).gridTemplateColumns.split(' ')[2]) >= 320);
+  await drag('#listResizer', 400);
+  const squeezed = await widths();
+  assert.ok(squeezed.sidebar + squeezed.list <= 760 - 320 + 1, 'panes left room for the editor: ' + JSON.stringify(squeezed));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 720));
+  await page.dblclick('#listResizer');
+  await waitFor('list reset again', () => readNotes().settings.listWidth === 300);
+});
+
 test('window state: Esc hides, a second launch re-shows the first instance, data survives reload', async () => {
   const step = (s) => console.log('  [window-state] ' + s);
   const win = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
