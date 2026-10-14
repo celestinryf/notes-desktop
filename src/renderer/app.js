@@ -598,7 +598,7 @@
     await flushSave();
     let updated;
     try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
-    catch (err) { const msg = String(err.message || err).replace(/^.*Error: /, ''); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); return; }
+    catch (err) { const msg = String(err.message || err).replace(/^.*Error: /, ''); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); renderFolderSelect(); return; }
     if (state.currentId === noteId && updated) state.current = updated;
     await refresh({ keepEditor: true });
     const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
@@ -1097,6 +1097,8 @@
         // Same rule as opening a note: text the rendered view would rewrite opens as source.
         if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) { applyEditorMode(true); toast('Switched to source: this note contains formatting the rendered view would change.'); }
       }
+      state.pending.delete(updated.id);
+      autoGrow();
       if (find.open) runFind(true, true, true);
     } else scheduleSave();
     renderLockState(updated);
@@ -1219,10 +1221,12 @@
 
   async function shareAction(action) {
     closeShareMenu();
-    const note = state.current;
+    let note = state.current;
     if (!note) return;
     if (note.locked && !note.unlocked) { toast('Unlock the note first.'); return; }
     await flushSave();
+    if (!state.current || state.current.id !== note.id) return; // the person moved on
+    note = state.current; // the saved view, including a title typed a moment ago
     const titleLine = note.title ? note.title + '\n\n' : '';
     try {
       if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
@@ -1691,6 +1695,9 @@
   // Puts a re-read file body into the editor and re-applies the strict rendered/source decision for files.
   function applyFreshFileBody(fresh) {
     state.current = fresh;
+    // Replacing the editor text while clean means any stashed older patch is obsolete: it must never be
+    // retried over the text we are now showing.
+    if (!state.dirty) state.pending.delete(fresh.id);
     el.bodyInput.value = fresh.body;
     if (state.rich) {
       let lossless = state.rich.setMarkdown(fresh.body);
@@ -2352,6 +2359,7 @@
     el.remindClearBtn.addEventListener('click', () => setReminder(null));
     el.remindCancelBtn.addEventListener('click', () => el.remindDialog.close());
     el.remindDialog.addEventListener('close', () => focusBody());
+    api.on.notice((text) => toast(String(text)));
     api.on.reminderFired(({ id, title }) => {
       toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await selectNoteNow(id); } });
       refresh({ keepEditor: true }).then(() => { if (state.currentId === id) refreshCurrentMeta(); });

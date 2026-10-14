@@ -69,7 +69,10 @@ function importNotes(store, dir) {
     const h = hashOf(content);
     if (h !== f.hash) {
       const note = store.get(f.id);
-      if (!note || note.trashedAt) {
+      if (note && note.lock) {
+        // Locked since the export: its text must not come back in clear as a copy.
+        details.push('skipped (note locked meanwhile): ' + f.rel);
+      } else if (!note || note.trashedAt) {
         details.push('skipped (note trashed meanwhile): ' + f.rel);
       } else if (hashOf(note.body) !== f.hash && note.body !== content) {
         // The body changed in the app since the export (not just tags, pin or folder) and the agent's text
@@ -129,4 +132,18 @@ function refreshWorkspace(store, dir) {
   return { imported, manifest };
 }
 
-module.exports = { exportNotes, importNotes, refreshWorkspace, folderRelPath, MANIFEST };
+// Removes a note's exported file and manifest entry, so a locked or deleted note leaves no clear copy behind.
+function forgetNote(dir, noteId) {
+  const manifestPath = path.join(dir, MANIFEST);
+  if (!fs.existsSync(manifestPath)) return false;
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { return false; }
+  const entry = (manifest.files || []).find((f) => f.id === noteId);
+  if (!entry) return false;
+  try { fs.rmSync(path.join(dir, entry.rel), { force: true }); } catch (_) { /* best effort */ }
+  manifest.files = manifest.files.filter((f) => f.id !== noteId);
+  try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8'); } catch (_) { /* best effort */ }
+  return true;
+}
+
+module.exports = { exportNotes, importNotes, refreshWorkspace, forgetNote, folderRelPath, MANIFEST };

@@ -114,3 +114,26 @@ test('refreshWorkspace does not export (and so delete) when the import failed', 
   assert.match(r.imported.error, /JSON/i);
   assert.equal(fs.readFileSync(path.join(dir, 'A.md'), 'utf8'), 'edited in a terminal', 'the folder was left alone');
 });
+
+test('forgetNote removes a note\'s exported file and manifest entry', () => {
+  const store = new Store(tmp()).load();
+  const a = store.create({ title: 'Secret', body: 'the secret' });
+  const b = store.create({ title: 'Other', body: 'o' });
+  const dir = tmp();
+  W.exportNotes(store, dir);
+  assert.ok(fs.existsSync(path.join(dir, 'Secret.md')));
+  assert.equal(W.forgetNote(dir, a.id), true);
+  assert.ok(!fs.existsSync(path.join(dir, 'Secret.md')));
+  assert.ok(fs.existsSync(path.join(dir, 'Other.md')));
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, W.MANIFEST), 'utf8'));
+  assert.deepEqual(manifest.files.map((f) => f.id), [b.id]);
+  assert.equal(W.forgetNote(dir, a.id), false, 'already gone');
+  // A note locked after export is skipped on import rather than copied back in clear.
+  W.exportNotes(store, dir);
+  store.lockNote(b.id, 'pw');
+  fs.writeFileSync(path.join(dir, 'Other.md'), 'agent edit');
+  const r = W.importNotes(store, dir);
+  assert.equal(r.conflicts, 0);
+  assert.match(r.details.join('\n'), /skipped \(note locked meanwhile\)/);
+  assert.ok(!store.notes.some((n) => n.title === 'Other (bot)'));
+});
