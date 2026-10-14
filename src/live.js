@@ -70,7 +70,11 @@ class LiveShare {
       server.once('error', (err) => {
         // The remembered port is taken (after a restart): take any free port; the link changes and the
         // status says so, which is better than a share that silently never comes back.
-        if (err && err.code === 'EADDRINUSE' && opts.port) { this.host(noteId, Object.assign({}, opts, { port: 0, movedFrom: opts.port })).then(resolve, reject); return; }
+        if (err && err.code === 'EADDRINUSE' && opts.port) {
+          this.hosting.delete(noteId); // the retry below must not be answered with this very promise
+          this.host(noteId, Object.assign({}, opts, { port: 0, movedFrom: opts.port })).then(resolve, reject);
+          return;
+        }
         reject(err);
       });
       server.listen(opts.port || 0, opts.hostname || '0.0.0.0', () => {

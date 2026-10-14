@@ -149,3 +149,21 @@ test('end event stops the guest cleanly; a stuck flag clears with stop(); a resu
   assert.equal(guestStore.get(local.id).body, 'after lock', 'guest copy intact');
   hostLive.stopAll(); guestLive2.stopAll();
 });
+
+test('restore() with a busy remembered port falls back to a free port instead of hanging', async () => {
+  const hostStore = new Store(tmp()).load();
+  const note = hostStore.create({ title: 'Busy', body: 'b' });
+  const blocker = http.createServer((_q, r) => r.end('x'));
+  await new Promise((r) => blocker.listen(0, '0.0.0.0', r)); // same wildcard bind as the host, so the port is truly taken
+  const busyPort = blocker.address().port;
+  hostStore.setLive(note.id, { role: 'host', url: 'http://127.0.0.1:' + busyPort + '/live/' + 'a'.repeat(32), token: 'a'.repeat(32), port: busyPort });
+  const live = new LiveShare(hostStore, {});
+  const done = await Promise.race([live.restore().then(() => 'restored'), new Promise((r) => setTimeout(() => r('hung'), 5000))]);
+  assert.equal(done, 'restored');
+  const s = live.statusOf(note.id);
+  assert.ok(s && s.url && !s.url.includes(':' + busyPort + '/'), 'moved to another port: ' + (s && s.url));
+  assert.match(s.error || '', /busy/);
+  assert.equal(live.hosting.size, 0);
+  live.stopAll();
+  blocker.close();
+});

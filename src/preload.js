@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     stickiesChanged: on('stickies:changed'),
     openNote: on('app:open-note'),
     reminderFired: on('reminder:fired'),
+    notice: on('app:notice'),
     liveStatus: on('live:status'),
     relocked: on('lock:relocked'),
   },

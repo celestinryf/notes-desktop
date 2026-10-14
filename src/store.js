@@ -824,7 +824,9 @@ class Store {
       return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; }); // pinned is kept for restore
     } catch (err) {
       // The metadata write failed: put the file back so disk and memory agree again.
-      if (moved) { try { fs.renameSync(moved.to, moved.from); note.filePath = moved.from; delete note.trashedFrom; } catch (_) { /* best effort */ } }
+      // _commit's rollback swapped this.notes for its snapshot copies: fix up the object that is live now.
+      const live = this.get(id) || note;
+      if (moved) { try { fs.renameSync(moved.to, moved.from); live.filePath = moved.from; delete live.trashedFrom; } catch (_) { /* best effort */ } }
       throw err;
     }
   }
@@ -851,7 +853,8 @@ class Store {
         // Save failed: the file goes back to .trash and the record stays trashed, so "delete forever" can
         // never remove a live file.
         try { fs.renameSync(next, wasAt); } catch (_) { /* best effort */ }
-        note.filePath = wasAt; note.trashedFrom = wasFrom; note.folderId = wasFolder;
+        const live = this.get(id) || note; // _commit's rollback swapped this.notes for its snapshot copies
+        live.filePath = wasAt; live.trashedFrom = wasFrom; live.folderId = wasFolder; live.trashedAt = live.trashedAt || note.trashedAt;
         throw err;
       }
     }

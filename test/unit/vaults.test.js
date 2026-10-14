@@ -294,3 +294,29 @@ test('a file changed on disk is not overwritten by a stale save unless forced', 
   store.update(inbox.id, { body: 'theirs 2 plus mine\n' });
   assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), 'theirs 2 plus mine\n');
 });
+
+test('a failed save during trash or restore leaves the live note object exactly as before', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const inbox = store.notes.find((n) => n.title === 'Inbox');
+  const realSave = store.save.bind(store);
+  store.save = () => { throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); };
+  assert.throws(() => store.trash(inbox.id), /ENOSPC/);
+  let now = store.get(inbox.id);
+  assert.equal(now.trashedAt, null);
+  assert.equal(now.filePath, path.join(dir, 'Inbox.md'), 'path back to the live file on the object the store holds now');
+  assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')));
+  store.save = realSave;
+  store.trash(inbox.id);
+  store.save = () => { throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); };
+  assert.throws(() => store.restore(inbox.id), /ENOSPC/);
+  now = store.get(inbox.id);
+  assert.ok(now.trashedAt, 'still trashed');
+  assert.ok(/\.trash/.test(now.filePath) && fs.existsSync(now.filePath), 'path points at the file in .trash');
+  assert.ok(now.trashedFrom, 'origin kept for a later restore');
+  store.save = realSave;
+  store.restore(inbox.id);
+  assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')));
+});

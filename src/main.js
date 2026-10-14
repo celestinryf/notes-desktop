@@ -211,6 +211,10 @@ function main() {
       git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
       if (win && !win.isDestroyed()) win.webContents.send('settings:changed', store.getSettings());
       fanReloaded({ reason: 'recovered' });
+      // Everything that was started against the empty store starts again against the real one.
+      try { stickies.restoreAll(); } catch (_) { /* best effort */ }
+      vaults.start().catch(() => {});
+      live.restore().catch(() => {});
     }
   }
 
@@ -353,7 +357,7 @@ function main() {
   });
 
   // ---- locking ---------------------------------------------------------------
-  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); live.stop(id); stickies.close(id, { forget: true }); return n; });
+  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); forgetWorkspaceCopy(id); live.stop(id); stickies.close(id, { forget: true }); return n; });
   ipcMain.handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
   ipcMain.handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
   ipcMain.handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
@@ -396,17 +400,26 @@ function main() {
   ipcMain.handle('live:status', (_e, id) => live.statusOf(id));
   ipcMain.handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
   ipcMain.handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
-  ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); const n = store.trash(id); stickies.close(id); return pub(n); });
+  ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
   ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
-  ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
+  ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
+  function forgetWorkspaceCopy(id) { try { require('./workspace').forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
   ipcMain.handle('notes:emptyTrash', () => store.emptyTrash());
 
   // ---- desktop stickies ------------------------------------------------------
 
   const stickyView = (n) => ({ id: n.id, title: H.deriveTitle(n), sticky: n.sticky, open: stickies.isOpen(n.id) });
   function newSticky() {
-    const note = store.create({ title: '', body: '' });
-    stickies.open(note.id);
+    let note;
+    try {
+      note = store.create({ title: '', body: '' });
+      stickies.open(note.id);
+    } catch (err) {
+      // From the tray there is no renderer to reject to: say it in the app window if there is one.
+      if (note) { try { store.destroy(note.id); } catch (_) { /* leave it */ } }
+      if (win && !win.isDestroyed()) win.webContents.send('app:notice', 'Could not create a sticky: ' + (err.message || err));
+      return null;
+    }
     fanReloaded({ reason: 'sticky' });
     return pub(note);
   }
@@ -501,9 +514,10 @@ function main() {
     return { ok: true, vault: vaultView(v) };
   });
   ipcMain.handle('vaults:update', async (_e, id, patch) => { const v = store.updateVault(id, patch); if (v) { vaults.schedulePull(id); if (patch && patch.remote !== undefined) await vaults.initRepo(id, patch.remote); } return v ? vaultView(v) : null; });
-  ipcMain.handle('vaults:remove', (_e, id) => { vaults.close(id); return store.removeVault(id); });
+  ipcMain.handle('vaults:remove', (_e, id) => { vaults.close(id); const r = store.removeVault(id); closeOrphanStickies(); fanReloaded({ reason: 'vault' }); return r; });
+  function closeOrphanStickies() { for (const sid of stickies.openIds()) if (!store.get(sid)) stickies.close(sid); }
   ipcMain.handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));
-  ipcMain.handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); return r; });
+  ipcMain.handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); closeOrphanStickies(); if (r && (r.added || r.updated || r.removed)) fanReloaded({ reason: 'vault' }); return r; });
   ipcMain.handle('vaults:initRepo', (_e, id, remote) => vaults.initRepo(id, remote));
   ipcMain.handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
   ipcMain.handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
