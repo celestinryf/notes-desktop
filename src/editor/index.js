@@ -98,7 +98,9 @@ export function create(element, options) {
     editor,
     getMarkdown,
     setMarkdown,
-    focus: (where) => editor.commands.focus(where || null),
+    // Tiptap's focus command defers the DOM focus to the next animation frame; a key pressed right after
+    // Enter in the title would land in the title. Focus the DOM synchronously first, then place the caret.
+    focus: (where) => { editor.view.focus(); return editor.commands.focus(where || null); },
     setEditable: (on) => editor.setEditable(!!on),
     isEmpty: () => editor.isEmpty,
     // range: {from,to} captured with selectionRange() when the dialog opened, so the link lands on the text
