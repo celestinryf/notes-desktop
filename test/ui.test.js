@@ -483,6 +483,85 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   await useSourceMode(true);
 });
 
+test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', async () => {
+  const fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-files-'));
+  const mdPath = path.join(fileDir, 'External note.md');
+  fs.writeFileSync(mdPath, '# From disk\n\nline one\n');
+  const pdfPath = path.join(fileDir, 'paper.pdf');
+  fs.writeFileSync(pdfPath, '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+  await app.evaluate(({ dialog }, paths) => {
+    dialog.showOpenDialog = async (_w, opts) => ({ canceled: false, filePaths: /Open files as notes/.test(opts.title) ? paths : [] });
+  }, [mdPath, pdfPath]);
+
+  await useSourceMode(true);
+  await page.keyboard.press('Control+o');
+  await waitFor('two file notes linked', () => readNotes().notes.filter((n) => n.filePath).length === 2);
+  const mdNote = readNotes().notes.find((n) => n.filePath && n.filePath.endsWith('External note.md'));
+  assert.equal(mdNote.title, 'External note.md');
+  assert.equal(mdNote.body, '# From disk\n\nline one\n');
+  await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
+  assert.equal(await page.$eval('#fileRow', (r) => !r.classList.contains('hidden')), true);
+  assert.equal(await page.textContent('#fileKind'), 'TEXT');
+
+  // Edit in the app: the file on disk changes, in place.
+  const inoBefore = fs.statSync(mdPath).ino;
+  await page.fill('#bodyInput', '# From disk\n\nline one\nline two from the app\n');
+  await waitFor('edit reached the file', () => fs.readFileSync(mdPath, 'utf8').includes('line two from the app'));
+  assert.equal(fs.statSync(mdPath).ino, inoBefore, 'written in place');
+
+  // Edit on disk: the app picks it up while the note is open and clean.
+  await sleep(400);
+  fs.writeFileSync(mdPath, '# From disk\n\nreplaced by another program\n');
+  await waitForDom(() => document.getElementById('bodyInput').value.includes('replaced by another program'), 10000);
+
+  // PDF opens in a viewer frame, read-only.
+  await page.click('.note-card:has-text("paper.pdf")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
+  await waitForDom(() => !document.getElementById('pdfFrame').classList.contains('hidden') && /file:\/\//.test(document.getElementById('pdfFrame').getAttribute('src') || ''));
+  assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true);
+  assert.match(await page.textContent('#fileBanner'), /read-only/);
+
+  // Agent files: discovery runs against the real home folder; it must create the folder and link at least the global CLAUDE.md.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.click('#agentFilesBtn');
+  await waitFor('agent files folder exists', () => readNotes().folders.some((f) => f.name === 'Agent files'));
+  await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath)));
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  const agentFolder = readNotes().folders.find((f) => f.name === 'Agent files');
+  const globalNote = readNotes().notes.find((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath));
+  assert.equal(globalNote.folderId, agentFolder.id);
+  assert.match(globalNote.title, /global/);
+  assert.ok(globalNote.body.includes('# Global instructions'), 'contents read from the real file');
+
+  // Clean up: unlink the test notes (files stay), delete the folder, go back to the usual state.
+  await page.click('.nav-item[data-view="all"]');
+  for (const t of ['External note.md', 'paper.pdf']) {
+    await page.click(`.note-card:has-text("${t}")`);
+    await waitForDom((x) => document.getElementById('titleInput').value === x, t);
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor(t + ' trashed', () => readNotes().notes.find((n) => n.title === t).trashedAt);
+  }
+  assert.ok(fs.existsSync(mdPath) && fs.existsSync(pdfPath), 'trashing a file note leaves the files alone');
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('file notes destroyed', () => !readNotes().notes.some((n) => n.title === 'External note.md' || n.title === 'paper.pdf'));
+  // Remove the agent-file links and their folder through the app's own API so later tests see the usual tree.
+  const agentNoteIds = readNotes().notes.filter((x) => x.folderId === agentFolder.id).map((x) => x.id);
+  await page.evaluate(async ({ ids, folderId }) => {
+    for (const id of ids) await window.notesApi.notes.destroy(id);
+    await window.notesApi.folders.delete(folderId);
+  }, { ids: agentNoteIds, folderId: agentFolder.id });
+  await waitFor('agent links removed', () => !readNotes().notes.some((n) => n.filePath) && !readNotes().folders.some((f) => f.name === 'Agent files'));
+  assert.ok(fs.readFileSync(path.join(os.homedir(), '.claude', 'CLAUDE.md'), 'utf8').includes('# Global instructions'), 'the real file was never modified');
+  await page.click('.nav-item[data-view="all"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length >= 2);
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+});
+
 test('writing column: alignment and width settings move and size the block', async () => {
   const col = () => page.evaluate(() => {
     const c = document.getElementById('editorColumn');

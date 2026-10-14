@@ -1,0 +1,143 @@
+'use strict';
+/* File-backed notes: which files the app can show or edit, how to read them, and where your agent files live. */
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'rst', 'adoc', 'org',
+  'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'csv', 'tsv', 'log',
+  'xml', 'html', 'htm', 'svg', 'css', 'scss', 'less', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs',
+  'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'swift', 'php', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd', 'sql',
+  'lua', 'luau', 'r', 'm', 'pl', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
+const MAX_TEXT_BYTES = 4 * 1024 * 1024;
+
+function extOf(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  if (!base.includes('.')) return base; // Makefile, Dockerfile
+  return base.slice(base.lastIndexOf('.') + 1);
+}
+
+// Returns 'text' | 'pdf' | 'docx' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
+function kindOf(filePath) {
+  const ext = extOf(filePath);
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (TEXT_EXT.has(ext)) return 'text';
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(8192);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    for (let i = 0; i < n; i++) if (buf[i] === 0) return 'binary';
+    return n === 0 ? 'text' : 'text';
+  } catch (_) {
+    return 'binary';
+  }
+}
+
+function readText(filePath) {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_TEXT_BYTES) throw Object.assign(new Error('File is larger than 4 MB'), { code: 'ETOOBIG' });
+  return { body: fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
+}
+
+// Writes in place (truncate + write), never via rename, so hard links such as CLAUDE.md <-> AGENTS.md stay joined.
+function writeTextInPlace(filePath, body) {
+  const eol = detectEol(filePath);
+  fs.writeFileSync(filePath, eol === '\r\n' ? String(body).replace(/\r?\n/g, '\r\n') : String(body), 'utf8');
+  return fs.statSync(filePath).mtimeMs;
+}
+
+function detectEol(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(4096);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const s = buf.toString('utf8', 0, n);
+    const crlf = (s.match(/\r\n/g) || []).length;
+    const lf = (s.match(/(?<!\r)\n/g) || []).length;
+    return crlf > lf ? '\r\n' : '\n';
+  } catch (_) { return '\n'; }
+}
+
+async function readDocxAsMarkdown(filePath) {
+  const mammoth = require('mammoth');
+  const result = await mammoth.convertToMarkdown({ path: filePath });
+  const stat = fs.statSync(filePath);
+  return { body: String(result.value || '').replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
+}
+
+function mtimeOf(filePath) {
+  try { return fs.statSync(filePath).mtimeMs; } catch (_) { return null; }
+}
+
+// Case-insensitive, separator-normalised identity for paths on Windows.
+function pathKey(p) {
+  return path.resolve(String(p)).replace(/\//g, '\\').toLowerCase();
+}
+
+// The files that steer coding agents on this machine: global and per-project instruction files, plus the
+// user's Claude Code commands, output styles, and memory notes. Scans one level of project folders under home.
+function discoverAgentFiles(opts) {
+  opts = opts || {};
+  const home = opts.home || os.homedir();
+  const out = [];
+  const seen = new Set();
+  const add = (filePath, label) => {
+    if (!filePath || !fs.existsSync(filePath)) return;
+    const key = pathKey(filePath);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ filePath: path.resolve(filePath), label });
+  };
+  const claudeDir = path.join(home, '.claude');
+  add(path.join(claudeDir, 'CLAUDE.md'), 'CLAUDE.md — global (same file as AGENTS.md)');
+  // ~/.claude/AGENTS.md is a hard link of CLAUDE.md on this machine; one note covers both. Add it only if it is a separate file.
+  try {
+    const a = path.join(claudeDir, 'AGENTS.md'), c = path.join(claudeDir, 'CLAUDE.md');
+    if (fs.existsSync(a) && fs.existsSync(c) && fs.statSync(a).ino !== fs.statSync(c).ino) add(a, 'AGENTS.md — global');
+  } catch (_) { /* ignore */ }
+  add(path.join(home, '.codex', 'AGENTS.md'), 'AGENTS.md — Codex global');
+  for (const sub of ['commands', 'output-styles', 'rules', 'agents']) {
+    const dir = path.join(claudeDir, sub);
+    if (!fs.existsSync(dir)) continue;
+    for (const f of safeList(dir)) if (/\.md$/i.test(f)) add(path.join(dir, f), f + ' — Claude ' + sub.replace('-', ' '));
+  }
+  const memDir = path.join(claudeDir, 'projects');
+  for (const proj of safeList(memDir)) {
+    const m = path.join(memDir, proj, 'memory');
+    for (const f of safeList(m)) if (/\.md$/i.test(f)) add(path.join(m, f), f + ' — Claude memory');
+  }
+  const skip = new Set(['node_modules', '.git', 'AppData', '.vscode', '.cursor', 'scoop', 'pipx', 'curseforge', 'OneDrive']);
+  const roots = [home].concat(opts.extraRoots || []);
+  for (const root of roots) {
+    for (const entry of safeList(root)) {
+      if (skip.has(entry) || entry.startsWith('.')) continue;
+      const dir = path.join(root, entry);
+      let isDir = false;
+      try { isDir = fs.statSync(dir).isDirectory(); } catch (_) { continue; }
+      if (!isDir) continue;
+      for (const name of ['CLAUDE.md', 'AGENTS.md', 'CLAUDE.local.md', 'CODEX.md', 'GEMINI.md']) {
+        const p = path.join(dir, name);
+        if (fs.existsSync(p)) {
+          const other = name === 'CLAUDE.md' ? path.join(dir, 'AGENTS.md') : null;
+          let dup = false;
+          try { if (other && fs.existsSync(other) && fs.statSync(other).ino === fs.statSync(p).ino) dup = true; } catch (_) { /* ignore */ }
+          add(p, name + ' — ' + entry + (dup ? ' (same file as AGENTS.md)' : ''));
+        }
+      }
+      const nested = path.join(dir, '.claude', 'CLAUDE.md');
+      if (fs.existsSync(nested)) add(nested, 'CLAUDE.md — ' + entry + '/.claude');
+      const fieldGuide = path.join(dir, '.field-guide', 'CLAUDE.md');
+      if (fs.existsSync(fieldGuide)) add(fieldGuide, 'CLAUDE.md — ' + entry + '/.field-guide');
+    }
+  }
+  return out;
+}
+
+function safeList(dir) {
+  try { return fs.readdirSync(dir); } catch (_) { return []; }
+}
+
+module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxAsMarkdown, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

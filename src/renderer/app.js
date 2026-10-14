@@ -38,6 +38,9 @@
     sidebarResizer: $('#sidebarResizer'), listResizer: $('#listResizer'),
     newFolderBtn: $('#newFolderBtn'), folderTree: $('#folderTree'), folderSelect: $('#folderSelect'), folderMenu: $('#folderMenu'),
     navAll: document.querySelector('.nav-item[data-view="all"]'),
+    openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
+    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'),
+    fileBanner: $('#fileBanner'), pdfFrame: $('#pdfFrame'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
   };
 
   const state = {
@@ -308,8 +311,9 @@
       li.setAttribute('role', 'option');
       li.style.animationDelay = Math.min(i, 12) * 20 + 'ms';
       const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
+      const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
       li.innerHTML =
-        '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + highlight(H.deriveTitle(n), q) + '</div>' +
+        '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + highlight(H.deriveTitle(n), q) + fileMark + '</div>' +
         '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>' +
         '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + tags + '</div>';
       li.addEventListener('click', () => selectNote(n.id));
@@ -690,8 +694,11 @@
     }
     autoGrow();
     const inTrash = !!note.trashedAt;
-    [el.titleInput, el.tagsInput, el.bodyInput].forEach((i) => { i.readOnly = inTrash; });
-    if (state.rich) state.rich.setEditable(!inTrash);
+    const fileReadOnly = !!(note.filePath && note.fileKind !== 'text');
+    [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
+    el.bodyInput.readOnly = inTrash || fileReadOnly;
+    if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
+    renderFileRow(note);
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
@@ -723,8 +730,103 @@
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
   }
 
+  // ---- file-backed notes ---------------------------------------------------
+
+  function renderFileRow(note) {
+    const isFile = !!(note && note.filePath);
+    el.fileRow.classList.toggle('hidden', !isFile);
+    el.fileBanner.classList.add('hidden');
+    el.pdfFrame.classList.add('hidden');
+    el.pdfFrame.removeAttribute('src');
+    if (!isFile) { el.richEditor.classList.toggle('hidden', state.sourceMode); el.bodyInput.classList.toggle('hidden', !state.sourceMode); return; }
+    el.fileKind.textContent = (note.fileKind || 'file').toUpperCase();
+    el.filePath.textContent = note.filePath;
+    el.filePath.title = note.filePath;
+    if (note.fileKind === 'pdf') {
+      el.richEditor.classList.add('hidden');
+      el.bodyInput.classList.add('hidden');
+      el.pdfFrame.classList.remove('hidden');
+      api.files.pdfUrl(note.id).then((url) => { if (url && state.currentId === note.id) el.pdfFrame.src = url; });
+      showBanner('PDF shown read-only. Use "Open with…" for your PDF app.');
+    } else if (note.fileKind === 'docx') {
+      showBanner('Word document converted to Markdown for reading. It is read-only here; use "Open with…" to edit in Word.');
+    } else if (note.fileKind === 'binary') {
+      el.richEditor.classList.add('hidden');
+      el.bodyInput.classList.add('hidden');
+      showBanner('This file type cannot be shown here. Use "Open with…" to open it in its own app.');
+    }
+  }
+
+  function showBanner(text) {
+    el.fileBanner.textContent = text;
+    el.fileBanner.classList.remove('hidden');
+  }
+
+  async function openFiles(paths) {
+    await flushSave();
+    let res;
+    try { res = paths ? await api.files.link(paths) : await api.files.openDialog(); }
+    catch (err) { toast('Could not open: ' + (err.message || err)); return; }
+    if (res.canceled) return;
+    if (res.linked.length) {
+      state.query = ''; el.searchInput.value = '';
+      if (state.view === 'trash') { state.view = 'all'; el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all')); }
+      await refresh({ keepEditor: true });
+      await selectNote(res.firstId);
+    }
+    const failed = res.failed.length ? ' Could not open: ' + res.failed.join(', ') : '';
+    toast((res.linked.length ? 'Opened ' + res.linked.length + (res.linked.length === 1 ? ' file' : ' files') : 'Nothing opened') + failed);
+  }
+
+  // While a file-backed note is open and untouched, pick up changes made by other programs.
+  async function pollCurrentFile() {
+    const note = state.current;
+    if (!note || !note.filePath || state.dirty || document.hidden) return;
+    let res;
+    try { res = await api.files.refresh(note.id); } catch (_) { return; }
+    if (state.currentId !== note.id) return;
+    if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
+    if (res.changed && !state.dirty) {
+      const fresh = await api.notes.get(note.id);
+      state.current = fresh;
+      el.bodyInput.value = fresh.body;
+      if (state.rich) state.currentLossless = state.rich.setMarkdown(fresh.body);
+      autoGrow();
+      updateStatus(fresh);
+      toast('Reloaded from disk: the file changed outside Notes.');
+    }
+  }
+
+  async function reloadCurrentFile() {
+    if (!state.current || !state.current.filePath) return;
+    if (state.dirty && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
+    state.dirty = false;
+    const res = await api.files.refresh(state.currentId);
+    const fresh = await api.notes.get(state.currentId);
+    state.current = fresh;
+    el.bodyInput.value = fresh.body;
+    if (state.rich) state.currentLossless = state.rich.setMarkdown(fresh.body);
+    autoGrow();
+    updateStatus(fresh);
+    toast(res.missing ? 'File not found on disk.' : res.changed ? 'Reloaded from disk.' : 'Already up to date.');
+  }
+
+  async function addAgentFiles() {
+    el.agentFilesStatus.textContent = 'Looking…';
+    try {
+      const res = await api.agentFiles.link();
+      el.agentFilesStatus.textContent = 'Found ' + res.found + ', linked ' + res.linked.length + (res.failed.length ? ', failed ' + res.failed.length : '') + '.';
+      el.settingsDialog.close();
+      await setView('folder', res.folderId);
+      toast('Agent files are in the "Agent files" folder. Edits write to the real files.');
+    } catch (err) {
+      el.agentFilesStatus.textContent = 'Failed: ' + (err.message || err);
+    }
+  }
+
   function scheduleSave() {
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
+    if (state.current && state.current.filePath && state.current.fileKind !== 'text') return; // read-only kinds
     state.dirty = true;
     setSaved('Saving…');
     clearTimeout(state.saveTimer);
@@ -961,8 +1063,9 @@
     el.sourceBtn.classList.toggle('is-on', state.sourceMode);
     el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
-    el.bodyInput.classList.toggle('hidden', !state.sourceMode);
-    el.richEditor.classList.toggle('hidden', state.sourceMode);
+    const viewerOnly = !!(state.current && state.current.filePath && (state.current.fileKind === 'pdf' || state.current.fileKind === 'binary'));
+    el.bodyInput.classList.toggle('hidden', !state.sourceMode || viewerOnly);
+    el.richEditor.classList.toggle('hidden', state.sourceMode || viewerOnly);
     if (state.sourceMode) autoGrow();
     else if (state.rich && state.currentId) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
@@ -1181,6 +1284,7 @@
     if (ctrl && !e.shiftKey && !e.altKey) {
       switch (e.key.toLowerCase()) {
         case 'n': e.preventDefault(); newNote(); return;
+        case 'o': e.preventDefault(); openFiles(); return;
         case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
@@ -1222,6 +1326,24 @@
 
   function bind() {
     el.newNoteBtn.addEventListener('click', newNote);
+    el.openFileBtn.addEventListener('click', () => openFiles());
+    el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
+    el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
+    el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
+    el.agentFilesBtn.addEventListener('click', addAgentFiles);
+    setInterval(pollCurrentFile, 3000);
+    // Drag files from Explorer onto the window to open them.
+    let dragDepth = 0;
+    document.addEventListener('dragenter', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) { dragDepth++; el.app.classList.add('is-dropping'); } });
+    document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; el.app.classList.remove('is-dropping'); } });
+    document.addEventListener('dragover', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault(); });
+    document.addEventListener('drop', (e) => {
+      dragDepth = 0; el.app.classList.remove('is-dropping');
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      const paths = Array.from(e.dataTransfer.files).map((f) => api.files.pathFor(f)).filter(Boolean);
+      if (paths.length) openFiles(paths);
+    });
     el.navItems.forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     el.themeBtn.addEventListener('click', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }));
     el.settingsBtn.addEventListener('click', openSettings);
