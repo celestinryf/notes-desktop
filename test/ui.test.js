@@ -48,6 +48,12 @@ test.before(async () => {
   await page.evaluate(() => { window.confirm = () => true; });
 });
 
+// A failed test must not leave a modal dialog open for the next one.
+test.beforeEach(async () => {
+  if (!page) return;
+  await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }).catch(() => {});
+});
+
 async function useSourceMode(on) {
   const isSource = async () => page.evaluate(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   if ((await isSource()) === on) return;
@@ -302,6 +308,19 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   assert.equal(await page.$$eval('#richEditor td', (c) => c.length), 2);
   assert.equal(await page.$eval('#richEditor img', (i) => i.getAttribute('src')), png);
   assert.equal(readNotes().settings.editorMode, 'rendered');
+  // Enter inside a cell used to replace the whole table with "[table]" on autosave.
+  await page.click('#richEditor td >> nth=0');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('more');
+  await waitFor('cell edit saved', () => findNote('Rich constructs').body.includes('more'));
+  const afterEnter = findNote('Rich constructs').body;
+  assert.ok(!afterEnter.includes('[table]'), 'no placeholder: ' + afterEnter);
+  assert.ok(/Apple/.test(afterEnter) && /Qty/.test(afterEnter), 'table content kept: ' + afterEnter);
+  // Ctrl+Backspace in a text field deletes a word and must not trash the note.
+  await page.keyboard.press('Control+Backspace');
+  await sleep(500);
+  assert.equal(findNote('Rich constructs').trashedAt, null, 'Ctrl+Backspace did not trash');
 
   // A note with constructs the editor cannot keep (inline HTML, a footnote) must open as source untouched.
   await page.click('#newNoteBtn');
@@ -475,10 +494,13 @@ test('settings: theme, font size, always on top, sidebar toggle, hotkey change',
   await waitFor('font size saved', () => readNotes().settings.fontSize === 20);
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--editor-font-size').trim()), '20px');
 
+  // Windows refuses topmost changes from a background process while another app holds the foreground, so the
+  // OS flag is not assertable from an inactive test window; the setting and the request are.
   await page.check('#alwaysOnTopInput');
-  await waitFor('always on top applied', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
+  await waitFor('always on top persisted', () => readNotes().settings.alwaysOnTop === true);
+  console.log('  [settings] OS reports alwaysOnTop =', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
   await page.uncheck('#alwaysOnTopInput');
-  await waitFor('always on top cleared', async () => !(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop())));
+  await waitFor('always on top cleared', () => readNotes().settings.alwaysOnTop === false);
 
   await page.focus('#hotkeyInput');
   await page.keyboard.press('Control+Alt+F10');

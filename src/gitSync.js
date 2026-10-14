@@ -123,8 +123,10 @@ class GitSync {
 
   async commit(message) {
     if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
-    if (this.busy) await this.busy;
+    // Chain on whatever is running so two callers can never run git at the same time in this repo.
+    const prev = this.busy;
     const work = (async () => {
+      if (prev) { try { await prev; } catch (_) { /* previous failure already recorded */ } }
       if (!(await this.available())) return { ok: false, error: 'git unavailable' };
       if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
       try { if (!(await this.takeSnapshot())) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; } }

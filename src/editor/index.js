@@ -17,10 +17,15 @@ import { Markdown } from 'tiptap-markdown';
 // Content fingerprint used to decide whether the rendered view can show a note without changing it.
 // Escapes and formatting punctuation are ignored; the letters, digits, and URLs must survive.
 function fingerprint(md) {
-  return String(md || '')
-    .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1')
-    .replace(/[^A-Za-z0-9:/.]+/g, '')
-    .toLowerCase();
+  let s = String(md || '').replace(/\r/g, '');
+  // YAML front matter turns into a rule plus paragraphs; never call that lossless.
+  if (/^---\n[\s\S]*?\n---(\n|$)/.test(s)) return 'front-matter:' + s;
+  s = s
+    .replace(/\\\n/g, '\n')                      // backslash hard break == newline
+    .replace(/ {2,}\n/g, '\n')                   // two-space hard break == newline
+    .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1');
+  // Compare line by line so lost or merged line breaks are noticed; blank lines and formatting are not.
+  return s.split('\n').map((l) => l.replace(/[^A-Za-z0-9:/.]+/g, '').toLowerCase()).filter(Boolean).join('\n');
 }
 
 // Tab indents list items; outside a list it does nothing instead of moving focus away mid-sentence.

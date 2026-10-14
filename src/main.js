@@ -72,9 +72,13 @@ function main() {
   function safeBounds(saved) {
     const def = { width: 1100, height: 720 };
     if (!saved) return def;
-    const area = screen.getDisplayMatching(saved).workArea;
-    const fits = saved.x >= area.x - 50 && saved.y >= area.y - 50 && saved.x < area.x + area.width - 100 && saved.y < area.y + area.height - 100;
-    return fits ? saved : { width: saved.width, height: saved.height };
+    try {
+      const area = screen.getDisplayMatching(saved).workArea;
+      const fits = saved.x >= area.x - 50 && saved.y >= area.y - 50 && saved.x < area.x + area.width - 100 && saved.y < area.y + area.height - 100;
+      return fits ? saved : { width: saved.width, height: saved.height };
+    } catch (_) {
+      return def; // an odd saved rectangle must never stop the window from opening
+    }
   }
 
   function createWindow() {
@@ -122,7 +126,11 @@ function main() {
     win.on('move', persistBounds);
     win.on('show', () => writeRuntime());
     win.on('hide', () => writeRuntime());
-    win.on('focus', () => writeRuntime());
+    win.on('focus', () => {
+      // Windows may refuse a topmost change requested while another app held the foreground; retry on focus.
+      if (store.settings.alwaysOnTop && !win.isAlwaysOnTop()) win.setAlwaysOnTop(true);
+      writeRuntime();
+    });
     win.on('blur', () => writeRuntime());
 
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -354,14 +362,20 @@ function main() {
   // ---- lifecycle -----------------------------------------------------------
 
   app.on('second-instance', () => showWindow());
-  let gitFlushed = false;
+  let quitPrepared = false;
   app.on('before-quit', (e) => {
     quitting = true;
-    if (!gitFlushed && git.status().pending) {
-      // Finish the pending commit before the process goes away, then quit for real.
-      e.preventDefault();
-      git.flush().catch(() => {}).finally(() => { gitFlushed = true; app.quit(); });
-    }
+    if (quitPrepared) return;
+    quitPrepared = true;
+    // Let the renderer flush an in-flight edit, then finish any pending git commit, then quit for real.
+    e.preventDefault();
+    const rendererFlushed = new Promise((resolve) => {
+      if (!win || win.isDestroyed()) return resolve();
+      const timer = setTimeout(resolve, 800);
+      ipcMain.once('app:flush-done', () => { clearTimeout(timer); resolve(); });
+      try { win.webContents.send('app:flush'); } catch (_) { clearTimeout(timer); resolve(); }
+    });
+    rendererFlushed.then(() => git.flush()).catch(() => {}).finally(() => app.quit());
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
@@ -375,11 +389,13 @@ function main() {
   });
 
   app.whenReady().then(() => {
-    applyTheme();
-    createWindow();
-    createTray();
-    registerHotkey(store.settings.hotkey);
-    applyLoginItem();
+    const step = (name, fn) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
+    step('theme', applyTheme);
+    step('window', createWindow);
+    if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });
+    step('tray', createTray);
+    step('hotkey', () => registerHotkey(store.settings.hotkey));
+    step('login item', applyLoginItem);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
   });
 }

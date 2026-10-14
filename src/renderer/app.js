@@ -639,9 +639,12 @@
 
   async function selectNote(id) {
     if (state.currentId === id && state.current) return;
-    await flushSave();
     const note = await api.notes.get(id);
     if (!note) return;
+    // Flush the outgoing note last, and again if keystrokes landed while the flush was in flight,
+    // so nothing typed during the switch is dropped.
+    let guard = 0;
+    while (state.dirty && guard++ < 5) await flushSave();
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
@@ -708,7 +711,15 @@
     const id = state.currentId;
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
     state.dirty = false;
-    const updated = await api.notes.update(id, patch);
+    let updated;
+    try {
+      updated = await api.notes.update(id, patch);
+    } catch (err) {
+      // Disk full, file locked, or similar: keep the edit marked dirty and retry rather than forgetting it.
+      if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); clearTimeout(state.saveTimer); state.saveTimer = setTimeout(flushSave, 3000); }
+      if (!state.saveErrorShown) { state.saveErrorShown = true; toast('Could not save: ' + (err.message || err) + '. Retrying.'); setTimeout(() => { state.saveErrorShown = false; }, 10000); }
+      return;
+    }
     if (!updated) return;
     if (state.currentId === id) {
       state.current = updated;
@@ -717,10 +728,11 @@
     }
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx !== -1) {
+      const prevTags = (state.notes[idx].tags || []).join(',');
       state.notes[idx] = updated;
       refreshCard(updated);
       if (state.settings.sort === 'updated' && idx !== 0 && !updated.pinned) await refresh({ keepEditor: true });
-      else if (updated.tags.join(',') !== (state.notes[idx].tags || []).join(',')) await refresh({ keepEditor: true });
+      else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
     // Tags may have changed: cheap to refresh the tag list.
     api.notes.tags().then(renderTags);
@@ -1226,6 +1238,7 @@
       }
     });
     api.on.newNote(newNote);
+    api.on.flush(async () => { try { await flushSave(); } finally { api.app.flushDone(); } });
     api.on.settingsChanged((s) => applySettings(s));
     api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
