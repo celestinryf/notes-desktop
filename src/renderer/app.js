@@ -947,12 +947,22 @@
   // Ranges over the rendered editor's text nodes (matches may span node boundaries).
   function findRangesIn(root, q) {
     const nodes = []; let text = '';
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) { nodes.push({ node: n, start: text.length }); text += n.nodeValue; }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    const blockOf = (n) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
+    let lastBlock = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.nodeType === 1) { if (n.tagName === 'BR') text += '\n'; continue; } // a line break separates too
+      const b = blockOf(n);
+      if (lastBlock && b !== lastBlock) text += '\n'; // a separator no query can contain
+      lastBlock = b;
+      nodes.push({ node: n, start: text.length }); text += n.nodeValue;
+    }
     const locate = (pos) => {
       let lo = 0, hi = nodes.length - 1;
       while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (nodes[mid].start <= pos) lo = mid; else hi = mid - 1; }
-      return nodes.length ? { node: nodes[lo].node, offset: pos - nodes[lo].start } : null;
+      if (!nodes.length) return null;
+      const node = nodes[lo].node;
+      return { node, offset: Math.min(pos - nodes[lo].start, node.nodeValue.length) }; // a position inside a separator clamps to the node's end
     };
     return findOffsets(text, q).map((pos) => {
       const s = locate(pos), e = locate(pos + q.length);
@@ -976,19 +986,18 @@
         // Start from the caret so Enter finds the next match after where the person is.
         const caret = el.bodyInput.selectionStart || 0;
         const idx = find.sourceHits.findIndex((h) => h >= caret);
-        find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) - (forward === false ? 0 : 0) : -1;
-        if (fresh && find.active > 0 && find.sourceHits[find.active] === caret && el.bodyInput.selectionEnd - caret === q.length) { /* already on it */ }
+        find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) : -1; // past the last match wraps to the first
       } else if (find.sourceHits.length) {
         find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
       }
       const n = find.sourceHits.length;
       if (n && find.active >= 0) {
         const at = find.sourceHits[find.active];
-        // Selecting shows the match only while the textarea has focus; stepping (Enter/F3) hands focus over.
-        if (!fresh) { el.bodyInput.focus(); }
+        // A textarea shows its selection only while focused, so stepping (Enter, F3) moves focus to the
+        // text and keeps it there; F3 / Shift+F3 keep stepping from the text, Esc closes the bar.
+        if (!fresh) el.bodyInput.focus();
         el.bodyInput.setSelectionRange(at, at + q.length);
         scrollTextareaToSelection(at);
-        if (!fresh) el.findInput.focus();
       }
       el.findCount.textContent = n ? (find.active + 1) + '/' + n : 'No matches';
       el.findCount.classList.toggle('is-none', !n);
@@ -1014,14 +1023,25 @@
     el.findCount.classList.toggle('is-none', !n);
   }
 
+  // The textarea auto-grows and .editor-scroll scrolls, so the match's visual position is measured with a
+  // mirror element that wraps exactly like the textarea (newline counting would undershoot on long lines).
   function scrollTextareaToSelection(at) {
-    // Approximate: line height times the line number of the match, kept in the middle of the viewport.
-    const before = el.bodyInput.value.slice(0, at);
-    const line = before.split('\n').length - 1;
-    const lh = parseFloat(getComputedStyle(el.bodyInput).lineHeight) || 24;
-    const scroller = el.bodyInput.closest('.editor-scroll') || el.bodyInput;
-    const top = el.bodyInput.offsetTop + line * lh - scroller.clientHeight / 2;
-    if (scroller !== el.bodyInput) scroller.scrollTop = Math.max(0, top); else el.bodyInput.scrollTop = Math.max(0, line * lh - el.bodyInput.clientHeight / 2);
+    const ta = el.bodyInput;
+    const scroller = ta.closest('.editor-scroll') || ta;
+    const cs = getComputedStyle(ta);
+    const mirror = document.createElement('div');
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'padding', 'border', 'boxSizing', 'whiteSpace', 'wordBreak', 'overflowWrap', 'tabSize']) mirror.style[prop] = cs[prop];
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.position = 'absolute'; mirror.style.visibility = 'hidden'; mirror.style.top = '0'; mirror.style.left = '-99999px';
+    mirror.style.width = ta.clientWidth + 'px';
+    mirror.textContent = ta.value.slice(0, at);
+    const marker = document.createElement('span'); marker.textContent = '\u200b';
+    mirror.append(marker);
+    document.body.append(mirror);
+    const y = marker.offsetTop;
+    mirror.remove();
+    const target = ta.offsetTop + y - scroller.clientHeight / 2;
+    if (scroller !== ta) scroller.scrollTop = Math.max(0, target); else ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
   }
 
   async function printNote() {
@@ -1586,6 +1606,7 @@
         if (md === el.bodyInput.value) return;
         el.bodyInput.value = md;
         scheduleSave();
+        if (find.open) runFind(true, true);
       },
     });
     el.richEditor.addEventListener('click', (e) => {
@@ -1596,6 +1617,7 @@
 
   function applyEditorMode(source) {
     state.sourceMode = !!source;
+    if (find.open) { clearFindHighlights(); setTimeout(() => { if (find.open) runFind(true, true); }, 0); }
     el.sourceBtn.classList.toggle('is-on', state.sourceMode);
     el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
