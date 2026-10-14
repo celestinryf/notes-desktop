@@ -641,8 +641,17 @@
     el.noteList.querySelectorAll('.note-card.is-active').forEach((c) => c.classList.remove('is-active'));
   }
 
-  async function selectNote(id) {
+  // Selections run one at a time: two quick switches must not interleave their loads and flushes.
+  state.selecting = Promise.resolve();
+  function selectNote(id) {
+    const run = state.selecting.then(() => selectNoteNow(id)).catch((err) => console.error('selectNote failed', err));
+    state.selecting = run;
+    return run;
+  }
+
+  async function selectNoteNow(id) {
     if (state.currentId === id && state.current) return;
+    if (state.inflight.has(id)) await state.inflight.get(id); // a write for this note is still landing
     const note = await api.notes.get(id);
     if (!note) return;
     // Flush the outgoing note last, and again if keystrokes landed while the flush was in flight,
@@ -738,11 +747,13 @@
   // Retry every pending patch except the open note's, whose latest text lives in the fields and goes through flushSave.
   async function retryPending() {
     let failed = false;
-    for (const [id, patch] of Array.from(state.pending.entries())) {
+    for (const id of Array.from(state.pending.keys())) {
       if (id === state.currentId) continue;
+      const patch = state.pending.get(id); // read at send time: the entry may have been replaced meanwhile
+      if (!patch) continue;
       try {
         const updated = await api.notes.update(id, patch);
-        state.pending.delete(id);
+        if (state.pending.get(id) === patch) state.pending.delete(id); // only clear what was actually written
         if (updated) {
           const idx = state.notes.findIndex((n) => n.id === id);
           if (idx !== -1) { state.notes[idx] = updated; refreshCard(updated); }
@@ -772,24 +783,31 @@
     return true;
   }
 
+  state.inflight = new Map(); // id -> promise of a write in progress, so a reselect can wait for it
+
+  // Resolves true when the open note is saved (or had nothing to save), false when the write failed.
   async function flushSave() {
     clearTimeout(state.saveTimer);
-    if (!state.dirty || !state.currentId) return;
+    if (!state.dirty || !state.currentId) return true;
     const id = state.currentId;
     const patch = currentPatch();
     state.dirty = false;
     let updated;
+    const write = api.notes.update(id, patch);
+    state.inflight.set(id, write.then(() => undefined, () => undefined));
     try {
-      updated = await api.notes.update(id, patch);
-      state.pending.delete(id);
+      updated = await write;
+      if (state.pending.get(id) !== patch) state.pending.delete(id);
     } catch (err) {
       state.pending.set(id, patch);
       if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); }
       reportSaveFailure(err);
       scheduleRetry();
-      return;
+      return false;
+    } finally {
+      state.inflight.delete(id);
     }
-    if (!updated) return;
+    if (!updated) return true;
     if (state.currentId === id) {
       state.current = updated;
       updateStatus(updated);
@@ -1132,7 +1150,7 @@
         case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
-        case 's': e.preventDefault(); flushSave().then(() => toast('Saved')); return;
+        case 's': e.preventDefault(); flushSave().then((ok) => toast(ok ? 'Saved' : 'Save failed, will retry')); return;
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }); return;
         // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
@@ -1309,7 +1327,7 @@
       }
     });
     api.on.newNote(newNote);
-    api.on.flush(async () => { try { await flushSave(); } finally { api.app.flushDone(); } });
+    api.on.flush(async () => { try { await flushSave(); await retryPending(); } finally { api.app.flushDone(); } });
     api.on.settingsChanged((s) => applySettings(s));
     api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
