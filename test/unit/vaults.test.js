@@ -194,6 +194,17 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   assert.ok(fs.existsSync(path.join(aDir, 'Remote.md')));
   assert.ok(store.notes.some((n) => n.title === 'Remote'), 'pulled file became a note');
 
+  // A sync requested while one is running gets its own run afterwards (not the in-flight result), so a
+  // remote change that lands mid-sync is still pulled by the second call.
+  const first = vm.sync(v.id, 'first');
+  fs.writeFileSync(path.join(bDir, 'Second.md'), 'second\n');
+  git(bDir, ['add', '-A']); git(bDir, ['-c', 'user.name=b', '-c', 'user.email=b@b', 'commit', '-q', '-m', 'b-second']); git(bDir, ['push', '-q']);
+  const second = vm.sync(v.id, 'second');
+  const [f1, s2] = await Promise.all([first, second]);
+  assert.equal(f1.ok, true); assert.equal(f1.reason, 'first');
+  assert.equal(s2.ok, true); assert.equal(s2.reason, 'second', 'queued caller got a fresh run');
+  assert.ok(store.notes.some((n) => n.title === 'Second'), 'change pushed mid-sync was pulled');
+
   // Conflict: both sides edit Start.md. Sync must fail cleanly, keep the local commit, and not leave a rebase in progress.
   fs.writeFileSync(path.join(bDir, 'Start.md'), 'b version\n');
   git(bDir, ['add', '-A']); git(bDir, ['-c', 'user.name=b', '-c', 'user.email=b@b', 'commit', '-q', '-m', 'b2']); git(bDir, ['push', '-q']);

@@ -95,6 +95,7 @@
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
             <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
             <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
+            <button class="tool-btn" id="printBtn" title="Print this note (Ctrl+Shift+P)" aria-label="Print">🖨 Print</button>
             <button class="tool-btn" id="stickyBtn" title="Put this note on the desktop as a sticky (Ctrl+Shift+T)" aria-label="Sticky">📌 Stick</button>
             <button class="tool-btn" id="botBtn" title="Ask Claude Code to work on your notes (Ctrl+Shift+A)" aria-label="Bot">🤖 Bot</button>
           </div>
@@ -127,6 +128,13 @@
           </div>
         </div>
 
+        <div class="find-bar hidden" id="findBar" role="search" aria-label="Find in note">
+          <input id="findInput" class="input find-input" type="text" placeholder="Find in this note…" autocomplete="off" spellcheck="false" />
+          <span class="find-count" id="findCount"></span>
+          <button class="tool-btn" id="findPrevBtn" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button>
+          <button class="tool-btn" id="findNextBtn" title="Next (Enter)" aria-label="Next match">↓</button>
+          <button class="tool-btn" id="findCloseBtn" title="Close (Esc)" aria-label="Close find">✕</button>
+        </div>
         <section class="bot-panel hidden" id="botPanel" aria-label="Bot">
           <div class="bot-head">
             <strong>Claude Code</strong>

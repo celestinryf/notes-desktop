@@ -46,7 +46,8 @@
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
     vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
     folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
-    stickyBtn: $('#stickyBtn'), botBtn: $('#botBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
+    stickyBtn: $('#stickyBtn'), botBtn: $('#botBtn'), printBtn: $('#printBtn'),
+    findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrevBtn: $('#findPrevBtn'), findNextBtn: $('#findNextBtn'), findCloseBtn: $('#findCloseBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
   };
 
@@ -867,6 +868,7 @@
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
     renderStickyButton(note);
+    if (find.open) closeFind();
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
@@ -897,6 +899,137 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- find in note, print ---------------------------------------------------
+
+  // Done in the page, not with Chromium's page-wide find: only the note is searched, the count is exact,
+  // and it works whether the note is shown rendered (Custom Highlight API) or as source (textarea selection).
+  const find = { open: false, query: '', ranges: [], active: -1, sourceHits: [] };
+
+  function openFind() {
+    if (!state.current) return;
+    find.open = true;
+    el.findBar.classList.remove('hidden');
+    const sel = String(window.getSelection && window.getSelection().toString() || '').trim();
+    if (!sel && document.activeElement === el.bodyInput) {
+      const t = el.bodyInput.value.slice(el.bodyInput.selectionStart, el.bodyInput.selectionEnd).trim();
+      if (t) el.findInput.value = t;
+    } else if (sel && sel.length < 200) el.findInput.value = sel;
+    el.findInput.focus();
+    el.findInput.select();
+    runFind(true, true);
+  }
+
+  function closeFind() {
+    if (!find.open) return;
+    find.open = false;
+    el.findBar.classList.add('hidden');
+    el.findCount.textContent = '';
+    clearFindHighlights();
+    focusBody();
+  }
+
+  function clearFindHighlights() {
+    if (window.CSS && CSS.highlights) { CSS.highlights.delete('notes-find'); CSS.highlights.delete('notes-find-active'); }
+    find.ranges = []; find.sourceHits = []; find.active = -1;
+  }
+
+  // Positions of every case-insensitive occurrence of q in text.
+  function findOffsets(text, q) {
+    const hits = []; const hay = text.toLowerCase(); const needle = q.toLowerCase();
+    if (!needle) return hits;
+    let i = hay.indexOf(needle);
+    while (i !== -1) { hits.push(i); i = hay.indexOf(needle, i + needle.length); }
+    return hits;
+  }
+
+  // Ranges over the rendered editor's text nodes (matches may span node boundaries).
+  function findRangesIn(root, q) {
+    const nodes = []; let text = '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) { nodes.push({ node: n, start: text.length }); text += n.nodeValue; }
+    const locate = (pos) => {
+      let lo = 0, hi = nodes.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (nodes[mid].start <= pos) lo = mid; else hi = mid - 1; }
+      return nodes.length ? { node: nodes[lo].node, offset: pos - nodes[lo].start } : null;
+    };
+    return findOffsets(text, q).map((pos) => {
+      const s = locate(pos), e = locate(pos + q.length);
+      if (!s || !e) return null;
+      const r = document.createRange();
+      r.setStart(s.node, s.offset);
+      // The end may fall exactly at a node boundary: keep it inside the node where the match ends.
+      if (e.offset === 0 && pos + q.length > 0) { const prev = locate(pos + q.length - 1); r.setEnd(prev.node, prev.offset + 1); } else r.setEnd(e.node, e.offset);
+      return r;
+    }).filter(Boolean);
+  }
+
+  function runFind(forward, fresh) {
+    const q = el.findInput.value;
+    const sameQuery = q === find.query;
+    find.query = q;
+    if (!q) { clearFindHighlights(); el.findCount.textContent = ''; return; }
+    if (state.sourceMode) {
+      if (fresh || !sameQuery || !find.sourceHits.length) {
+        find.sourceHits = findOffsets(el.bodyInput.value, q);
+        // Start from the caret so Enter finds the next match after where the person is.
+        const caret = el.bodyInput.selectionStart || 0;
+        const idx = find.sourceHits.findIndex((h) => h >= caret);
+        find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) - (forward === false ? 0 : 0) : -1;
+        if (fresh && find.active > 0 && find.sourceHits[find.active] === caret && el.bodyInput.selectionEnd - caret === q.length) { /* already on it */ }
+      } else if (find.sourceHits.length) {
+        find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
+      }
+      const n = find.sourceHits.length;
+      if (n && find.active >= 0) {
+        const at = find.sourceHits[find.active];
+        // Selecting shows the match only while the textarea has focus; stepping (Enter/F3) hands focus over.
+        if (!fresh) { el.bodyInput.focus(); }
+        el.bodyInput.setSelectionRange(at, at + q.length);
+        scrollTextareaToSelection(at);
+        if (!fresh) el.findInput.focus();
+      }
+      el.findCount.textContent = n ? (find.active + 1) + '/' + n : 'No matches';
+      el.findCount.classList.toggle('is-none', !n);
+      return;
+    }
+    if (fresh || !sameQuery || !find.ranges.length) {
+      find.ranges = findRangesIn(el.richEditor, q);
+      find.active = find.ranges.length ? 0 : -1;
+    } else if (find.ranges.length) {
+      find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
+    }
+    if (window.CSS && CSS.highlights) {
+      CSS.highlights.set('notes-find', new Highlight(...find.ranges));
+      CSS.highlights.set('notes-find-active', new Highlight(...(find.active >= 0 ? [find.ranges[find.active]] : [])));
+    }
+    const n = find.ranges.length;
+    if (n && find.active >= 0) {
+      const r = find.ranges[find.active];
+      const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+      if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    el.findCount.textContent = n ? (find.active + 1) + '/' + n : 'No matches';
+    el.findCount.classList.toggle('is-none', !n);
+  }
+
+  function scrollTextareaToSelection(at) {
+    // Approximate: line height times the line number of the match, kept in the middle of the viewport.
+    const before = el.bodyInput.value.slice(0, at);
+    const line = before.split('\n').length - 1;
+    const lh = parseFloat(getComputedStyle(el.bodyInput).lineHeight) || 24;
+    const scroller = el.bodyInput.closest('.editor-scroll') || el.bodyInput;
+    const top = el.bodyInput.offsetTop + line * lh - scroller.clientHeight / 2;
+    if (scroller !== el.bodyInput) scroller.scrollTop = Math.max(0, top); else el.bodyInput.scrollTop = Math.max(0, line * lh - el.bodyInput.clientHeight / 2);
+  }
+
+  async function printNote() {
+    if (!state.current) return;
+    await flushSave();
+    const r = await api.app.print();
+    if (!r.ok) toast('Could not print: ' + (r.error || 'unknown error'));
+    else if (r.dry) toast('Print: dry run');
   }
 
   // ---- desktop stickies ------------------------------------------------------
@@ -1324,6 +1457,10 @@
       state.current = updated;
       updateStatus(updated);
       setSaved('Saved');
+      // A vault note's title is its file name: the store may have settled it (illegal characters, a clash),
+      // and the file row must show the renamed path.
+      if (updated.filePath && el.filePath.textContent !== updated.filePath) { el.filePath.textContent = updated.filePath; el.filePath.title = updated.filePath; }
+      if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
     }
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx !== -1) {
@@ -1672,6 +1809,7 @@
     const inDialog = el.settingsDialog.open || el.linkDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
+      if (find.open) { e.preventDefault(); closeFind(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
@@ -1720,6 +1858,9 @@
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
+    if (e.key === 'F3' && find.open) { e.preventDefault(); runFind(!e.shiftKey); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
@@ -1758,6 +1899,16 @@
     el.readAloudBtn.addEventListener('click', toggleReadAloud);
     el.dictateBtn.addEventListener('click', startDictation);
     el.stickyBtn.addEventListener('click', toggleSticky);
+    el.printBtn.addEventListener('click', printNote);
+    el.findNextBtn.addEventListener('click', () => runFind(true));
+    el.findPrevBtn.addEventListener('click', () => runFind(false));
+    el.findCloseBtn.addEventListener('click', closeFind);
+    el.findInput.addEventListener('input', () => runFind(true, true));
+    el.bodyInput.addEventListener('input', () => { if (find.open && state.sourceMode) runFind(true, true); });
+    el.findInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); runFind(!e.shiftKey); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
+    });
     api.on.stickiesChanged(() => { refreshCurrentMeta(); });
     api.on.openNote(async (id) => { await setView('all'); await selectNoteNow(id); });
     el.botBtn.addEventListener('click', () => toggleBot());

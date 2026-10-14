@@ -28,6 +28,7 @@ class VaultManager {
     this.timers = new Map();       // vaultId -> { rescan, commit, pull }
     this.status = new Map();       // vaultId -> status object
     this.busy = new Map();         // vaultId -> promise
+    this.queued = new Map();       // vaultId -> promise of the follow-up sync
   }
 
   _status(id) {
@@ -175,7 +176,14 @@ class VaultManager {
   async sync(id, reason) {
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
-    if (this.busy.has(id)) return this.busy.get(id);
+    // A sync asked for while one is running must not get that run's (possibly stale) result: it runs
+    // again afterwards, once, however many callers queued up meanwhile.
+    if (this.busy.has(id)) {
+      if (!this.queued.has(id)) {
+        this.queued.set(id, this.busy.get(id).catch(() => {}).then(() => { this.queued.delete(id); return this.sync(id, reason); }));
+      }
+      return this.queued.get(id);
+    }
     const work = (async () => {
       this._set(id, { syncing: true });
       try {
@@ -196,18 +204,25 @@ class VaultManager {
           const remoteHas = await git(['ls-remote', '--heads', 'origin', branch], v.path, 60000);
           const remoteHasBranch = remoteHas.ok && remoteHas.stdout.trim().length > 0;
           // Rebase and autostash create commits too, so the identity goes on the pull as well.
-          const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true };
-          if (!pull.ok) {
-            await git(['rebase', '--abort'], v.path);
-            await this.refreshRepoStatus(id);
-            const msg = /CONFLICT|could not apply/i.test(pull.error) ? 'Conflicting changes from another device; open the folder and resolve them, then Sync again.' : pull.error;
-            this._set(id, { lastError: 'pull: ' + msg, syncing: false });
-            return { ok: false, error: msg };
+          // Pull, then push. If the remote moved between the two (another device pushed just now), pull
+          // once more and push again rather than reporting a rejection the next sync would clear anyway.
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true };
+            if (!pull.ok) {
+              await git(['rebase', '--abort'], v.path);
+              await this.refreshRepoStatus(id);
+              const msg = /CONFLICT|could not apply/i.test(pull.error) ? 'Conflicting changes from another device; open the folder and resolve them, then Sync again.' : pull.error;
+              this._set(id, { lastError: 'pull: ' + msg, syncing: false });
+              return { ok: false, error: msg };
+            }
+            // Pulled files may be new or changed: bring the notes in line before pushing.
+            try { const r = await this.store.scanVault(id); if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r); } catch (_) { /* ignore */ }
+            const push = await git(['push', '-q', '-u', 'origin', 'HEAD'], v.path, 120000);
+            if (push.ok) break;
+            const rejected = /rejected|fetch first|non-fast-forward|failed to push some refs/i.test(push.error);
+            if (rejected && attempt === 0) continue;
+            this._set(id, { lastError: 'push: ' + push.error, syncing: false }); await this.refreshRepoStatus(id); return { ok: false, error: push.error };
           }
-          // Pulled files may be new or changed: bring the notes in line before pushing.
-          try { const r = await this.store.scanVault(id); if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r); } catch (_) { /* ignore */ }
-          const push = await git(['push', '-q', '-u', 'origin', 'HEAD'], v.path, 120000);
-          if (!push.ok) { this._set(id, { lastError: 'push: ' + push.error, syncing: false }); await this.refreshRepoStatus(id); return { ok: false, error: push.error }; }
         }
         await this.refreshRepoStatus(id);
         this._set(id, { lastSyncAt: this.now(), lastError: null, syncing: false });

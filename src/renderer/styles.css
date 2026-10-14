@@ -514,6 +514,31 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   pointer-events: none;
 }
 
+/* Find in note */
+.find-bar {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 16px 8px;
+  padding: 6px 8px;
+  border: 2px solid var(--line); border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: 3px 3px 0 var(--shadow);
+  animation: rise 0.2s var(--ease) both;
+}
+.find-input { flex: 1; min-width: 0; }
+.find-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.find-count.is-none { color: var(--ember); }
+::highlight(notes-find) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+::highlight(notes-find-active) { background: var(--accent); color: var(--accent-ink); }
+
+/* Print: the note only */
+@media print {
+  .sidebar, .list-pane, .editor-toolbar, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  html, body, .app, .editor-pane, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
+  .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; }
+  .rich-editor-content, #bodyInput { font-size: 12pt; }
+  #bodyInput { border: none; height: auto !important; overflow: visible !important; }
+}
+
 /* Bot panel */
 .bot-panel {
   display: flex; flex-direction: column; gap: 8px;
