@@ -280,7 +280,9 @@
   }
 
   function safeFilename(name) {
-    let s = String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/[. ]+$/, '');
+    // Cut by code point: a UTF-16 slice through an emoji would leave a lone surrogate, which the file system
+    // turns into U+FFFD, so the stored name and the name on disk would never match again.
+    let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('').replace(/[. ]+$/, '');
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = 'note-' + s; // Windows device names
     return s || UNTITLED;
   }
