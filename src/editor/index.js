@@ -2,7 +2,7 @@
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
 import { Editor, Extension, InputRule } from '@tiptap/core';
-import { EditorState } from '@tiptap/pm/state';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
@@ -181,9 +181,15 @@ export function create(element, options) {
   function setMarkdown(md) {
     suppress = true;
     try {
+      const prev = editor.state.selection;
       editor.commands.setContent(md || '', false);
       // Loading a note is not an edit: a fresh state means Ctrl+Z cannot bring the previous note's text back.
-      editor.view.updateState(EditorState.create({ doc: editor.state.doc, plugins: editor.state.plugins, selection: editor.state.selection }));
+      // The caret goes back where it was (clamped), so a remote or vault reload does not jump it to the end.
+      const doc = editor.state.doc;
+      const clamp = (p) => Math.max(0, Math.min(p, doc.content.size));
+      let selection;
+      try { selection = TextSelection.create(doc, clamp(prev.from), clamp(prev.to)); } catch (_) { selection = undefined; }
+      editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins, selection }));
     } finally { suppress = false; }
     const out = getMarkdown();
     // Exact: byte-for-byte apart from trailing whitespace. Used for file-backed notes, where even a changed
