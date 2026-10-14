@@ -535,12 +535,18 @@ function main() {
     const { spawn } = require('child_process');
     try {
       // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.
-      // The command is a PowerShell call of the resolved file, single-quoted for PowerShell.
-      const psq = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-      const psCommand = spec.isScript ? ('& ' + psq(claudeBin.resolveNode() || 'node') + ' ' + psq(spec.file)) : ('& ' + psq(spec.file));
+      // Paths never go through PowerShell's parser or wt's `;` splitting: they sit inside single-quoted
+      // here-strings in a script file (only a line that is exactly '@ ends one, and paths have no newlines).
+      const here = (s) => "@'\n" + String(s).replace(/\r?\n/g, '') + "\n'@";
+      const lines = ['$ErrorActionPreference = \'Continue\'', 'Set-Location -LiteralPath ' + here(target.cwd)];
+      if (spec.isScript) lines.push('$notesNode = ' + here(claudeBin.resolveNode() || 'node'), '$notesCli = ' + here(spec.file), '& $notesNode $notesCli');
+      else lines.push('$notesClaude = ' + here(spec.file), '& $notesClaude');
+      const script = path.join(DATA_DIR, 'bot-terminal.ps1');
+      fs.writeFileSync(script, '﻿' + lines.join('\r\n') + '\r\n', 'utf8');
+      const psArgs = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', script];
       const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
-      if (hasWt) spawn('wt', ['-d', target.cwd, 'powershell', '-NoExit', '-Command', psCommand], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
-      else spawn('powershell', ['-NoExit', '-Command', 'Set-Location -LiteralPath ' + psq(target.cwd) + '; ' + psCommand], { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
+      if (hasWt) spawn('wt', ['powershell'].concat(psArgs), { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      else spawn('powershell', psArgs, { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
       return { ok: true, cwd: target.cwd, kind: target.kind };
     } catch (err) {
       return { ok: false, error: err.message };

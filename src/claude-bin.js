@@ -16,11 +16,14 @@ function shimTarget(shimPath) {
   let text;
   try { text = fs.readFileSync(shimPath, 'utf8'); } catch (_) { return null; }
   const dir = path.dirname(shimPath);
-  const re = /"?((?:%~?dp0%?|\$basedir)[^"\r\n]*?\.(?:exe|js|cjs|mjs))"?/gi;
+  // The extension must end the token: `foo.json"` is not `foo.js`.
+  const re = /"?((?:%~?dp0%?|\$basedir)[^"\r\n]*?\.(?:exe|js|cjs|mjs))(?=["\s)]|$)/gi;
   let m;
   while ((m = re.exec(text))) {
     const rel = m[1].replace(/^%~?dp0%?[\\/]?/i, '').replace(/^\$basedir[\\/]?/i, '');
     const full = path.resolve(dir, rel);
+    // nvm-style shims mention a sibling node.exe before the script they run; node is the runner, not the target.
+    if (/^node(\.exe)?$/i.test(path.basename(full))) continue;
     if (exists(full)) return full;
   }
   return null;
