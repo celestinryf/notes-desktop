@@ -71,7 +71,7 @@ test('list filters by trash, pinned, tag, and query, and sorts pinned first', ()
   assert.deepEqual(store.list({ sort: 'title' }).map((n) => n.id), [a.id, c.id]);
 });
 
-test('trash unpins, restore brings back, destroy removes, emptyTrash clears only trashed', () => {
+test('trash keeps the pin, restore brings back, destroy removes, emptyTrash clears only trashed', () => {
   const { store } = makeStore();
   const a = store.create({ title: 'a' });
   const b = store.create({ title: 'b' });
