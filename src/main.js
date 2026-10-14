@@ -624,8 +624,11 @@ function main() {
     botChild = child;
     let ended = false;
     const end = (data) => { if (ended) return; ended = true; if (botChild === child) botChild = null; botSend('end', data); };
-    child.stdout.on('data', (d) => botSend('out', { text: String(d) }));
-    child.stderr.on('data', (d) => botSend('err', { text: String(d) }));
+    // Streaming decoders: a multibyte character split across two chunks must not show as a replacement sign.
+    const { StringDecoder } = require('string_decoder');
+    const outDec = new StringDecoder('utf8'), errDec = new StringDecoder('utf8');
+    child.stdout.on('data', (d) => { const t = outDec.write(d); if (t) botSend('out', { text: t }); });
+    child.stderr.on('data', (d) => { const t = errDec.write(d); if (t) botSend('err', { text: t }); });
     child.on('error', (err) => end({ ok: false, error: 'Could not start "' + launch.file + '": ' + err.message }));
     child.on('close', (code) => {
       if (ended) return;
@@ -915,7 +918,8 @@ function main() {
     fs.mkdirSync(ATTACH_DIR, { recursive: true });
     const clean = /^[a-z0-9]{1,5}$/i.test(String(ext)) ? String(ext).toLowerCase() : 'webm';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const name = 'Recording ' + stamp + '.' + clean;
+    let name = 'Recording ' + stamp + '.' + clean;
+    for (let i = 2; fs.existsSync(path.join(ATTACH_DIR, name)); i++) name = 'Recording ' + stamp + ' ' + i + '.' + clean; // two in one second
     fs.writeFileSync(path.join(ATTACH_DIR, name), Buffer.from(bytes));
     return { name, href: 'attachment://' + encodeURIComponent(name), size: Buffer.from(bytes).length };
   });
