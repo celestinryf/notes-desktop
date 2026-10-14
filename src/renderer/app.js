@@ -651,14 +651,15 @@
 
   async function selectNoteNow(id) {
     if (state.currentId === id && state.current) return;
-    if (state.inflight.has(id)) await state.inflight.get(id); // a write for this note is still landing
-    const note = await api.notes.get(id);
-    if (!note) return;
-    // Flush the outgoing note last, and again if keystrokes landed while the flush was in flight,
+    // Flush the outgoing note first, and again if keystrokes landed while the flush was in flight,
     // so nothing typed during the switch is dropped.
     let guard = 0;
     while (state.dirty && guard++ < 3) await flushSave();
     stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
+    if (state.inflight.has(id)) await state.inflight.get(id); // a write for the incoming note is still landing
+    // Read the incoming note only now, after every write that could change it has settled.
+    const note = await api.notes.get(id);
+    if (!note) return;
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
@@ -823,6 +824,7 @@
     }
     // Tags may have changed: cheap to refresh the tag list.
     api.notes.tags().then(renderTags);
+    return true;
   }
 
   async function newNote() {
