@@ -18,7 +18,8 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
 - Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
 - Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
-- Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
+- Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold; tables and images render too. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
+- Safety net: if a note contains Markdown the rendered view cannot show faithfully (inline HTML, footnotes), it opens as source with a notice, so just looking at it never rewrites it.
 - Ctrl+B / Ctrl+I for bold and italic, Ctrl+K for a link, Tab / Shift+Tab to nest and un-nest list items
 - Writing column can sit left, center, or right of the editor pane at a chosen width, or use the full width (Settings)
 - Git history: every change is committed to a git repo inside the data folder (only `notes.json` is tracked). Add an optional remote in Settings and each commit is pushed. Commit now / Push now buttons in Settings.
@@ -38,7 +39,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 | Ctrl+F | Search |
 | Ctrl+E | Toggle Markdown source / rendered |
 | Ctrl+P | Pin / unpin |
-| Ctrl+Del | Move to trash |
+| Ctrl+Shift+Del | Move to trash (Ctrl+Del also works outside a text field) |
 | Ctrl+S | Save now |
 | Ctrl+, | Settings |
 | Ctrl+\ | Toggle sidebar |

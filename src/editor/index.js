@@ -7,7 +7,21 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
+import Image from '@tiptap/extension-image';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableHeader from '@tiptap/extension-table-header';
+import TableCell from '@tiptap/extension-table-cell';
 import { Markdown } from 'tiptap-markdown';
+
+// Content fingerprint used to decide whether the rendered view can show a note without changing it.
+// Escapes and formatting punctuation are ignored; the letters, digits, and URLs must survive.
+function fingerprint(md) {
+  return String(md || '')
+    .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1')
+    .replace(/[^A-Za-z0-9:/.]+/g, '')
+    .toLowerCase();
+}
 
 // Tab indents list items; outside a list it does nothing instead of moving focus away mid-sentence.
 // Shift+Tab lifts a list item, or falls through to the browser so focus can move back to the tags field.
@@ -75,8 +89,15 @@ export function create(element, options) {
       TaskListTight,
       DashCheckbox,
       Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
+      Image.configure({ inline: false, allowBase64: true }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
       Placeholder.configure({ placeholder: options.placeholder || 'Start writing…' }),
-      Markdown.configure({ html: false, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: true, transformCopiedText: true }),
+      // html: true so a structure Markdown cannot express (a table cell with two paragraphs) is written as
+      // HTML, which round-trips, instead of the literal placeholder "[table]" that would lose the table.
+      Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: true, transformCopiedText: true }),
       NotesKeys,
     ],
     content: options.content || '',
@@ -105,9 +126,12 @@ export function create(element, options) {
     return liveRange() || { from: editor.state.selection.from, to: editor.state.selection.to };
   }
 
+  // Loads Markdown and reports whether the rendered view preserves it: true when serializing the loaded
+  // document gives back the same content, false when some construct would be rewritten or dropped.
   function setMarkdown(md) {
     suppress = true;
     try { editor.commands.setContent(md || '', false); } finally { suppress = false; }
+    return fingerprint(getMarkdown()) === fingerprint(md);
   }
 
   return {

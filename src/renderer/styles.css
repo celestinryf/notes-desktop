@@ -470,6 +470,12 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .rich-editor-content li[data-type="taskItem"] > label input { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; margin: 0; }
 .rich-editor-content li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
 .rich-editor-content li[data-type="taskItem"][data-checked="true"] > div { color: var(--fg-muted); text-decoration: line-through; }
+.rich-editor-content table { border-collapse: collapse; margin: 0 0 0.8em; table-layout: fixed; width: 100%; }
+.rich-editor-content th, .rich-editor-content td { border: 1.5px solid var(--line-soft); padding: 4px 10px; vertical-align: top; min-width: 3em; }
+.rich-editor-content th { background: var(--bg-sunken); font-weight: 600; text-align: left; }
+.rich-editor-content td > p, .rich-editor-content th > p { margin: 0; }
+.rich-editor-content .selectedCell { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rich-editor-content img { display: block; max-width: 100%; border-radius: 8px; border: 2px solid var(--line-soft); margin: 0.4em 0 0.8em; }
 .rich-editor-content ::selection { background: var(--selection); color: var(--accent-ink); }
 .rich-editor-content .ProseMirror-selectednode { outline: 2px solid var(--accent); }
 

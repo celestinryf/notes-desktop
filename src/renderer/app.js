@@ -110,7 +110,10 @@
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
-    if ((settings.editorMode === 'source') !== state.sourceMode) applyEditorMode(settings.editorMode === 'source');
+    // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it.
+    const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId;
+    const wantSource = settings.editorMode === 'source' || forcedSource;
+    if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
 
   function applyEditorLayout(settings) {
@@ -645,7 +648,17 @@
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
-    if (state.rich) state.rich.setMarkdown(note.body);
+    let lossless = true;
+    if (state.rich) lossless = state.rich.setMarkdown(note.body);
+    state.currentLossless = lossless;
+    state.lossyOverride = null;
+    // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
+    const wantSource = state.settings.editorMode === 'source' || !lossless;
+    if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
+    if (!lossless && state.lossyToastFor !== note.id) {
+      state.lossyToastFor = note.id;
+      toast('Opened as Markdown source: the rendered view would change some of this note’s formatting.');
+    }
     autoGrow();
     const inTrash = !!note.trashedAt;
     [el.titleInput, el.tagsInput, el.bodyInput].forEach((i) => { i.readOnly = inTrash; });
@@ -831,6 +844,10 @@
   function toggleSource(force) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (next === state.sourceMode) return;
+    if (!next && state.currentLossless === false) {
+      state.lossyOverride = state.currentId;
+      toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
+    }
     applyEditorMode(next);
     updateSettings({ editorMode: next ? 'source' : 'rendered' });
     focusBody();
@@ -839,6 +856,11 @@
   function focusBody() {
     if (state.sourceMode || !state.rich) el.bodyInput.focus();
     else state.rich.focus();
+  }
+
+  function inTextField() {
+    const a = document.activeElement;
+    return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || el.richEditor.contains(a));
   }
 
   function bodyHasFocus() {
@@ -1030,7 +1052,8 @@
         case 's': e.preventDefault(); flushSave().then(() => toast('Saved')); return;
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }); return;
-        case 'delete': e.preventDefault(); trashCurrent(); return;
+        // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
+        case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
         // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
         case 'b': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('**', '**'); } return;
         case 'i': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('_', '_'); } return;
@@ -1040,8 +1063,8 @@
           return;
         default: break;
       }
-      if (e.key === 'Backspace') { e.preventDefault(); trashCurrent(); return; }
     }
+    if (ctrl && e.shiftKey && e.key === 'Delete') { e.preventDefault(); trashCurrent(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'l') {
       e.preventDefault();
       updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
