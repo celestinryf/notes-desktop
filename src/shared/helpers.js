@@ -211,13 +211,24 @@
   }
 
   // A mailto: URL for a note. Mail clients reject very long URLs, so the body is cut with a notice.
+  // limit caps the ENCODED URL (Windows shell handlers reject roughly 2 KB), never splitting a surrogate pair.
   function mailtoFor(note, limit) {
-    limit = limit || 1800;
+    limit = limit || 1900;
     const subject = deriveTitle(note) || 'Note';
-    let body = String(note.body || '');
-    let truncated = false;
-    if (body.length > limit) { body = body.slice(0, limit) + '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]'; truncated = true; }
-    return { url: 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body), truncated };
+    const body = String(note.body || '');
+    const notice = '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]';
+    const head = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';
+    const full = head + encodeURIComponent(body);
+    if (full.length <= limit) return { url: full, truncated: false };
+    // Find the longest prefix (in code points) whose encoded form fits with the notice.
+    const points = Array.from(body);
+    let lo = 0, hi = points.length;
+    const budget = Math.max(0, limit - head.length - encodeURIComponent(notice).length);
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (encodeURIComponent(points.slice(0, mid).join('')).length <= budget) lo = mid; else hi = mid - 1;
+    }
+    return { url: head + encodeURIComponent(points.slice(0, lo).join('') + notice), truncated: true };
   }
 
   function plainTextFromMarkdown(md) {

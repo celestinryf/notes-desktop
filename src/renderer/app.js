@@ -1001,11 +1001,12 @@
     host.style.position = 'absolute'; host.style.left = '-99999px';
     document.body.append(host);
     try {
-      const ed = window.NotesEditor.create(host, {});
-      ed.setMarkdown(el.bodyInput.value);
-      const html = host.querySelector('.rich-editor-content').innerHTML;
-      ed.destroy();
-      return html;
+      let ed = null;
+      try {
+        ed = window.NotesEditor.create(host, {});
+        ed.setMarkdown(el.bodyInput.value);
+        return host.querySelector('.rich-editor-content').innerHTML;
+      } finally { if (ed) ed.destroy(); }
     } finally { host.remove(); }
   }
 
@@ -1020,7 +1021,7 @@
       else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
       else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
       else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
-      else if (action === 'pdf') { const r = await api.app.exportPdf(note.id); if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error); }
+      else if (action === 'pdf') { if (find.open) closeFind(); const r = await api.app.exportPdf(note.id); if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error); }
       else if (action === 'html') { const r = await api.app.exportHtml(note.id, currentHtml()); if (r.ok) toast('Saved HTML to ' + r.filePath); else if (!r.canceled) toast('Could not save HTML: ' + r.error); }
       else if (action === 'md') { await exportCurrent(); }
       else if (action === 'reveal') { await api.files.reveal(note.id); }

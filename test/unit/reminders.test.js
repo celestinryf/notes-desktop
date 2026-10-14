@@ -82,6 +82,20 @@ test('formatWhen and mailtoFor', () => {
   assert.ok(m.url.startsWith('mailto:?subject=Plan%20%26%20go&body=line%201%0A**bold**'), m.url);
   const long = H.mailtoFor({ title: 'Long', body: 'x'.repeat(5000) });
   assert.equal(long.truncated, true);
-  assert.ok(long.url.length < 2500, 'kept under what mail clients accept');
+  assert.ok(long.url.length <= 1900, 'kept under what mail clients accept: ' + long.url.length);
   assert.match(decodeURIComponent(long.url), /truncated/i);
+  // The cap is on the encoded URL: newlines and non-ASCII expand when encoded.
+  const cjk = H.mailtoFor({ title: 'CJK', body: '日本語の文章\n'.repeat(400) });
+  assert.ok(cjk.url.length <= 1900, 'encoded length capped: ' + cjk.url.length);
+  assert.doesNotThrow(() => decodeURIComponent(cjk.url));
+  // Never cut through an emoji (a surrogate pair), which would make encodeURIComponent throw.
+  for (let n = 1700; n < 1760; n++) {
+    const body = 'a'.repeat(n) + '😀'.repeat(300);
+    let m;
+    assert.doesNotThrow(() => { m = H.mailtoFor({ title: 'E', body }); }, 'n=' + n);
+    const decoded = decodeURIComponent(m.url);
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    assert.ok(decoded.indexOf('�') === -1 && !loneSurrogate.test(decoded), 'no lone surrogate at n=' + n);
+    assert.ok(m.url.length <= 1900, 'capped at n=' + n);
+  }
 });

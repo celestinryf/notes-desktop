@@ -704,11 +704,11 @@ function main() {
     await clipboard.write([item]);
     return true;
   });
-  ipcMain.handle('app:emailNote', (_e, id) => {
+  ipcMain.handle('app:emailNote', async (_e, id) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     const m = H.mailtoFor(note);
-    shell.openExternal(m.url);
+    try { await shell.openExternal(m.url); } catch (err) { return { ok: false, error: 'No mail app could open the message: ' + err.message }; }
     return { ok: true, truncated: m.truncated };
   });
   ipcMain.handle('app:exportPdf', async (e, id) => {
