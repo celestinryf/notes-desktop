@@ -11,15 +11,23 @@
     "icon": "electron scripts/make-icon.js",
     "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",
     "test:ui": "node --test --test-timeout=25000 test/ui.test.js",
-    "test:all": "npm test && npm run test:ui && npm run test:e2e"
+    "test:all": "npm test && npm run test:ui && npm run test:e2e",
+    "build": "esbuild src/editor/index.js --bundle --format=iife --global-name=NotesEditor --target=chrome120 --minify --outfile=src/renderer/vendor/editor.bundle.js"
   },
   "license": "MIT",
   "devDependencies": {
     "electron": "^44.7.2",
+    "esbuild": "^0.28.2",
     "playwright-core": "^1.49.1"
   },
   "dependencies": {
-    "dompurify": "^3.4.17",
-    "marked": "^15.0.12"
+    "@tiptap/core": "^2.27.3",
+    "@tiptap/extension-link": "^2.27.3",
+    "@tiptap/extension-placeholder": "^2.27.3",
+    "@tiptap/extension-task-item": "^2.27.3",
+    "@tiptap/extension-task-list": "^2.27.3",
+    "@tiptap/pm": "^2.27.3",
+    "@tiptap/starter-kit": "^2.27.3",
+    "tiptap-markdown": "^0.8.10"
   }
 }

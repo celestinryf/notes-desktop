@@ -38,7 +38,8 @@ test.before(async () => {
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [ROOT],
-    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1' }),
+    // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
+    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1' }),
   });
   page = await app.firstWindow();
   page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(m.text()); });
@@ -46,6 +47,13 @@ test.before(async () => {
   await page.waitForSelector('#app');
   await page.evaluate(() => { window.confirm = () => true; });
 });
+
+async function useSourceMode(on) {
+  const isSource = async () => page.evaluate(() => !document.getElementById('bodyInput').classList.contains('hidden'));
+  if ((await isSource()) === on) return;
+  await page.click('#sourceBtn');
+  await waitFor('editor mode ' + (on ? 'source' : 'rendered'), async () => (await isSource()) === on);
+}
 
 test.after(async () => {
   // The window's close handler hides to the tray, so ask the app to exit instead of closing windows.
@@ -76,8 +84,78 @@ test('showing the window does not create stray notes once notes exist', async ()
   assert.equal(readNotes().notes.length, 1, 'second show created no extra note');
 });
 
+test('rendered editor: ## becomes a heading, lists and checklists render, Markdown round-trips', async () => {
+  await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
+  assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true, 'rendered view is the default');
+  await page.fill('#titleInput', 'Rendered');
+  await page.click('#richEditor .rich-editor-content');
+  await page.keyboard.type('## Big heading');
+  await page.waitForSelector('#richEditor h2:has-text("Big heading")');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Plain paragraph with ');
+  await page.keyboard.press('Control+b');
+  await page.keyboard.type('bold');
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- [ ] a task');
+  await page.waitForSelector('#richEditor li[data-type="taskItem"]');
+  await waitFor('markdown saved from rendered editor', () => {
+    const n = findNote('Rendered');
+    return n && n.body.includes('## Big heading') && n.body.includes('**bold**') && n.body.includes('- [ ] a task');
+  });
+  // Ticking the checkbox writes back to the Markdown.
+  await page.click('#richEditor li[data-type="taskItem"] input[type="checkbox"]');
+  await waitFor('checkbox toggled in markdown', () => findNote('Rendered').body.includes('- [x] a task'));
+
+  // Ctrl+K opens the link dialog and applies a link to the selection.
+  await page.click('#richEditor h2');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press('Control+k');
+  await page.waitForSelector('#linkDialog[open]');
+  await page.fill('#linkInput', 'https://example.com');
+  await page.click('#linkApplyBtn');
+  try {
+    await waitFor('link in markdown', () => /\[Big heading\]\(https:\/\/example\.com\)/.test(findNote('Rendered').body));
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      html: document.querySelector('#richEditor .ProseMirror').innerHTML,
+      textarea: document.getElementById('bodyInput').value,
+      active: document.activeElement && (document.activeElement.id || document.activeElement.className),
+      hasFocus: document.hasFocus(),
+      dialogOpen: document.getElementById('linkDialog').open,
+      selection: String(window.getSelection && window.getSelection().toString()),
+    }));
+    throw new Error(err.message + ' | file=' + JSON.stringify(findNote('Rendered').body) + ' | ' + JSON.stringify(diag));
+  }
+
+  // Ctrl+E shows the raw source with the same text; editing there flows back into the rendered view.
+  await page.keyboard.press('Control+e');
+  await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
+  assert.equal(readNotes().settings.editorMode, 'source', 'mode persists');
+  assert.match(await page.inputValue('#bodyInput'), /^## \[Big heading\]/);
+  await page.fill('#bodyInput', '# From source\n\n- [ ] one');
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#richEditor h1:has-text("From source")');
+  assert.equal(await page.$$eval('#richEditor li[data-type="taskItem"]', (l) => l.length), 1);
+  await waitFor('source edit saved', () => findNote('Rendered').body.startsWith('# From source'));
+
+  // Leave the editor in source mode: the older tests below drive the textarea directly.
+  await useSourceMode(true);
+  await page.keyboard.press('Control+Delete'); // trash this note so the following tests start as before
+  await waitFor('rendered note trashed', () => findNote('Rendered').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await page.click('.note-card:has-text("Rendered")');
+  await page.click('#destroyBtn');
+  await waitFor('rendered note destroyed', () => !findNote('Rendered'));
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+});
+
 test('first run opens on a fresh note and typing autosaves', async () => {
   await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
+  await useSourceMode(true);
   await page.fill('#titleInput', 'Alpha');
   await page.fill('#bodyInput', 'first body');
   await waitFor('Alpha saved', () => { const n = findNote('Alpha'); return n && n.body === 'first body'; });
@@ -183,17 +261,85 @@ test('Tab indents, Shift+Tab outdents, Enter continues lists', async () => {
   assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two  \n', 'empty bullet ends the list');
 });
 
-test('preview renders Markdown and checkbox clicks write back to the source', async () => {
+test('switching source to rendered shows the same Markdown and checkbox clicks write back', async () => {
   await page.fill('#bodyInput', '# Head\n\n- [ ] alpha\n- [x] beta\n\n[site](https://example.com)');
+  await waitFor('source saved', () => findNote('Gamma (copy)').body.startsWith('# Head'));
   await page.keyboard.press('Control+e');
-  await page.waitForSelector('#preview:not(.hidden) h1');
-  assert.equal(await page.textContent('#preview h1'), 'Head');
-  assert.equal(await page.$$eval('#preview input[type=checkbox]', (b) => b.length), 2);
-  await page.click('#preview input[type=checkbox] >> nth=0');
+  await page.waitForSelector('#richEditor:not(.hidden) h1');
+  assert.equal(await page.textContent('#richEditor h1'), 'Head');
+  assert.equal(await page.$$eval('#richEditor li[data-type="taskItem"]', (b) => b.length), 2);
+  assert.equal(await page.$eval('#richEditor a', (a) => a.getAttribute('href')), 'https://example.com');
+  await page.click('#richEditor li[data-type="taskItem"] >> nth=0 >> input[type="checkbox"]');
   await waitFor('checkbox toggled in source', () => findNote('Gamma (copy)').body.includes('- [x] alpha'));
-  assert.equal(await page.$eval('#preview li.task-item >> nth=0', (li) => li.classList.contains('is-done')), true);
+  assert.equal(await page.$eval('#richEditor li[data-type="taskItem"] >> nth=0', (li) => li.dataset.checked), 'true');
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#bodyInput:not(.hidden)');
+});
+
+test('writing column: alignment and width settings move and size the block', async () => {
+  const col = () => page.evaluate(() => {
+    const c = document.getElementById('editorColumn');
+    const cs = getComputedStyle(c);
+    return { cls: c.className, width: c.getBoundingClientRect().width, left: c.getBoundingClientRect().left, paneLeft: document.getElementById('editorPane').getBoundingClientRect().left, paneWidth: document.getElementById('editorPane').getBoundingClientRect().width, maxWidth: cs.maxWidth };
+  });
+  const before = await col();
+  assert.match(before.cls, /align-left/);
+  assert.equal(before.maxWidth, '760px');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.click('#alignSeg button[data-align="center"]');
+  await waitFor('center persisted', () => readNotes().settings.editorAlign === 'center');
+  const centered = await col();
+  assert.match(centered.cls, /align-center/);
+  const leftGap = centered.left - centered.paneLeft;
+  const rightGap = centered.paneLeft + centered.paneWidth - (centered.left + centered.width);
+  assert.ok(Math.abs(leftGap - rightGap) < 2, 'centered within the pane: ' + leftGap + ' vs ' + rightGap);
+
+  await page.click('#alignSeg button[data-align="right"]');
+  await waitFor('right persisted', () => readNotes().settings.editorAlign === 'right');
+  const righted = await col();
+  assert.ok(righted.paneLeft + righted.paneWidth - (righted.left + righted.width) < 2, 'flush right');
+
+  await page.$eval('#editorWidthInput', (i) => { i.value = '600'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
+  await waitFor('width persisted', () => readNotes().settings.editorWidth === 600);
+  assert.equal((await col()).maxWidth, '600px');
+
+  await page.check('#editorFullWidthInput');
+  await waitFor('full width persisted', () => readNotes().settings.editorWidth === 0);
+  assert.match((await col()).cls, /full-width/);
+  assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
+
+  await page.uncheck('#editorFullWidthInput');
+  await page.click('#alignSeg button[data-align="left"]');
+  await waitFor('restored', () => readNotes().settings.editorAlign === 'left' && readNotes().settings.editorWidth > 0);
+  await page.click('#closeSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+});
+
+test('git history: edits are committed to a repo in the data folder', async () => {
+  const { execFileSync } = require('child_process');
+  const repoDir = path.join(dataDir, 'history');
+  const count = () => { try { return parseInt(execFileSync('git', ['-C', repoDir, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), 10) || 0; } catch (_) { return 0; } };
+  await useSourceMode(true);
+  await waitFor('at least one commit exists', () => count() >= 1, 10000);
+  const before = count();
+  await page.fill('#bodyInput', 'committed text ' + Date.now());
+  await waitFor('new commit after an edit', () => count() > before, 10000);
+  const tracked = execFileSync('git', ['-C', repoDir, 'ls-files'], { encoding: 'utf8' }).trim().split('\n').sort();
+  assert.deepEqual(tracked, ['notes.json'], 'only notes.json is tracked');
+  assert.equal(fs.existsSync(path.join(dataDir, '.git')), false, 'the data folder itself is not a repo');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await waitForDom(() => /commit/.test(document.getElementById('gitStatus').textContent));
+  assert.equal(await page.$eval('#gitPushBtn', (b) => b.disabled), true, 'push disabled without a remote');
+  await waitForDom(() => document.getElementById('toast').classList.contains('hidden'));
+  await page.click('#gitCommitBtn');
+  await waitForDom(() => !document.getElementById('toast').classList.contains('hidden') && /Committed|Nothing new to commit|Commit failed/.test(document.getElementById('toast').textContent));
+  assert.match(await page.textContent('#toast'), /Committed|Nothing new to commit/);
+  await page.click('#closeSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
 });
 
 test('Alt+Arrow moves between notes', async () => {

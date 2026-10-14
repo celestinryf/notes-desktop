@@ -35,6 +35,12 @@ contextBridge.exposeInMainWorld('notesApi', {
     get: invoke('settings:get'),
     set: invoke('settings:set'),
   },
+  git: {
+    status: invoke('git:status'),
+    commit: invoke('git:commit'),
+    push: invoke('git:push'),
+    history: invoke('git:history'),
+  },
   app: {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
@@ -49,5 +55,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     newNote: on('app:new-note'),
     settingsChanged: on('settings:changed'),
     systemTheme: on('theme:system'),
+    gitStatus: on('git:status'),
   },
 });

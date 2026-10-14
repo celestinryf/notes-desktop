@@ -19,10 +19,14 @@
     listTitle: $('#listTitle'), emptyTrashBtn: $('#emptyTrashBtn'),
     noteList: $('#noteList'), listEmpty: $('#listEmpty'),
     editorEmpty: $('#editorEmpty'), editor: $('#editor'),
-    toggleSidebarBtn: $('#toggleSidebarBtn'), pinBtn: $('#pinBtn'), previewBtn: $('#previewBtn'),
+    toggleSidebarBtn: $('#toggleSidebarBtn'), pinBtn: $('#pinBtn'), sourceBtn: $('#sourceBtn'),
+    editorColumn: $('#editorColumn'), richEditor: $('#richEditor'),
+    linkDialog: $('#linkDialog'), linkForm: $('#linkForm'), linkInput: $('#linkInput'), linkRemoveBtn: $('#linkRemoveBtn'), linkCancelBtn: $('#linkCancelBtn'),
+    alignSeg: $('#alignSeg'), editorWidthInput: $('#editorWidthInput'), editorWidthValue: $('#editorWidthValue'), editorFullWidthInput: $('#editorFullWidthInput'),
+    gitEnabledInput: $('#gitEnabledInput'), gitRemoteInput: $('#gitRemoteInput'), gitStatus: $('#gitStatus'), gitCommitBtn: $('#gitCommitBtn'), gitPushBtn: $('#gitPushBtn'),
     exportBtn: $('#exportBtn'), duplicateBtn: $('#duplicateBtn'), restoreBtn: $('#restoreBtn'),
     deleteBtn: $('#deleteBtn'), destroyBtn: $('#destroyBtn'),
-    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'), preview: $('#preview'),
+    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'),
     statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'),
     settingsDialog: $('#settingsDialog'), settingsForm: $('#settingsForm'),
     hotkeyInput: $('#hotkeyInput'), hotkeyError: $('#hotkeyError'), themeSelect: $('#themeSelect'),
@@ -48,7 +52,8 @@
     notes: [],
     currentId: null,
     current: null,
-    preview: false,
+    sourceMode: false,    // false: rendered editor, true: raw Markdown textarea
+    rich: null,           // rendered editor instance (window.NotesEditor)
     settings: null,
     info: null,
     systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
@@ -104,6 +109,15 @@
     el.app.classList.toggle('sidebar-collapsed', !!settings.sidebarCollapsed);
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
+    applyEditorLayout(settings);
+    if ((settings.editorMode === 'source') !== state.sourceMode) applyEditorMode(settings.editorMode === 'source');
+  }
+
+  function applyEditorLayout(settings) {
+    el.editorColumn.classList.remove('align-left', 'align-center', 'align-right');
+    el.editorColumn.classList.add('align-' + settings.editorAlign);
+    el.editorColumn.classList.toggle('full-width', !settings.editorWidth);
+    el.editorColumn.style.setProperty('--editor-col-width', (settings.editorWidth || 760) + 'px');
   }
 
   // ---- resizable panes -----------------------------------------------------
@@ -631,8 +645,11 @@
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
+    if (state.rich) state.rich.setMarkdown(note.body);
+    autoGrow();
     const inTrash = !!note.trashedAt;
     [el.titleInput, el.tagsInput, el.bodyInput].forEach((i) => { i.readOnly = inTrash; });
+    if (state.rich) state.rich.setEditable(!inTrash);
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
@@ -647,7 +664,6 @@
     el.noteList.querySelectorAll('.note-card').forEach((c) => c.classList.toggle('is-active', c.dataset.id === id));
     updateStatus(note);
     setSaved('Saved');
-    if (state.preview) renderPreview();
   }
 
   function updateStatus(note) {
@@ -712,7 +728,6 @@
     el.searchInput.value = '';
     await refresh({ keepEditor: true });
     await selectNote(note.id);
-    if (state.preview) togglePreview(false);
     el.titleInput.focus();
   }
 
@@ -781,40 +796,73 @@
     if (res.ok) toast('Exported to ' + res.filePath);
   }
 
-  // ---- preview -------------------------------------------------------------
+  // ---- rendered editor vs. Markdown source --------------------------------
 
-  function togglePreview(force) {
-    state.preview = typeof force === 'boolean' ? force : !state.preview;
-    el.previewBtn.classList.toggle('is-on', state.preview);
-    el.bodyInput.classList.toggle('hidden', state.preview);
-    el.preview.classList.toggle('hidden', !state.preview);
-    if (state.preview) renderPreview();
-    else el.bodyInput.focus();
+  // The textarea (#bodyInput) always mirrors the Markdown, whichever view is showing,
+  // so saving, word counts, and the source view all read one place.
+  function createRichEditor() {
+    if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
+    state.rich = window.NotesEditor.create(el.richEditor, {
+      placeholder: 'Start writing… Type ## for a heading, - for a list, - [ ] for a checklist.',
+      onUpdate: (md) => {
+        if (state.sourceMode || !state.currentId) return;
+        if (md === el.bodyInput.value) return;
+        el.bodyInput.value = md;
+        scheduleSave();
+      },
+    });
+    el.richEditor.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href]');
+      if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); api.app.openExternal(a.getAttribute('href')); }
+    });
   }
 
-  function renderPreview() {
-    const raw = window.marked.parse(el.bodyInput.value || '', { gfm: true, breaks: true });
-    el.preview.innerHTML = window.DOMPurify.sanitize(raw, { ADD_ATTR: ['target'] });
-    if (!el.preview.textContent.trim() && !el.preview.querySelector('img')) {
-      el.preview.innerHTML = '<p style="color:var(--fg-muted)">Nothing to preview yet.</p>';
-    }
-    let index = 0;
-    el.preview.querySelectorAll('li > input[type="checkbox"], li > p > input[type="checkbox"]').forEach((box) => {
-      const li = box.closest('li');
-      const i = index++;
-      box.disabled = state.current && state.current.trashedAt;
-      li.classList.add('task-item');
-      li.classList.toggle('is-done', box.checked);
-      if (li.parentElement) li.parentElement.classList.add('task-list');
-      box.addEventListener('change', () => {
-        el.bodyInput.value = H.toggleTaskAt(el.bodyInput.value, i);
-        scheduleSave();
-        renderPreview();
-      });
-    });
-    el.preview.querySelectorAll('a[href]').forEach((a) => {
-      a.addEventListener('click', (e) => { e.preventDefault(); api.app.openExternal(a.getAttribute('href')); });
-    });
+  function applyEditorMode(source) {
+    state.sourceMode = !!source;
+    el.sourceBtn.classList.toggle('is-on', state.sourceMode);
+    el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
+    el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
+    el.bodyInput.classList.toggle('hidden', !state.sourceMode);
+    el.richEditor.classList.toggle('hidden', state.sourceMode);
+    if (state.sourceMode) autoGrow();
+    else if (state.rich && state.currentId) state.rich.setMarkdown(el.bodyInput.value);
+  }
+
+  function toggleSource(force) {
+    const next = typeof force === 'boolean' ? force : !state.sourceMode;
+    if (next === state.sourceMode) return;
+    applyEditorMode(next);
+    updateSettings({ editorMode: next ? 'source' : 'rendered' });
+    focusBody();
+  }
+
+  function focusBody() {
+    if (state.sourceMode || !state.rich) el.bodyInput.focus();
+    else state.rich.focus();
+  }
+
+  function bodyHasFocus() {
+    const a = document.activeElement;
+    return a === el.bodyInput || el.richEditor.contains(a);
+  }
+
+  function autoGrow() {
+    const ta = el.bodyInput;
+    if (ta.classList.contains('hidden')) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(320, ta.scrollHeight + 2) + 'px';
+  }
+
+  function openLinkDialog() {
+    if (!state.rich || state.sourceMode) return;
+    const existing = state.rich.activeLink();
+    if (!existing && !state.rich.hasSelection()) { toast('Select the text to link first'); return; }
+    state.linkRange = state.rich.selectionRange();
+    el.linkInput.value = existing || 'https://';
+    el.linkRemoveBtn.classList.toggle('hidden', !existing);
+    el.linkDialog.showModal();
+    el.linkInput.focus();
+    el.linkInput.select();
   }
 
   // ---- editor text helpers -------------------------------------------------
@@ -888,7 +936,40 @@
     el.fontSizeValue.textContent = s.fontSize + 'px';
     el.openAtLoginInput.checked = s.openAtLogin;
     el.alwaysOnTopInput.checked = s.alwaysOnTop;
+    syncAlignSeg(s.editorAlign);
+    el.editorFullWidthInput.checked = !s.editorWidth;
+    el.editorWidthInput.disabled = !s.editorWidth;
+    el.editorWidthInput.value = s.editorWidth || 760;
+    el.editorWidthValue.textContent = (s.editorWidth || 760) + 'px';
+    el.gitEnabledInput.checked = s.gitEnabled;
+    el.gitRemoteInput.value = s.gitRemote;
+    refreshGitStatus();
     el.settingsDialog.showModal();
+  }
+
+  function syncAlignSeg(value) {
+    el.alignSeg.querySelectorAll('button[data-align]').forEach((b) => {
+      const on = b.dataset.align === value;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+
+  async function refreshGitStatus() {
+    renderGitStatus(await api.git.status());
+  }
+
+  function renderGitStatus(s) {
+    if (!s) return;
+    let text;
+    if (!s.enabled) text = 'Off. Your notes file is still backed up to the backups folder.';
+    else if (s.available === false) text = 'git was not found on this computer, so no history is being kept.';
+    else if (!s.commits) text = s.pending ? 'First commit coming up…' : 'Repository ready; no commits yet.';
+    else text = s.commits + (s.commits === 1 ? ' commit' : ' commits') + ', last ' + H.relativeTime(s.lastCommitAt) + (s.pending ? ', changes waiting' : '') + (s.remote ? (s.lastPushAt ? ', pushed ' + H.relativeTime(s.lastPushAt) : ', not pushed yet') : '');
+    if (s.lastError) text += '  Error: ' + s.lastError;
+    el.gitStatus.textContent = text;
+    el.gitPushBtn.disabled = !s.enabled || !s.remote;
+    el.gitCommitBtn.disabled = !s.enabled;
   }
 
   function acceleratorFromEvent(e) {
@@ -925,7 +1006,7 @@
 
   function onKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open;
+    const inDialog = el.settingsDialog.open || el.linkDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
@@ -944,15 +1025,19 @@
       switch (e.key.toLowerCase()) {
         case 'n': e.preventDefault(); newNote(); return;
         case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
-        case 'e': e.preventDefault(); if (state.current) togglePreview(); return;
+        case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
         case 's': e.preventDefault(); flushSave().then(() => toast('Saved')); return;
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }); return;
         case 'delete': e.preventDefault(); trashCurrent(); return;
+        // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
         case 'b': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('**', '**'); } return;
         case 'i': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('_', '_'); } return;
-        case 'k': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('[', '](url)'); } return;
+        case 'k':
+          if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('[', '](url)'); }
+          else if (bodyHasFocus()) { e.preventDefault(); openLinkDialog(); }
+          return;
         default: break;
       }
       if (e.key === 'Backspace') { e.preventDefault(); trashCurrent(); return; }
@@ -971,7 +1056,7 @@
       e.preventDefault();
       const idx = state.notes.findIndex((n) => n.id === state.currentId);
       const next = state.notes[idx + (e.key === 'ArrowDown' ? 1 : -1)];
-      if (next) selectNote(next.id).then(() => el.bodyInput.focus());
+      if (next) selectNote(next.id).then(() => focusBody());
     }
   }
 
@@ -1000,14 +1085,49 @@
       searchTimer = setTimeout(() => { state.query = el.searchInput.value.trim(); refresh({ keepEditor: true }); }, 120);
     });
     el.searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && state.notes.length) { selectNote(state.notes[0].id).then(() => el.bodyInput.focus()); }
-      if (e.key === 'ArrowDown' && state.notes.length) { e.preventDefault(); selectNote(state.notes[0].id).then(() => el.bodyInput.focus()); }
+      if (e.key === 'Enter' && state.notes.length) { selectNote(state.notes[0].id).then(() => focusBody()); }
+      if (e.key === 'ArrowDown' && state.notes.length) { e.preventDefault(); selectNote(state.notes[0].id).then(() => focusBody()); }
     });
     el.sortSelect.addEventListener('change', () => updateSettings({ sort: el.sortSelect.value }).then(() => refresh({ keepEditor: true })));
     el.emptyTrashBtn.addEventListener('click', emptyTrash);
 
     el.pinBtn.addEventListener('click', togglePin);
-    el.previewBtn.addEventListener('click', () => togglePreview());
+    el.sourceBtn.addEventListener('click', () => toggleSource());
+    el.bodyInput.addEventListener('input', autoGrow);
+    el.richEditor.addEventListener('mousedown', (e) => { if (e.target === el.richEditor && state.rich) { e.preventDefault(); state.rich.focus('end'); } });
+
+    // Link dialog (rendered view)
+    el.linkForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const href = el.linkInput.value.trim();
+      el.linkDialog.close();
+      if (state.rich) state.rich.setLink(href && href !== 'https://' ? href : '', state.linkRange);
+    });
+    el.linkRemoveBtn.addEventListener('click', () => { el.linkDialog.close(); if (state.rich) state.rich.setLink('', state.linkRange); });
+    el.linkCancelBtn.addEventListener('click', () => el.linkDialog.close());
+    el.linkDialog.addEventListener('close', () => focusBody());
+
+    // Writing column layout
+    el.alignSeg.querySelectorAll('button[data-align]').forEach((b) => b.addEventListener('click', () => { updateSettings({ editorAlign: b.dataset.align }); syncAlignSeg(b.dataset.align); }));
+    el.editorWidthInput.addEventListener('input', () => {
+      el.editorWidthValue.textContent = el.editorWidthInput.value + 'px';
+      el.editorColumn.style.setProperty('--editor-col-width', el.editorWidthInput.value + 'px');
+    });
+    el.editorWidthInput.addEventListener('change', () => updateSettings({ editorWidth: Number(el.editorWidthInput.value) }));
+    el.editorFullWidthInput.addEventListener('change', () => {
+      const full = el.editorFullWidthInput.checked;
+      el.editorWidthInput.disabled = full;
+      updateSettings({ editorWidth: full ? 0 : Number(el.editorWidthInput.value) || 760 });
+    });
+
+    // Git history
+    el.gitEnabledInput.addEventListener('change', () => updateSettings({ gitEnabled: el.gitEnabledInput.checked }).then(refreshGitStatus));
+    const commitRemote = () => { const v = el.gitRemoteInput.value.trim(); if (v !== state.settings.gitRemote) updateSettings({ gitRemote: v }).then(refreshGitStatus); };
+    el.gitRemoteInput.addEventListener('change', commitRemote);
+    el.gitRemoteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemote(); } });
+    el.gitCommitBtn.addEventListener('click', async () => { await flushSave(); const r = await api.git.commit(); toast(r.ok ? (r.nothingToCommit ? 'Nothing new to commit' : 'Committed') : 'Commit failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
+    el.gitPushBtn.addEventListener('click', async () => { const r = await api.git.push(); toast(r.ok ? 'Pushed' : 'Push failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
+    api.on.gitStatus((s) => renderGitStatus(s));
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
     el.restoreBtn.addEventListener('click', restoreCurrent);
@@ -1017,8 +1137,8 @@
     el.titleInput.addEventListener('input', scheduleSave);
     el.tagsInput.addEventListener('input', scheduleSave);
     el.bodyInput.addEventListener('input', scheduleSave);
-    el.titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.bodyInput.focus(); } });
-    el.tagsInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.bodyInput.focus(); } });
+    el.titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); focusBody(); } });
+    el.tagsInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); focusBody(); } });
     el.tagsInput.addEventListener('blur', flushSave);
     el.bodyInput.addEventListener('keydown', handleEditorKeydown);
 
@@ -1055,7 +1175,7 @@
     });
     el.exportAllBtn.addEventListener('click', async () => { const res = await api.app.exportAll(); if (res.ok) toast('Exported to ' + res.filePath); });
     el.dataFolderBtn.addEventListener('click', () => api.app.openDataFolder());
-    el.settingsDialog.addEventListener('close', () => { if (state.current) el.bodyInput.focus(); });
+    el.settingsDialog.addEventListener('close', () => { if (state.current) focusBody(); });
 
     // Main-process events
     api.on.shown(async () => {
@@ -1067,7 +1187,7 @@
       }
       if (state.notes.length) {
         await selectNote(state.notes[0].id);
-        el.bodyInput.focus();
+        focusBody();
         return;
       }
       // Only start a fresh note when there truly are none, not when the current view is just empty.
@@ -1085,11 +1205,12 @@
 
   async function init() {
     const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
+    createRichEditor();
     applySettings(settings);
     applyInfo(info);
     bind();
     await refresh();
-    if (state.current) el.bodyInput.focus();
+    if (state.current) focusBody();
   }
 
   window.addEventListener('error', (e) => console.error('Uncaught: ' + e.message));
