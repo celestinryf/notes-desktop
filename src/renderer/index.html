@@ -25,6 +25,7 @@
       <nav class="nav" aria-label="Views">
         <button class="nav-item is-active" data-view="all"><span>All notes</span><span class="count" id="countAll">0</span></button>
         <button class="nav-item" data-view="pinned"><span>Pinned</span><span class="count" id="countPinned">0</span></button>
+        <button class="nav-item" data-view="reminders"><span>Reminders</span><span class="count" id="countReminders">0</span></button>
         <button class="nav-item" data-view="trash"><span>Trash</span><span class="count" id="countTrash">0</span></button>
       </nav>
 
@@ -95,11 +96,13 @@
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
             <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
             <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
+            <button class="tool-btn" id="remindBtn" title="Remind me about this note (Ctrl+Shift+M)" aria-label="Reminder">⏰ Remind</button>
             <button class="tool-btn" id="printBtn" title="Print this note (Ctrl+Shift+P)" aria-label="Print">🖨 Print</button>
             <button class="tool-btn" id="stickyBtn" title="Put this note on the desktop as a sticky (Ctrl+Shift+T)" aria-label="Sticky">📌 Stick</button>
             <button class="tool-btn" id="botBtn" title="Ask Claude Code to work on your notes (Ctrl+Shift+A)" aria-label="Bot">🤖 Bot</button>
           </div>
           <div class="toolbar-right">
+            <button class="tool-btn" id="shareBtn" title="Share: copy, email, PDF, HTML (Ctrl+Shift+S)" aria-haspopup="menu">Share ▾</button>
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
             <button class="tool-btn" id="duplicateBtn" title="Duplicate note">Duplicate</button>
             <button class="tool-btn" id="restoreBtn" title="Restore from trash">Restore</button>
@@ -289,6 +292,28 @@
       </form>
     </dialog>
 
+    <dialog id="remindDialog" class="dialog dialog-small">
+      <form method="dialog" class="dialog-form" id="remindForm">
+        <h2 class="dialog-title">Remind me</h2>
+        <div class="quick-picks" id="remindQuick">
+          <button type="button" class="btn btn-small" data-pick="1h">In 1 hour</button>
+          <button type="button" class="btn btn-small" data-pick="evening">This evening</button>
+          <button type="button" class="btn btn-small" data-pick="tomorrow">Tomorrow 9:00</button>
+          <button type="button" class="btn btn-small" data-pick="monday">Next Monday 9:00</button>
+        </div>
+        <label class="field">
+          <span class="field-label">Or pick a time</span>
+          <input id="remindInput" class="input" type="datetime-local" />
+        </label>
+        <p class="field-hint" id="remindCurrent"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small" id="remindClearBtn">Clear reminder</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="remindCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="remindSetBtn">Set</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="linkDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="linkForm">
         <h2 class="dialog-title">Link</h2>
@@ -306,6 +331,16 @@
     </dialog>
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+    <div class="popover hidden" id="shareMenu" role="menu" aria-label="Share">
+      <button role="menuitem" data-action="copy-md">Copy as Markdown</button>
+      <button role="menuitem" data-action="copy-html">Copy as rich text</button>
+      <button role="menuitem" data-action="copy-text">Copy as plain text</button>
+      <button role="menuitem" data-action="email">Email…</button>
+      <button role="menuitem" data-action="pdf">Save as PDF…</button>
+      <button role="menuitem" data-action="html">Save as HTML…</button>
+      <button role="menuitem" data-action="md">Save as Markdown…</button>
+      <button role="menuitem" data-action="reveal" id="shareReveal">Show file in Explorer</button>
+    </div>
     <div class="popover hidden" id="folderMenu" role="menu">
       <button role="menuitem" data-action="new-note">New note here</button>
       <button role="menuitem" data-action="new-subfolder">New subfolder</button>

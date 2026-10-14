@@ -40,7 +40,7 @@ test.before(async () => {
     args: [ROOT],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
     env: Object.assign({}, process.env, {
-      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1',
+      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_REMINDER_TICK_MS: '300',
       // The bot panel is exercised against a fake `claude` so no real agent (or tokens) is involved.
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
     }),
@@ -846,6 +846,100 @@ test('find in note counts and steps through matches; print asks the system to pr
   // Print (dry run in tests) goes through the main process and reports back.
   await page.keyboard.press('Control+Shift+p');
   await waitForDom(() => /Print: dry run/.test(document.getElementById('toast').textContent), 8000);
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
+test('reminders: set from the dialog, shown on the card and in the Reminders view, fired by the scheduler, cleared', { timeout: 30000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  const id = findNote('Gamma (copy)').id;
+  assert.equal(await page.textContent('#remindBtn'), '⏰ Remind');
+  const before = Date.now();
+  await page.keyboard.press('Control+Shift+m');
+  await page.waitForSelector('#remindDialog[open]');
+  assert.match(await page.textContent('#remindCurrent'), /No reminder/);
+  await page.click('#remindQuick [data-pick="1h"]');
+  await waitFor('reminder saved', () => { const n = findNote('Gamma (copy)'); return n.remindAt && n.remindAt > before + 3500 * 1000 && n.remindAt < before + 3700 * 1000; });
+  await waitForDom(() => !document.getElementById('remindDialog').open);
+  await waitForDom(() => document.getElementById('remindBtn').classList.contains('is-on'));
+  await waitForDom(() => !!document.querySelector('.note-card.is-active .remind-mark'));
+  await waitForDom(() => document.getElementById('countReminders').textContent === '1');
+  await page.click('.nav-item[data-view="reminders"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 1 && /Gamma/.test(document.querySelector('.note-card').textContent));
+  // The scheduler announces a reminder when its time passes: toast in the app, badge turns overdue.
+  await page.evaluate((nid) => window.notesApi.notes.update(nid, { remindAt: Date.now() + 600 }), id);
+  await waitForDom(() => /⏰ Gamma \(copy\)/.test(document.getElementById('toast').textContent), 8000);
+  await waitFor('marked reminded', () => { const n = findNote('Gamma (copy)'); return n.remindedAt && n.remindedAt >= n.remindAt; });
+  await waitForDom(() => !!document.querySelector('.note-card .remind-mark.is-overdue'), 8000);
+  await waitForDom(() => document.getElementById('countReminders').classList.contains('is-overdue'));
+  // A later time rings again; clearing removes it from the view.
+  await page.keyboard.press('Control+Shift+m');
+  await page.waitForSelector('#remindDialog[open]');
+  assert.match(await page.textContent('#remindCurrent'), /went off/);
+  await page.click('#remindClearBtn');
+  await waitFor('cleared', () => findNote('Gamma (copy)').remindAt === null);
+  await waitForDom(() => document.getElementById('countReminders').textContent === '0');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 0);
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  // Typing a time in the picker works too.
+  await page.keyboard.press('Control+Shift+m');
+  await page.waitForSelector('#remindDialog[open]');
+  await page.fill('#remindInput', '2031-01-02T09:30');
+  await page.click('#remindSetBtn');
+  await waitFor('typed time saved', () => findNote('Gamma (copy)').remindAt === new Date(2031, 0, 2, 9, 30).getTime());
+  await page.evaluate((nid) => window.notesApi.notes.update(nid, { remindAt: null }), id);
+  await waitFor('cleared again', () => findNote('Gamma (copy)').remindAt === null);
+});
+
+test('share: copy as Markdown, rich text and plain text; email via mailto; save as PDF and HTML', { timeout: 30000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', '# Head\n\n**bold** text\n');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === '# Head\n\n**bold** text\n');
+  const pdfPath = path.join(dataDir, 'share-out.pdf');
+  const htmlPath = path.join(dataDir, 'share-out.html');
+  await app.evaluate(({ dialog, shell }, paths) => {
+    dialog.showSaveDialog = async (_w, opts) => ({ canceled: false, filePath: /PDF/.test(opts.title) ? paths.pdf : paths.html });
+    shell.openExternal = async (url) => { global.__lastExternal = url; return true; };
+  }, { pdf: pdfPath, html: htmlPath });
+  const share = async (action) => {
+    await page.keyboard.press('Control+Shift+s');
+    await page.waitForSelector('#shareMenu:not(.hidden)');
+    await page.click('#shareMenu [data-action="' + action + '"]');
+    await waitForDom(() => document.getElementById('shareMenu').classList.contains('hidden'));
+  };
+  await share('copy-md');
+  await waitFor('markdown on clipboard', () => app.evaluate(({ clipboard }) => clipboard.readText()).then((t) => /\*\*bold\*\* text/.test(t) && /Gamma \(copy\)/.test(t)));
+  await share('copy-html');
+  // Electron 44's clipboard module has no readHTML; ask Windows for the HTML format directly.
+  const readHtmlClipboard = () => require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], { encoding: 'utf8' }).stdout || '';
+  await waitFor('html on clipboard', () => { const t = readHtmlClipboard(); return /<strong>bold<\/strong>/.test(t) && /<h1>Gamma \(copy\)<\/h1>/.test(t); }, 10000);
+  await share('copy-text');
+  const plain = await app.evaluate(({ clipboard }) => clipboard.readText());
+  assert.ok(/bold text/.test(plain) && !/\*\*/.test(plain), 'plain text has no Markdown markers: ' + JSON.stringify(plain));
+  await share('email');
+  await waitFor('mail client asked', () => app.evaluate(() => global.__lastExternal).then((u) => !!u));
+  const mailto = await app.evaluate(() => global.__lastExternal);
+  assert.ok(mailto.startsWith('mailto:?subject=Gamma%20(copy)&body='), mailto);
+  assert.match(decodeURIComponent(mailto), /\*\*bold\*\* text/);
+  await share('pdf');
+  await waitFor('pdf written', () => fs.existsSync(pdfPath) && fs.readFileSync(pdfPath).slice(0, 5).toString() === '%PDF-', 15000);
+  await waitForDom(() => /Saved PDF/.test(document.getElementById('toast').textContent));
+  await share('html');
+  await waitFor('html written', () => fs.existsSync(htmlPath));
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  assert.match(html, /<title>Gamma \(copy\)<\/title>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  // Esc closes the menu without hiding the window.
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForSelector('#shareMenu:not(.hidden)');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('shareMenu').classList.contains('hidden'));
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true);
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });

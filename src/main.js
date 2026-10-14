@@ -1,7 +1,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem } = require('electron');
 const { Store } = require('./store');
 const { GitSync } = require('./gitSync');
 const { VaultManager } = require('./vaults');
@@ -52,6 +52,19 @@ function main() {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
     onNotesChanged: () => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'vault' }); },
+  });
+  const { ReminderScheduler } = require('./reminders');
+  const reminders = new ReminderScheduler(store, {
+    tickMs: Number(process.env.NOTES_APP_REMINDER_TICK_MS) || 30000,
+    notify: (note) => {
+      const title = H.deriveTitle(note) || 'Reminder';
+      lastContentHash = contentHash();
+      if (win && !win.isDestroyed()) win.webContents.send('reminder:fired', { id: note.id, title });
+      if (process.env.NOTES_APP_DRY_NOTIFY === '1' || !Notification.isSupported()) return;
+      const n = new Notification({ title: '⏰ ' + title, body: H.plainTextFromMarkdown(note.body).slice(0, 200) || 'Open your note', icon: iconImage() });
+      n.on('click', () => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', note.id); else pendingOpenNote = note.id; });
+      n.show();
+    },
   });
   const { StickyManager } = require('./stickies');
   const stickies = new StickyManager(store, {
@@ -679,6 +692,61 @@ function main() {
     return { ok: true, filePath };
   });
 
+  // ---- sharing ---------------------------------------------------------------
+
+  ipcMain.handle('app:copy', async (_e, data) => {
+    const d = data || {};
+    const text = String(d.text || '');
+    if (!d.html) { await clipboard.writeText(text); return true; }
+    // Electron 44's clipboard is the async ClipboardItem API: both flavours go on in one item, so a rich
+    // editor pastes the HTML and a plain one the Markdown.
+    const item = new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }), 'text/html': new Blob([String(d.html)], { type: 'text/html' }) });
+    await clipboard.write([item]);
+    return true;
+  });
+  ipcMain.handle('app:emailNote', async (_e, id) => {
+    const note = store.get(id);
+    if (!note) return { ok: false, error: 'Note not found' };
+    const m = H.mailtoFor(note);
+    try { await shell.openExternal(m.url); } catch (err) { return { ok: false, error: 'No mail app could open the message: ' + err.message }; }
+    return { ok: true, truncated: m.truncated };
+  });
+  ipcMain.handle('app:exportPdf', async (e, id) => {
+    const note = store.get(id);
+    if (!note) return { ok: false, error: 'Note not found' };
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save as PDF',
+      defaultPath: path.join(app.getPath('documents'), H.safeFilename(H.deriveTitle(note)) + '.pdf'),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    try {
+      // The print stylesheet leaves only the note on the page.
+      const data = await e.sender.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } });
+      fs.writeFileSync(filePath, data);
+      return { ok: true, filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('app:exportHtml', async (_e, id, bodyHtml) => {
+    const note = store.get(id);
+    if (!note) return { ok: false, error: 'Note not found' };
+    const title = H.deriveTitle(note) || 'Note';
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save as HTML',
+      defaultPath: path.join(app.getPath('documents'), H.safeFilename(title) + '.html'),
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const doc = '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + esc(title) + '</title>\n' +
+      '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}</style></head>\n' +
+      '<body>' + (note.title ? '<h1>' + esc(note.title) + '</h1>\n' : '') + String(bodyHtml || '') + '</body></html>\n';
+    fs.writeFileSync(filePath, doc, 'utf8');
+    return { ok: true, filePath };
+  });
+
   ipcMain.handle('app:exportAll', async () => {
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       title: 'Export all notes',
@@ -741,7 +809,7 @@ function main() {
     rendererFlushed
       .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()]), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { vaults.closeAll(); stickies.closeAll(); app.quit(); });
+      .finally(() => { reminders.stop(); vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
@@ -766,5 +834,6 @@ function main() {
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
     step('stickies', () => stickies.restoreAll());
+    step('reminders', () => reminders.start());
   });
 }

@@ -196,6 +196,41 @@
   }
 
   // Plain prose from Markdown for reading aloud: drops markup, keeps the words and sentence breaks.
+  // "today 18:30", "tomorrow 09:00", "yesterday 09:00", "Tue, Oct 20 09:00", "Jan 2, 2027 09:00".
+  function formatWhen(ts, now) {
+    now = now == null ? Date.now() : now;
+    const d = new Date(ts), n = new Date(now);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dayOf = (x) => x.toDateString();
+    const shift = (days) => { const c = new Date(n); c.setDate(n.getDate() + days); return dayOf(c); };
+    if (dayOf(d) === dayOf(n)) return 'today ' + time;
+    if (dayOf(d) === shift(1)) return 'tomorrow ' + time;
+    if (dayOf(d) === shift(-1)) return 'yesterday ' + time;
+    const sameYear = d.getFullYear() === n.getFullYear();
+    return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + time;
+  }
+
+  // A mailto: URL for a note. Mail clients reject very long URLs, so the body is cut with a notice.
+  // limit caps the ENCODED URL (Windows shell handlers reject roughly 2 KB), never splitting a surrogate pair.
+  function mailtoFor(note, limit) {
+    limit = limit || 1900;
+    const subject = deriveTitle(note) || 'Note';
+    const body = String(note.body || '');
+    const notice = '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]';
+    const head = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';
+    const full = head + encodeURIComponent(body);
+    if (full.length <= limit) return { url: full, truncated: false };
+    // Find the longest prefix (in code points) whose encoded form fits with the notice.
+    const points = Array.from(body);
+    let lo = 0, hi = points.length;
+    const budget = Math.max(0, limit - head.length - encodeURIComponent(notice).length);
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (encodeURIComponent(points.slice(0, mid).join('')).length <= budget) lo = mid; else hi = mid - 1;
+    }
+    return { url: head + encodeURIComponent(points.slice(0, lo).join('') + notice), truncated: true };
+  }
+
   function plainTextFromMarkdown(md) {
     let s = String(md || '').replace(/\r\n/g, '\n');
     s = s.replace(/```[\s\S]*?```/g, ' code block omitted. ');
@@ -250,6 +285,6 @@
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
-    plainTextFromMarkdown, speechChunks,
+    plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor,
   };
 });

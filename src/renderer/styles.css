@@ -514,6 +514,13 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   pointer-events: none;
 }
 
+/* Reminders */
+.remind-mark { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.remind-mark.is-overdue { color: var(--ember); font-weight: 600; }
+.count.is-overdue { background: var(--ember); color: #fff; }
+.quick-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.field-hint { margin: 0 0 8px; font-size: 12px; color: var(--fg-muted); }
+
 /* Find in note */
 .find-bar {
   display: flex; align-items: center; gap: 6px;
