@@ -447,7 +447,7 @@ function main() {
   ipcMain.handle('files:link', (_e, paths, opts) => linkPaths(Array.isArray(paths) ? paths : [], opts || {}));
   ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
   ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
-  const EXEC_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|lnk|url|jar|hta|reg|cpl)$/i;
+  const EXEC_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|lnk|url|jar|hta|reg|cpl|py|pyw|mht|mhtml)$/i;
   ipcMain.handle('files:openExternal', async (_e, id) => {
     const n = store.get(id);
     if (!n || !n.filePath) return 'No file';

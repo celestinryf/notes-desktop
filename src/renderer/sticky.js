@@ -73,6 +73,13 @@
       else { state.dirty = false; setReadOnly(true, 'This note is gone.'); }
       if (state.dirty) scheduleSave();
     } catch (err) {
+      if (/changed on disk/i.test(String(err.message))) {
+        // The file moved on under us; a sticky has no room for a merge choice: take the disk version and say so.
+        state.dirty = false;
+        await reload();
+        el.status.textContent = 'The file changed on disk; showing the new version. Your last edit was not saved.';
+        return;
+      }
       el.status.textContent = 'Save failed: ' + (err.message || err);
       setTimeout(scheduleSave, 3000);
     } finally { state.saving = false; }
