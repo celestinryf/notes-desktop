@@ -153,6 +153,7 @@ class VaultManager {
   }
 
   async initRepo(id, remote) {
+    if (typeof remote === 'string') remote = remote.trim();
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
     if (!fs.existsSync(path.join(v.path, '.git'))) {

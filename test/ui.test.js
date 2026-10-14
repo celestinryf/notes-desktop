@@ -1133,6 +1133,17 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
+  // Offsets are measured on the original text: a capital İ (two code units when lower-cased) must not shift them.
+  await page.fill('#bodyInput', 'İstanbul foo bar foo');
+  await waitFor('turkish saved', () => findNote('Gamma (copy)').body === 'İstanbul foo bar foo');
+  await page.keyboard.press('Control+h');
+  await page.waitForSelector('#replaceRow:not(.hidden)');
+  await page.fill('#findInput', 'foo');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  await page.fill('#replaceInput', 'X');
+  await page.click('#replaceAllBtn');
+  await waitFor('offsets intact', () => findNote('Gamma (copy)').body === 'İstanbul X bar X');
+  await page.keyboard.press('Escape');
   await page.fill('#bodyInput', 'cat sat\ncat ran\ncat hid\n');
   await waitFor('saved', () => findNote('Gamma (copy)').body === 'cat sat\ncat ran\ncat hid\n');
   await page.keyboard.press('Control+h');
