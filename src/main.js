@@ -223,7 +223,7 @@ function main() {
     tray.setToolTip('Notes  (' + hk + ')');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Show / hide notes', accelerator: hotkeyState.registered ? hotkeyState.hotkey : undefined, click: toggleWindow },
-      { label: 'New note', click: () => { showWindow(); win.webContents.send('app:new-note'); } },
+      { label: 'New note', click: requestNewNote },
       { type: 'separator' },
       { label: 'Start at login', type: 'checkbox', checked: !!store.settings.openAtLogin, click: (item) => { store.setSettings({ openAtLogin: item.checked }); applyLoginItem(); broadcastSettings(); } },
       { label: 'Always on top', type: 'checkbox', checked: !!store.settings.alwaysOnTop, click: (item) => { store.setSettings({ alwaysOnTop: item.checked }); if (win) win.setAlwaysOnTop(item.checked); broadcastSettings(); } },
@@ -317,11 +317,19 @@ function main() {
   ipcMain.handle('app:hide', () => hideWindow());
   // The first 'app:shown' can be sent before the renderer has registered its listener (ready-to-show fires
   // before the scripts finish). Once the renderer is ready it asks, and we replay the signal if visible.
+  let rendererReady = false;
+  let pendingNewNote = false;
   ipcMain.handle('app:rendererReady', () => {
+    rendererReady = true;
     const visible = !!(win && !win.isDestroyed() && win.isVisible());
     if (visible) win.webContents.send('app:shown');
+    if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
     return { visible };
   });
+  function requestNewNote() {
+    showWindow();
+    if (rendererReady) win.webContents.send('app:new-note'); else pendingNewNote = true;
+  }
   ipcMain.handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
   ipcMain.handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
 

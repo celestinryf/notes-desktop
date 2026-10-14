@@ -399,6 +399,90 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await useSourceMode(true);
 });
 
+test.afterEach(() => {
+  // The locked-disk test makes notes.json read-only; make sure nothing downstream inherits that.
+  try { fs.chmodSync(notesFile, 0o666); } catch (_) { /* ignore */ }
+});
+
+test('an edit that cannot be saved survives switching notes and lands once the disk allows it', { timeout: 60000 }, async () => {
+  await useSourceMode(true);
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await page.fill('#bodyInput', 'before lock');
+  await waitFor('baseline saved', () => findNote('Gamma (copy)').body === 'before lock');
+  // Make the data file read-only: rename-over and copy-over both fail, so update() throws.
+  const alphaBefore = findNote('Alpha').body;
+  fs.chmodSync(notesFile, 0o444);
+  try {
+    await page.fill('#bodyInput', 'typed while locked');
+    await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
+    // Switch to a second note and edit it too: both failures must be kept, one per note.
+    await page.click('.note-card:has-text("Alpha")');
+    await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
+    assert.equal(findNote('Gamma (copy)').body, 'before lock', 'nothing reached disk while locked');
+    await page.fill('#bodyInput', 'alpha edited while locked');
+    await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
+    // Coming back to the first note must show the unsaved text, not the stale disk copy, and stay marked unsaved.
+    await page.click('.note-card:has-text("Gamma (copy)")');
+    await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+    assert.equal(await page.inputValue('#bodyInput'), 'typed while locked', 'pending edit shown on reselect');
+    assert.equal(await page.textContent('#statusSaved'), 'Save failed');
+    await sleep(3500); // a retry cycle while still locked must not clobber either pending edit
+    assert.equal(findNote('Gamma (copy)').body, 'before lock');
+    assert.equal(findNote('Alpha').body, alphaBefore);
+    assert.equal(await page.inputValue('#bodyInput'), 'typed while locked');
+  } finally {
+    fs.chmodSync(notesFile, 0o666);
+  }
+  await waitFor('both pending edits landed after unlock', () => findNote('Gamma (copy)').body === 'typed while locked' && findNote('Alpha').body === 'alpha edited while locked', 15000);
+  await waitForDom(() => document.getElementById('statusSaved').textContent === 'Saved');
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('restored body', () => findNote('Gamma (copy)').body === 'pure text');
+  await page.click('.note-card:has-text("Alpha")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
+  await page.fill('#bodyInput', alphaBefore);
+  await waitFor('alpha restored', () => findNote('Alpha').body === alphaBefore);
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+});
+
+test('entity-looking text and numbered lists round-trip in the rendered view', async () => {
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Entities');
+  await useSourceMode(true);
+  // In Markdown source, "&" and angle brackets are ordinary text; "1. 1. 1." is a valid ordered list.
+  const md = 'Fish & chips, 1 < 2 && 3 > 2, <3\n\n1. one\n1. two\n1. three';
+  await page.fill('#bodyInput', md);
+  await waitFor('entities note saved', () => findNote('Entities') && findNote('Entities').body === md);
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('#richEditor:not(.hidden) ol', { timeout: 8000 });
+  assert.equal(await page.$eval('#richEditor p', (p) => p.textContent), 'Fish & chips, 1 < 2 && 3 > 2, <3', 'text shown verbatim, note not forced to source');
+  await page.click('#richEditor p');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ok, typed &amp; literally');
+  await waitFor('rendered edit saved', () => findNote('Entities').body.includes('literally'));
+  const body = findNote('Entities').body;
+  assert.ok(body.includes('Fish & chips, 1 < 2 && 3 > 2, <3 ok'), 'ampersand and brackets stay literal: ' + JSON.stringify(body));
+  assert.ok(body.includes('typed &amp;amp; literally'), 'an entity typed as text is escaped so it reloads as typed: ' + JSON.stringify(body));
+  // Reload the note: the typed "&amp;" must come back as the five characters the user typed.
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await page.click('.note-card:has-text("Entities")');
+  await page.waitForSelector('#richEditor:not(.hidden) ol', { timeout: 8000 });
+  assert.ok((await page.$eval('#richEditor p', (p) => p.textContent)).endsWith('typed &amp; literally'));
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('entities note trashed', () => findNote('Entities').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('entities note destroyed', () => !findNote('Entities'));
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+});
+
 test('writing column: alignment and width settings move and size the block', async () => {
   const col = () => page.evaluate(() => {
     const c = document.getElementById('editorColumn');

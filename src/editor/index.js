@@ -19,16 +19,20 @@ import { Markdown } from 'tiptap-markdown';
 // Escapes and formatting punctuation are ignored; the letters, digits, and URLs must survive.
 function fingerprint(md) {
   let s = String(md || '').replace(/\r/g, '');
-  // YAML front matter turns into a rule plus paragraphs; never call that lossless.
-  if (/^---\n[\s\S]*?\n---(\n|$)/.test(s)) return 'front-matter:' + s;
+  // YAML front matter (a key: value block fenced by ---) turns into a rule plus paragraphs; never lossless.
+  if (/^---\n[A-Za-z_][\w-]*:[^\n]*\n[\s\S]*?\n---(\n|$)/.test(s)) return 'front-matter:' + s;
   // Fences other than three backticks are always re-emitted as three backticks, which can break a block
   // that itself contains backticks; treat such notes as lossy.
   if (/^(~~~|````)/m.test(s)) return 'odd-fence:' + s;
+  // A hard break followed directly by a block marker (quote, heading, list) splits the paragraph on reload.
+  // Checked outside fenced code, and only on the very next line (a blank line in between is a normal break).
+  if (/(\\| {2,})\n[ \t]*(>|#{1,6}\s|[-+*]\s|\d+[.)]\s)/.test(s.replace(/```[\s\S]*?```/g, ''))) return 'break-before-block:' + s;
   s = s
     .replace(/\\\n/g, '\n')                      // backslash hard break == newline
     .replace(/ {2,}\n/g, '\n')                   // two-space hard break == newline
     .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/^(\s*)\d+[.)]\s/gm, '$11. ');      // ordered lists are renumbered on output; that is not a loss
   // Compare line by line so lost or merged line breaks are noticed; blank lines and formatting are not.
   // Letters and digits in any script count, plus the characters that make URLs and angle brackets meaningful.
   return s.split('\n').map((l) => l.replace(/[^\p{L}\p{N}:/.<>]+/gu, '').toLowerCase()).filter(Boolean).join('\n');
@@ -40,7 +44,10 @@ const PlainText = Text.extend({
   addStorage() {
     return {
       markdown: {
-        serialize(state, node) { state.text(String(node.text).replace(/<(?=[A-Za-z/!?])/g, '&lt;')); },
+        // Escape a "<" that could open a tag and an "&" that would read as an entity; everything else as typed.
+        serialize(state, node) {
+          state.text(String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;'));
+        },
         parse: {},
       },
     };

@@ -60,12 +60,13 @@ function sleepSync(ms) {
 }
 
 function replaceFile(tmp, target) {
+  // Short total wait (~300 ms): a reader's lock lasts milliseconds, and this blocks the main process.
   let lastErr = null;
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try { fs.renameSync(tmp, target); return; } catch (err) {
       lastErr = err;
       if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) throw err;
-      sleepSync(25 * (attempt + 1));
+      sleepSync(20 * (attempt + 1));
     }
   }
   try {

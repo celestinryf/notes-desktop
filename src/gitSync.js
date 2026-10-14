@@ -97,7 +97,11 @@ class GitSync {
     for (let i = 0; i < COPY_RETRIES; i++) {
       try {
         if (!fs.existsSync(this.source)) return false;
+        // Windows copies the read-only attribute along with the file; a read-only snapshot would make
+        // every later copy fail and stop history silently. Keep the snapshot writable.
+        if (fs.existsSync(this.snapshot)) { try { fs.chmodSync(this.snapshot, 0o666); } catch (_) { /* ignore */ } }
         fs.copyFileSync(this.source, this.snapshot);
+        try { fs.chmodSync(this.snapshot, 0o666); } catch (_) { /* ignore */ }
         return true;
       } catch (err) {
         lastErr = err;
