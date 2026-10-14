@@ -325,7 +325,8 @@ class Store {
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
     const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
-    fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json'));
+    // A backup that cannot be written must never block the note save itself.
+    try { fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json')); } catch (_) { return; }
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
     // Pruning must never block the note write itself; a backup held open by another program can wait.

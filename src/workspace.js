@@ -7,6 +7,15 @@ const H = require('./shared/helpers');
 
 const MANIFEST = '.notes-manifest.json';
 
+// The manifest lives inside the folder the agent edits, so nothing in it is trusted as a path: an entry
+// may only name a file inside the workspace. Returns the absolute path, or null.
+function insideWorkspace(dir, rel) {
+  if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return null;
+  const root = path.resolve(dir);
+  const abs = path.resolve(root, rel);
+  return abs.startsWith(root + path.sep) ? abs : null;
+}
+
 function uniqueIn(used, base, ext) {
   let name = base + ext;
   let i = 2;
@@ -64,7 +73,8 @@ function importNotes(store, dir) {
   const details = [];
   const updatedIds = [];
   for (const f of manifest.files) {
-    const abs = path.join(dir, f.rel);
+    const abs = insideWorkspace(dir, f.rel);
+    if (!abs) { details.push('ignored (path outside the workspace): ' + String(f.rel)); continue; }
     if (!fs.existsSync(abs)) { missing++; details.push('missing: ' + f.rel); continue; }
     const content = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
     const h = hashOf(content);
@@ -141,7 +151,8 @@ function forgetNote(dir, noteId) {
   try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { return false; }
   const entry = (manifest.files || []).find((f) => f.id === noteId);
   if (!entry) return false;
-  try { fs.rmSync(path.join(dir, entry.rel), { force: true }); } catch (_) { /* best effort */ }
+  const abs = insideWorkspace(dir, entry.rel);
+  if (abs) { try { fs.rmSync(abs, { force: true }); } catch (_) { /* best effort */ } }
   manifest.files = manifest.files.filter((f) => f.id !== noteId);
   try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8'); } catch (_) { /* best effort */ }
   return true;

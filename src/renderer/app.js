@@ -1415,6 +1415,7 @@
       if (!lossless && !state.sourceMode) applyEditorMode(true); // text the rendered view would rewrite opens as source
     }
     autoGrow();
+    if (find.open) runFind(true, true, true); // the text changed under the find bar
     scheduleSave();
     const ok = await flushSave();
     if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
@@ -1471,8 +1472,14 @@
       if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; showActiveMatch(); }
       return;
     }
-    if (!state.rich || !find.ranges.length || find.active < 0) { runFind(true, true); return; }
+    if (!state.rich) return;
+    // Ranges may be stale (a restore or reload replaced the content): recount and check the text first.
+    const wantedIdx = find.active;
+    runFind(true, true, true);
+    if (!find.ranges.length) { runFind(true, true); return; }
+    find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
     const idx = find.active;
+    if (String(find.ranges[idx]).toLowerCase() !== q.toLowerCase()) { showActiveMatch(); return; }
     state.rich.replaceRanges([find.ranges[idx]], text);
     runFind(true, true, true); // the quiet re-find keeps the index, which now points at the following match
     // A replacement that itself contains the query ("cat" -> "cats") creates matches at the same spot: skip them.
@@ -1539,11 +1546,14 @@
   }
 
   // Positions of every case-insensitive occurrence of q in text.
+  // Case-insensitive, but measured on the ORIGINAL text: lower-casing can change string length ("İ" becomes
+  // two code units), which would shift every offset after it and make a replace hit the wrong characters.
   function findOffsets(text, q) {
-    const hits = []; const hay = text.toLowerCase(); const needle = q.toLowerCase();
-    if (!needle) return hits;
-    let i = hay.indexOf(needle);
-    while (i !== -1) { hits.push(i); i = hay.indexOf(needle, i + needle.length); }
+    const hits = [];
+    if (!q) return hits;
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    let m;
+    while ((m = re.exec(text)) !== null) { hits.push(m.index); if (m[0].length === 0) re.lastIndex++; }
     return hits;
   }
 
@@ -1992,6 +2002,8 @@
     state.lastTypedAt = Date.now();
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
     state.dirty = true;
+    // Edits that bypass the input event (Tab, list keys, Ctrl+B/I/K wrappers) still keep find's offsets honest.
+    if (find.open && state.sourceMode) runFind(true, true, true);
     setSaved('Saving…');
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(flushSave, 350);

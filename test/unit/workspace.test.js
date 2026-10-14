@@ -153,3 +153,24 @@ test('exportNotes keeps notes apart when two folders differ only by case (one fo
   assert.equal(store.get(x.id).body, 'X body');
   assert.equal(store.get(y.id).body, 'Y body');
 });
+
+test('manifest paths that point outside the workspace are ignored by import and forgetNote', () => {
+  const store = new Store(tmp()).load();
+  const a = store.create({ title: 'A', body: 'a body' });
+  const dir = tmp();
+  W.exportNotes(store, dir);
+  const outside = path.join(tmp(), 'victim.txt');
+  fs.writeFileSync(outside, 'private');
+  const manifestPath = path.join(dir, W.MANIFEST);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const rel = path.relative(dir, outside); // ..\..\victim.txt
+  manifest.files.push({ id: a.id, rel, hash: 'nope', folderId: null });
+  manifest.files.push({ id: a.id, rel: outside, hash: 'nope', folderId: null }); // absolute
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  const r = W.importNotes(store, dir);
+  assert.equal(store.get(a.id).body, 'a body', 'nothing read from outside');
+  assert.equal(r.details.filter((d) => /outside the workspace/.test(d)).length, 2);
+  assert.ok(!store.notes.some((n) => n.body === 'private'));
+  W.forgetNote(dir, a.id);
+  assert.ok(fs.existsSync(outside), 'file outside the workspace untouched');
+});
