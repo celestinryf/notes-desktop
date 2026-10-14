@@ -1951,7 +1951,7 @@
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       // Re-check after the second round trip: the user may have switched notes or started typing meanwhile.
-      if (state.currentId !== note.id || state.dirty || !fresh) return;
+      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh) return; // a save that landed in the gap must not be overwritten
       applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }

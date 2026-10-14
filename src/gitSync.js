@@ -52,11 +52,13 @@ class GitSync {
 
   async configure(settings) {
     this.state.enabled = !!settings.gitEnabled;
-    this.state.remote = settings.gitRemote || '';
+    const wantedRemote = String(settings.gitRemote || '').trim();
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
     if (!(await this.available())) { this._set({ lastError: 'git is not installed or not on PATH.' }); return this.status(); }
     await this.ensureRepo();
-    await this.syncRemote(this.state.remote);
+    // The remote only takes effect once git accepted it: a refused value must not leave pushes going anywhere.
+    if (wantedRemote && /^-/.test(wantedRemote)) { this._set({ remote: '', lastError: 'That does not look like a repository URL.' }); await this.syncRemote(''); }
+    else await this.syncRemote(wantedRemote);
     await this.refreshCounts();
     return this.status();
   }

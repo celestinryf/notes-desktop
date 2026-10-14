@@ -82,6 +82,13 @@ function sanitizeVault(raw, now) {
 const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
 
+// Directories the scan skips must not be creatable or renamable from the app: their notes would vanish
+// from view while staying on disk.
+function assertVaultDirName(name) {
+  const safe = H.safeFilename(name);
+  if (/^\./.test(safe) || VAULT_SKIP_DIRS.has(safe.toLowerCase())) throw Object.assign(new Error('A vault folder cannot be named "' + safe + '": the app does not scan folders with that name.'), { code: 'ENAME' });
+}
+
 function uniqueName(dir, base, ext) {
   let candidate = base + ext;
   let i = 2;
@@ -1021,7 +1028,7 @@ class Store {
     if (parent && parent.vaultId && parent.dirPath) {
       // A subfolder of a vault folder is a directory. Dot-directories are skipped by the scan (.git, .trash,
       // .obsidian), so a folder named that way would hold notes the app never sees again.
-      if (/^\./.test(H.safeFilename(folder.name))) throw Object.assign(new Error('A vault folder name cannot start with a dot.'), { code: 'ENAME' });
+      assertVaultDirName(folder.name);
       const dirName = uniqueName(parent.dirPath, H.safeFilename(folder.name), '');
       folder.name = dirName;
       folder.vaultId = parent.vaultId;
@@ -1046,6 +1053,7 @@ class Store {
     if (f.vaultId && f.dirPath && f.parentId) {
       // Rename the directory and re-point every note and subfolder underneath it.
       const parentDir = path.dirname(f.dirPath);
+      assertVaultDirName(next);
       const wanted = H.safeFilename(next);
       // Only the case changed (notes -> Notes): Windows would find the folder itself in the way; rename directly.
       next = wanted.toLowerCase() === path.basename(f.dirPath).toLowerCase() ? wanted : uniqueName(parentDir, wanted, '');
