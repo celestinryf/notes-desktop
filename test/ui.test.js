@@ -805,6 +805,12 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Shift+F3');
   await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [0, 6]);
+  // Enter while focus is in the text steps too; it must never replace the selected match with a newline.
+  await page.keyboard.press('Enter');
+  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await page.keyboard.press('Shift+Enter');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), 'needle one\nhay\nneedle two\n', 'text untouched by stepping');
   // Editing in the rendered view keeps the count honest.
   await page.click('#findInput');
   // Rendered view: the same search highlights ranges inside the editor only.
