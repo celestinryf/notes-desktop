@@ -70,7 +70,9 @@ function importNotes(store, dir) {
       const note = store.get(f.id);
       if (!note || note.trashedAt) {
         details.push('skipped (note trashed meanwhile): ' + f.rel);
-      } else if (Number.isFinite(f.updatedAt) && note.updatedAt > f.updatedAt && note.body !== content) {
+      } else if (hashOf(note.body) !== f.hash && note.body !== content) {
+        // The body changed in the app since the export (not just tags, pin or folder) and the agent's text
+        // differs from it.
         // Edited in the app while the agent also edited the file: keep the person's text and save the
         // agent's version beside it, so nothing is lost and the choice stays with the person.
         const copy = store.create({ title: (H.deriveTitle(note) || 'Untitled') + ' (bot)', body: content, folderId: note.folderId, tags: note.tags });
@@ -80,7 +82,6 @@ function importNotes(store, dir) {
         store.update(f.id, { body: content }); updated++; details.push('updated: ' + f.rel);
       }
       f.hash = h; // the workspace now reflects this content; a later import must not re-apply it
-      if (note) f.updatedAt = store.get(f.id).updatedAt;
     }
   }
   const walk = (d, relDir) => {

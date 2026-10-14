@@ -50,6 +50,18 @@ test('a shim pointing at a cli.js runs under node; a .js override does too; a mi
   assert.equal(CB.resolveClaude({ pathDirs: [broken], home: tmp() }), null);
 });
 
+test('an nvm-style shim that mentions a sibling node.exe still resolves to the script; .json never matches .js', { skip: !win && 'windows shim' }, () => {
+  const bin = tmp();
+  const cli = path.join(bin, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  fs.mkdirSync(path.dirname(cli), { recursive: true });
+  fs.writeFileSync(cli, '// cli');
+  fs.writeFileSync(path.join(bin, 'node.exe'), 'MZ');
+  fs.writeFileSync(path.join(bin, 'package.json'), '{}');
+  fs.writeFileSync(path.join(bin, 'claude.cmd'), '@ECHO off\r\nSETLOCAL\r\nSET "_prog=node"\r\nIF EXIST "%dp0%\\node.exe" (SET "_prog=%dp0%\\node.exe")\r\nREM "%dp0%\\package.json"\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n');
+  assert.deepEqual(CB.resolveClaude({ pathDirs: [bin], home: tmp() }), { file: cli, isScript: true });
+  assert.equal(CB.shimTarget(path.join(bin, 'claude.cmd')), cli);
+});
+
 test('the native installer location (~/.local/bin) is found when PATH has nothing', { skip: !win && 'exe check' }, () => {
   const home = tmp();
   const exe = path.join(home, '.local', 'bin', 'claude.exe');

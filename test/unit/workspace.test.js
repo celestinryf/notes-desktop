@@ -71,6 +71,15 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   const copy = store.notes.find((n) => n.title === 'Plan (bot)');
   assert.ok(copy && copy.body === 'v2 (agent)', 'agent text saved beside it');
   assert.match(r.details.join('\n'), /conflict: Plan\.md/);
+  // Metadata-only changes in the app (pin, tags, folder) are not a conflict: the agent's edit applies.
+  const b = store.create({ title: 'Meta', body: 'm1' });
+  W.exportNotes(store, dir);
+  store.update(b.id, { pinned: true, tags: 'work' });
+  fs.writeFileSync(path.join(dir, 'Meta.md'), 'm2 (agent)', 'utf8');
+  const r1 = W.importNotes(store, dir);
+  assert.equal(r1.conflicts, 0);
+  assert.equal(store.get(b.id).body, 'm2 (agent)');
+  assert.equal(store.get(b.id).pinned, true);
   // A note trashed mid-run is skipped, not resurrected.
   const t = store.create({ title: 'Doomed', body: 'x' });
   W.exportNotes(store, dir);
