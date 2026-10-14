@@ -257,6 +257,7 @@ class Store {
     const note = this.get(id);
     if (!note) return null;
     patch = patch || {};
+    const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
     if (typeof patch.title === 'string' && patch.title !== note.title) { note.title = patch.title; changed = true; }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
@@ -271,7 +272,13 @@ class Store {
     }
     if (changed) {
       note.updatedAt = this.now();
-      this.save();
+      try {
+        this.save();
+      } catch (err) {
+        // Roll back so a retry with the same patch is a real change and gets written.
+        Object.assign(note, before);
+        throw err;
+      }
     }
     return note;
   }

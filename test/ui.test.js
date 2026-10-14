@@ -306,7 +306,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
   assert.equal(await page.$$eval('#richEditor td', (c) => c.length), 2);
-  assert.equal(await page.$eval('#richEditor img', (i) => i.getAttribute('src')), png);
+  assert.equal(await page.$eval('#richEditor img[src]', (i) => i.getAttribute('src')), png);
   assert.equal(readNotes().settings.editorMode, 'rendered');
   // Enter inside a cell used to replace the whole table with "[table]" on autosave.
   await page.click('#richEditor td >> nth=0');
@@ -321,6 +321,40 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.keyboard.press('Control+Backspace');
   await sleep(500);
   assert.equal(findNote('Rich constructs').trashedAt, null, 'Ctrl+Backspace did not trash');
+
+  // Viewing must never write. Re-open the (HTML-serialized) table note and a note whose Markdown is not
+  // byte-identical to the editor's output but is content-identical: neither may change on disk.
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Soft breaks');
+  await useSourceMode(true);
+  const soft = 'line one\nline two\n\nx -> y and a > b\n\n* star bullet\n* another';
+  await page.fill('#bodyInput', soft);
+  await waitFor('soft note saved', () => findNote('Soft breaks') && findNote('Soft breaks').body === soft);
+  await page.keyboard.press('Control+e'); // rendered, global preference back to rendered
+  await page.waitForSelector('#richEditor:not(.hidden) p', { timeout: 8000 });
+  const stampSoft = findNote('Soft breaks').updatedAt;
+  const stampTable = findNote('Rich constructs').updatedAt;
+  await page.click('.note-card:has-text("Rich constructs")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Rich constructs');
+  await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
+  await sleep(900);
+  await page.click('.note-card:has-text("Soft breaks")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Soft breaks');
+  await sleep(900);
+  assert.equal(findNote('Soft breaks').body, soft, 'viewing did not rewrite soft breaks');
+  assert.equal(findNote('Soft breaks').updatedAt, stampSoft, 'updatedAt untouched by viewing');
+  assert.equal(findNote('Rich constructs').updatedAt, stampTable, 'table note untouched by viewing');
+  // Editing in rendered mode keeps "->" as typed instead of "-&gt;".
+  await page.click('#richEditor p >> nth=0');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' plus');
+  await waitFor('rendered edit saved', () => findNote('Soft breaks').body.includes('plus'));
+  const edited = findNote('Soft breaks').body;
+  assert.ok(edited.includes('x -> y and a > b'), 'angle brackets kept literal: ' + JSON.stringify(edited));
+  assert.ok(!edited.includes('&gt;'), 'no entity escaping: ' + JSON.stringify(edited));
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('soft note trashed', () => findNote('Soft breaks').trashedAt);
 
   // A note with constructs the editor cannot keep (inline HTML, a footnote) must open as source untouched.
   await page.click('#newNoteBtn');
@@ -358,7 +392,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.click('.nav-item[data-view="trash"]');
   await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
   await page.click('#emptyTrashBtn');
-  await waitFor('trash emptied', () => !findNote('Lossy') && !findNote('Rich constructs'));
+  await waitFor('trash emptied', () => !findNote('Lossy') && !findNote('Rich constructs') && !findNote('Soft breaks'));
   await page.click('.nav-item[data-view="all"]');
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

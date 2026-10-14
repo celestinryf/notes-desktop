@@ -850,7 +850,7 @@
     el.bodyInput.classList.toggle('hidden', !state.sourceMode);
     el.richEditor.classList.toggle('hidden', state.sourceMode);
     if (state.sourceMode) autoGrow();
-    else if (state.rich && state.currentId) state.rich.setMarkdown(el.bodyInput.value);
+    else if (state.rich && state.currentId) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
 
   function toggleSource(force) {

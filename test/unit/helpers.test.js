@@ -122,5 +122,6 @@ test('safeFilename strips characters Windows rejects', () => {
   assert.equal(H.safeFilename('COM1'), 'note-COM1');
   assert.equal(H.safeFilename('console'), 'console');
   assert.equal(H.safeFilename('ends with dot.'), 'ends with dot');
+  assert.ok(!/[. ]$/.test(H.safeFilename('x'.repeat(79) + '. tail')), 'no trailing dot after truncation');
   assert.equal(H.safeFilename('x'.repeat(100)).length, 80);
 });
