@@ -365,11 +365,18 @@ function main() {
     });
     if (canceled || !filePaths.length) return { ok: false, canceled: true, count: 0 };
     let first = null;
+    let count = 0;
+    const failed = [];
     for (const fp of filePaths) {
-      const note = store.importMarkdown(path.basename(fp), fs.readFileSync(fp, 'utf8'));
-      if (!first) first = note;
+      try {
+        const note = store.importMarkdown(path.basename(fp), fs.readFileSync(fp, 'utf8'));
+        count++;
+        if (!first) first = note;
+      } catch (err) {
+        failed.push(path.basename(fp) + ' (' + (err.code || err.message) + ')');
+      }
     }
-    return { ok: true, count: filePaths.length, firstId: first && first.id };
+    return { ok: count > 0, count, failed, firstId: first && first.id };
   });
 
   // ---- lifecycle -----------------------------------------------------------
@@ -388,9 +395,12 @@ function main() {
       ipcMain.once('app:flush-done', () => { clearTimeout(timer); resolve(); });
       try { win.webContents.send('app:flush'); } catch (_) { clearTimeout(timer); resolve(); }
     });
-    // Cap the git step: an unreachable remote must not keep the tray icon alive for a minute after Quit.
-    const gitFlushed = Promise.race([git.flush(), new Promise((r) => setTimeout(r, 5000))]);
-    rendererFlushed.then(() => gitFlushed).catch(() => {}).finally(() => app.quit());
+    // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
+    // cannot keep the tray icon alive for a minute after Quit.
+    rendererFlushed
+      .then(() => Promise.race([git.flush(), new Promise((r) => setTimeout(r, 5000))]))
+      .catch(() => {})
+      .finally(() => app.quit());
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });

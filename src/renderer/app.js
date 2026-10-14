@@ -957,6 +957,7 @@
   function toggleSource(force) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (next === state.sourceMode) return;
+    if (!next && !state.rich) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
     if (!next && state.currentLossless === false) {
       state.lossyOverride = state.currentId;
       toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
@@ -1306,8 +1307,13 @@
     el.openAtLoginInput.addEventListener('change', () => updateSettings({ openAtLogin: el.openAtLoginInput.checked }));
     el.alwaysOnTopInput.addEventListener('change', () => updateSettings({ alwaysOnTop: el.alwaysOnTopInput.checked }));
     el.importBtn.addEventListener('click', async () => {
-      const res = await api.app.importMarkdown();
-      if (res.ok) { el.settingsDialog.close(); await refresh({ keepEditor: true }); if (res.firstId) await selectNote(res.firstId); toast('Imported ' + res.count + (res.count === 1 ? ' note' : ' notes')); }
+      let res;
+      try { res = await api.app.importMarkdown(); }
+      catch (err) { toast('Import failed: ' + (err.message || err)); return; }
+      if (res.canceled) return;
+      if (res.count) { el.settingsDialog.close(); await refresh({ keepEditor: true }); if (res.firstId) await selectNote(res.firstId); }
+      const failed = res.failed && res.failed.length ? '. Could not read: ' + res.failed.join(', ') : '';
+      toast((res.count ? 'Imported ' + res.count + (res.count === 1 ? ' note' : ' notes') : 'Nothing imported') + failed);
     });
     el.exportAllBtn.addEventListener('click', async () => {
       try { const res = await api.app.exportAll(); if (res.ok) toast('Exported to ' + res.filePath); }
