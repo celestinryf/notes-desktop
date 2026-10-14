@@ -1697,6 +1697,9 @@
   }
 
   function handleEditorKeydown(e) {
+    // While the find bar is open, Enter in the text steps between matches instead of replacing the selected
+    // match with a newline (focus lands here after Enter in the bar, so that would eat the match).
+    if (find.open && e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); runFind(!e.shiftKey); return; }
     const ta = el.bodyInput;
     if (e.key === 'Tab' && e.shiftKey) {
       // Outdent the current line when it is indented; otherwise let focus move back to the tags field.
