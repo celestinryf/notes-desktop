@@ -66,6 +66,13 @@ function main() {
       n.show();
     },
   });
+  const { LiveShare } = require('./live');
+  const live = new LiveShare(store, {
+    pushDelayMs: Number(process.env.NOTES_APP_LIVE_PUSH_MS) || 250,
+    // A remote edit landed in the store: the open editor and any sticky showing the note follow it.
+    onRemote: (id) => { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
+    onStatus: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('live:status', { id, status }); },
+  });
   const { StickyManager } = require('./stickies');
   const stickies = new StickyManager(store, {
     themeFor: effectiveTheme,
@@ -357,12 +364,22 @@ function main() {
   function notifyNoteChanged(id, sender) {
     if (win && !win.isDestroyed() && (!sender || win.webContents.id !== sender.id)) win.webContents.send('notes:reloaded', { reason: 'sticky', id });
     stickies.broadcast('notes:changed', { id }, sender);
+    live.noteChanged(id);
   }
+
+  // ---- live share -------------------------------------------------------------
+  ipcMain.handle('live:host', async (_e, id) => { try { return { ok: true, status: await live.host(id) }; } catch (err) { return { ok: false, error: err.message }; } });
+  ipcMain.handle('live:join', async (_e, url, folderId) => {
+    try { const r = await live.join(url, { folderId: folderId || null }); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('live:stop', (_e, id) => live.stop(id));
+  ipcMain.handle('live:status', (_e, id) => live.statusOf(id));
   ipcMain.handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
   ipcMain.handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
-  ipcMain.handle('notes:trash', (_e, id) => { const n = store.trash(id); stickies.close(id); return pub(n); });
+  ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); const n = store.trash(id); stickies.close(id); return pub(n); });
   ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
-  ipcMain.handle('notes:destroy', (_e, id) => { stickies.close(id); return store.destroy(id); });
+  ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
   ipcMain.handle('notes:emptyTrash', () => store.emptyTrash());
 
   // ---- desktop stickies ------------------------------------------------------
@@ -821,9 +838,9 @@ function main() {
     // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
     // cannot keep the tray icon alive for a minute after Quit.
     rendererFlushed
-      .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()]), new Promise((r) => setTimeout(r, 8000))]))
+      .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()].concat(Array.from(live.sessions.keys()).map((id) => live.flush(id)))), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { reminders.stop(); vaults.closeAll(); stickies.closeAll(); app.quit(); });
+      .finally(() => { reminders.stop(); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server.close(); } catch (_) { /* ignore */ } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
@@ -849,5 +866,6 @@ function main() {
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
     step('stickies', () => stickies.restoreAll());
     step('reminders', () => reminders.start());
+    live.restore().catch((err) => console.error('[live] restore failed', err));
   });
 }

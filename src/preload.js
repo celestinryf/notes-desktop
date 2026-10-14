@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('notesApi', {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  live: {
+    host: invoke('live:host'),
+    join: invoke('live:join'),
+    stop: invoke('live:stop'),
+    status: invoke('live:status'),
+  },
   lock: {
     set: invoke('lock:set'),
     unlock: invoke('lock:unlock'),
@@ -121,6 +127,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     stickiesChanged: on('stickies:changed'),
     openNote: on('app:open-note'),
     reminderFired: on('reminder:fired'),
+    liveStatus: on('live:status'),
     relocked: on('lock:relocked'),
   },
 });

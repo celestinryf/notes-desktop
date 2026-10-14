@@ -1017,6 +1017,68 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   void id;
 });
 
+test('live share: the app hosts a note; another participant over HTTP sees edits as they happen and can edit back', { timeout: 60000 }, async () => {
+  const http = require('http');
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'shared v1');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === 'shared v1');
+  const id = findNote('Gamma (copy)').id;
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForSelector('#shareMenu:not(.hidden)');
+  await page.click('#shareMenu [data-action="live-host"]');
+  await page.waitForSelector('#liveDialog[open]');
+  const url = await page.inputValue('#liveLinkInput');
+  assert.match(url, /^http:\/\/[\d.]+:\d+\/live\/[0-9a-f]{32}$/);
+  await page.click('#liveCancelBtn');
+  await waitFor('flag persisted', () => findNote('Gamma (copy)').live && findNote('Gamma (copy)').live.role === 'host');
+  await page.waitForSelector('#liveRow:not(.hidden)');
+  await waitForDom(() => !!document.querySelector('.note-card.is-active .live-mark'));
+  // The other participant: fetch the state, then follow the event stream.
+  const local = url.replace(/\/\/[\d.]+:/, '//127.0.0.1:');
+  const getJson = (u) => new Promise((resolve, reject) => http.get(u, (res) => { let t = ''; res.on('data', (d) => (t += d)); res.on('end', () => { try { resolve(JSON.parse(t)); } catch (e) { reject(e); } }); }).on('error', reject));
+  assert.equal((await getJson(local)).body, 'shared v1');
+  const events = [];
+  const es = await new Promise((resolve, reject) => { const req = http.get(local + '/events', (res) => { res.setEncoding('utf8'); let buf = ''; res.on('data', (ch) => { buf += ch; let i; while ((i = buf.indexOf('\n\n')) !== -1) { const f = buf.slice(0, i); buf = buf.slice(i + 2); const d = f.split('\n').find((l) => l.startsWith('data: ')); if (d) events.push(JSON.parse(d.slice(6))); } }); resolve(req); }); req.on('error', reject); });
+  await waitFor('initial state event', () => events.length >= 1);
+  await waitForDom(() => /1 person connected/.test(document.getElementById('liveText').textContent));
+  // Host types -> participant receives within the push window.
+  await page.fill('#bodyInput', 'shared v2 from app');
+  await waitFor('participant got v2', () => events.some((e) => e.body === 'shared v2 from app'), 8000);
+  // Participant edits -> the app's editor updates live (it is not being typed in).
+  await sleep(1600);
+  const post = (u, data) => new Promise((resolve, reject) => { const body = Buffer.from(JSON.stringify(data)); const req = http.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': body.length } }, (res) => { let t = ''; res.on('data', (d) => (t += d)); res.on('end', () => resolve({ status: res.statusCode, text: t })); }); req.on('error', reject); req.end(body); });
+  const r = await post(local, { title: 'Gamma (copy)', body: 'shared v3 from the other side', clientId: 'tester' });
+  assert.equal(r.status, 200);
+  await waitForDom(() => document.getElementById('bodyInput').value === 'shared v3 from the other side', 8000);
+  await waitFor('stored', () => findNote('Gamma (copy)').body === 'shared v3 from the other side');
+  // A wrong token gets nothing.
+  const bad = await new Promise((resolve) => http.get(local.replace(/[0-9a-f]{32}$/, '0'.repeat(32)), (res) => { res.resume(); resolve(res.statusCode); }));
+  assert.equal(bad, 404);
+  // Stop: the participant's stream ends, the flag clears, the note stays.
+  let ended = false; es.on('close', () => { ended = true; }); es.on('response', (res) => res.on('end', () => { ended = true; }));
+  await page.click('#liveStopBtn');
+  await waitFor('flag cleared', () => !findNote('Gamma (copy)').live);
+  await waitForDom(() => document.getElementById('liveRow').classList.contains('hidden'));
+  es.destroy();
+  assert.equal(findNote('Gamma (copy)').body, 'shared v3 from the other side');
+  // Joining a dead link reports an error instead of creating a note.
+  const before = readNotes().notes.length;
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForSelector('#shareMenu:not(.hidden)');
+  await page.click('#shareMenu [data-action="live-join"]');
+  await page.waitForSelector('#liveDialog[open]');
+  await page.fill('#liveLinkInput', local);
+  await page.click('#liveSubmitBtn');
+  await waitForDom(() => /ECONNREFUSED|refused|HTTP|ended|closed/i.test(document.getElementById('liveError').textContent), 10000);
+  await page.click('#liveCancelBtn');
+  assert.equal(readNotes().notes.length, before, 'no note created for a failed join');
+  void id;
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
