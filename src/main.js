@@ -525,7 +525,16 @@ function main() {
     await vaults.open(v.id, { pull: false });
     return { ok: true, vault: vaultView(v) };
   });
-  ipcMain.handle('vaults:update', async (_e, id, patch) => { const v = store.updateVault(id, patch); if (v) { vaults.schedulePull(id); if (patch && patch.remote !== undefined) await vaults.initRepo(id, patch.remote); } return v ? vaultView(v) : null; });
+  ipcMain.handle('vaults:update', async (_e, id, patch) => {
+    patch = Object.assign({}, patch || {});
+    if (patch.remote !== undefined) {
+      patch.remote = String(patch.remote || '').trim();
+      if (/^-/.test(patch.remote)) return { ok: false, error: 'That does not look like a repository URL.' }; // refused before anything is stored
+    }
+    const v = store.updateVault(id, patch);
+    if (v) { vaults.schedulePull(id); if (patch.remote !== undefined) await vaults.initRepo(id, patch.remote); }
+    return v ? vaultView(v) : null;
+  });
   ipcMain.handle('vaults:remove', (_e, id) => { vaults.close(id); const r = store.removeVault(id); closeOrphanStickies(); fanReloaded({ reason: 'vault' }); return r; });
   function closeOrphanStickies() { for (const sid of stickies.openIds()) if (!store.get(sid)) stickies.close(sid); }
   ipcMain.handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));

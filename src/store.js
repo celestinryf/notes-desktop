@@ -487,6 +487,7 @@ class Store {
   // What leaves the store: never the ciphertext; the body only while unlocked this session.
   publicNote(n) {
     if (!n) return n;
+    if (n.lock === undefined && typeof n.locked === 'boolean') return n; // already a public view: idempotent
     const out = Object.assign({}, n);
     delete out.lock;
     out.locked = !!n.lock;
@@ -1018,7 +1019,9 @@ class Store {
     const folder = { id: crypto.randomUUID(), name: cleanFolderName(data.name), parentId, createdAt: this.now() };
     const parent = parentId ? this.getFolder(parentId) : null;
     if (parent && parent.vaultId && parent.dirPath) {
-      // A subfolder of a vault folder is a directory.
+      // A subfolder of a vault folder is a directory. Dot-directories are skipped by the scan (.git, .trash,
+      // .obsidian), so a folder named that way would hold notes the app never sees again.
+      if (/^\./.test(H.safeFilename(folder.name))) throw Object.assign(new Error('A vault folder name cannot start with a dot.'), { code: 'ENAME' });
       const dirName = uniqueName(parent.dirPath, H.safeFilename(folder.name), '');
       folder.name = dirName;
       folder.vaultId = parent.vaultId;

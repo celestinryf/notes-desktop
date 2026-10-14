@@ -795,7 +795,7 @@
       remote.className = 'input';
       remote.placeholder = v.status.isRepo ? 'Remote URL (origin)' : 'Add a remote URL to turn this folder into a synced repo';
       remote.value = v.remote || v.status.remote || '';
-      remote.addEventListener('change', async () => { await api.vaults.update(v.id, { remote: remote.value.trim() }); renderVaultList(); });
+      remote.addEventListener('change', async () => { const r = await api.vaults.update(v.id, { remote: remote.value.trim() }); if (r && r.ok === false) toast(r.error); renderVaultList(); });
       actions.append(remote);
       const mk = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
       mk('Sync now', () => syncVault(v.id));
@@ -1463,7 +1463,7 @@
       const at = find.sourceHits[find.active];
       const ta = el.bodyInput;
       if (ta.readOnly) return;
-      if (ta.value.slice(at, at + q.length).toLowerCase() !== q.toLowerCase()) { showActiveMatch(); return; }
+      if (!isQueryText(ta.value.slice(at, at + q.length), q)) { showActiveMatch(); return; }
       ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
       ta.setSelectionRange(at + text.length, at + text.length);
       ta.dispatchEvent(new Event('input', { bubbles: true })); // autosave + recount
@@ -1479,7 +1479,7 @@
     if (!find.ranges.length) { runFind(true, true); return; }
     find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
     const idx = find.active;
-    if (String(find.ranges[idx]).toLowerCase() !== q.toLowerCase()) { showActiveMatch(); return; }
+    if (!isQueryText(String(find.ranges[idx]), q)) { showActiveMatch(); return; }
     state.rich.replaceRanges([find.ranges[idx]], text);
     runFind(true, true, true); // the quiet re-find keeps the index, which now points at the following match
     // A replacement that itself contains the query ("cat" -> "cats") creates matches at the same spot: skip them.
@@ -1548,6 +1548,11 @@
   // Positions of every case-insensitive occurrence of q in text.
   // Case-insensitive, but measured on the ORIGINAL text: lower-casing can change string length ("İ" becomes
   // two code units), which would shift every offset after it and make a replace hit the wrong characters.
+  // The same case rule as findOffsets (RegExp 'i'), so a guard never disagrees with the matcher (ς vs σ).
+  function isQueryText(text, q) {
+    return new RegExp('^' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i').test(text);
+  }
+
   function findOffsets(text, q) {
     const hits = [];
     if (!q) return hits;
@@ -1564,7 +1569,7 @@
     const blockOf = (n) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n.nodeType === 1) { if (n.tagName === 'BR') text += '\n'; continue; } // a line break separates too
+      if (n.nodeType === 1) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
       const b = blockOf(n);
       if (lastBlock && b !== lastBlock) text += '\n'; // a separator no query can contain
       lastBlock = b;
