@@ -30,6 +30,10 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Lock a note (🔒 Lock or Ctrl+L): the text is encrypted on disk with a password (scrypt + AES-256-GCM); the title stays visible and searchable, the body does not. It stays readable until you hide the app or choose Lock now. There is no recovery for a forgotten password. File-backed notes cannot be locked.
 - Reminders (⏰ Remind or Ctrl+Shift+M): quick picks or a date and time. A Windows notification appears when it is due (click it to open the note), the app shows a toast, the card badge turns red, and the Reminders view lists what is coming up, soonest first.
 - Share (Share ▾ or Ctrl+Shift+S): copy as Markdown, rich text or plain text; email it; save as PDF, HTML or Markdown; show the file in Explorer for file-backed notes.
+- Replace in the open note (Ctrl+H, or ⇄ in the find bar): one match at a time or all at once, in either view.
+- Earlier versions (🕘 History or Ctrl+Shift+H): every saved change of a note, from the local git history; preview and restore any of them.
+- Attachments (📎 Attach or Ctrl+Shift+O) and voice memos (🎙 Record or Ctrl+Shift+V): files are copied into the app's attachments folder and linked from the note; Ctrl+click a link to open it. Programs and scripts are never launched.
+- Links between notes: in the link dialog (Ctrl+K) pick a note, or Share ▾ → Copy link to this note and paste it elsewhere. Ctrl+click follows it.
 - Find in the open note (Ctrl+Shift+F; Enter/Shift+Enter or F3 step through, Esc closes). Ctrl+F searches all notes.
 - Print the open note (🖨 Print or Ctrl+Shift+P): just the note, no chrome.
 - Read aloud (🔊 Read or Ctrl+Shift+R) speaks the selection or the whole note with a system voice; voice and speed in Settings. Dictate (🎤 or Ctrl+Shift+D) opens Windows speech recognition (Win+H) into the editor; speech is handled by Windows, not this app.

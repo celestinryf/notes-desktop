@@ -838,6 +838,76 @@ function main() {
     return { ok: true, filePath };
   });
 
+  // ---- per-note version history (from the git snapshots of notes.json) ------------
+  ipcMain.handle('history:versions', async (_e, id, limit) => {
+    const note = store.get(id);
+    if (!note) return { ok: false, error: 'Note not found' };
+    if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
+    if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Commit every change to a git repo" in Settings.' };
+    const commits = await git.history(Math.min(200, Math.max(1, limit || 80)));
+    const versions = [];
+    let lastBody = null;
+    for (const c of commits) {
+      const text = await git.showNotesAt(c.hash);
+      if (!text) continue;
+      let snap;
+      try { snap = JSON.parse(text); } catch (_) { continue; }
+      const n = (snap.notes || []).find((x) => x.id === id);
+      if (!n || typeof n.body !== 'string' || n.lock) continue;
+      if (n.body === lastBody) continue; // the same text committed again (another note changed)
+      lastBody = n.body;
+      versions.push({ hash: c.hash, at: c.at, title: n.title || '', body: n.body, chars: n.body.length });
+    }
+    return { ok: true, versions, current: note.body };
+  });
+
+  // ---- attachments: files the app keeps next to the notes -----------------------
+  const ATTACH_DIR = path.join(DATA_DIR, 'attachments');
+  const safeAttachmentName = (name) => {
+    const base = path.basename(String(name || ''));
+    return base && base === String(name) && !/^\.+$/.test(base) ? base : null; // a plain file name, nothing else
+  };
+  function addAttachment(srcPath) {
+    fs.mkdirSync(ATTACH_DIR, { recursive: true });
+    const ext = path.extname(srcPath);
+    const stem = H.safeFilename(path.basename(srcPath, ext)) || 'file';
+    let name = stem + ext, i = 2;
+    while (fs.existsSync(path.join(ATTACH_DIR, name))) { name = stem + ' ' + i + ext; i++; }
+    fs.copyFileSync(srcPath, path.join(ATTACH_DIR, name));
+    return { name, href: 'attachment://' + encodeURIComponent(name), size: fs.statSync(path.join(ATTACH_DIR, name)).size };
+  }
+  ipcMain.handle('attachments:pick', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Attach files', properties: ['openFile', 'multiSelections'] });
+    if (canceled || !filePaths.length) return [];
+    return filePaths.map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } });
+  });
+  ipcMain.handle('attachments:addPaths', (_e, paths) => (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string').map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } }));
+  ipcMain.handle('attachments:saveRecording', (_e, bytes, ext) => {
+    fs.mkdirSync(ATTACH_DIR, { recursive: true });
+    const clean = /^[a-z0-9]{1,5}$/i.test(String(ext)) ? String(ext).toLowerCase() : 'webm';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const name = 'Recording ' + stamp + '.' + clean;
+    fs.writeFileSync(path.join(ATTACH_DIR, name), Buffer.from(bytes));
+    return { name, href: 'attachment://' + encodeURIComponent(name), size: Buffer.from(bytes).length };
+  });
+  ipcMain.handle('attachments:open', async (_e, href) => {
+    const raw = String(href || '').replace(/^attachment:\/\//i, '');
+    let name;
+    try { name = safeAttachmentName(decodeURIComponent(raw)); } catch (_) { name = null; }
+    if (!name) return 'Not an attachment link';
+    const full = path.join(ATTACH_DIR, name);
+    if (path.dirname(full) !== ATTACH_DIR || !fs.existsSync(full)) return 'Attachment not found: ' + name;
+    if (EXEC_EXT.test(full)) return 'Notes does not launch programs or scripts.';
+    return shell.openPath(full);
+  });
+  ipcMain.handle('attachments:reveal', (_e, href) => {
+    const raw = String(href || '').replace(/^attachment:\/\//i, '');
+    let name; try { name = safeAttachmentName(decodeURIComponent(raw)); } catch (_) { name = null; }
+    const full = name ? path.join(ATTACH_DIR, name) : null;
+    if (full && fs.existsSync(full)) shell.showItemInFolder(full);
+    return !!(full && fs.existsSync(full));
+  });
+
   ipcMain.handle('app:importMarkdown', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: 'Import Markdown or text files',

@@ -133,7 +133,9 @@ export function create(element, options) {
       TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' } }),
       TaskListTight,
       DashCheckbox,
-      Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
+      // note:// links point at other notes; attachment:// links at files the app keeps. Both are opened by
+      // the app, never by the browser.
+      Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, protocols: ['note', 'attachment'], HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
       // Inline, as Markdown models images: tiptap-markdown's image serializer never closes a block, so a
       // block image followed by text would be glued onto one line and misparse on reload.
       Image.configure({ inline: true, allowBase64: true }),
@@ -220,6 +222,22 @@ export function create(element, options) {
     selectionRange: currentRange,
     lastRoundTripExact: () => lastExact,
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
+    // Replaces the text of DOM ranges (as produced by the app's find) in one transaction, last first so
+    // earlier positions stay valid. Returns how many were replaced.
+    replaceRanges: (domRanges, text) => {
+      const spans = [];
+      for (const r of domRanges) {
+        try { spans.push({ from: editor.view.posAtDOM(r.startContainer, r.startOffset), to: editor.view.posAtDOM(r.endContainer, r.endOffset) }); } catch (_) { /* detached range */ }
+      }
+      spans.sort((a, b) => b.from - a.from);
+      if (!spans.length) return 0;
+      let tr = editor.state.tr;
+      for (const s of spans) tr = tr.insertText(text, s.from, s.to);
+      editor.view.dispatch(tr);
+      return spans.length;
+    },
+    // Inserts a link at the caret (or over the selection), as Markdown would: [text](href).
+    insertLink: (text, href) => editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run(),
     hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
     destroy: () => editor.destroy(),
   };
