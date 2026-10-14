@@ -1178,21 +1178,29 @@
     el.settingsDialog.addEventListener('close', () => { if (state.current) focusBody(); });
 
     // Main-process events
+    let shownBusy = false;
     api.on.shown(async () => {
-      await state.initDone; // the first show can arrive before the initial load has finished
-      if (el.settingsDialog.open) return;
-      if (state.current) {
-        (state.current.title || state.current.body ? el.bodyInput : el.titleInput).focus();
-        return;
+      // 'shown' can arrive twice around startup (first paint plus the ready handshake); never overlap.
+      if (shownBusy) return;
+      shownBusy = true;
+      try {
+        await state.initDone; // the first show can arrive before the initial load has finished
+        if (el.settingsDialog.open) return;
+        if (state.current) {
+          if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();
+          return;
+        }
+        if (state.notes.length) {
+          await selectNote(state.notes[0].id);
+          focusBody();
+          return;
+        }
+        // Only start a fresh note when there truly are none, not when the current view is just empty.
+        const counts = await api.notes.counts();
+        if (counts.all === 0) await newNote();
+      } finally {
+        shownBusy = false;
       }
-      if (state.notes.length) {
-        await selectNote(state.notes[0].id);
-        focusBody();
-        return;
-      }
-      // Only start a fresh note when there truly are none, not when the current view is just empty.
-      const counts = await api.notes.counts();
-      if (counts.all === 0) await newNote();
     });
     api.on.newNote(newNote);
     api.on.settingsChanged((s) => applySettings(s));
@@ -1211,6 +1219,8 @@
     bind();
     await refresh();
     if (state.current) focusBody();
+    // Tell main we can receive events now; it replays 'app:shown' if the window is already on screen.
+    api.app.rendererReady().catch(() => {});
   }
 
   window.addEventListener('error', (e) => console.error('Uncaught: ' + e.message));

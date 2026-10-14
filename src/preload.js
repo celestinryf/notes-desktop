@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('notesApi', {
   app: {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
+    rendererReady: invoke('app:rendererReady'),
     openDataFolder: invoke('app:openDataFolder'),
     openExternal: invoke('app:openExternal'),
     exportNote: invoke('app:exportNote'),

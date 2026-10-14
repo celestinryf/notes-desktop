@@ -302,6 +302,13 @@ function main() {
 
   ipcMain.handle('app:info', () => info());
   ipcMain.handle('app:hide', () => hideWindow());
+  // The first 'app:shown' can be sent before the renderer has registered its listener (ready-to-show fires
+  // before the scripts finish). Once the renderer is ready it asks, and we replay the signal if visible.
+  ipcMain.handle('app:rendererReady', () => {
+    const visible = !!(win && !win.isDestroyed() && win.isVisible());
+    if (visible) win.webContents.send('app:shown');
+    return { visible };
+  });
   ipcMain.handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
   ipcMain.handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
 
