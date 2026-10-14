@@ -361,8 +361,21 @@ test('a vault subfolder cannot be given a dot name the scan would skip', async (
   const v = store.addVault({ path: dir });
   await store.scanVault(v.id);
   const root = store.vaultRootFolder(v.id);
-  assert.throws(() => store.createFolder({ name: '.hidden', parentId: root.id }), /dot/);
+  assert.throws(() => store.createFolder({ name: '.hidden', parentId: root.id }), /does not scan/);
   assert.ok(!fs.existsSync(path.join(dir, '.hidden')));
   const ok = store.createFolder({ name: 'visible', parentId: root.id });
   assert.ok(fs.existsSync(ok.dirPath));
+});
+
+test('vault folders cannot be renamed to a dot name or a skipped directory name', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const projects = store.folders.find((f) => f.name === 'Projects');
+  assert.throws(() => store.renameFolder(projects.id, '.old'), /does not scan/);
+  assert.throws(() => store.renameFolder(projects.id, 'node_modules'), /does not scan/);
+  assert.throws(() => store.createFolder({ name: 'Node_Modules', parentId: store.vaultRootFolder(v.id).id }), /does not scan/);
+  assert.equal(store.getFolder(projects.id).name, 'Projects');
+  assert.ok(fs.existsSync(path.join(dir, 'Projects')));
 });
