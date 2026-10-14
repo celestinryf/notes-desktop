@@ -23,6 +23,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold; tables and images render too. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
 - Safety net: if a note contains Markdown the rendered view cannot show faithfully (inline HTML, footnotes), it opens as source with a notice, so just looking at it never rewrites it.
 - Ctrl+B / Ctrl+I for bold and italic, Ctrl+K for a link, Tab / Shift+Tab to nest and un-nest list items
+- Read aloud (🔊 Read or Ctrl+Shift+R) speaks the selection or the whole note with a system voice; voice and speed in Settings. Dictate (🎤 or Ctrl+Shift+D) opens Windows speech recognition (Win+H) into the editor; speech is handled by Windows, not this app.
 - Writing column can sit left, center, or right of the editor pane at a chosen width, or use the full width (Settings)
 - Git history: every change is committed to a git repo inside the data folder (only `notes.json` is tracked). Add an optional remote in Settings and each commit is pushed. Commit now / Push now buttons in Settings.
 - Light (cream) and dark (ink) themes, follows the system by default; adjustable editor font size; always-on-top option

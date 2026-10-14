@@ -39,7 +39,7 @@ test.before(async () => {
     executablePath: ELECTRON_PATH,
     args: [ROOT],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
-    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1' }),
+    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1' }),
   });
   page = await app.firstWindow();
   page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(m.text()); });
@@ -577,6 +577,42 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
+});
+
+test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  const voices = await page.evaluate(() => (window.speechSynthesis ? window.speechSynthesis.getVoices().length : -1));
+  assert.ok(voices >= 0, 'speechSynthesis exists');
+  await page.click('#readAloudBtn');
+  await waitForDom(() => document.getElementById('readAloudBtn').classList.contains('is-on'));
+  if (voices > 0) {
+    await waitForDom(() => window.speechSynthesis.speaking || window.speechSynthesis.pending, 5000);
+  }
+  await page.click('#readAloudBtn');
+  await waitForDom(() => !document.getElementById('readAloudBtn').classList.contains('is-on'));
+  assert.equal(await page.evaluate(() => window.speechSynthesis.speaking), false);
+  await page.keyboard.press('Control+Shift+r');
+  await waitForDom(() => document.getElementById('readAloudBtn').classList.contains('is-on'));
+  await page.keyboard.press('Control+Shift+r');
+  await waitForDom(() => !document.getElementById('readAloudBtn').classList.contains('is-on'));
+
+  // Voice and rate persist.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.$eval('#ttsRateInput', (i) => { i.value = '1.4'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
+  await waitFor('rate persisted', () => readNotes().settings.ttsRate === 1.4);
+  const options = await page.$$eval('#ttsVoiceSelect option', (o) => o.map((x) => x.value));
+  if (options.length > 1) {
+    await page.selectOption('#ttsVoiceSelect', options[1]);
+    await waitFor('voice persisted', () => readNotes().settings.ttsVoice === options[1]);
+  }
+  await page.click('#closeSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+
+  // Dictation is a hand-off to Windows (dry run in tests so no dictation window opens).
+  const res = await page.evaluate(() => window.notesApi.app.dictate());
+  assert.deepEqual(res, { ok: true, method: 'windows-dictation', dryRun: true });
 });
 
 test('writing column: alignment and width settings move and size the block', async () => {

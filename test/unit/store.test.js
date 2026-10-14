@@ -121,6 +121,10 @@ test('settings are sanitized on load and on set', () => {
   assert.deepEqual(sanitizeSettings(['x']), DEFAULT_SETTINGS);
   assert.equal(sanitizeSettings({ fontSize: 900 }).fontSize, 28);
   assert.equal(sanitizeSettings({ fontSize: 3 }).fontSize, 12);
+  assert.equal(sanitizeSettings({ ttsRate: 9 }).ttsRate, 2);
+  assert.equal(sanitizeSettings({ ttsRate: 'fast' }).ttsRate, 1);
+  assert.equal(sanitizeSettings({ ttsRate: 1.26 }).ttsRate, 1.3);
+  assert.equal(sanitizeSettings({ ttsVoice: 42 }).ttsVoice, '');
   assert.equal(sanitizeSettings({ sidebarWidth: 50 }).sidebarWidth, 160);
   assert.equal(sanitizeSettings({ sidebarWidth: 9999 }).sidebarWidth, 420);
   assert.equal(sanitizeSettings({ listWidth: 'wide' }).listWidth, 300);

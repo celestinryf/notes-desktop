@@ -25,6 +25,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   editorWidth: 760,         // max width of the writing column in px; 0 means full width
   gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
   gitRemote: '',            // optional remote URL to push to after each commit
+  ttsVoice: '',             // speechSynthesis voice name; '' = system default
+  ttsRate: 1,               // 0.5 .. 2
   window: null,             // { x, y, width, height }
 });
 
@@ -102,6 +104,8 @@ function sanitizeSettings(input) {
   s.editorWidth = clampEditorWidth(s.editorWidth);
   s.gitEnabled = !!s.gitEnabled;
   s.gitRemote = typeof s.gitRemote === 'string' ? s.gitRemote.trim().slice(0, 500) : '';
+  s.ttsVoice = typeof s.ttsVoice === 'string' ? s.ttsVoice.slice(0, 200) : '';
+  s.ttsRate = Number.isFinite(Number(s.ttsRate)) ? Math.min(2, Math.max(0.5, Math.round(Number(s.ttsRate) * 10) / 10)) : 1;
   s.sort = ['updated', 'created', 'title'].includes(s.sort) ? s.sort : 'updated';
   if (s.window && typeof s.window === 'object') {
     const w = s.window;

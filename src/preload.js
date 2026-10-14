@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
     rendererReady: invoke('app:rendererReady'),
+    dictate: invoke('app:dictate'),
     flushDone: () => ipcRenderer.send('app:flush-done'),
     openDataFolder: invoke('app:openDataFolder'),
     openExternal: invoke('app:openExternal'),

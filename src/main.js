@@ -391,6 +391,27 @@ function main() {
   ipcMain.handle('git:push', () => git.push());
   ipcMain.handle('git:history', (_e, limit) => git.history(limit));
 
+  // Dictation: Windows' built-in speech recognition types into the focused control. We bring the window to
+  // the front and press Win+H on the user's behalf; nothing is recorded by this app.
+  ipcMain.handle('app:dictate', async () => {
+    if (process.platform !== 'win32') return { ok: false, error: 'Dictation is only wired up for Windows here.' };
+    if (process.env.NOTES_APP_DRY_DICTATE === '1') return { ok: true, method: 'windows-dictation', dryRun: true };
+    try {
+      if (win && !win.isDestroyed()) { win.show(); win.focus(); app.focus({ steal: true }); }
+      await new Promise((r) => setTimeout(r, 150));
+      const script = [
+        "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class K { [DllImport(\"user32.dll\")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo); }'",
+        '[K]::keybd_event(0x5B,0,0,[UIntPtr]::Zero); [K]::keybd_event(0x48,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [K]::keybd_event(0x48,0,2,[UIntPtr]::Zero); [K]::keybd_event(0x5B,0,2,[UIntPtr]::Zero)',
+      ].join('; ');
+      await new Promise((resolve, reject) => {
+        require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+      });
+      return { ok: true, method: 'windows-dictation' };
+    } catch (err) {
+      return { ok: false, error: 'Could not open Windows dictation: ' + (err.message || err) + '. Press Win+H manually.' };
+    }
+  });
+
   ipcMain.handle('app:info', () => info());
   ipcMain.handle('app:hide', () => hideWindow());
   // The first 'app:shown' can be sent before the renderer has registered its listener (ready-to-show fires
