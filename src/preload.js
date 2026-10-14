@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('notesApi', {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  bot: {
+    run: invoke('bot:run'),
+    cancel: invoke('bot:cancel'),
+    openTerminal: invoke('bot:openTerminal'),
+    importWorkspace: invoke('bot:importWorkspace'),
+  },
   vaults: {
     list: invoke('vaults:list'),
     pickFolder: invoke('vaults:pickFolder'),
@@ -89,5 +95,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     flush: on('app:flush'),
     reloaded: on('notes:reloaded'),
     vaultStatus: on('vault:status'),
+    botEvent: on('bot:event'),
   },
 });

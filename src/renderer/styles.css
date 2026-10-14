@@ -513,6 +513,40 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   pointer-events: none;
 }
 
+/* Bot panel */
+.bot-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 45%;
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--line); border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow: 4px 4px 0 var(--shadow);
+  animation: rise 0.25s var(--ease) both;
+}
+.bot-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.bot-scope { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.bot-allow { font-size: 12px; gap: 6px; }
+.bot-row { display: flex; gap: 8px; align-items: flex-start; }
+.bot-prompt {
+  flex: 1; resize: vertical; min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg);
+}
+.bot-prompt:focus { outline: none; box-shadow: 3px 3px 0 var(--shadow); }
+.bot-output {
+  flex: 1; min-height: 60px; max-height: 240px; overflow: auto;
+  margin: 0; padding: 8px 10px;
+  border: 1.5px solid var(--line-soft); border-radius: 8px;
+  background: var(--bg-sunken);
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+}
+.bot-output .bot-err { color: var(--ember); }
+.bot-output .bot-meta { color: var(--fg-muted); }
+.bot-panel.is-running .bot-prompt { opacity: 0.7; }
+
 /* Vaults */
 .vault-list { display: flex; flex-direction: column; gap: 8px; }
 .vault-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1.5px solid var(--line-soft); border-radius: 8px; background: var(--bg-sunken); }

@@ -95,6 +95,7 @@
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
             <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
             <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
+            <button class="tool-btn" id="botBtn" title="Ask Claude Code to work on your notes (Ctrl+Shift+A)" aria-label="Bot">🤖 Bot</button>
           </div>
           <div class="toolbar-right">
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
@@ -125,6 +126,21 @@
           </div>
         </div>
 
+        <section class="bot-panel hidden" id="botPanel" aria-label="Bot">
+          <div class="bot-head">
+            <strong>Claude Code</strong>
+            <span class="bot-scope" id="botScope"></span>
+            <span class="spacer"></span>
+            <label class="field-check bot-allow"><input type="checkbox" id="botAllowEdits" checked /><span>Allow edits</span></label>
+            <button class="tool-btn" id="botTerminalBtn" title="Open an interactive Claude Code terminal in this notes folder">Open terminal</button>
+            <button class="tool-btn" id="botCloseBtn" title="Close (Ctrl+Shift+A)">✕</button>
+          </div>
+          <div class="bot-row">
+            <textarea id="botPrompt" class="bot-prompt" rows="2" placeholder="What should Claude do with your notes? e.g. “Summarise this note into five bullets at the top”, “Create a weekly review note from everything tagged work”. Ctrl+Enter runs."></textarea>
+            <button class="btn btn-primary btn-small" id="botRunBtn">Run</button>
+          </div>
+          <pre class="bot-output" id="botOutput" aria-live="polite"></pre>
+        </section>
         <div class="status-bar">
           <span id="statusWords">0 words</span>
           <span class="dot">·</span>

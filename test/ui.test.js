@@ -39,7 +39,11 @@ test.before(async () => {
     executablePath: ELECTRON_PATH,
     args: [ROOT],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
-    env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1' }),
+    env: Object.assign({}, process.env, {
+      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1',
+      // The bot panel is exercised against a fake `claude` so no real agent (or tokens) is involved.
+      NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
+    }),
   });
   page = await app.firstWindow();
   page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(m.text()); });
@@ -642,6 +646,33 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await page.click('.nav-item[data-view="all"]');
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+});
+
+test('bot: runs Claude Code over an exported workspace, streams output, and pulls the edits back in', { timeout: 60000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', 'bot target body');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === 'bot target body');
+  await page.keyboard.press('Control+Shift+a');
+  await page.waitForSelector('#botPanel:not(.hidden)');
+  assert.match(await page.textContent('#botScope'), /plain notes/);
+  await page.fill('#botPrompt', 'Append a bullet to the current note');
+  await page.keyboard.press('Control+Enter');
+  await waitForDom(() => /done/.test(document.getElementById('botOutput').textContent), 20000);
+  const out = await page.textContent('#botOutput');
+  assert.match(out, /fake claude: cwd=.*workspace/);
+  assert.match(out, /edited .*Gamma \(copy\)\.md/);
+  assert.match(out, /Notes updated: 1, created: 1/);
+  await waitFor('agent edit imported', () => findNote('Gamma (copy)').body === 'bot target body\n- added by the bot\n');
+  await waitFor('agent-created note imported', () => findNote('Bot created this'));
+  await waitForDom(() => document.getElementById('bodyInput').value.includes('added by the bot'));
+  // Clean up the created note and restore the body for later tests.
+  await page.evaluate((id) => window.notesApi.notes.destroy(id), findNote('Bot created this').id);
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+  await page.keyboard.press('Control+Shift+a');
+  await waitForDom(() => document.getElementById('botPanel').classList.contains('hidden'));
 });
 
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
