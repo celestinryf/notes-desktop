@@ -32,7 +32,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Share (Share ▾ or Ctrl+Shift+S): copy as Markdown, rich text or plain text; email it; save as PDF, HTML or Markdown; show the file in Explorer for file-backed notes.
 - Replace in the open note (Ctrl+H, or ⇄ in the find bar): one match at a time or all at once, in either view.
 - Earlier versions (🕘 History or Ctrl+Shift+H): every saved change of a note, from the local git history; preview and restore any of them.
-- Attachments (📎 Attach or Ctrl+Shift+O) and voice memos (🎙 Record or Ctrl+Shift+V): files are copied into the app's attachments folder and linked from the note; Ctrl+click a link to open it. Programs and scripts are never launched.
+- Attachments (📎 Attach or Ctrl+Shift+O) and voice memos (🎙 Record or Ctrl+Shift+G): files are copied into the app's attachments folder and linked from the note; Ctrl+click a link to open it. Programs and scripts are never launched.
 - Links between notes: in the link dialog (Ctrl+K) pick a note, or Share ▾ → Copy link to this note and paste it elsewhere. Ctrl+click follows it.
 - Find in the open note (Ctrl+Shift+F; Enter/Shift+Enter or F3 step through, Esc closes). Ctrl+F searches all notes.
 - Print the open note (🖨 Print or Ctrl+Shift+P): just the note, no chrome.

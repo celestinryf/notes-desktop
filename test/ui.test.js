@@ -1125,7 +1125,7 @@ test('hardening: the page cannot be navigated away, and "Open with…" refuses p
   const note = (Array.isArray(linked) ? linked : linked.notes || [])[0] || readNotes().notes.find((n) => n.filePath && /danger\.bat$/.test(n.filePath));
   assert.ok(note, 'linked');
   const res = await page.evaluate((id) => window.notesApi.files.openExternal(id), note.id);
-  assert.match(String(res), /does not launch/);
+  assert.match(String(res), /Shown in Explorer instead/);
   await page.evaluate((id) => window.notesApi.notes.destroy(id), note.id);
 });
 
@@ -1133,18 +1133,21 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'cat sat\ncat ran\n');
-  await waitFor('saved', () => findNote('Gamma (copy)').body === 'cat sat\ncat ran\n');
+  await page.fill('#bodyInput', 'cat sat\ncat ran\ncat hid\n');
+  await waitFor('saved', () => findNote('Gamma (copy)').body === 'cat sat\ncat ran\ncat hid\n');
   await page.keyboard.press('Control+h');
   await page.waitForSelector('#replaceRow:not(.hidden)');
   await page.fill('#findInput', 'cat');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/3');
   await page.fill('#replaceInput', 'dog');
   await page.click('#replaceOneBtn');
-  await waitFor('one replaced', () => findNote('Gamma (copy)').body === 'dog sat\ncat ran\n');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/1');
+  await waitFor('one replaced', () => findNote('Gamma (copy)').body === 'dog sat\ncat ran\ncat hid\n');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['dog sat\n'.length, 'dog sat\ncat'.length], 'the very next match is selected, none skipped');
+  await page.click('#replaceOneBtn');
+  await waitFor('second replaced in order', () => findNote('Gamma (copy)').body === 'dog sat\ndog ran\ncat hid\n');
   await page.click('#replaceAllBtn');
-  await waitFor('all replaced', () => findNote('Gamma (copy)').body === 'dog sat\ndog ran\n');
+  await waitFor('all replaced', () => findNote('Gamma (copy)').body === 'dog sat\ndog ran\ndog hid\n');
   await waitForDom(() => document.getElementById('findCount').textContent === 'No matches');
   // Rendered view.
   await page.keyboard.press('Escape');
@@ -1152,11 +1155,12 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await page.keyboard.press('Control+h');
   await page.waitForSelector('#replaceRow:not(.hidden)');
   await page.fill('#findInput', 'dog');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2');
+  await waitForDom(() => document.getElementById('findCount').textContent === '1/3');
   await page.fill('#replaceInput', 'fox');
   await page.click('#replaceAllBtn');
   // The rendered view serializes without a trailing newline; the replacement itself is what matters.
-  await waitFor('rendered all replaced', () => /^fox sat\\?\nfox ran\n?$/.test(findNote('Gamma (copy)').body), 8000); // a hard break may serialize as backslash-newline
+  // A hard break may serialize as backslash-newline; the replacement itself is what matters.
+  await waitFor('rendered all replaced', () => findNote('Gamma (copy)').body.replace(/\\\n/g, '\n').replace(/\n$/, '') === 'fox sat\nfox ran\nfox hid', 8000);
   await page.keyboard.press('Escape');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'pure text');
@@ -1211,9 +1215,11 @@ test('attachments and voice memos: files are copied in and linked; links open th
   // A forged link cannot escape the attachments folder or run a program.
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://..%2F..%2Fnotes.json'))), /Not an attachment|not found/);
   fs.writeFileSync(path.join(dataDir, 'attachments', 'evil.bat'), '@echo off');
-  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat'))), /does not launch/);
+  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat'))), /Shown in Explorer instead/);
+  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat.'))), /Not an attachment/);
+  assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat%3A%3A%24DATA'))), /Not an attachment/);
   // Voice memo with the fake microphone.
-  await page.keyboard.press('Control+Shift+v');
+  await page.keyboard.press('Control+Shift+g');
   await waitForDom(() => document.getElementById('recordBtn').classList.contains('is-recording'), 8000);
   await sleep(1200);
   await page.click('#recordBtn');

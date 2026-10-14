@@ -461,11 +461,19 @@ function main() {
   ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
   ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
   const EXEC_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|lnk|url|jar|hta|reg|cpl|py|pyw|mht|mhtml)$/i;
+  // Only documents and media are handed to their default app; anything else is shown in Explorer instead,
+  // so a file that could run code is never launched from inside Notes. (An allowlist, not a denylist.)
+  const OPENABLE_EXT = /\.(pdf|txt|md|markdown|mdx|csv|tsv|json|xml|yaml|yml|toml|ini|log|rtf|doc|docx|odt|xls|xlsx|ods|ppt|pptx|odp|key|pages|numbers|png|jpe?g|gif|webp|bmp|tiff?|heic|avif|mp3|wav|m4a|aac|ogg|opus|flac|webm|mp4|m4v|mov|mkv|avi|zip|7z|rar|gz|tar|epub|ics|vcf|tex|bib|srt|vtt)$/i;
+  function openSafely(fullPath) {
+    const name = path.basename(fullPath).replace(/[. ]+$/, '');
+    if (OPENABLE_EXT.test(name) && !EXEC_EXT.test(name)) return shell.openPath(fullPath);
+    shell.showItemInFolder(fullPath);
+    return 'Shown in Explorer instead: Notes only opens documents and media itself.';
+  }
   ipcMain.handle('files:openExternal', async (_e, id) => {
     const n = store.get(id);
     if (!n || !n.filePath) return 'No file';
-    if (EXEC_EXT.test(n.filePath)) return 'Notes does not launch programs or scripts; open it from Explorer if you mean to run it.';
-    return shell.openPath(n.filePath);
+    return openSafely(n.filePath);
   });
   ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
 
@@ -864,8 +872,12 @@ function main() {
   // ---- attachments: files the app keeps next to the notes -----------------------
   const ATTACH_DIR = path.join(DATA_DIR, 'attachments');
   const safeAttachmentName = (name) => {
-    const base = path.basename(String(name || ''));
-    return base && base === String(name) && !/^\.+$/.test(base) ? base : null; // a plain file name, nothing else
+    const s = String(name || '');
+    const base = path.basename(s);
+    // A plain file name: no separators, no drive or stream colon, not all dots, no trailing dot or space
+    // (Windows strips those and would resolve "setup.exe." to setup.exe).
+    if (!base || base !== s || /^\.+$/.test(base) || /[:\u0000-\u001f]/.test(base) || /[. ]$/.test(base)) return null;
+    return base;
   };
   function addAttachment(srcPath) {
     fs.mkdirSync(ATTACH_DIR, { recursive: true });
@@ -897,8 +909,7 @@ function main() {
     if (!name) return 'Not an attachment link';
     const full = path.join(ATTACH_DIR, name);
     if (path.dirname(full) !== ATTACH_DIR || !fs.existsSync(full)) return 'Attachment not found: ' + name;
-    if (EXEC_EXT.test(full)) return 'Notes does not launch programs or scripts.';
-    return shell.openPath(full);
+    return openSafely(full);
   });
   ipcMain.handle('attachments:reveal', (_e, href) => {
     const raw = String(href || '').replace(/^attachment:\/\//i, '');

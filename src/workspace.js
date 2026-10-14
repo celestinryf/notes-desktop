@@ -34,8 +34,9 @@ function exportNotes(store, dir) {
   const notes = store.notes.filter((n) => !n.trashedAt && !n.filePath && !n.lock).slice().sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   for (const n of notes) {
     const relDir = n.folderId ? folderRelPath(store, n.folderId) : '';
-    if (!used.has(relDir)) used.set(relDir, new Set());
-    const name = uniqueIn(used.get(relDir), H.safeFilename(H.deriveTitle(n)), '.md');
+    const dirKey = relDir.toLowerCase(); // Windows folders Work and work are one folder
+    if (!used.has(dirKey)) used.set(dirKey, new Set());
+    const name = uniqueIn(used.get(dirKey), H.safeFilename(H.deriveTitle(n)), '.md');
     const rel = relDir ? path.join(relDir, name) : name;
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });

@@ -1277,9 +1277,10 @@
     if (state.sourceMode || !state.rich) {
       const ta = el.bodyInput;
       if (ta.readOnly) return;
-      const at = ta.selectionStart || ta.value.length;
+      const at = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+      const end = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : at;
       const md = '[' + text.replace(/[\[\]]/g, '') + '](' + href + ')';
-      const before = ta.value.slice(0, at), after = ta.value.slice(ta.selectionEnd || at);
+      const before = ta.value.slice(0, at), after = ta.value.slice(end);
       const sep = before && !/\s$/.test(before) ? ' ' : '';
       ta.value = before + sep + md + ' ' + after;
       const pos = (before + sep + md + ' ').length;
@@ -1291,21 +1292,25 @@
   }
 
   async function attachFiles() {
-    if (!state.current || lockedNow() || state.current.trashedAt) { toast('Open an unlocked note first.'); return; }
+    if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
     await flushSave();
     const items = await api.attachments.pick();
     insertAttachmentLinks(items);
   }
 
-  const rec = { recorder: null, chunks: [], startedAt: 0, timer: null };
+  const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
 
   async function toggleRecording() {
     if (rec.recorder) { rec.recorder.stop(); return; }
-    if (!state.current || lockedNow() || state.current.trashedAt) { toast('Open an unlocked note first.'); return; }
+    if (rec.starting) return; // the microphone prompt is still up
+    if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
+    rec.noteId = state.current.id;
+    rec.starting = true;
     if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
     let stream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (err) { toast('Microphone not available: ' + (err.message || err)); return; }
+    catch (err) { rec.starting = false; toast('Microphone not available: ' + (err.message || err)); return; }
+    rec.starting = false;
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
     const recorder = new MediaRecorder(stream, { mimeType: mime });
     rec.recorder = recorder; rec.chunks = []; rec.startedAt = Date.now();
@@ -1322,8 +1327,19 @@
       try {
         const saved = await api.attachments.saveRecording(new Uint8Array(await blob.arrayBuffer()), 'webm');
         const mm = String(Math.floor(seconds / 60)).padStart(2, '0'), ss = String(seconds % 60).padStart(2, '0');
-        insertLinkIntoNote('🎙 Voice memo ' + mm + ':' + ss, saved.href);
-        toast('Voice memo saved (' + mm + ':' + ss + '). Ctrl+click the link to play it.');
+        const label = '🎙 Voice memo ' + mm + ':' + ss;
+        if (state.currentId === rec.noteId && !lockedNow()) {
+          insertLinkIntoNote(label, saved.href);
+          toast('Voice memo saved (' + mm + ':' + ss + '). Ctrl+click the link to play it.');
+        } else {
+          // The person moved to another note meanwhile: the memo still belongs to the note it was recorded in.
+          const target = await api.notes.get(rec.noteId);
+          if (target && !target.locked && !target.trashedAt && !(target.filePath && target.fileKind !== 'text')) {
+            await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + '[' + label + '](' + saved.href + ')\n' });
+            toast('Voice memo saved into "' + H.truncate(H.deriveTitle(target), 30) + '", the note it was recorded in.');
+            refresh({ keepEditor: true });
+          } else toast('Voice memo saved as ' + saved.name + ' (that note can no longer take it; Attach it where you want it).');
+        }
       } catch (err) { toast('Could not save the recording: ' + (err.message || err)); }
     };
     recorder.start(250);
@@ -1339,6 +1355,7 @@
   async function openHistory() {
     const note = state.current;
     if (!note) return;
+    if (note.trashedAt) { toast('Restore the note from the trash first; then its earlier versions can be restored.'); return; }
     await flushSave();
     el.historyList.innerHTML = '';
     el.historyPreview.textContent = '';
@@ -1376,12 +1393,17 @@
     const note = state.current;
     if (!v || !note) return;
     el.historyDialog.close();
+    if (state.currentId !== note.id || note.trashedAt || lockedNow() || (note.filePath && note.fileKind !== 'text')) { toast('This note cannot take the restored text right now.'); return; }
     el.bodyInput.value = v.body;
-    if (state.rich && !state.sourceMode) state.rich.setMarkdown(v.body);
+    if (state.rich) {
+      const lossless = state.rich.setMarkdown(v.body);
+      if (!lossless && !state.sourceMode) applyEditorMode(true); // text the rendered view would rewrite opens as source
+    }
     autoGrow();
     scheduleSave();
     const ok = await flushSave();
-    toast(ok ? 'Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.' : 'Could not save the restored text yet; it will retry.');
+    if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
+    else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
   }
 
   // ---- find in note, print ---------------------------------------------------
@@ -1414,7 +1436,7 @@
   function replaceCurrent() {
     const q = el.findInput.value;
     const text = el.replaceInput.value;
-    if (!q || lockedNow() || (state.current && state.current.trashedAt)) return;
+    if (!q || lockedNow() || !state.current || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) return;
     if (state.sourceMode) {
       if (!find.sourceHits.length || find.active < 0) { runFind(true, true); return; }
       const at = find.sourceHits[find.active];
@@ -1424,19 +1446,39 @@
       ta.setSelectionRange(at + text.length, at + text.length);
       ta.dispatchEvent(new Event('input', { bubbles: true })); // autosave + recount
       runFind(true, true, true);
-      if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; runFind(true, false); }
+      // Select the match that now follows the replacement (no stepping, which would skip one).
+      if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; showActiveMatch(); }
       return;
     }
     if (!state.rich || !find.ranges.length || find.active < 0) { runFind(true, true); return; }
-    state.rich.replaceRanges([find.ranges[find.active]], text);
-    runFind(true, true, true);
-    if (find.ranges.length) runFind(true, false);
+    const idx = find.active;
+    state.rich.replaceRanges([find.ranges[idx]], text);
+    runFind(true, true, true); // the quiet re-find keeps the index, which now points at the following match
+    if (find.ranges.length) { find.active = Math.min(idx, find.ranges.length - 1); showActiveMatch(); }
+  }
+
+  // Selects / highlights and scrolls to find.active without changing it.
+  function showActiveMatch() {
+    const q = el.findInput.value;
+    if (state.sourceMode) {
+      const at = find.sourceHits[find.active];
+      if (at === undefined) return;
+      el.bodyInput.focus();
+      el.bodyInput.setSelectionRange(at, at + q.length);
+      scrollTextareaToSelection(at);
+      el.findCount.textContent = (find.active + 1) + '/' + find.sourceHits.length;
+      return;
+    }
+    if (window.CSS && CSS.highlights) CSS.highlights.set('notes-find-active', new Highlight(...(find.active >= 0 && find.ranges[find.active] ? [find.ranges[find.active]] : [])));
+    const r = find.ranges[find.active];
+    if (r) { const node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement; if (node && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    el.findCount.textContent = find.ranges.length ? (find.active + 1) + '/' + find.ranges.length : 'No matches';
   }
 
   function replaceAll() {
     const q = el.findInput.value;
     const text = el.replaceInput.value;
-    if (!q || lockedNow() || (state.current && state.current.trashedAt)) return;
+    if (!q || lockedNow() || !state.current || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) return;
     let n = 0;
     if (state.sourceMode) {
       const ta = el.bodyInput;
@@ -1544,7 +1586,7 @@
     }
     if (fresh || !sameQuery || !find.ranges.length) {
       find.ranges = findRangesIn(el.richEditor, q);
-      find.active = find.ranges.length ? 0 : -1;
+      find.active = find.ranges.length ? (sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0) : -1; // after a replace, the next match now sits at the same index
     } else if (find.ranges.length) {
       find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
     }
@@ -2495,7 +2537,7 @@
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); attachFiles(); return; }
-    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'v') { e.preventDefault(); toggleRecording(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); toggleRecording(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); openHistory(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); openRemindDialog(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
