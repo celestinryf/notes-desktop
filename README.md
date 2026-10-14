@@ -6,8 +6,10 @@ A tray-resident notes app for Windows. Press **Ctrl + Alt + N** anywhere to togg
 
 ```
 npm install
-npm run install:shortcuts   # Start Menu shortcut + launches the app
+npm run install:shortcuts   # Start Menu + desktop shortcuts, launches the app
 ```
+
+The rendered editor is a prebuilt bundle at `src/renderer/vendor/editor.bundle.js`. After changing `src/editor/index.js`, run `npm run build`.
 
 The app adds its own autostart entry (Settings → "Start Notes when I log in"). Quit from the tray icon.
 
@@ -16,8 +18,10 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
 - Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
 - Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
-- Markdown preview (Ctrl+E) with clickable checklists that write back to the source
-- List continuation on Enter, Tab indents, Ctrl+B / Ctrl+I / Ctrl+K wrap selection
+- Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
+- Ctrl+B / Ctrl+I for bold and italic, Ctrl+K for a link, Tab / Shift+Tab to nest and un-nest list items
+- Writing column can sit left, center, or right of the editor pane at a chosen width, or use the full width (Settings)
+- Git history: every change is committed to a git repo inside the data folder (only `notes.json` is tracked). Add an optional remote in Settings and each commit is pushed. Commit now / Push now buttons in Settings.
 - Light (cream) and dark (ink) themes, follows the system by default; adjustable editor font size; always-on-top option
 - Drag the edge of the sidebar or the note list to resize them; widths persist, double-click an edge to reset
 - Export a note as `.md`, export everything as JSON, import `.md`/`.txt` files
@@ -32,7 +36,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 | Ctrl+N | New note |
 | Ctrl+Shift+N | New folder (inside the current folder) |
 | Ctrl+F | Search |
-| Ctrl+E | Toggle preview |
+| Ctrl+E | Toggle Markdown source / rendered |
 | Ctrl+P | Pin / unpin |
 | Ctrl+Del | Move to trash |
 | Ctrl+S | Save now |

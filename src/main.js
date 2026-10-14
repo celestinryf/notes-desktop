@@ -3,12 +3,16 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen } = require('electron');
 const { Store } = require('./store');
+const { GitSync } = require('./gitSync');
 const { drawIconBitmap } = require('./icon');
+const crypto = require('crypto');
 const H = require('./shared/helpers');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
 const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_START_HIDDEN === '1';
+// Test harnesses set this so the window never takes keyboard focus away from whoever is using the machine.
+const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 const THEME_BG = { light: '#fbf1e4', dark: '#1b120d' };
@@ -25,6 +29,20 @@ if (!app.requestSingleInstanceLock()) {
 
 function main() {
   const store = new Store(DATA_DIR).load();
+  const git = new GitSync(DATA_DIR, {
+    debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
+    onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
+  });
+  // Commit only when notes or folders change, not on window moves or other settings writes.
+  const contentHash = () => crypto.createHash('sha1').update(JSON.stringify({ n: store.notes, f: store.folders })).digest('hex');
+  let lastContentHash = contentHash();
+  const originalSave = store.save.bind(store);
+  store.save = () => {
+    originalSave();
+    const h = contentHash();
+    if (h !== lastContentHash) { lastContentHash = h; git.noteChanged(); }
+    return store;
+  };
   let win = null;
   let tray = null;
   let quitting = false;
@@ -129,9 +147,13 @@ function main() {
   function showWindow() {
     if (!win || win.isDestroyed()) createWindow();
     if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-    app.focus({ steal: true });
+    if (SHOW_INACTIVE) {
+      win.showInactive();
+    } else {
+      win.show();
+      win.focus();
+      app.focus({ steal: true });
+    }
     win.webContents.send('app:shown');
     writeRuntime();
   }
@@ -245,7 +267,7 @@ function main() {
   ipcMain.handle('folders:delete', (_e, id) => store.deleteFolder(id));
 
   ipcMain.handle('settings:get', () => store.getSettings());
-  ipcMain.handle('settings:set', (_e, patch) => {
+  ipcMain.handle('settings:set', async (_e, patch) => {
     patch = patch || {};
     const before = store.getSettings();
     let error = null;
@@ -265,9 +287,18 @@ function main() {
     if (settings.theme !== before.theme) applyTheme();
     if (settings.alwaysOnTop !== before.alwaysOnTop && win) win.setAlwaysOnTop(settings.alwaysOnTop);
     if (settings.openAtLogin !== before.openAtLogin) applyLoginItem();
+    if (settings.gitEnabled !== before.gitEnabled || settings.gitRemote !== before.gitRemote) {
+      await git.configure(settings);
+      if (settings.gitEnabled) git.noteChanged();
+    }
     refreshTray();
     return { settings, info: info(), error };
   });
+
+  ipcMain.handle('git:status', () => git.status());
+  ipcMain.handle('git:commit', () => git.commit('manual commit'));
+  ipcMain.handle('git:push', () => git.push());
+  ipcMain.handle('git:history', (_e, limit) => git.history(limit));
 
   ipcMain.handle('app:info', () => info());
   ipcMain.handle('app:hide', () => hideWindow());
@@ -316,7 +347,15 @@ function main() {
   // ---- lifecycle -----------------------------------------------------------
 
   app.on('second-instance', () => showWindow());
-  app.on('before-quit', () => { quitting = true; });
+  let gitFlushed = false;
+  app.on('before-quit', (e) => {
+    quitting = true;
+    if (!gitFlushed && git.status().pending) {
+      // Finish the pending commit before the process goes away, then quit for real.
+      e.preventDefault();
+      git.flush().catch(() => {}).finally(() => { gitFlushed = true; app.quit(); });
+    }
+  });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });
   app.on('activate', showWindow);
@@ -334,5 +373,6 @@ function main() {
     createTray();
     registerHotkey(store.settings.hotkey);
     applyLoginItem();
+    git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
   });
 }

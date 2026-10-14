@@ -76,7 +76,7 @@
           <ul class="shortcut-list">
             <li><kbd>Ctrl</kbd>+<kbd>N</kbd> New note</li>
             <li><kbd>Ctrl</kbd>+<kbd>F</kbd> Search</li>
-            <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Toggle preview</li>
+            <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Show Markdown source</li>
             <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Pin</li>
             <li><kbd>Ctrl</kbd>+<kbd>Del</kbd> Move to trash</li>
             <li><kbd>Esc</kbd> Hide window</li>
@@ -90,7 +90,7 @@
           <div class="toolbar-left">
             <button class="tool-btn" id="toggleSidebarBtn" title="Toggle sidebar (Ctrl+\)" aria-label="Toggle sidebar">☰</button>
             <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
-            <button class="tool-btn" id="previewBtn" title="Preview (Ctrl+E)" aria-label="Toggle preview">Preview</button>
+            <button class="tool-btn" id="sourceBtn" title="Show Markdown source (Ctrl+E)" aria-label="Toggle Markdown source">Source</button>
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
           </div>
           <div class="toolbar-right">
@@ -102,12 +102,15 @@
           </div>
         </div>
 
-        <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
-        <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
-
-        <div class="editor-body">
-          <textarea id="bodyInput" class="body-input" placeholder="Start writing… Markdown works here. Try - [ ] for a checklist." spellcheck="true"></textarea>
-          <article id="preview" class="preview hidden"></article>
+        <div class="editor-scroll">
+          <div class="editor-column align-left" id="editorColumn">
+            <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
+            <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
+            <div class="editor-body">
+              <div id="richEditor" class="rich-editor"></div>
+              <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
+            </div>
+          </div>
         </div>
 
         <div class="status-bar">
@@ -147,6 +150,22 @@
           <input id="fontSizeInput" type="range" min="12" max="28" step="1" />
         </label>
 
+        <div class="field">
+          <span class="field-label">Writing column</span>
+          <div class="segmented" id="alignSeg" role="radiogroup" aria-label="Column position">
+            <button type="button" data-align="left" role="radio">Left</button>
+            <button type="button" data-align="center" role="radio">Center</button>
+            <button type="button" data-align="right" role="radio">Right</button>
+          </div>
+          <span class="field-help">Where the title and text block sits inside the editor pane.</span>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Column width <span id="editorWidthValue"></span></span>
+          <input id="editorWidthInput" type="range" min="480" max="1600" step="20" />
+          <label class="field-check"><input id="editorFullWidthInput" type="checkbox" /><span>Use the full width of the pane</span></label>
+        </div>
+
         <label class="field field-check">
           <input id="openAtLoginInput" type="checkbox" />
           <span>Start Notes when I log in (so the hotkey always works)</span>
@@ -156,6 +175,17 @@
           <input id="alwaysOnTopInput" type="checkbox" />
           <span>Keep the window above other windows</span>
         </label>
+
+        <div class="field">
+          <span class="field-label">Git history</span>
+          <label class="field-check"><input id="gitEnabledInput" type="checkbox" /><span>Commit every change to a git repo in the data folder</span></label>
+          <input id="gitRemoteInput" class="input" type="text" placeholder="Optional remote to push to, e.g. git@github.com:you/notes-backup.git" autocomplete="off" spellcheck="false" />
+          <span class="field-help" id="gitStatus"></span>
+          <div class="dialog-actions">
+            <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
+            <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
+          </div>
+        </div>
 
         <div class="dialog-actions">
           <button type="button" class="btn btn-small" id="importBtn">Import .md files</button>
@@ -168,6 +198,22 @@
       </form>
     </dialog>
 
+    <dialog id="linkDialog" class="dialog dialog-small">
+      <form method="dialog" class="dialog-form" id="linkForm">
+        <h2 class="dialog-title">Link</h2>
+        <label class="field">
+          <span class="field-label">URL</span>
+          <input id="linkInput" class="input" type="text" placeholder="https://" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small" id="linkRemoveBtn">Remove link</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="linkCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="linkApplyBtn">Apply</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
     <div class="popover hidden" id="folderMenu" role="menu">
       <button role="menuitem" data-action="new-note">New note here</button>
@@ -177,8 +223,7 @@
     </div>
   </div>
 
-  <script src="vendor/marked.umd.js"></script>
-  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/editor.bundle.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>
 </body>

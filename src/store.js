@@ -19,8 +19,22 @@ const DEFAULT_SETTINGS = Object.freeze({
   sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
   listWidth: H.PANE_LIMITS.listWidth.def,
   expandedFolders: [],      // folder ids whose children are shown in the sidebar
+  editorMode: 'rendered',   // rendered | source
+  editorAlign: 'left',      // left | center | right: where the writing column sits in the editor pane
+  editorWidth: 760,         // max width of the writing column in px; 0 means full width
+  gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
+  gitRemote: '',            // optional remote URL to push to after each commit
   window: null,             // { x, y, width, height }
 });
+
+const EDITOR_WIDTH = { min: 480, max: 1600 };
+
+function clampEditorWidth(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.editorWidth;
+  if (n <= 0) return 0;
+  return Math.min(EDITOR_WIDTH.max, Math.max(EDITOR_WIDTH.min, Math.round(n)));
+}
 
 const FOLDER_NAME_MAX = 80;
 
@@ -37,6 +51,29 @@ function sanitizeFolder(raw, now) {
     parentId: typeof raw.parentId === 'string' && raw.parentId ? raw.parentId : null,
     createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
   };
+}
+
+// Atomic replace with retries. On Windows a reader (git, antivirus, a sync client) holding the target
+// open makes rename fail with EPERM/EBUSY for a moment; wait briefly and try again before falling back to a copy.
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function replaceFile(tmp, target) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try { fs.renameSync(tmp, target); return; } catch (err) {
+      lastErr = err;
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) throw err;
+      sleepSync(25 * (attempt + 1));
+    }
+  }
+  try {
+    fs.copyFileSync(tmp, target);
+    fs.unlinkSync(tmp);
+  } catch (_) {
+    throw lastErr;
+  }
 }
 
 function clampFontSize(n) {
@@ -58,6 +95,11 @@ function sanitizeSettings(input) {
   s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
   s.listWidth = H.clampPane('listWidth', s.listWidth);
   s.expandedFolders = Array.isArray(s.expandedFolders) ? s.expandedFolders.filter((x) => typeof x === 'string').slice(0, 5000) : [];
+  s.editorMode = s.editorMode === 'source' ? 'source' : 'rendered';
+  s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : 'left';
+  s.editorWidth = clampEditorWidth(s.editorWidth);
+  s.gitEnabled = !!s.gitEnabled;
+  s.gitRemote = typeof s.gitRemote === 'string' ? s.gitRemote.trim().slice(0, 500) : '';
   s.sort = ['updated', 'created', 'title'].includes(s.sort) ? s.sort : 'updated';
   if (s.window && typeof s.window === 'object') {
     const w = s.window;
@@ -160,7 +202,7 @@ class Store {
     this._maybeBackup();
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this.serialize(), null, 2), 'utf8');
-    fs.renameSync(tmp, this.file);
+    replaceFile(tmp, this.file);
     return this;
   }
 
@@ -419,4 +461,4 @@ class Store {
   }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS, sanitizeSettings, sanitizeNote, sanitizeFolder, cleanFolderName };
+module.exports = { Store, DEFAULT_SETTINGS, EDITOR_WIDTH, sanitizeSettings, sanitizeNote, sanitizeFolder, cleanFolderName };
