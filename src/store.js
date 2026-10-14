@@ -145,6 +145,7 @@ class Store {
     let raw = null;
     this.saveBlocked = false;
     this.recoveredFromBackup = false;
+    this.backupSuspended = false;
     this.loadError = null;
     if (fs.existsSync(this.file)) {
       let text = null;
@@ -164,7 +165,10 @@ class Store {
           // Genuinely corrupt: keep the file for the user and start from the newest backup.
           this.loadError = err;
           const quarantined = this.file + '.corrupt-' + this.now();
-          try { fs.renameSync(this.file, quarantined); } catch (_) { /* ignore */ }
+          try { fs.renameSync(this.file, quarantined); } catch (_) {
+            // The corrupt file is stuck in place: never copy it into backups/ or prune good ones for it.
+            this.backupSuspended = true;
+          }
           raw = this._loadNewestBackup();
           this.recoveredFromBackup = true;
         }
@@ -231,11 +235,13 @@ class Store {
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this.serialize(), null, 2), 'utf8');
     replaceFile(tmp, this.file);
+    this.backupSuspended = false; // the live file is known-good again
     return this;
   }
 
   _maybeBackup() {
     const now = this.now();
+    if (this.backupSuspended) return; // the file on disk is the corrupt one we could not move aside
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
     const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
