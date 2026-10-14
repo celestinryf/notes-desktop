@@ -144,6 +144,8 @@ class Store {
     fs.mkdirSync(this.dir, { recursive: true });
     let raw = null;
     this.saveBlocked = false;
+    this.recoveredFromBackup = false;
+    this.loadError = null;
     if (fs.existsSync(this.file)) {
       let text = null;
       let ioError = null;
@@ -164,6 +166,7 @@ class Store {
           const quarantined = this.file + '.corrupt-' + this.now();
           try { fs.renameSync(this.file, quarantined); } catch (_) { /* ignore */ }
           raw = this._loadNewestBackup();
+          this.recoveredFromBackup = true;
         }
       }
     }
@@ -176,6 +179,10 @@ class Store {
     this.settings = sanitizeSettings(raw && raw.settings);
     const ids = new Set(this.folders.map((f) => f.id));
     this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
+    // Recovered from a backup: write it back now, so a quit without further edits does not start empty next time.
+    if (this.recoveredFromBackup && !this.saveBlocked) {
+      try { this.save(); } catch (_) { /* a later save will persist it; memory is correct */ }
+    }
     return this;
   }
 
@@ -235,7 +242,8 @@ class Store {
     fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json'));
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
-    while (files.length > MAX_BACKUPS) fs.unlinkSync(path.join(this.backupDir, files.shift()));
+    // Pruning must never block the note write itself; a backup held open by another program can wait.
+    while (files.length > MAX_BACKUPS) { try { fs.unlinkSync(path.join(this.backupDir, files.shift())); } catch (_) { break; } }
   }
 
   // ---- notes -------------------------------------------------------------
