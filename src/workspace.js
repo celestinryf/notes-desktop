@@ -31,7 +31,7 @@ function exportNotes(store, dir) {
   const used = new Map(); // relDir -> Set(names)
   const files = [];
   // Oldest first, so a title clash gives the suffix to the newer note and names stay stable between runs.
-  const notes = store.notes.filter((n) => !n.trashedAt && !n.filePath).slice().sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const notes = store.notes.filter((n) => !n.trashedAt && !n.filePath && !n.lock).slice().sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   for (const n of notes) {
     const relDir = n.folderId ? folderRelPath(store, n.folderId) : '';
     if (!used.has(relDir)) used.set(relDir, new Set());

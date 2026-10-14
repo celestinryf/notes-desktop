@@ -157,7 +157,7 @@ function main() {
       stickies.broadcast('app:flush');
       git.flush().catch(() => {});
     });
-    win.on('hide', () => writeRuntime());
+    win.on('hide', () => { writeRuntime(); relockOnHide(); });
     win.on('focus', () => {
       // Windows may refuse a topmost change requested while another app held the foreground; retry on focus.
       if (store.settings.alwaysOnTop && !win.isAlwaysOnTop()) win.setAlwaysOnTop(true);
@@ -323,31 +323,45 @@ function main() {
 
   // ---- IPC ----------------------------------------------------------------
 
-  ipcMain.handle('notes:list', (_e, opts) => store.list(opts));
-  ipcMain.handle('notes:get', (_e, id) => store.get(id));
+  const pub = (n) => store.publicNote(n);
+  ipcMain.handle('notes:list', (_e, opts) => store.list(opts).map(pub));
+  ipcMain.handle('notes:get', (_e, id) => pub(store.get(id)));
   ipcMain.handle('notes:create', (_e, data) => {
     data = data || {};
     const folder = data.folderId ? store.getFolder(data.folderId) : null;
     const note = folder && folder.vaultId ? store.createVaultNote(folder.id, data) : store.create(data);
     if (note.vaultId) vaults.noteChanged(note.vaultId);
-    return note;
+    return pub(note);
   });
   ipcMain.handle('notes:update', (e, id, patch) => {
     const note = store.update(id, patch);
     if (note && note.vaultId) vaults.noteChanged(note.vaultId);
     if (note) notifyNoteChanged(note.id, e.sender);
-    return note;
+    return pub(note);
   });
+
+  // ---- locking ---------------------------------------------------------------
+  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); stickies.close(id, { forget: true }); return n; });
+  ipcMain.handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
+  ipcMain.handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
+  ipcMain.handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
+  // Hiding the window locks everything again (after the renderer has written what it was typing).
+  function relockOnHide() {
+    flushWindow(win, 800).then(() => {
+      const ids = store.relockAll();
+      if (ids.length && win && !win.isDestroyed()) win.webContents.send('lock:relocked', ids);
+    });
+  }
   // Edits made in one window reach the others: the main window reloads the open note when clean,
   // and each sticky showing that note does the same.
   function notifyNoteChanged(id, sender) {
     if (win && !win.isDestroyed() && (!sender || win.webContents.id !== sender.id)) win.webContents.send('notes:reloaded', { reason: 'sticky', id });
     stickies.broadcast('notes:changed', { id }, sender);
   }
-  ipcMain.handle('notes:togglePin', (_e, id) => store.togglePin(id));
-  ipcMain.handle('notes:duplicate', (_e, id) => store.duplicate(id));
-  ipcMain.handle('notes:trash', (_e, id) => { const n = store.trash(id); stickies.close(id); return n; });
-  ipcMain.handle('notes:restore', (_e, id) => store.restore(id));
+  ipcMain.handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
+  ipcMain.handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
+  ipcMain.handle('notes:trash', (_e, id) => { const n = store.trash(id); stickies.close(id); return pub(n); });
+  ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
   ipcMain.handle('notes:destroy', (_e, id) => { stickies.close(id); return store.destroy(id); });
   ipcMain.handle('notes:emptyTrash', () => store.emptyTrash());
 
@@ -358,7 +372,7 @@ function main() {
     const note = store.create({ title: '', body: '' });
     stickies.open(note.id);
     if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'sticky' });
-    return note;
+    return pub(note);
   }
   ipcMain.handle('stickies:list', () => store.stickies().map(stickyView));
   ipcMain.handle('stickies:open', (_e, id) => !!stickies.open(id));

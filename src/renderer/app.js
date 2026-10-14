@@ -15,6 +15,9 @@
     remindBtn: $('#remindBtn'), remindDialog: $('#remindDialog'), remindForm: $('#remindForm'), remindInput: $('#remindInput'), remindQuick: $('#remindQuick'),
     remindCurrent: $('#remindCurrent'), remindClearBtn: $('#remindClearBtn'), remindCancelBtn: $('#remindCancelBtn'),
     shareBtn: $('#shareBtn'), shareMenu: $('#shareMenu'), shareReveal: $('#shareReveal'),
+    lockBtn: $('#lockBtn'), lockMenu: $('#lockMenu'), lockDialog: $('#lockDialog'), lockForm: $('#lockForm'), lockDialogTitle: $('#lockDialogTitle'), lockDialogHint: $('#lockDialogHint'),
+    lockPassword: $('#lockPassword'), lockPassword2: $('#lockPassword2'), lockConfirmRow: $('#lockConfirmRow'), lockError: $('#lockError'), lockCancelBtn: $('#lockCancelBtn'), lockSubmitBtn: $('#lockSubmitBtn'),
+    lockScreen: $('#lockScreen'), lockScreenPassword: $('#lockScreenPassword'), lockScreenBtn: $('#lockScreenBtn'), lockScreenError: $('#lockScreenError'),
     tagList: $('#tagList'),
     themeBtn: $('#themeBtn'), settingsBtn: $('#settingsBtn'),
     hotkeyHint: $('#hotkeyHint'), hotkeyHint2: $('#hotkeyHint2'),
@@ -324,12 +327,7 @@
       li.dataset.id = n.id;
       li.setAttribute('role', 'option');
       li.style.animationDelay = Math.min(i, 12) * 20 + 'ms';
-      const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
-      const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
-      li.innerHTML =
-        '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '') + highlight(H.deriveTitle(n), q) + fileMark + '</div>' +
-        '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>' +
-        '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + reminderMark(n) + tags + '</div>';
+      li.innerHTML = cardHtml(n, q);
       li.addEventListener('click', () => selectNote(n.id));
       if (!n.trashedAt) {
         li.draggable = true;
@@ -351,14 +349,23 @@
     return '<span class="remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">⏰ ' + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
+  // One renderer for a card's contents, used by the full list render and by single-card refreshes, so the
+  // pin, sticky, lock and reminder marks never disappear after a save.
+  function cardHtml(n, q) {
+    const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
+    const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
+    const marks = (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '')
+      + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '')
+      + (n.locked ? '<span class="lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + (n.unlocked ? '🔓' : '🔒') + '</span>' : '');
+    const snippet = n.locked && !n.unlocked ? '<div class="note-card-snippet is-locked">Locked note</div>' : '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>';
+    return '<div class="note-card-title">' + marks + highlight(H.deriveTitle(n), q) + fileMark + '</div>' + snippet +
+      '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + reminderMark(n) + tags + '</div>';
+  }
+
   function refreshCard(note) {
     const li = el.noteList.querySelector('.note-card[data-id="' + note.id + '"]');
     if (!li) return;
-    const q = state.query;
-    li.querySelector('.note-card-title').innerHTML = (note.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + highlight(H.deriveTitle(note), q);
-    li.querySelector('.note-card-snippet').innerHTML = highlight(H.snippet(note, 120), q);
-    const meta = li.querySelector('.note-card-meta');
-    meta.innerHTML = '<span>' + escapeHtml(H.relativeTime(note.updatedAt)) + '</span>' + note.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
+    li.innerHTML = cardHtml(note, state.query);
   }
 
   // ---- views ---------------------------------------------------------------
@@ -587,7 +594,7 @@
     await flushSave();
     let updated;
     try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
-    catch (err) { toast(err.message && /vault/i.test(err.message) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + (err.message || err)); return; }
+    catch (err) { const msg = String(err.message || err).replace(/^.*Error: /, ''); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); return; }
     if (state.currentId === noteId && updated) state.current = updated;
     await refresh({ keepEditor: true });
     const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
@@ -877,6 +884,7 @@
     const fileReadOnly = !!(note.filePath && note.fileKind !== 'text');
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
+    renderLockState(note);
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
     renderStickyButton(note);
@@ -886,6 +894,7 @@
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
+    el.lockBtn.classList.toggle('hidden', inTrash || !!note.filePath || !!note.vaultId);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
@@ -913,6 +922,117 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- locking -----------------------------------------------------------------
+
+  const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
+
+  function renderLockState(note) {
+    const locked = !!(note && note.locked);
+    const open = !!(note && note.unlocked);
+    el.lockScreen.classList.toggle('hidden', !(locked && !open));
+    el.lockScreenError.textContent = '';
+    el.lockScreenPassword.value = '';
+    el.lockBtn.classList.toggle('is-on', locked);
+    el.lockBtn.textContent = !locked ? '🔒 Lock' : (open ? '🔓 Unlocked' : '🔒 Locked');
+    el.lockBtn.title = !locked ? 'Lock this note with a password (Ctrl+L)' : (open ? 'Unlocked for now: lock again or remove the lock (Ctrl+L)' : 'Locked. Enter the password below to read it (Ctrl+L)');
+    if (locked && !open) {
+      el.richEditor.classList.add('hidden');
+      el.bodyInput.classList.add('hidden');
+      if (state.rich) state.rich.setEditable(false);
+    } else if (note) {
+      renderFileRow(note); // restores the right editor for the mode
+      if (state.rich) state.rich.setEditable(!note.trashedAt && !(note.filePath && note.fileKind !== 'text'));
+    }
+  }
+
+  function onLockButton() {
+    const note = state.current;
+    if (!note || note.trashedAt || note.filePath) return;
+    if (!note.locked) { openLockDialog('set'); return; }
+    if (!note.unlocked) { el.lockScreenPassword.focus(); return; }
+    placePopover(el.lockMenu, el.lockBtn);
+    el.lockMenu.querySelector('button').focus();
+  }
+
+  function openLockDialog(mode) {
+    el.lockDialog.dataset.mode = mode;
+    el.lockDialogTitle.textContent = mode === 'set' ? 'Lock note' : 'Remove lock';
+    el.lockDialogHint.textContent = mode === 'set'
+      ? 'The text is encrypted with this password. There is no recovery: if you forget it, the note stays locked.'
+      : 'Enter the password to store this note in clear again.';
+    el.lockConfirmRow.classList.toggle('hidden', mode !== 'set');
+    el.lockSubmitBtn.textContent = mode === 'set' ? 'Lock' : 'Remove lock';
+    el.lockPassword.value = ''; el.lockPassword2.value = ''; el.lockError.textContent = '';
+    el.lockDialog.showModal();
+    el.lockPassword.focus();
+  }
+
+  async function submitLockDialog() {
+    const note = state.current;
+    if (!note) return;
+    const mode = el.lockDialog.dataset.mode;
+    const pw = el.lockPassword.value;
+    if (!pw) { el.lockError.textContent = 'Enter a password.'; return; }
+    if (mode === 'set' && pw !== el.lockPassword2.value) { el.lockError.textContent = 'The two passwords differ.'; return; }
+    await flushSave();
+    try {
+      const updated = mode === 'set' ? await api.lock.set(note.id, pw) : await api.lock.remove(note.id, pw);
+      el.lockDialog.close();
+      applyLockedNote(updated);
+      toast(mode === 'set' ? 'Locked. It stays readable until you hide the app or choose Lock now.' : 'Lock removed.');
+    } catch (err) {
+      el.lockError.textContent = String(err.message || err).replace(/^.*Error: /, '');
+    }
+  }
+
+  async function unlockFromScreen() {
+    const note = state.current;
+    if (!note) return;
+    const pw = el.lockScreenPassword.value;
+    if (!pw) { el.lockScreenError.textContent = 'Enter the password.'; return; }
+    try {
+      const updated = await api.lock.unlock(note.id, pw);
+      applyLockedNote(updated);
+      focusBody();
+    } catch (err) {
+      el.lockScreenError.textContent = /wrong password/i.test(String(err.message)) ? 'Wrong password.' : String(err.message || err).replace(/^.*Error: /, '');
+      el.lockScreenPassword.select();
+    }
+  }
+
+  // Swaps the open note for its fresh view after a lock change: body, editor, button, card.
+  function applyLockedNote(updated) {
+    if (!updated || updated.id !== state.currentId) return;
+    state.current = updated;
+    // Keystrokes that landed while the lock call ran (scrypt takes a moment) are kept and saved again;
+    // a relocked note, on the other hand, must show no plaintext at all.
+    const keepTyping = state.dirty && updated.unlocked;
+    if (!keepTyping) {
+      state.dirty = false;
+      el.bodyInput.value = updated.body;
+      if (state.rich) state.currentLossless = state.rich.setMarkdown(updated.body);
+    } else scheduleSave();
+    renderLockState(updated);
+    renderStickyButton(updated);
+    updateStatus(updated);
+    const idx = state.notes.findIndex((n) => n.id === updated.id);
+    if (idx !== -1) { state.notes[idx] = updated; refreshCard(updated); }
+  }
+
+  async function lockMenuAction(action) {
+    el.lockMenu.classList.add('hidden');
+    const note = state.current;
+    if (!note || !note.locked) return;
+    if (action === 'relock') {
+      const saved = await flushSave();
+      if (!saved) { toast('Your latest typing could not be saved yet, so the note was not locked. Try again in a moment.'); return; }
+      state.pending.delete(note.id);
+      applyLockedNote(await api.lock.relock(note.id));
+      toast('Locked.');
+    }
+    else if (action === 'remove') openLockDialog('remove');
   }
 
   // ---- reminders ---------------------------------------------------------------
@@ -1014,6 +1134,7 @@
     closeShareMenu();
     const note = state.current;
     if (!note) return;
+    if (note.locked && !note.unlocked) { toast('Unlock the note first.'); return; }
     await flushSave();
     const titleLine = note.title ? note.title + '\n\n' : '';
     try {
@@ -1189,7 +1310,8 @@
     el.stickyBtn.textContent = on ? '📌 Stuck' : '📌 Stick';
     el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
     const viewerOnly = !!(note && note.filePath && note.fileKind !== 'text');
-    el.stickyBtn.disabled = !note || !!note.trashedAt || viewerOnly;
+    el.stickyBtn.disabled = !note || !!note.trashedAt || viewerOnly || !!note.locked;
+    el.stickyBtn.title = note && note.locked ? 'Locked notes cannot be stickies' : el.stickyBtn.title;
   }
 
   async function toggleSticky() {
@@ -1407,7 +1529,7 @@
     el.fileBanner.classList.add('hidden');
     el.pdfFrame.classList.add('hidden');
     el.pdfFrame.removeAttribute('src');
-    if (!isFile) { el.richEditor.classList.toggle('hidden', state.sourceMode); el.bodyInput.classList.toggle('hidden', !state.sourceMode); return; }
+    if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
     el.fileKind.textContent = (note.fileKind || 'file').toUpperCase();
     el.filePath.textContent = note.filePath;
     el.filePath.title = note.filePath;
@@ -1523,6 +1645,7 @@
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
     // Read-only file kinds (PDF, Word, binary) still take title and tag edits; their body is not ours to write.
     if (state.current && state.current.filePath && state.current.fileKind !== 'text') delete patch.body;
+    if (lockedNow()) delete patch.body; // the locked view has no body to offer
     return patch;
   }
 
@@ -1576,7 +1699,7 @@
     if (!p) return false;
     el.titleInput.value = p.title;
     el.tagsInput.value = p.tags;
-    el.bodyInput.value = p.body;
+    if (typeof p.body === 'string' && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body; // never show a stale plaintext on a relocked note
     return true;
   }
 
@@ -1753,7 +1876,7 @@
     el.sourceBtn.classList.toggle('is-on', state.sourceMode);
     el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
-    const viewerOnly = !!(state.current && state.current.filePath && (state.current.fileKind === 'pdf' || state.current.fileKind === 'binary'));
+    const viewerOnly = !!(state.current && state.current.filePath && (state.current.fileKind === 'pdf' || state.current.fileKind === 'binary')) || lockedNow();
     el.bodyInput.classList.toggle('hidden', !state.sourceMode || viewerOnly);
     el.richEditor.classList.toggle('hidden', state.sourceMode || viewerOnly);
     if (state.sourceMode) autoGrow();
@@ -1963,11 +2086,12 @@
 
   function onKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open;
+    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
+      if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
@@ -1984,6 +2108,7 @@
       switch (e.key.toLowerCase()) {
         case 'n': e.preventDefault(); newNote(); return;
         case 'o': e.preventDefault(); openFiles(); return;
+        case 'l': e.preventDefault(); onLockButton(); return;
         case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
@@ -2061,6 +2186,18 @@
     el.stickyBtn.addEventListener('click', toggleSticky);
     el.printBtn.addEventListener('click', printNote);
     el.remindBtn.addEventListener('click', openRemindDialog);
+    el.lockBtn.addEventListener('click', onLockButton);
+    el.lockMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-action]'); if (b) lockMenuAction(b.dataset.action); });
+    el.lockForm.addEventListener('submit', (e) => { e.preventDefault(); submitLockDialog(); });
+    el.lockCancelBtn.addEventListener('click', () => el.lockDialog.close());
+    el.lockDialog.addEventListener('close', () => focusBody());
+    el.lockScreen.addEventListener('submit', (e) => { e.preventDefault(); unlockFromScreen(); });
+    api.on.relocked(async (ids) => {
+      // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
+      for (const id of ids) state.pending.delete(id);
+      if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
+      refresh({ keepEditor: true });
+    });
     el.remindQuick.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) setReminder(quickPick(b.dataset.pick)); });
     el.remindForm.addEventListener('submit', (e) => { e.preventDefault(); const t = Date.parse(el.remindInput.value); if (!Number.isFinite(t)) { toast('Pick a date and time'); return; } setReminder(t); });
     el.remindClearBtn.addEventListener('click', () => setReminder(null));
@@ -2120,6 +2257,7 @@
     document.addEventListener('pointerdown', (e) => {
       if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
       if (!el.shareMenu.classList.contains('hidden') && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
+      if (!el.lockMenu.classList.contains('hidden') && !el.lockMenu.contains(e.target) && !el.lockBtn.contains(e.target)) el.lockMenu.classList.add('hidden');
     });
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
     window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });

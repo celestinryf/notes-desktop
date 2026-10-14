@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
 const F = require('./files');
+const L = require('./lock');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
@@ -167,7 +168,7 @@ function sanitizeNote(raw, now) {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     title: typeof raw.title === 'string' ? raw.title : '',
-    body: typeof raw.body === 'string' ? raw.body : '',
+    body: typeof raw.body === 'string' && !L.sanitizeLock(raw.lock) ? raw.body : '',
     tags: H.parseTags(raw.tags || []),
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
     // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
@@ -177,6 +178,8 @@ function sanitizeNote(raw, now) {
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     sticky: sanitizeSticky(raw.sticky),
+    // A locked note stores only ciphertext; its body field is always empty on disk.
+    lock: L.sanitizeLock(raw.lock),
     remindAt: Number.isFinite(raw.remindAt) ? Math.round(raw.remindAt) : null,
     remindedAt: Number.isFinite(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
     pinned: !!raw.pinned,
@@ -194,6 +197,8 @@ class Store {
     this.backupDir = path.join(dir, 'backups');
     this.now = opts.now || Date.now;
     this.notes = [];
+    this.plain = new Map(); // noteId -> decrypted body, for notes unlocked this session
+    this.keys = new Map();  // noteId -> derived key, so edits can be re-encrypted without the password
     this.folders = [];
     this.vaults = [];
     this.settings = Object.assign({}, DEFAULT_SETTINGS);
@@ -369,6 +374,19 @@ class Store {
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
     let fileWritten = false; // the body landed in the file
+    let plainBefore;          // the cached plaintext to restore if the save fails
+    if (note.lock && typeof patch.body === 'string') {
+      // A locked view can only ever send an empty body (that is all it has): ignore it, so title and tag
+      // edits still save. Any other body while locked is a mistake.
+      if (!this.plain.has(id) && patch.body !== '') throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
+      if (this.plain.has(id) && patch.body !== this.plain.get(id)) {
+        plainBefore = this.plain.get(id);
+        note.lock = L.encrypt(patch.body, this.keys.get(id), note.lock.salt);
+        this.plain.set(id, patch.body);
+        changed = true;
+      }
+      patch = Object.assign({}, patch); delete patch.body; // the record's body stays empty
+    }
     let fileMoved = false;   // the file was renamed, moved, or created on disk
     // File-backed: the file is the source of truth and is written first, before any field changes.
     if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
@@ -394,6 +412,7 @@ class Store {
     } else if (patch.folderId && !note.filePath) {
       // A plain note dropped into a vault folder becomes a file there, so it is synced like the others.
       const target = this.getFolder(patch.folderId);
+      if (target && target.vaultId && note.lock) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
       if (target && target.vaultId && target.dirPath) {
         fs.mkdirSync(target.dirPath, { recursive: true });
         const name = uniqueName(target.dirPath, H.safeFilename(H.deriveTitle(note)), '.md');
@@ -429,10 +448,74 @@ class Store {
         if (fileWritten) Object.assign(keep, { body: note.body, fileMtime: note.fileMtime });
         if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime });
         Object.assign(note, before, keep);
+        if (plainBefore !== undefined) this.plain.set(id, plainBefore);
         throw err;
       }
     }
     return note;
+  }
+
+  // ---- locking ----------------------------------------------------------------
+
+  // What leaves the store: never the ciphertext; the body only while unlocked this session.
+  publicNote(n) {
+    if (!n) return n;
+    const out = Object.assign({}, n);
+    delete out.lock;
+    out.locked = !!n.lock;
+    out.unlocked = !!n.lock && this.plain.has(n.id);
+    if (n.lock) out.body = out.unlocked ? this.plain.get(n.id) : '';
+    return out;
+  }
+
+  lockNote(id, password) {
+    const note = this.get(id);
+    if (!note) return null;
+    if (note.filePath || note.vaultId) throw Object.assign(new Error('A file-backed note cannot be locked: the file itself would stay readable.'), { code: 'EFILE' });
+    if (!password || !String(password).length) throw Object.assign(new Error('Enter a password.'), { code: 'EPASS' });
+    if (note.lock) throw Object.assign(new Error('This note is already locked.'), { code: 'ELOCKED' });
+    const body = note.body;
+    const { blob, key } = L.lock(body, password);
+    this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; });
+    this.plain.set(id, body);
+    this.keys.set(id, key);
+    return this.publicNote(note);
+  }
+
+  unlockNote(id, password) {
+    const note = this.get(id);
+    if (!note) return null;
+    if (!note.lock) return this.publicNote(note);
+    const r = L.unlock(note.lock, password);
+    if (!r) throw Object.assign(new Error('Wrong password.'), { code: 'EPASS' });
+    this.plain.set(id, r.body);
+    this.keys.set(id, r.key);
+    return this.publicNote(note);
+  }
+
+  relock(id) {
+    const was = this.plain.has(id);
+    this.plain.delete(id);
+    this.keys.delete(id);
+    return was;
+  }
+
+  // Forgets every unlocked body; returns the ids that were unlocked.
+  relockAll() {
+    const ids = Array.from(this.plain.keys());
+    this.plain.clear();
+    this.keys.clear();
+    return ids;
+  }
+
+  removeLock(id, password) {
+    const note = this.get(id);
+    if (!note || !note.lock) return this.publicNote(note);
+    const r = L.unlock(note.lock, password);
+    if (!r) throw Object.assign(new Error('Wrong password.'), { code: 'EPASS' });
+    this._commit(() => { note.lock = null; note.body = r.body; note.updatedAt = this.now(); return note; });
+    this.relock(id);
+    return this.publicNote(note);
   }
 
   // Called by the reminder scheduler when a reminder has been announced.
@@ -464,6 +547,15 @@ class Store {
   duplicate(id) {
     const note = this.get(id);
     if (!note) return null;
+    if (note.lock) {
+      if (!this.plain.has(id)) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
+      const key = this.keys.get(id);
+      // One write: the copy is created already locked (a failed save leaves nothing behind).
+      const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false, lock: L.encrypt(this.plain.get(id), key, note.lock.salt) });
+      this.plain.set(copy.id, this.plain.get(id));
+      this.keys.set(copy.id, key);
+      return this.publicNote(copy);
+    }
     // A duplicate of a file-backed note is an ordinary note holding a copy of the text, not a second link.
     return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
@@ -663,6 +755,7 @@ class Store {
   trash(id) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
+    this.relock(id); // a trashed locked note needs its password again
     let moved = null;
     if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
@@ -708,6 +801,7 @@ class Store {
   destroy(id) {
     const idx = this.notes.findIndex((n) => n.id === id);
     if (idx === -1) return false;
+    this.relock(id);
     const note = this.notes[idx];
     if (note.vaultId && note.trashedAt && note.filePath && fs.existsSync(note.filePath)) fs.rmSync(note.filePath);
     return this._commit(() => { this.notes.splice(idx, 1); return true; });
@@ -717,6 +811,7 @@ class Store {
     const before = this.notes.length;
     if (!this.notes.some((n) => n.trashedAt)) return 0;
     for (const n of this.notes) if (n.trashedAt && n.vaultId && n.filePath && fs.existsSync(n.filePath)) { try { fs.rmSync(n.filePath); } catch (_) { /* leave it */ } }
+    for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
     return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
   }
 
@@ -974,7 +1069,9 @@ class Store {
   exportNote(id) {
     const note = this.get(id);
     if (!note) return null;
-    return { filename: H.safeFilename(H.deriveTitle(note)) + '.md', content: H.noteToMarkdown(note) };
+    if (note.lock && !this.plain.has(id)) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
+    const view = this.publicNote(note);
+    return { filename: H.safeFilename(H.deriveTitle(view)) + '.md', content: H.noteToMarkdown(view) };
   }
 
   exportAll() {
