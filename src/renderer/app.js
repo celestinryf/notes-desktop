@@ -666,6 +666,8 @@
     // Read the incoming note only now, after every write that could change it has settled.
     const note = await api.notes.get(id);
     if (!note) return;
+    // Keystrokes that arrived during that read belong to the outgoing note: save or stash them too.
+    if (state.dirty) { await flushSave(); stashIfDirty(); }
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
@@ -967,9 +969,13 @@
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (next === state.sourceMode) return;
     if (!next && !state.rich) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
-    if (!next && state.currentLossless === false) {
-      state.lossyOverride = state.currentId;
-      toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
+    if (!next && state.currentId) {
+      // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
+      state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      if (state.currentLossless === false) {
+        state.lossyOverride = state.currentId;
+        toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
+      }
     }
     applyEditorMode(next);
     updateSettings({ editorMode: next ? 'source' : 'rendered' });
@@ -1126,7 +1132,9 @@
     const ignore = ['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'OS'];
     if (ignore.includes(e.key)) return { partial: mods.join('+') + '+' };
     let key = e.key;
-    if (key === ' ') key = 'Space';
+    if (e.code === 'NumpadAdd') key = 'numadd';
+    else if (key === '+') key = 'Plus';
+    else if (key === ' ') key = 'Space';
     else if (key === 'Escape') key = 'Esc';
     else if (key === 'ArrowUp') key = 'Up';
     else if (key === 'ArrowDown') key = 'Down';
