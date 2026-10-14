@@ -93,6 +93,8 @@
             <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
             <button class="tool-btn" id="sourceBtn" title="Show Markdown source (Ctrl+E)" aria-label="Toggle Markdown source">Source</button>
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
+            <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
+            <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
           </div>
           <div class="toolbar-right">
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
@@ -195,6 +197,19 @@
             <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
             <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
           </div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Speech</span>
+          <label class="field">
+            <span class="field-help">Read-aloud voice</span>
+            <select id="ttsVoiceSelect" class="select"><option value="">System default</option></select>
+          </label>
+          <label class="field">
+            <span class="field-help">Read-aloud speed <span id="ttsRateValue"></span></span>
+            <input id="ttsRateInput" type="range" min="0.5" max="2" step="0.1" />
+          </label>
+          <span class="field-help">Dictation uses Windows speech recognition (the same as pressing Win+H): click Dictate or press Ctrl+Shift+D with the cursor in a note, then speak. The first use may ask Windows to enable online speech recognition.</span>
         </div>
 
         <div class="field">

@@ -117,6 +117,28 @@ test('clampPane keeps pane widths inside their limits', () => {
   assert.ok(H.EDITOR_MIN >= 300);
 });
 
+test('plainTextFromMarkdown keeps the words and drops the markup', () => {
+  const md = '# Heading\n\nSome **bold** and _it_ with `code` and a [link](https://x.y).\n\n- [ ] task one\n- item two\n\n> quoted\n\n```\nignored();\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nfish &amp; chips';
+  const t = H.plainTextFromMarkdown(md);
+  assert.ok(t.startsWith('Heading.'));
+  assert.ok(t.includes('Some bold and it with code and a link.'));
+  assert.ok(t.includes('task one\nitem two'));
+  assert.ok(t.includes('quoted'));
+  assert.ok(t.includes('code block omitted'));
+  assert.ok(!t.includes('ignored();'));
+  assert.ok(!/[#*_`|>\[\]]/.test(t), 'no markup left: ' + t);
+  assert.ok(t.endsWith('fish & chips'));
+});
+
+test('speechChunks splits on sentences and caps chunk length', () => {
+  const chunks = H.speechChunks('One. Two! Three? ' + 'x'.repeat(500) + '. End.', 50);
+  assert.ok(chunks.every((c) => c.length <= 50), chunks.map((c) => c.length).join(','));
+  assert.equal(chunks[0], 'One. Two! Three?');
+  assert.equal(chunks[chunks.length - 1], 'End.');
+  assert.deepEqual(H.speechChunks(''), []);
+  assert.deepEqual(H.speechChunks('no terminator'), ['no terminator']);
+});
+
 test('safeFilename strips characters Windows rejects', () => {
   assert.equal(H.safeFilename('a/b\\c:d*e?f"g<h>i|j'), 'abcdefghij');
   assert.equal(H.safeFilename('   '), 'Untitled');

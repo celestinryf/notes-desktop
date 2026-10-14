@@ -195,6 +195,51 @@
     return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
   }
 
+  // Plain prose from Markdown for reading aloud: drops markup, keeps the words and sentence breaks.
+  function plainTextFromMarkdown(md) {
+    let s = String(md || '').replace(/\r\n/g, '\n');
+    s = s.replace(/```[\s\S]*?```/g, ' code block omitted. ');
+    s = s.replace(/`([^`\n]+)`/g, '$1');
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + '. ' : '');
+    s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+    s = s.replace(/^\s{0,3}#{1,6}\s+(.*)$/gm, '$1.');
+    s = s.replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, '');
+    s = s.replace(/^\s*[-*+]\s+/gm, '');
+    s = s.replace(/^\s*\d+[.)]\s+/gm, '');
+    s = s.replace(/^\s*>\s?/gm, '');
+    s = s.replace(/^\s*([-*_])\s*(\1\s*){2,}$/gm, '');
+    s = s.replace(/\|/g, ' ');
+    s = s.replace(/(\*\*|__)(.*?)\1/g, '$2').replace(/(\*|_)(.*?)\1/g, '$2').replace(/~~(.*?)~~/g, '$1');
+    s = s.replace(/<[^>\n]+>/g, '');
+    s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    s = s.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    return s;
+  }
+
+  // Splits prose into utterance-sized chunks; Chromium can go silent on very long single utterances.
+  function speechChunks(text, max) {
+    max = max || 220;
+    const out = [];
+    for (const para of String(text || '').split(/\n+/)) {
+      const sentences = para.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [];
+      let cur = '';
+      for (const sRaw of sentences) {
+        const s = sRaw.trim();
+        if (!s) continue;
+        if (s.length > max) {
+          // One over-long sentence: flush what we have, then slice it on its own.
+          if (cur) { out.push(cur); cur = ''; }
+          for (let i = 0; i < s.length; i += max) out.push(s.slice(i, i + max));
+          continue;
+        }
+        if ((cur + ' ' + s).trim().length > max && cur) { out.push(cur); cur = s; }
+        else cur = (cur + ' ' + s).trim();
+      }
+      if (cur.trim()) out.push(cur.trim());
+    }
+    return out;
+  }
+
   function safeFilename(name) {
     let s = String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80).replace(/[. ]+$/, '');
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = 'note-' + s; // Windows device names
@@ -205,5 +250,6 @@
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
+    plainTextFromMarkdown, speechChunks,
   };
 });
