@@ -1369,6 +1369,7 @@
     });
     api.on.newNote(newNote);
     api.on.flush(async () => { try { await flushSave(); await retryPending(); } finally { api.app.flushDone(); } });
+    api.on.reloaded(async () => { await refresh(); toast('Your notes file is readable again; saving resumed.'); });
     api.on.settingsChanged((s) => applySettings(s));
     api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });

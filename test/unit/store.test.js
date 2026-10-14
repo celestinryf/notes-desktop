@@ -148,6 +148,11 @@ test('corrupt data file is quarantined and the newest backup is used', () => {
   assert.ok(recovered.loadError);
   assert.ok(recovered.get(a.id), 'note from backup survives');
   assert.ok(fs.readdirSync(store.dir).some((f) => f.startsWith('notes.json.corrupt-')));
+  // The recovery must be on disk immediately: a relaunch with no edits in between sees the same notes.
+  assert.ok(fs.existsSync(store.file), 'recovered data written back');
+  const relaunched = new Store(store.dir).load();
+  assert.equal(relaunched.loadError, null);
+  assert.ok(relaunched.get(a.id), 'relaunch after recovery keeps the notes');
 });
 
 test('backups are rate limited and capped', () => {

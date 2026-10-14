@@ -35,7 +35,7 @@ function main() {
   });
   // Commit only when notes or folders change, not on window moves or other settings writes.
   const contentHash = () => crypto.createHash('sha1').update(JSON.stringify({ n: store.notes, f: store.folders })).digest('hex');
-  let lastContentHash = contentHash();
+  let lastContentHash = contentHash(); // eslint-disable-line prefer-const
   const originalSave = store.save.bind(store);
   store.save = () => {
     originalSave();
@@ -118,7 +118,7 @@ function main() {
       clearTimeout(boundsTimer);
       boundsTimer = setTimeout(() => {
         if (win && !win.isDestroyed() && !win.isMinimized() && !win.isMaximized()) {
-          store.setSettings({ window: win.getBounds() });
+          try { store.setSettings({ window: win.getBounds() }); } catch (_) { /* saving paused or disk busy; bounds are not worth an error dialog */ }
         }
       }, 400);
     };
@@ -157,7 +157,18 @@ function main() {
     }
   }
 
+  // While saving is paused because the file was unreadable at startup, try again whenever the window is shown.
+  function retryLoadIfBlocked() {
+    if (!store.saveBlocked) return;
+    try { store.load(); } catch (_) { return; }
+    if (!store.saveBlocked) {
+      lastContentHash = contentHash();
+      if (win && !win.isDestroyed()) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded'); }
+    }
+  }
+
   function showWindow() {
+    retryLoadIfBlocked();
     if (!win || win.isDestroyed()) createWindow();
     if (win.isMinimized()) win.restore();
     if (SHOW_INACTIVE) {
@@ -225,8 +236,8 @@ function main() {
       { label: 'Show / hide notes', accelerator: hotkeyState.registered ? hotkeyState.hotkey : undefined, click: toggleWindow },
       { label: 'New note', click: requestNewNote },
       { type: 'separator' },
-      { label: 'Start at login', type: 'checkbox', checked: !!store.settings.openAtLogin, click: (item) => { store.setSettings({ openAtLogin: item.checked }); applyLoginItem(); broadcastSettings(); } },
-      { label: 'Always on top', type: 'checkbox', checked: !!store.settings.alwaysOnTop, click: (item) => { store.setSettings({ alwaysOnTop: item.checked }); if (win) win.setAlwaysOnTop(item.checked); broadcastSettings(); } },
+      { label: 'Start at login', type: 'checkbox', checked: !!store.settings.openAtLogin, click: (item) => { try { store.setSettings({ openAtLogin: item.checked }); applyLoginItem(); } catch (_) { /* paused */ } broadcastSettings(); refreshTray(); } },
+      { label: 'Always on top', type: 'checkbox', checked: !!store.settings.alwaysOnTop, click: (item) => { try { store.setSettings({ alwaysOnTop: item.checked }); if (win) win.setAlwaysOnTop(item.checked); } catch (_) { /* paused */ } broadcastSettings(); refreshTray(); } },
       { label: 'Open data folder', click: () => shell.openPath(DATA_DIR) },
       { type: 'separator' },
       { label: 'Quit Notes', click: () => { quitting = true; app.quit(); } },
@@ -297,7 +308,14 @@ function main() {
         } else patch.hotkey = parsed.value;
       }
     }
-    const settings = store.setSettings(patch);
+    let settings;
+    try {
+      settings = store.setSettings(patch);
+    } catch (err) {
+      // The save failed; undo a hotkey we may already have re-registered so the binding matches the settings.
+      if (patch.hotkey && patch.hotkey !== before.hotkey) registerHotkey(before.hotkey);
+      throw err;
+    }
     if (settings.theme !== before.theme) applyTheme();
     if (settings.alwaysOnTop !== before.alwaysOnTop && win) win.setAlwaysOnTop(settings.alwaysOnTop);
     if (settings.openAtLogin !== before.openAtLogin) applyLoginItem();

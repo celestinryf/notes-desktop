@@ -59,5 +59,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     systemTheme: on('theme:system'),
     gitStatus: on('git:status'),
     flush: on('app:flush'),
+    reloaded: on('notes:reloaded'),
   },
 });
