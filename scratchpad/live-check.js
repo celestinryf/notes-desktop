@@ -123,8 +123,11 @@ async function main() {
   record('terminal: PowerShell runs the generated script', !!(term.ok && haveShell), term.ok ? scriptText.split(/\r?\n/).slice(0, 4).join(' / ') : term.error);
   record('terminal: an interactive claude is running inside it', haveClaude, termProcs.map((l) => l.split('|').slice(0, 3).join(':')).join(', '));
   // Close what we opened.
-  for (const l of termProcs) { if (/powershell/i.test(l) && /bot-terminal.ps1/.test(l)) spawnSync('taskkill', ['/PID', l.split('|')[0], '/T', '/F'], { stdio: 'ignore' }); }
-  for (const l of termProcs) { if (/WindowsTerminal/i.test(l) && /bot-terminal.ps1/.test(l)) spawnSync('taskkill', ['/PID', l.split('|')[0], '/F'], { stdio: 'ignore' }); }
+  // Only what we launched: match by process NAME and the exact command the app writes. (Matching on the
+  // command-line text alone once killed the shell running this script, whose own command line quoted it.)
+  const ours = (l) => { const f = l.split('|'); return f[3] && /^("?powershell(.exe)?"? |wt.exe )/.test(f[3]) && /bot-terminal.ps1/.test(f[3]); };
+  for (const l of termProcs) { const f = l.split('|'); if (f[2] === 'powershell.exe' && ours(l)) spawnSync('taskkill', ['/PID', f[0], '/T', '/F'], { stdio: 'ignore' }); }
+  for (const l of termProcs) { const f = l.split('|'); if (f[2] === 'WindowsTerminal.exe' && ours(l)) spawnSync('taskkill', ['/PID', f[0], '/F'], { stdio: 'ignore' }); }
 
   // 6. Sticky: real window, screenshot it.
   const noteId = readNotes().notes.find((n) => n.title === NOTE).id;

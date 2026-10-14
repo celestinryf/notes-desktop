@@ -801,8 +801,12 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Enter');
   await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['needle one\nhay\n'.length, 'needle one\nhay\nneedle'.length], 'source view selects the active match');
-  await page.keyboard.press('Shift+Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'bodyInput', 'focus moves to the text so the selection is visible');
+  await page.keyboard.press('Shift+F3');
   await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [0, 6]);
+  // Editing in the rendered view keeps the count honest.
+  await page.click('#findInput');
   // Rendered view: the same search highlights ranges inside the editor only.
   await page.keyboard.press('Escape');
   await useSourceMode(false);
@@ -813,6 +817,14 @@ test('find in note counts and steps through matches; print asks the system to pr
   assert.equal(await page.evaluate(() => CSS.highlights.get('notes-find').size), 2, 'two highlighted ranges');
   await page.keyboard.press('Enter');
   await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await page.click('.rich-editor-content');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' needle three');
+  await waitForDom(() => /\/3$/.test(document.getElementById('findCount').textContent), 8000);
+  await page.fill('#findInput', 'onehay');
+  await waitForDom(() => document.getElementById('findCount').textContent === 'No matches', 8000); // no match across paragraphs
+  await page.fill('#findInput', 'NEEDLE');
+  await waitForDom(() => /\/3$/.test(document.getElementById('findCount').textContent), 8000);
   await page.keyboard.press('Escape');
   await waitForDom(() => !CSS.highlights.has('notes-find'));
   await useSourceMode(true);
