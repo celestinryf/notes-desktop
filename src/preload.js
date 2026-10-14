@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 const on = (channel) => (handler) => {
@@ -22,6 +22,20 @@ contextBridge.exposeInMainWorld('notesApi', {
     emptyTrash: invoke('notes:emptyTrash'),
     tags: invoke('notes:tags'),
     counts: invoke('notes:counts'),
+  },
+  files: {
+    openDialog: invoke('files:openDialog'),
+    link: invoke('files:link'),
+    refresh: invoke('files:refresh'),
+    reveal: invoke('files:reveal'),
+    openExternal: invoke('files:openExternal'),
+    pdfUrl: invoke('files:pdfUrl'),
+    // Drag-and-drop gives File objects; this turns them into real paths without exposing Node to the page.
+    pathFor: (file) => { try { return webUtils.getPathForFile(file); } catch (_) { return null; } },
+  },
+  agentFiles: {
+    discover: invoke('agentFiles:discover'),
+    link: invoke('agentFiles:link'),
   },
   folders: {
     tree: invoke('folders:tree'),

@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:; frame-src 'self' file:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
@@ -20,6 +20,7 @@
       <button class="btn btn-primary btn-block" id="newNoteBtn" title="New note (Ctrl+N)">
         <span class="plus" aria-hidden="true">+</span> New note
       </button>
+      <button class="btn btn-block btn-small" id="openFileBtn" title="Open files as notes (Ctrl+O). Markdown, text, LaTeX, PDF, Word, and more.">Open file…</button>
 
       <nav class="nav" aria-label="Views">
         <button class="nav-item is-active" data-view="all"><span>All notes</span><span class="count" id="countAll">0</span></button>
@@ -106,9 +107,18 @@
           <div class="editor-column align-left" id="editorColumn">
             <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
             <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
+            <div class="file-row hidden" id="fileRow">
+              <span class="file-kind" id="fileKind"></span>
+              <span class="file-path" id="filePath" title=""></span>
+              <button class="tool-btn" id="fileRevealBtn" title="Show in Explorer">Reveal</button>
+              <button class="tool-btn" id="fileOpenBtn" title="Open with the default app">Open with…</button>
+              <button class="tool-btn" id="fileReloadBtn" title="Re-read from disk">Reload</button>
+            </div>
+            <div class="file-banner hidden" id="fileBanner"></div>
             <div class="editor-body">
               <div id="richEditor" class="rich-editor"></div>
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
+              <iframe id="pdfFrame" class="pdf-frame hidden" title="PDF"></iframe>
             </div>
           </div>
         </div>
@@ -185,6 +195,12 @@
             <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
             <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
           </div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Agent files</span>
+          <span class="field-help">Links your CLAUDE.md, AGENTS.md, Claude commands, output styles, and memory notes as editable notes in an "Agent files" folder. Edits write straight to the real files.</span>
+          <div class="dialog-actions"><button type="button" class="btn btn-small" id="agentFilesBtn">Add my agent files</button><span class="field-help" id="agentFilesStatus"></span></div>
         </div>
 
         <div class="dialog-actions">

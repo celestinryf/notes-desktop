@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
+const F = require('./files');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
@@ -119,6 +120,10 @@ function sanitizeNote(raw, now) {
     body: typeof raw.body === 'string' ? raw.body : '',
     tags: H.parseTags(raw.tags || []),
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
+    // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
+    filePath: typeof raw.filePath === 'string' && raw.filePath ? raw.filePath : null,
+    fileKind: ['text', 'pdf', 'docx', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
+    fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
     pinned: !!raw.pinned,
     createdAt,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
@@ -301,7 +306,15 @@ class Store {
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
     if (typeof patch.title === 'string' && patch.title !== note.title) { note.title = patch.title; changed = true; }
-    if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
+    if (typeof patch.body === 'string' && patch.body !== note.body) {
+      if (note.filePath) {
+        // Only text files take edits; the file is the source of truth, written first, then the cache updated.
+        if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
+        note.fileMtime = F.writeTextInPlace(note.filePath, patch.body);
+      }
+      note.body = patch.body;
+      changed = true;
+    }
     if (patch.tags !== undefined) {
       const tags = H.parseTags(patch.tags);
       if (tags.join(',') !== note.tags.join(',')) { note.tags = tags; changed = true; }
@@ -333,7 +346,13 @@ class Store {
   duplicate(id) {
     const note = this.get(id);
     if (!note) return null;
-    return this.create({ title: note.title ? note.title + ' (copy)' : '', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
+    // A duplicate of a file-backed note is an ordinary note holding a copy of the text, not a second link.
+    return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
+  }
+
+  ensureFolder(name, parentId) {
+    const found = this.folders.find((f) => (f.parentId || null) === (parentId || null) && f.name.toLowerCase() === String(name).toLowerCase());
+    return found || this.createFolder({ name, parentId: parentId || null });
   }
 
   // Run a mutation and persist it; if the write fails, put memory back exactly as it was so the store
@@ -401,6 +420,60 @@ class Store {
       else { all++; if (n.pinned) pinned++; }
     }
     return { all, pinned, trash };
+  }
+
+  // ---- file-backed notes -------------------------------------------------
+
+  findByPath(filePath) {
+    const key = F.pathKey(filePath);
+    return this.notes.find((n) => n.filePath && F.pathKey(n.filePath) === key) || null;
+  }
+
+  // Links a file as a note. Text files load their contents; Word files are converted (read-only); PDFs and
+  // other binaries are shown through the system viewer. Linking the same file twice returns the same note.
+  async linkFile(filePath, opts) {
+    opts = opts || {};
+    const abs = path.resolve(filePath);
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw Object.assign(new Error('File not found: ' + abs), { code: 'ENOENT' });
+    const existing = this.findByPath(abs);
+    if (existing) {
+      if (existing.trashedAt) this.restore(existing.id);
+      await this.refreshFileNote(existing.id);
+      return existing;
+    }
+    const kind = F.kindOf(abs);
+    let body = '', mtime = F.mtimeOf(abs);
+    if (kind === 'text') ({ body, mtime } = F.readText(abs));
+    else if (kind === 'docx') ({ body, mtime } = await F.readDocxAsMarkdown(abs));
+    return this.create({
+      title: opts.title || path.basename(abs),
+      body,
+      tags: opts.tags || [],
+      folderId: opts.folderId || null,
+      filePath: abs,
+      fileKind: kind,
+      fileMtime: mtime,
+    });
+  }
+
+  // Re-reads a file-backed note when the file changed on disk. Returns { changed, missing }.
+  async refreshFileNote(id) {
+    const note = this.get(id);
+    if (!note || !note.filePath) return { changed: false, missing: false };
+    if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
+    const mtime = F.mtimeOf(note.filePath);
+    if (mtime === note.fileMtime) return { changed: false, missing: false };
+    let body = note.body;
+    if (note.fileKind === 'text') body = F.readText(note.filePath).body;
+    else if (note.fileKind === 'docx') body = (await F.readDocxAsMarkdown(note.filePath)).body;
+    const changed = body !== note.body;
+    // Cache update only: the file changed, the note's own edit time is not touched.
+    this._commit(() => { note.body = body; note.fileMtime = mtime; });
+    return { changed, missing: false };
+  }
+
+  fileNotes() {
+    return this.notes.filter((n) => n.filePath && !n.trashedAt);
   }
 
   // ---- folders -----------------------------------------------------------

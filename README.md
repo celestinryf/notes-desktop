@@ -16,6 +16,8 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 ## Features
 
 - Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
+- Open files as notes (Ctrl+O, the Open file… button, or drag files onto the window): Markdown, text, LaTeX, JSON, code and any other text file are editable and written back to the file in place (hard links such as CLAUDE.md ↔ AGENTS.md stay joined; CRLF files stay CRLF). PDFs show in a viewer, Word documents are converted to Markdown for reading; both are read-only here with an "Open with…" button for the native app. Changes made by other programs are picked up while the note is open.
+- Agent files: Settings → "Add my agent files" links your global CLAUDE.md/AGENTS.md, Claude commands, output styles, memory notes, and every project's CLAUDE.md/AGENTS.md into an "Agent files" folder. Editing them in Notes edits the real files.
 - Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
 - Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
 - Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold; tables and images render too. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
@@ -35,6 +37,7 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 | Ctrl+Alt+N | Show / hide from anywhere (changeable in Settings) |
 | Esc | Hide window |
 | Ctrl+N | New note |
+| Ctrl+O | Open files as notes |
 | Ctrl+Shift+N | New folder (inside the current folder) |
 | Ctrl+F | Search |
 | Ctrl+E | Toggle Markdown source / rendered |

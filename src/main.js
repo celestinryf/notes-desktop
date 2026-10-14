@@ -293,6 +293,50 @@ function main() {
   ipcMain.handle('notes:tags', () => store.tags());
   ipcMain.handle('notes:counts', () => store.counts());
 
+  // ---- file-backed notes ---------------------------------------------------
+
+  async function linkPaths(paths, opts) {
+    const linked = [];
+    const failed = [];
+    for (const p of paths) {
+      try { linked.push(await store.linkFile(p, opts)); }
+      catch (err) { failed.push(path.basename(p) + ' (' + (err.code || err.message) + ')'); }
+    }
+    return { ok: linked.length > 0, linked: linked.map((n) => n.id), failed, firstId: linked.length ? linked[0].id : null };
+  }
+
+  ipcMain.handle('files:openDialog', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Open files as notes',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', 'docx', 'json', 'yaml', 'yml', 'csv', 'log'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !filePaths.length) return { ok: false, canceled: true, linked: [], failed: [] };
+    return linkPaths(filePaths);
+  });
+  ipcMain.handle('files:link', (_e, paths, opts) => linkPaths(Array.isArray(paths) ? paths : [], opts || {}));
+  ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
+  ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
+  ipcMain.handle('files:openExternal', async (_e, id) => { const n = store.get(id); return n && n.filePath ? shell.openPath(n.filePath) : 'No file'; });
+  ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? 'file:///' + n.filePath.replace(/\\/g, '/') : null; });
+
+  const { discoverAgentFiles } = require('./files');
+  ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
+  ipcMain.handle('agentFiles:link', async () => {
+    const folder = store.ensureFolder('Agent files', null);
+    const found = discoverAgentFiles();
+    const res = await linkPaths(found.map((f) => f.filePath), { folderId: folder.id });
+    // Give each linked note its descriptive label and tag, and move pre-existing links into the folder.
+    for (const f of found) {
+      const n = store.findByPath(f.filePath);
+      if (n) store.update(n.id, { title: f.label, tags: Array.from(new Set((n.tags || []).concat(['agent']))), folderId: folder.id });
+    }
+    return Object.assign(res, { folderId: folder.id, found: found.length });
+  });
+
   ipcMain.handle('folders:tree', () => store.folderTree());
   ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
   ipcMain.handle('folders:create', (_e, data) => store.createFolder(data));
