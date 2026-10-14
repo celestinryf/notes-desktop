@@ -475,7 +475,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .rich-editor-content th { background: var(--bg-sunken); font-weight: 600; text-align: left; }
 .rich-editor-content td > p, .rich-editor-content th > p { margin: 0; }
 .rich-editor-content .selectedCell { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rich-editor-content img { display: block; max-width: 100%; border-radius: 8px; border: 2px solid var(--line-soft); margin: 0.4em 0 0.8em; }
+.rich-editor-content img[src] { display: inline-block; max-width: 100%; border-radius: 8px; border: 2px solid var(--line-soft); margin: 0.4em 0; vertical-align: middle; }
 .rich-editor-content ::selection { background: var(--selection); color: var(--accent-ink); }
 .rich-editor-content .ProseMirror-selectednode { outline: 2px solid var(--accent); }
 

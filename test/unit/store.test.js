@@ -269,6 +269,20 @@ test('folders: load repairs cycles, dangling parents, duplicates, and orphaned n
   assert.ok(store.folderTree().length >= 1, 'tree renders after repair');
 });
 
+test('a failed save rolls the note back so the retry really writes', () => {
+  const { store } = makeStore();
+  const n = store.create({ title: 'orig', body: 'one' });
+  const realSave = store.save.bind(store);
+  let fail = true;
+  store.save = () => { if (fail) throw Object.assign(new Error('EPERM: locked'), { code: 'EPERM' }); return realSave(); };
+  assert.throws(() => store.update(n.id, { body: 'two' }), /EPERM/);
+  assert.equal(store.get(n.id).body, 'one', 'memory rolled back');
+  fail = false;
+  const after = store.update(n.id, { body: 'two' });
+  assert.equal(after.body, 'two');
+  assert.equal(new Store(store.dir).load().get(n.id).body, 'two', 'retry reached disk');
+});
+
 test('export and import markdown', () => {
   const { store } = makeStore();
   const a = store.create({ title: 'Re: plan?', body: 'body', tags: ['x'] });

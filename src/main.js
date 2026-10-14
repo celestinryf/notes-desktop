@@ -125,6 +125,11 @@ function main() {
     win.on('resize', persistBounds);
     win.on('move', persistBounds);
     win.on('show', () => writeRuntime());
+    // Windows logoff/shutdown does not emit before-quit; do what can be done synchronously.
+    win.on('session-end', () => {
+      try { win.webContents.send('app:flush'); } catch (_) { /* ignore */ }
+      git.flush().catch(() => {});
+    });
     win.on('hide', () => writeRuntime());
     win.on('focus', () => {
       // Windows may refuse a topmost change requested while another app held the foreground; retry on focus.

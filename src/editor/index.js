@@ -3,6 +3,7 @@
    every change comes back out as Markdown. */
 import { Editor, Extension, InputRule } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
@@ -20,13 +21,31 @@ function fingerprint(md) {
   let s = String(md || '').replace(/\r/g, '');
   // YAML front matter turns into a rule plus paragraphs; never call that lossless.
   if (/^---\n[\s\S]*?\n---(\n|$)/.test(s)) return 'front-matter:' + s;
+  // Fences other than three backticks are always re-emitted as three backticks, which can break a block
+  // that itself contains backticks; treat such notes as lossy.
+  if (/^(~~~|````)/m.test(s)) return 'odd-fence:' + s;
   s = s
     .replace(/\\\n/g, '\n')                      // backslash hard break == newline
     .replace(/ {2,}\n/g, '\n')                   // two-space hard break == newline
-    .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1');
+    .replace(/\\([\\`*_{}[\]()#+\-.!|<>~])/g, '$1')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   // Compare line by line so lost or merged line breaks are noticed; blank lines and formatting are not.
-  return s.split('\n').map((l) => l.replace(/[^A-Za-z0-9:/.]+/g, '').toLowerCase()).filter(Boolean).join('\n');
+  // Letters and digits in any script count, plus the characters that make URLs and angle brackets meaningful.
+  return s.split('\n').map((l) => l.replace(/[^\p{L}\p{N}:/.<>]+/gu, '').toLowerCase()).filter(Boolean).join('\n');
 }
+
+// tiptap-markdown escapes every < and > as entities, so "x -> y" is stored as "x -&gt; y" and search for
+// "->" fails. Only a < that could start an HTML tag needs escaping when html is enabled.
+const PlainText = Text.extend({
+  addStorage() {
+    return {
+      markdown: {
+        serialize(state, node) { state.text(String(node.text).replace(/<(?=[A-Za-z/!?])/g, '&lt;')); },
+        parse: {},
+      },
+    };
+  },
+});
 
 // Tab indents list items; outside a list it does nothing instead of moving focus away mid-sentence.
 // Shift+Tab lifts a list item, or falls through to the browser so focus can move back to the tags field.
@@ -82,19 +101,24 @@ const DashCheckbox = Extension.create({
   },
 });
 
+export { fingerprint };
+
 export function create(element, options) {
   options = options || {};
   let suppress = false;
   const editor = new Editor({
     element,
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, codeBlock: { HTMLAttributes: { spellcheck: 'false' } } }),
+      StarterKit.configure({ text: false, heading: { levels: [1, 2, 3, 4, 5, 6] }, codeBlock: { HTMLAttributes: { spellcheck: 'false' } } }),
+      PlainText,
       TaskList.configure({ HTMLAttributes: { 'data-type': 'taskList' } }),
       TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' } }),
       TaskListTight,
       DashCheckbox,
       Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
-      Image.configure({ inline: false, allowBase64: true }),
+      // Inline, as Markdown models images: tiptap-markdown's image serializer never closes a block, so a
+      // block image followed by text would be glued onto one line and misparse on reload.
+      Image.configure({ inline: true, allowBase64: true }),
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
@@ -102,7 +126,9 @@ export function create(element, options) {
       Placeholder.configure({ placeholder: options.placeholder || 'Start writing…' }),
       // html: true so a structure Markdown cannot express (a table cell with two paragraphs) is written as
       // HTML, which round-trips, instead of the literal placeholder "[table]" that would lose the table.
-      Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: true, transformCopiedText: true }),
+      // transformPastedText stays off: with html enabled, pasted plain text like "List<String>" would be
+      // read as HTML tags and the angle-bracket text dropped. Pasted text arrives as text.
+      Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: false, transformCopiedText: true }),
       NotesKeys,
     ],
     content: options.content || '',
@@ -146,7 +172,9 @@ export function create(element, options) {
     // Tiptap's focus command defers the DOM focus to the next animation frame; a key pressed right after
     // Enter in the title would land in the title. Focus the DOM synchronously first, then place the caret.
     focus: (where) => { editor.view.focus(); return editor.commands.focus(where || null); },
-    setEditable: (on) => editor.setEditable(!!on),
+    // Second argument false: setEditable would otherwise emit an update, and an update on a freshly loaded
+    // note would write the editor's serialization back over the stored Markdown just for viewing it.
+    setEditable: (on) => editor.setEditable(!!on, false),
     isEmpty: () => editor.isEmpty,
     // range: {from,to} captured with selectionRange() when the dialog opened, so the link lands on the text
     // the user had selected even though focus moved to the dialog in between.
