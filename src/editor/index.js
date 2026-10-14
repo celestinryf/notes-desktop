@@ -89,6 +89,22 @@ export function create(element, options) {
     return editor.storage.markdown.getMarkdown();
   }
 
+  // ProseMirror copies the browser selection into its state asynchronously. A shortcut pressed right after
+  // Shift+Home (or a mouse drag) can run before that copy, so read the live DOM selection when it is ours.
+  function liveRange() {
+    const sel = element.ownerDocument.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editor.view.dom.contains(sel.anchorNode) || !editor.view.dom.contains(sel.focusNode)) return null;
+    try {
+      const a = editor.view.posAtDOM(sel.anchorNode, sel.anchorOffset);
+      const f = editor.view.posAtDOM(sel.focusNode, sel.focusOffset);
+      return { from: Math.min(a, f), to: Math.max(a, f) };
+    } catch (_) { return null; }
+  }
+
+  function currentRange() {
+    return liveRange() || { from: editor.state.selection.from, to: editor.state.selection.to };
+  }
+
   function setMarkdown(md) {
     suppress = true;
     try { editor.commands.setContent(md || '', false); } finally { suppress = false; }
@@ -111,9 +127,9 @@ export function create(element, options) {
       if (!href) return chain.extendMarkRange('link').unsetLink().run();
       return chain.extendMarkRange('link').setLink({ href }).run();
     },
-    selectionRange: () => ({ from: editor.state.selection.from, to: editor.state.selection.to }),
+    selectionRange: currentRange,
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
-    hasSelection: () => !editor.state.selection.empty,
+    hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
     destroy: () => editor.destroy(),
   };
 }
