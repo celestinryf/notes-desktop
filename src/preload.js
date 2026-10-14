@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld('notesApi', {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
     print: invoke('app:print'),
+    copy: invoke('app:copy'),
+    emailNote: invoke('app:emailNote'),
+    exportPdf: invoke('app:exportPdf'),
+    exportHtml: invoke('app:exportHtml'),
     rendererReady: invoke('app:rendererReady'),
     dictate: invoke('app:dictate'),
     flushDone: () => ipcRenderer.send('app:flush-done'),
@@ -110,5 +114,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     stickyChanged: on('sticky:changed'),
     stickiesChanged: on('stickies:changed'),
     openNote: on('app:open-note'),
+    reminderFired: on('reminder:fired'),
   },
 });

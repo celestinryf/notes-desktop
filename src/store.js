@@ -177,6 +177,8 @@ function sanitizeNote(raw, now) {
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     sticky: sanitizeSticky(raw.sticky),
+    remindAt: Number.isFinite(raw.remindAt) ? Math.round(raw.remindAt) : null,
+    remindedAt: Number.isFinite(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
     pinned: !!raw.pinned,
     createdAt,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
@@ -334,7 +336,9 @@ class Store {
         out = out.filter((n) => (n.folderId || null) === fid);
       }
     }
+    if (opts.reminders) out = out.filter((n) => n.remindAt);
     if (opts.query) out = out.filter((n) => H.matchesQuery(n, opts.query));
+    if (opts.reminders) return out.slice().sort((a, b) => a.remindAt - b.remindAt); // soonest first
     return H.sortNotes(out, opts.sort || this.settings.sort);
   }
 
@@ -405,6 +409,10 @@ class Store {
       if (tags.join(',') !== note.tags.join(',')) { note.tags = tags; changed = true; }
     }
     if (typeof patch.pinned === 'boolean' && patch.pinned !== note.pinned) { note.pinned = patch.pinned; changed = true; }
+    if (patch.remindAt !== undefined) {
+      const at = Number.isFinite(patch.remindAt) ? Math.round(patch.remindAt) : null;
+      if (at !== note.remindAt) { note.remindAt = at; note.remindedAt = null; changed = true; } // a new time rings again
+    }
     if (patch.folderId !== undefined) {
       const fid = patch.folderId && this.getFolder(patch.folderId) ? patch.folderId : null;
       if (fid !== (note.folderId || null)) { note.folderId = fid; changed = true; }
@@ -425,6 +433,13 @@ class Store {
       }
     }
     return note;
+  }
+
+  // Called by the reminder scheduler when a reminder has been announced.
+  markReminded(id, at) {
+    const note = this.get(id);
+    if (!note) return null;
+    return this._commit(() => { note.remindedAt = at; return note; });
   }
 
   // Desktop stickies. Only this path changes the field; update() ignores it.
@@ -715,12 +730,13 @@ class Store {
   }
 
   counts() {
-    let all = 0, pinned = 0, trash = 0;
+    let all = 0, pinned = 0, trash = 0, reminders = 0, overdue = 0;
+    const now = this.now();
     for (const n of this.notes) {
       if (n.trashedAt) trash++;
-      else { all++; if (n.pinned) pinned++; }
+      else { all++; if (n.pinned) pinned++; if (n.remindAt) { reminders++; if (n.remindAt <= now) overdue++; } }
     }
-    return { all, pinned, trash };
+    return { all, pinned, trash, reminders, overdue };
   }
 
   // ---- file-backed notes -------------------------------------------------

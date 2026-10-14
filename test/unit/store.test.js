@@ -91,7 +91,7 @@ test('trash keeps the pin, restore brings back, destroy removes, emptyTrash clea
   assert.ok(store.get(b.id));
   assert.equal(store.destroy(b.id), true);
   assert.equal(store.destroy(b.id), false);
-  assert.deepEqual(store.counts(), { all: 0, pinned: 0, trash: 0 });
+  assert.deepEqual(store.counts(), { all: 0, pinned: 0, trash: 0, reminders: 0, overdue: 0 });
 });
 
 test('duplicate copies content, drops pin, and appends (copy)', () => {

@@ -11,7 +11,10 @@
     sidebar: $('#sidebar'),
     newNoteBtn: $('#newNoteBtn'),
     navItems: Array.from(document.querySelectorAll('.nav-item[data-view]')),
-    countAll: $('#countAll'), countPinned: $('#countPinned'), countTrash: $('#countTrash'),
+    countAll: $('#countAll'), countPinned: $('#countPinned'), countTrash: $('#countTrash'), countReminders: $('#countReminders'),
+    remindBtn: $('#remindBtn'), remindDialog: $('#remindDialog'), remindForm: $('#remindForm'), remindInput: $('#remindInput'), remindQuick: $('#remindQuick'),
+    remindCurrent: $('#remindCurrent'), remindClearBtn: $('#remindClearBtn'), remindCancelBtn: $('#remindCancelBtn'),
+    shareBtn: $('#shareBtn'), shareMenu: $('#shareMenu'), shareReveal: $('#shareReveal'),
     tagList: $('#tagList'),
     themeBtn: $('#themeBtn'), settingsBtn: $('#settingsBtn'),
     hotkeyHint: $('#hotkeyHint'), hotkeyHint2: $('#hotkeyHint2'),
@@ -237,6 +240,7 @@
     if (state.view === 'trash') listOpts.trashed = true;
     else if (state.query) { /* a search looks across every live note, whatever is selected */ }
     else if (state.view === 'pinned') listOpts.pinned = true;
+    else if (state.view === 'reminders') listOpts.reminders = true;
     else if (state.view === 'tag') listOpts.tag = state.tag;
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
     const [notes, counts, tags, tree, folderPath] = await Promise.all([
@@ -271,6 +275,8 @@
     el.countAll.textContent = c.all;
     el.countPinned.textContent = c.pinned;
     el.countTrash.textContent = c.trash;
+    el.countReminders.textContent = c.reminders;
+    el.countReminders.classList.toggle('is-overdue', !!c.overdue);
   }
 
   function renderTags(tags) {
@@ -323,7 +329,7 @@
       li.innerHTML =
         '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '') + highlight(H.deriveTitle(n), q) + fileMark + '</div>' +
         '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>' +
-        '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + tags + '</div>';
+        '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + reminderMark(n) + tags + '</div>';
       li.addEventListener('click', () => selectNote(n.id));
       if (!n.trashedAt) {
         li.draggable = true;
@@ -337,6 +343,12 @@
       frag.append(li);
     });
     el.noteList.append(frag);
+  }
+
+  function reminderMark(n) {
+    if (!n.remindAt || n.trashedAt) return '';
+    const overdue = n.remindAt <= Date.now();
+    return '<span class="remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">⏰ ' + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
   function refreshCard(note) {
@@ -868,6 +880,8 @@
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
     renderStickyButton(note);
+    renderRemindButton(note);
+    el.shareBtn.classList.toggle('hidden', !!note.trashedAt);
     if (find.open) closeFind();
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
@@ -899,6 +913,120 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- reminders ---------------------------------------------------------------
+
+  function renderRemindButton(note) {
+    const on = !!(note && note.remindAt);
+    el.remindBtn.classList.toggle('hidden', !note || !!note.trashedAt);
+    el.remindBtn.classList.toggle('is-on', on);
+    el.remindBtn.textContent = on ? '⏰ ' + H.formatWhen(note.remindAt) : '⏰ Remind';
+    el.remindBtn.title = on ? 'Reminder set for ' + H.formatWhen(note.remindAt) + ' (Ctrl+Shift+M to change)' : 'Remind me about this note (Ctrl+Shift+M)';
+  }
+
+  function toLocalInputValue(ts) {
+    const d = new Date(ts);
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function quickPick(kind) {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    if (kind === '1h') { d.setTime(d.getTime() + 3600 * 1000); return d.getTime(); }
+    if (kind === 'evening') { if (d.getHours() >= 18) d.setDate(d.getDate() + 1); d.setHours(18, 0, 0, 0); return d.getTime(); }
+    if (kind === 'tomorrow') { d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); }
+    if (kind === 'monday') { const add = ((8 - d.getDay()) % 7) || 7; d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0); return d.getTime(); }
+    return null;
+  }
+
+  function openRemindDialog() {
+    const note = state.current;
+    if (!note || note.trashedAt) return;
+    const base = note.remindAt || (Math.ceil(Date.now() / (3600 * 1000)) * 3600 * 1000);
+    el.remindInput.value = toLocalInputValue(base);
+    el.remindCurrent.textContent = note.remindAt ? ('Currently: ' + H.formatWhen(note.remindAt) + (note.remindedAt ? ' (went off)' : '')) : 'No reminder on this note.';
+    el.remindClearBtn.classList.toggle('hidden', !note.remindAt);
+    el.remindDialog.showModal();
+    el.remindInput.focus();
+  }
+
+  async function setReminder(at) {
+    const note = state.current;
+    if (!note) return;
+    el.remindDialog.close();
+    await flushSave();
+    try {
+      await api.notes.update(note.id, { remindAt: at });
+      await refreshCurrentMeta();
+      toast(at ? 'Reminder set for ' + H.formatWhen(at) : 'Reminder cleared');
+    } catch (err) {
+      toast('Could not save the reminder: ' + (err.message || err));
+    }
+  }
+
+  // ---- sharing -----------------------------------------------------------------
+
+  function placePopover(menu, anchor) {
+    menu.classList.remove('hidden');
+    const rect = anchor.getBoundingClientRect();
+    let x = rect.left, y = rect.bottom + 4;
+    menu.style.left = '0px'; menu.style.top = '0px';
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+    if (y + mh > window.innerHeight - 8) y = rect.top - mh - 4;
+    menu.style.left = Math.max(8, x) + 'px';
+    menu.style.top = Math.max(8, y) + 'px';
+  }
+
+  function openShareMenu() {
+    if (!state.current || state.current.trashedAt) return;
+    el.shareReveal.classList.toggle('hidden', !state.current.filePath);
+    placePopover(el.shareMenu, el.shareBtn);
+    const first = el.shareMenu.querySelector('button:not(.hidden)');
+    if (first) first.focus();
+  }
+
+  function closeShareMenu() {
+    el.shareMenu.classList.add('hidden');
+  }
+
+  // The note as HTML: what the rendered view shows, or a one-off render when the source view is up.
+  function currentHtml() {
+    const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
+    if (live) return live.innerHTML;
+    if (!window.NotesEditor) return '<pre>' + escapeHtml(el.bodyInput.value) + '</pre>';
+    const host = document.createElement('div');
+    host.style.position = 'absolute'; host.style.left = '-99999px';
+    document.body.append(host);
+    try {
+      const ed = window.NotesEditor.create(host, {});
+      ed.setMarkdown(el.bodyInput.value);
+      const html = host.querySelector('.rich-editor-content').innerHTML;
+      ed.destroy();
+      return html;
+    } finally { host.remove(); }
+  }
+
+  async function shareAction(action) {
+    closeShareMenu();
+    const note = state.current;
+    if (!note) return;
+    await flushSave();
+    const titleLine = note.title ? note.title + '\n\n' : '';
+    try {
+      if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
+      else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
+      else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
+      else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
+      else if (action === 'pdf') { const r = await api.app.exportPdf(note.id); if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error); }
+      else if (action === 'html') { const r = await api.app.exportHtml(note.id, currentHtml()); if (r.ok) toast('Saved HTML to ' + r.filePath); else if (!r.canceled) toast('Could not save HTML: ' + r.error); }
+      else if (action === 'md') { await exportCurrent(); }
+      else if (action === 'reveal') { await api.files.reveal(note.id); }
+    } catch (err) {
+      toast('Share failed: ' + (err.message || err));
+    }
   }
 
   // ---- find in note, print ---------------------------------------------------
@@ -1088,7 +1216,10 @@
     if (!fresh || !state.current || fresh.id !== state.current.id) return;
     state.current.sticky = fresh.sticky;
     state.current.pinned = fresh.pinned;
+    state.current.remindAt = fresh.remindAt;
+    state.current.remindedAt = fresh.remindedAt;
     renderStickyButton(state.current);
+    renderRemindButton(state.current);
     await refresh({ keepEditor: true });
   }
 
@@ -1831,10 +1962,11 @@
 
   function onKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.linkDialog.open;
+    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
+      if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
@@ -1884,6 +2016,8 @@
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); openRemindDialog(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
     if (e.key === 'F3' && find.open) { e.preventDefault(); runFind(!e.shiftKey); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
@@ -1925,6 +2059,18 @@
     el.dictateBtn.addEventListener('click', startDictation);
     el.stickyBtn.addEventListener('click', toggleSticky);
     el.printBtn.addEventListener('click', printNote);
+    el.remindBtn.addEventListener('click', openRemindDialog);
+    el.remindQuick.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) setReminder(quickPick(b.dataset.pick)); });
+    el.remindForm.addEventListener('submit', (e) => { e.preventDefault(); const t = Date.parse(el.remindInput.value); if (!Number.isFinite(t)) { toast('Pick a date and time'); return; } setReminder(t); });
+    el.remindClearBtn.addEventListener('click', () => setReminder(null));
+    el.remindCancelBtn.addEventListener('click', () => el.remindDialog.close());
+    el.remindDialog.addEventListener('close', () => focusBody());
+    api.on.reminderFired(({ id, title }) => {
+      toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await selectNoteNow(id); } });
+      refresh({ keepEditor: true }).then(() => { if (state.currentId === id) refreshCurrentMeta(); });
+    });
+    el.shareBtn.addEventListener('click', () => { if (el.shareMenu.classList.contains('hidden')) openShareMenu(); else closeShareMenu(); });
+    el.shareMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-action]'); if (b) shareAction(b.dataset.action); });
     el.findNextBtn.addEventListener('click', () => runFind(true));
     el.findPrevBtn.addEventListener('click', () => runFind(false));
     el.findCloseBtn.addEventListener('click', closeFind);
@@ -1970,7 +2116,10 @@
     el.newFolderBtn.addEventListener('click', () => startCreateFolder(state.view === 'folder' ? state.folderId : null));
     el.folderSelect.addEventListener('change', () => { if (state.currentId) moveNoteToFolder(state.currentId, el.folderSelect.value || null); });
     el.folderMenu.querySelectorAll('button[data-action]').forEach((b) => b.addEventListener('click', () => folderMenuAction(b.dataset.action)));
-    document.addEventListener('pointerdown', (e) => { if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu(); });
+    document.addEventListener('pointerdown', (e) => {
+      if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
+      if (!el.shareMenu.classList.contains('hidden') && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
+    });
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
     window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });
 

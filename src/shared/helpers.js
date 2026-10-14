@@ -196,6 +196,30 @@
   }
 
   // Plain prose from Markdown for reading aloud: drops markup, keeps the words and sentence breaks.
+  // "today 18:30", "tomorrow 09:00", "yesterday 09:00", "Tue, Oct 20 09:00", "Jan 2, 2027 09:00".
+  function formatWhen(ts, now) {
+    now = now == null ? Date.now() : now;
+    const d = new Date(ts), n = new Date(now);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dayOf = (x) => x.toDateString();
+    const shift = (days) => { const c = new Date(n); c.setDate(n.getDate() + days); return dayOf(c); };
+    if (dayOf(d) === dayOf(n)) return 'today ' + time;
+    if (dayOf(d) === shift(1)) return 'tomorrow ' + time;
+    if (dayOf(d) === shift(-1)) return 'yesterday ' + time;
+    const sameYear = d.getFullYear() === n.getFullYear();
+    return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + time;
+  }
+
+  // A mailto: URL for a note. Mail clients reject very long URLs, so the body is cut with a notice.
+  function mailtoFor(note, limit) {
+    limit = limit || 1800;
+    const subject = deriveTitle(note) || 'Note';
+    let body = String(note.body || '');
+    let truncated = false;
+    if (body.length > limit) { body = body.slice(0, limit) + '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]'; truncated = true; }
+    return { url: 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body), truncated };
+  }
+
   function plainTextFromMarkdown(md) {
     let s = String(md || '').replace(/\r\n/g, '\n');
     s = s.replace(/```[\s\S]*?```/g, ' code block omitted. ');
@@ -250,6 +274,6 @@
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
-    plainTextFromMarkdown, speechChunks,
+    plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor,
   };
 });
