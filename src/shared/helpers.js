@@ -17,10 +17,13 @@
     return '';
   }
 
+  // Cuts by code point, so an emoji at the boundary is dropped whole rather than split into a lone surrogate.
   function truncate(text, max) {
     const s = String(text || '');
     if (s.length <= max) return s;
-    return s.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
+    const points = Array.from(s);
+    if (points.length <= max) return s;
+    return points.slice(0, Math.max(0, max - 1)).join('').trimEnd() + '…';
   }
 
   function deriveTitle(note) {
@@ -214,7 +217,8 @@
   // limit caps the ENCODED URL (Windows shell handlers reject roughly 2 KB), never splitting a surrogate pair.
   function mailtoFor(note, limit) {
     limit = limit || 1900;
-    const subject = deriveTitle(note) || 'Note';
+    // Subjects are bounded too, so the head can never eat the whole budget.
+    const subject = truncate(deriveTitle(note) || 'Note', 120);
     const body = String(note.body || '');
     const notice = '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]';
     const head = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';

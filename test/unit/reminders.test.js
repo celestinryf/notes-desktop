@@ -88,6 +88,12 @@ test('formatWhen and mailtoFor', () => {
   const cjk = H.mailtoFor({ title: 'CJK', body: '日本語の文章\n'.repeat(400) });
   assert.ok(cjk.url.length <= 1900, 'encoded length capped: ' + cjk.url.length);
   assert.doesNotThrow(() => decodeURIComponent(cjk.url));
+  // A derived title (first line) with an emoji at the 60-character cut, and a very long explicit title.
+  assert.doesNotThrow(() => H.mailtoFor({ title: '', body: 'a'.repeat(58) + '😀' + 'b'.repeat(20) }));
+  assert.equal(H.truncate('a'.repeat(58) + '😀' + 'b'.repeat(20), 60), 'a'.repeat(58) + '😀' + '…');
+  const longTitle = H.mailtoFor({ title: '長い題名'.repeat(300), body: 'x'.repeat(3000) });
+  assert.ok(longTitle.url.length <= 1900, 'long title still capped: ' + longTitle.url.length);
+  assert.ok(decodeURIComponent(longTitle.url).includes('Truncated'), 'body cut with notice');
   // Never cut through an emoji (a surrogate pair), which would make encodeURIComponent throw.
   for (let n = 1700; n < 1760; n++) {
     const body = 'a'.repeat(n) + '😀'.repeat(300);
