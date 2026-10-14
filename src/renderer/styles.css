@@ -338,6 +338,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .note-card-title .pin { color: var(--accent-strong); font-size: 12px; }
+.note-card-title .sticky-mark { font-size: 11px; margin-right: 2px; }
 .note-card-snippet { margin-top: 2px; color: var(--fg-muted); font-size: 12.5px; max-height: 2.9em; overflow: hidden; }
 .note-card-meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); }
 .note-card-meta .tag { color: var(--accent-strong); }

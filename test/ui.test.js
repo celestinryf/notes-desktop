@@ -682,6 +682,79 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await waitForDom(() => document.getElementById('botPanel').classList.contains('hidden'));
 });
 
+test('stickies: a note becomes a desktop window; edits flow both ways; colour and removal persist', { timeout: 60000 }, async () => {
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', '- [ ] buy milk\n');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === '- [ ] buy milk\n');
+  assert.equal(await page.textContent('#stickyBtn'), '📌 Stick');
+
+  const stickyPromise = app.waitForEvent('window', { timeout: 15000 });
+  await page.keyboard.press('Control+Shift+t');
+  const sticky = await stickyPromise;
+  sticky.on('pageerror', (e) => rendererErrors.push('sticky pageerror: ' + e.message));
+  sticky.on('console', (m) => { if (m.type() === 'error') rendererErrors.push('sticky: ' + m.text()); });
+  await sticky.waitForSelector('#stickyEditor .rich-editor-content', { timeout: 15000 });
+  await waitFor('sticky persisted', () => { const n = findNote('Gamma (copy)'); return n.sticky && n.sticky.color === 'peach'; });
+  await waitForDom(() => document.getElementById('stickyBtn').classList.contains('is-on'));
+  await waitForDom(() => !!document.querySelector('.note-card.is-active .sticky-mark'));
+  // The sticky renders the checklist.
+  await waitFor('checkbox rendered', () => sticky.evaluate(() => !!document.querySelector('#stickyEditor ul[data-type="taskList"] input[type="checkbox"]')));
+  assert.match(await sticky.textContent('#stickyTitle'), /Gamma \(copy\)/);
+
+  // Typing in the sticky saves and reaches the main window (which is clean and on the same note).
+  await sticky.click('#stickyEditor .rich-editor-content');
+  await sticky.keyboard.press('Control+End');
+  await sticky.keyboard.type('eggs');
+  await waitFor('sticky edit saved', () => /eggs/.test(findNote('Gamma (copy)').body), 8000);
+  await waitForDom(() => /eggs/.test(document.getElementById('bodyInput').value), 8000);
+
+  // Editing in the main window reaches the sticky.
+  await page.fill('#bodyInput', '- [x] done from main\n');
+  await waitFor('main edit saved', () => findNote('Gamma (copy)').body === '- [x] done from main\n');
+  await waitFor('sticky reloaded', () => sticky.evaluate(() => /done from main/.test(document.querySelector('#stickyEditor').textContent)), 8000);
+
+  // Colour and on-top are persisted on the note.
+  await sticky.click('#stickyColors [data-color="sky"]');
+  await waitFor('colour saved', () => findNote('Gamma (copy)').sticky.color === 'sky');
+  await waitFor('tint applied', () => sticky.evaluate(() => document.documentElement.dataset.color === 'sky'));
+  await sticky.click('#stickyTopBtn');
+  await waitFor('onTop saved', () => findNote('Gamma (copy)').sticky.onTop === false);
+  const bw = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => ({ title: w.getTitle(), onTop: w.isAlwaysOnTop(), frame: w.isResizable() })));
+  assert.ok(bw.length >= 2, 'two windows');
+
+  // Esc hides the sticky but keeps it a sticky; tray "Stickies" would bring it back. Reopen through the API.
+  // The window closes on keydown, so the keyup round trip may fail: that is the expected outcome.
+  await sticky.keyboard.press('Escape').catch(() => {});
+  await waitFor('hidden', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length) .then((n) => n === 1));
+  assert.ok(findNote('Gamma (copy)').sticky, 'still a sticky after Esc');
+  const again = app.waitForEvent('window', { timeout: 15000 });
+  await page.evaluate((id) => window.notesApi.stickies.open(id), findNote('Gamma (copy)').id);
+  const sticky2 = await again;
+  await sticky2.waitForSelector('#stickyEditor .rich-editor-content', { timeout: 15000 });
+  await waitFor('same tint on reopen', () => sticky2.evaluate(() => document.documentElement.dataset.color === 'sky'));
+
+  // ✕ removes it from the desktop: window gone, sticky cleared, note kept.
+  await sticky2.click('#stickyCloseBtn');
+  await waitFor('removed', () => !findNote('Gamma (copy)').sticky);
+  await waitFor('window closed', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
+  await waitForDom(() => !document.getElementById('stickyBtn').classList.contains('is-on'));
+  assert.equal(findNote('Gamma (copy)').body, '- [x] done from main\n');
+
+  // Tray-style creation: a new empty note opens as a sticky; trashing it closes the window.
+  const created = app.waitForEvent('window', { timeout: 15000 });
+  const fresh = await page.evaluate(() => window.notesApi.stickies.create());
+  const s3 = await created;
+  await s3.waitForSelector('#stickyEditor .rich-editor-content', { timeout: 15000 });
+  await page.evaluate((id) => window.notesApi.notes.trash(id), fresh.id);
+  await waitFor('window closed by trash', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
+  await page.evaluate((id) => window.notesApi.notes.destroy(id), fresh.id);
+
+  await page.fill('#bodyInput', 'pure text');
+  await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
+});
+
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

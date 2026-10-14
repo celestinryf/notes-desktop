@@ -1,0 +1,67 @@
+/* Desktop sticky window. Tints are palette-derived; the dark theme deepens them. */
+:root[data-color="peach"] { --sticky-bg: #f6dcc3; --sticky-bar: #f0cdaa; }
+:root[data-color="cream"] { --sticky-bg: #fbf1e4; --sticky-bar: #f3e3cc; }
+:root[data-color="leaf"]  { --sticky-bg: #dfe9d3; --sticky-bar: #cddcbd; }
+:root[data-color="sky"]   { --sticky-bg: #d9e6ee; --sticky-bar: #c4d8e4; }
+:root[data-color="rose"]  { --sticky-bg: #f4d6d6; --sticky-bar: #ecc1c1; }
+:root[data-color="ink"]   { --sticky-bg: #3a2a21; --sticky-bar: #2a1a12; --fg: #fbf1e4; --fg-muted: #d8c4b0; --line: #fbf1e4; --bg-sunken: #4a382d; }
+:root[data-theme="dark"][data-color="peach"] { --sticky-bg: #4a3122; --sticky-bar: #3a2519; }
+:root[data-theme="dark"][data-color="cream"] { --sticky-bg: #3d3024; --sticky-bar: #2f251c; }
+:root[data-theme="dark"][data-color="leaf"]  { --sticky-bg: #2d3a26; --sticky-bar: #222d1c; }
+:root[data-theme="dark"][data-color="sky"]   { --sticky-bg: #27353d; --sticky-bar: #1d292f; }
+:root[data-theme="dark"][data-color="rose"]  { --sticky-bg: #44292b; --sticky-bar: #351f21; }
+
+html, body.sticky-body { height: 100%; margin: 0; overflow: hidden; }
+body.sticky-body {
+  display: flex; flex-direction: column;
+  background: var(--sticky-bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  border: 2px solid var(--line);
+  box-sizing: border-box;
+}
+.sticky-bar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px 4px 8px;
+  background: var(--sticky-bar);
+  border-bottom: 2px solid var(--line);
+  -webkit-app-region: drag;
+  user-select: none;
+  flex: 0 0 auto;
+}
+.sticky-grip { color: var(--fg-muted); font-size: 11px; letter-spacing: -2px; }
+.sticky-title {
+  font-family: var(--font-display); font-weight: 600; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 55%;
+  -webkit-app-region: no-drag;
+  cursor: default;
+}
+.sticky-bar .spacer { flex: 1; }
+.sticky-colors { display: flex; gap: 3px; -webkit-app-region: no-drag; }
+.sticky-colors button {
+  width: 14px; height: 14px; border-radius: 50%; padding: 0;
+  border: 1.5px solid var(--line); cursor: pointer;
+}
+.sticky-colors button.is-on { box-shadow: 0 0 0 2px var(--sticky-bar), 0 0 0 3.5px var(--line); }
+.sticky-colors [data-color="peach"] { background: #f6dcc3; }
+.sticky-colors [data-color="cream"] { background: #fbf1e4; }
+.sticky-colors [data-color="leaf"]  { background: #dfe9d3; }
+.sticky-colors [data-color="sky"]   { background: #d9e6ee; }
+.sticky-colors [data-color="rose"]  { background: #f4d6d6; }
+.sticky-colors [data-color="ink"]   { background: #2a1a12; }
+.sticky-btn {
+  -webkit-app-region: no-drag;
+  border: none; background: transparent; color: var(--fg);
+  font-size: 12px; line-height: 1; padding: 4px 5px; border-radius: 6px; cursor: pointer;
+  opacity: 0.75;
+}
+.sticky-btn:hover { opacity: 1; background: rgba(0, 0, 0, 0.08); }
+.sticky-btn[aria-pressed="false"] { opacity: 0.35; }
+.sticky-main { flex: 1 1 auto; overflow: auto; padding: 8px 10px; }
+.sticky-editor { min-height: 100%; }
+.sticky-editor .rich-editor-content { font-size: 14px; line-height: 1.45; min-height: 100%; outline: none; }
+.sticky-editor .rich-editor-content h1 { font-size: 1.3em; } .sticky-editor .rich-editor-content h2 { font-size: 1.15em; } .sticky-editor .rich-editor-content h3 { font-size: 1.05em; }
+.sticky-missing { padding: 24px; text-align: center; color: var(--fg-muted); }
+.sticky-foot { flex: 0 0 auto; padding: 2px 10px 4px; font-size: 10px; color: var(--fg-muted); min-height: 14px; }
+.hidden { display: none !important; }

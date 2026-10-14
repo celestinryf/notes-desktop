@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-color="peach">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sticky</title>
+  <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="sticky.css" />
+</head>
+<body class="sticky-body">
+  <header class="sticky-bar" id="stickyBar">
+    <span class="sticky-grip" aria-hidden="true">⋮⋮</span>
+    <span class="sticky-title" id="stickyTitle" title="Double-click to open in Notes"></span>
+    <span class="spacer"></span>
+    <div class="sticky-colors" id="stickyColors" role="group" aria-label="Colour"></div>
+    <button class="sticky-btn" id="stickyTopBtn" title="Float above other windows" aria-pressed="true">⬆</button>
+    <button class="sticky-btn" id="stickyOpenBtn" title="Open in Notes">↗</button>
+    <button class="sticky-btn" id="stickyCloseBtn" title="Remove from desktop (the note is kept)">✕</button>
+  </header>
+  <main class="sticky-main" id="stickyMain">
+    <div class="rich-editor sticky-editor" id="stickyEditor"></div>
+    <div class="sticky-missing hidden" id="stickyMissing">This note is gone.</div>
+  </main>
+  <footer class="sticky-foot"><span id="stickyStatus"></span></footer>
+  <script src="vendor/editor.bundle.js"></script>
+  <script src="sticky.js"></script>
+</body>
+</html>

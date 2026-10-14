@@ -46,7 +46,7 @@
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
     vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
     folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
-    botBtn: $('#botBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
+    stickyBtn: $('#stickyBtn'), botBtn: $('#botBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
   };
 
@@ -320,7 +320,7 @@
       const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
       li.innerHTML =
-        '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + highlight(H.deriveTitle(n), q) + fileMark + '</div>' +
+        '<div class="note-card-title">' + (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '') + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '') + highlight(H.deriveTitle(n), q) + fileMark + '</div>' +
         '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>' +
         '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + tags + '</div>';
       li.addEventListener('click', () => selectNote(n.id));
@@ -866,6 +866,7 @@
     el.bodyInput.readOnly = inTrash || fileReadOnly;
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
+    renderStickyButton(note);
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
@@ -896,6 +897,42 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- desktop stickies ------------------------------------------------------
+
+  function renderStickyButton(note) {
+    const on = !!(note && note.sticky);
+    el.stickyBtn.classList.toggle('is-on', on);
+    el.stickyBtn.textContent = on ? '📌 Stuck' : '📌 Stick';
+    el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
+    const viewerOnly = !!(note && note.filePath && note.fileKind !== 'text');
+    el.stickyBtn.disabled = !note || !!note.trashedAt || viewerOnly;
+  }
+
+  async function toggleSticky() {
+    const note = state.current;
+    if (!note || el.stickyBtn.disabled) return;
+    await flushSave();
+    if (note.sticky) {
+      await api.stickies.close(note.id, { forget: true });
+      toast('Removed from the desktop. The note is kept.');
+    } else {
+      await api.stickies.open(note.id);
+      toast('On the desktop. Drag its top bar to move it; ✕ on it removes it, Esc just hides it (tray → Stickies brings it back).');
+    }
+    await refreshCurrentMeta();
+  }
+
+  // Re-reads the open note's metadata (not its body) after something outside the editor changed it.
+  async function refreshCurrentMeta() {
+    if (!state.currentId) return;
+    const fresh = await api.notes.get(state.currentId);
+    if (!fresh || !state.current || fresh.id !== state.current.id) return;
+    state.current.sticky = fresh.sticky;
+    state.current.pinned = fresh.pinned;
+    renderStickyButton(state.current);
+    await refresh({ keepEditor: true });
   }
 
   // ---- bot: Claude Code over the notes -------------------------------------
@@ -1665,6 +1702,7 @@
     }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
@@ -1702,6 +1740,9 @@
     });
     el.readAloudBtn.addEventListener('click', toggleReadAloud);
     el.dictateBtn.addEventListener('click', startDictation);
+    el.stickyBtn.addEventListener('click', toggleSticky);
+    api.on.stickiesChanged(() => { refreshCurrentMeta(); });
+    api.on.openNote(async (id) => { await setView('all'); await selectNoteNow(id); });
     el.botBtn.addEventListener('click', () => toggleBot());
     el.botCloseBtn.addEventListener('click', () => toggleBot(false));
     el.botRunBtn.addEventListener('click', runBot);

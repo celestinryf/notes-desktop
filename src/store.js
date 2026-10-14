@@ -147,6 +147,20 @@ function sanitizeSettings(input) {
   return s;
 }
 
+const STICKY_COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
+
+// A note shown as a desktop sticky: where it sits, how big, which tint, whether it floats above other windows.
+function sanitizeSticky(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const num = (v, d) => (Number.isFinite(v) ? Math.round(v) : d);
+  return {
+    x: num(raw.x, null), y: num(raw.y, null),
+    w: Math.max(180, Math.min(1600, num(raw.w, 280))), h: Math.max(140, Math.min(1600, num(raw.h, 260))),
+    color: STICKY_COLORS.includes(raw.color) ? raw.color : 'peach',
+    onTop: raw.onTop !== false,
+  };
+}
+
 function sanitizeNote(raw, now) {
   if (!raw || typeof raw !== 'object') return null;
   const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
@@ -162,6 +176,7 @@ function sanitizeNote(raw, now) {
     fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
+    sticky: sanitizeSticky(raw.sticky),
     pinned: !!raw.pinned,
     createdAt,
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
@@ -412,6 +427,19 @@ class Store {
     return note;
   }
 
+  // Desktop stickies. Only this path changes the field; update() ignores it.
+  setSticky(id, sticky) {
+    const note = this.get(id);
+    if (!note) return null;
+    const next = sticky ? sanitizeSticky(Object.assign({}, note.sticky || {}, sticky)) : null;
+    if (JSON.stringify(next) === JSON.stringify(note.sticky || null)) return note;
+    return this._commit(() => { note.sticky = next; return note; });
+  }
+
+  stickies() {
+    return this.notes.filter((n) => n.sticky && !n.trashedAt);
+  }
+
   togglePin(id) {
     const note = this.get(id);
     if (!note) return null;
@@ -630,7 +658,7 @@ class Store {
       note.filePath = next;
     }
     try {
-      return this._commit(() => { note.trashedAt = this.now(); return note; }); // pinned is kept for restore
+      return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; }); // pinned is kept for restore
     } catch (err) {
       // The metadata write failed: put the file back so disk and memory agree again.
       if (moved) { try { fs.renameSync(moved.to, moved.from); } catch (_) { /* best effort */ } }
@@ -943,4 +971,5 @@ class Store {
   }
 }
 
-module.exports = { Store, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
+module.exports = {
+  STICKY_COLORS, sanitizeSticky, Store, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
