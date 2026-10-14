@@ -183,7 +183,7 @@ export function create(element, options) {
     try {
       editor.commands.setContent(md || '', false);
       // Loading a note is not an edit: a fresh state means Ctrl+Z cannot bring the previous note's text back.
-      editor.view.updateState(EditorState.create({ doc: editor.state.doc, plugins: editor.state.plugins }));
+      editor.view.updateState(EditorState.create({ doc: editor.state.doc, plugins: editor.state.plugins, selection: editor.state.selection }));
     } finally { suppress = false; }
     const out = getMarkdown();
     // Exact: byte-for-byte apart from trailing whitespace. Used for file-backed notes, where even a changed

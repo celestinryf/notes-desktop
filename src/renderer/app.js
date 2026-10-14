@@ -1768,8 +1768,20 @@
       label: 'Keep mine',
       run: async () => {
         state.conflictShown = null;
-        try { const updated = await api.notes.update(id, Object.assign({}, patch, { force: true })); state.pending.delete(id); if (state.currentId === id && updated) { state.dirty = false; state.current = updated; setSaved('Saved'); refreshCard(updated); } }
-        catch (err) { reportSaveFailure(err); scheduleRetry(); }
+        // Send what the person has NOW: the open fields if the note is still open, else the newest stash.
+        const latest = state.currentId === id ? currentPatch() : (state.pending.get(id) || patch);
+        try {
+          const updated = await api.notes.update(id, Object.assign({}, latest, { force: true }));
+          if (state.pending.get(id) === patch || state.pending.get(id) === latest) state.pending.delete(id);
+          if (state.currentId === id && updated) {
+            state.current = updated;
+            // Typing during the save keeps dirty and saves again; otherwise the fields and the store agree.
+            const same = JSON.stringify(currentPatch()) === JSON.stringify(latest);
+            state.dirty = !same;
+            if (same) setSaved('Saved'); else scheduleSave();
+            refreshCard(updated);
+          }
+        } catch (err) { reportSaveFailure(err); scheduleRetry(); }
       },
     });
     setTimeout(() => { if (state.conflictShown === id) state.conflictShown = null; }, 12000);
@@ -1798,6 +1810,8 @@
           toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
         }
       } catch (err) {
+        // A file that changed on disk is a decision, not a retry: offer it once and stop looping on it.
+        if (/changed on disk/i.test(String(err && err.message))) { offerConflictChoice(id, patch); continue; }
         failed = true;
         reportSaveFailure(err);
       }
