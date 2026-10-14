@@ -272,6 +272,40 @@ test('folders: load repairs cycles, dangling parents, duplicates, and orphaned n
   assert.ok(store.folderTree().length >= 1, 'tree renders after repair');
 });
 
+test('an unreadable (not corrupt) notes file pauses saving instead of loading a stale backup over it', () => {
+  const dir = tmpDir();
+  // A directory where the file should be makes every read fail with an I/O error, never a parse error.
+  fs.mkdirSync(path.join(dir, 'notes.json'));
+  const store = new Store(dir).load();
+  assert.equal(store.saveBlocked, true);
+  assert.ok(store.loadError);
+  assert.deepEqual(store.notes, []);
+  assert.throws(() => store.create({ title: 'x' }), /Saving is paused/);
+  assert.deepEqual(store.notes, [], 'the refused create did not linger');
+  assert.ok(!fs.readdirSync(dir).some((f) => f.startsWith('notes.json.corrupt-')), 'not quarantined as corrupt');
+});
+
+test('trash, restore, destroy, empty trash, folder ops, and settings roll back when the save fails', () => {
+  const { store } = makeStore();
+  const a = store.create({ title: 'a' });
+  const b = store.create({ title: 'b' });
+  const f = store.createFolder({ name: 'F' });
+  const g = store.createFolder({ name: 'G', parentId: f.id });
+  store.update(a.id, { folderId: g.id });
+  store.trash(b.id);
+  const snapshot = JSON.stringify(store.serialize());
+  store.save = () => { throw Object.assign(new Error('EPERM: locked'), { code: 'EPERM' }); };
+  assert.throws(() => store.trash(a.id), /EPERM/);
+  assert.throws(() => store.restore(b.id), /EPERM/);
+  assert.throws(() => store.destroy(b.id), /EPERM/);
+  assert.throws(() => store.emptyTrash(), /EPERM/);
+  assert.throws(() => store.renameFolder(g.id, 'H'), /EPERM/);
+  assert.throws(() => store.moveFolder(g.id, null), /EPERM/);
+  assert.throws(() => store.deleteFolder(g.id), /EPERM/);
+  assert.throws(() => store.setSettings({ theme: 'dark' }), /EPERM/);
+  assert.equal(JSON.stringify(store.serialize()), snapshot, 'memory identical after every failed mutation');
+});
+
 test('a failed save during create leaves nothing behind in memory', () => {
   const { store } = makeStore();
   store.create({ title: 'existing' });
