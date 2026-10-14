@@ -300,6 +300,121 @@ test('export note, export all, and import through stubbed dialogs', async () => 
   assert.deepEqual(imported.tags, ['inbox']);
 });
 
+test('folders: create, nest, new note inside, move via select and drag, counts, collapse, rename, reparent, delete, persist', async () => {
+  const step = (s) => console.log('  [folders] ' + s);
+  const folders = () => readNotes().folders;
+  const folderByName = (name) => folders().find((f) => f.name === name);
+  const row = (name) => `.folder-row:has(.folder-name:text-is("${name}"))`;
+  // Plain-DOM equivalents for page.evaluate, which cannot use Playwright selector engines.
+  const waitForCount = (name, count) => waitForDom(([n, c]) => {
+    const r = Array.from(document.querySelectorAll('.folder-row')).find((x) => { const nm = x.querySelector('.folder-name'); return nm && nm.textContent === n; });
+    return !!r && r.querySelector('.count').textContent === String(c);
+  }, [name, count]);
+
+  // Create a root folder from the + button.
+  await page.click('#newFolderBtn');
+  await page.waitForSelector('#folderTree .folder-input');
+  await page.keyboard.type('Work');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(row('Work') + '.is-active');
+  await waitFor('Work folder saved', () => folderByName('Work'));
+  assert.equal(await page.textContent('#listTitle'), 'Work');
+  assert.equal(await page.$$eval('.note-card', (c) => c.length), 0, 'new folder is empty');
+  step('created root folder');
+
+  // New note while inside the folder lands in it.
+  await page.keyboard.press('Control+n');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'In Work');
+  await waitFor('note created in folder', () => { const n = findNote('In Work'); return n && n.folderId === folderByName('Work').id; });
+  assert.equal(await page.$$eval('.note-card', (c) => c.length), 1);
+  step('new note inside folder');
+
+  // Subfolder through the context menu.
+  await page.click(row('Work'), { button: 'right' });
+  await page.waitForSelector('#folderMenu:not(.hidden)');
+  await page.click('#folderMenu button[data-action="new-subfolder"]');
+  await page.waitForSelector('#folderTree .folder-input');
+  await page.keyboard.type('Clients');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(row('Clients') + '.is-active');
+  await waitFor('Clients nested under Work', () => { const c = folderByName('Clients'); return c && c.parentId === folderByName('Work').id; });
+  assert.equal(await page.$eval(row('Clients'), (r) => r.style.getPropertyValue('--depth')), '1');
+  assert.equal((await page.textContent('#listTitle')).replace(/\s+/g, ' ').trim(), 'Work / Clients');
+  step('subfolder via menu');
+
+  // Move a note with the editor's folder select.
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Gamma")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma');
+  await page.selectOption('#folderSelect', folderByName('Clients').id);
+  await waitFor('Gamma moved to Clients', () => findNote('Gamma').folderId === folderByName('Clients').id);
+  step('moved via select');
+
+  // Move a note by dragging its card onto a folder.
+  await page.dragAndDrop('.note-card:has-text("Imported note")', row('Work'), { timeout: 8000 });
+  await waitFor('Imported note dragged into Work', () => findNote('Imported note').folderId === folderByName('Work').id);
+  step('moved via drag');
+
+  // Recursive count on the parent: In Work + Imported note + Gamma (in Clients).
+  await waitForCount('Work', 3);
+  step('recursive count');
+
+  // Collapse and expand persist.
+  await page.click(row('Work') + ' .folder-chevron', { timeout: 8000 });
+  await waitForDom(() => !Array.from(document.querySelectorAll('.folder-name')).some((n) => n.textContent === 'Clients'));
+  assert.deepEqual(readNotes().settings.expandedFolders, []);
+  await page.click(row('Work') + ' .folder-chevron', { timeout: 8000 });
+  await page.waitForSelector(row('Clients'), { timeout: 8000 });
+  assert.deepEqual(readNotes().settings.expandedFolders, [folderByName('Work').id]);
+  step('collapse/expand');
+
+  // Rename inline by double-click.
+  await page.dblclick(row('Clients') + ' .folder-name', { timeout: 8000 });
+  await page.waitForSelector('#folderTree .folder-input', { timeout: 8000 });
+  await page.fill('#folderTree .folder-input', 'Customers');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(row('Customers'), { timeout: 8000 });
+  await waitFor('renamed on disk', () => folderByName('Customers') && !folderByName('Clients'));
+  step('renamed');
+
+  // Reparent a folder by dragging it onto "All notes" (top level), then back into Work.
+  await page.dragAndDrop(row('Customers'), '.nav-item[data-view="all"]', { timeout: 8000 });
+  await waitFor('Customers is top level', () => folderByName('Customers').parentId === null);
+  await page.dragAndDrop(row('Customers'), row('Work'), { timeout: 8000 });
+  await waitFor('Customers back under Work', () => folderByName('Customers').parentId === folderByName('Work').id);
+  // Dropping a folder into its own subfolder is refused.
+  await page.dragAndDrop(row('Work'), row('Customers'), { timeout: 8000 });
+  await sleep(300);
+  assert.equal(folderByName('Work').parentId, null, 'cycle refused');
+  step('reparented');
+
+  // Search inside a folder looks across every note.
+  await page.click(row('Work'), { timeout: 8000 });
+  await page.fill('#searchInput', 'Alpha');
+  await page.waitForSelector('.note-card:has-text("Alpha")', { timeout: 8000 });
+  await page.fill('#searchInput', '');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 2);
+  step('global search from folder');
+
+  // Deleting a folder lifts its contents to the parent.
+  await page.hover(row('Customers'), { timeout: 8000 });
+  await page.click(row('Customers') + ' .folder-menu-btn', { timeout: 8000, force: true });
+  await page.waitForSelector('#folderMenu:not(.hidden)', { timeout: 8000 });
+  await page.click('#folderMenu button[data-action="delete"]', { timeout: 8000 });
+  await waitFor('Customers deleted', () => !folderByName('Customers'));
+  assert.equal(findNote('Gamma').folderId, folderByName('Work').id, 'Gamma lifted into Work');
+  await waitForCount('Work', 3);
+  step('deleted folder');
+
+  // Survives a reload.
+  await page.reload({ timeout: 8000 });
+  await page.waitForSelector(row('Work'), { timeout: 8000 });
+  await page.click('.nav-item[data-view="all"]', { timeout: 8000 });
+  await waitForDom(() => document.querySelectorAll('.note-card').length >= 3);
+  step('persisted across reload');
+});
+
 test('drag handles resize the sidebar and list, persist, clamp, and reset on double-click', async () => {
   const widths = () => page.evaluate(() => {
     const s = getComputedStyle(document.getElementById('app')).gridTemplateColumns.split(' ').map((v) => parseFloat(v));

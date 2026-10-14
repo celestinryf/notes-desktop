@@ -32,11 +32,18 @@
     settingsInfo: $('#settingsInfo'),
     toast: $('#toast'),
     sidebarResizer: $('#sidebarResizer'), listResizer: $('#listResizer'),
+    newFolderBtn: $('#newFolderBtn'), folderTree: $('#folderTree'), folderSelect: $('#folderSelect'), folderMenu: $('#folderMenu'),
+    navAll: document.querySelector('.nav-item[data-view="all"]'),
   };
 
   const state = {
-    view: 'all',          // all | pinned | trash | tag
+    view: 'all',          // all | pinned | trash | tag | folder
     tag: null,
+    folderId: null,
+    tree: [],
+    folderPath: [],
+    menuFolderId: null,
+    editingFolder: null,  // { mode: 'create' | 'rename', id, parentId }
     query: '',
     notes: [],
     currentId: null,
@@ -197,12 +204,27 @@
     opts = opts || {};
     const listOpts = { query: state.query, sort: state.settings.sort };
     if (state.view === 'trash') listOpts.trashed = true;
-    if (state.view === 'pinned') listOpts.pinned = true;
-    if (state.view === 'tag') listOpts.tag = state.tag;
-    const [notes, counts, tags] = await Promise.all([api.notes.list(listOpts), api.notes.counts(), api.notes.tags()]);
+    else if (state.query) { /* a search looks across every live note, whatever is selected */ }
+    else if (state.view === 'pinned') listOpts.pinned = true;
+    else if (state.view === 'tag') listOpts.tag = state.tag;
+    else if (state.view === 'folder') listOpts.folderId = state.folderId;
+    const [notes, counts, tags, tree, folderPath] = await Promise.all([
+      api.notes.list(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
+      state.view === 'folder' ? api.folders.path(state.folderId) : Promise.resolve([]),
+    ]);
     state.notes = notes;
+    state.tree = tree;
+    state.folderPath = folderPath;
+    if (state.view === 'folder' && !folderPath.length) {
+      // The folder we were looking at is gone; fall back to all notes.
+      state.view = 'all'; state.folderId = null;
+      el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all'));
+      return refresh(opts);
+    }
     renderCounts(counts);
     renderTags(tags);
+    renderFolders();
+    renderFolderSelect();
     renderList();
     const inList = notes.some((n) => n.id === state.currentId);
     if (!inList && !opts.keepEditor) {
@@ -246,7 +268,18 @@
     el.listEmpty.classList.toggle('hidden', state.notes.length > 0);
     el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
     const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', tag: '#' + state.tag };
-    el.listTitle.textContent = q ? 'Results' : titles[state.view];
+    el.listTitle.innerHTML = '';
+    if (q) el.listTitle.textContent = 'Results';
+    else if (state.view === 'folder') {
+      state.folderPath.forEach((p, i) => {
+        if (i < state.folderPath.length - 1) {
+          const crumb = document.createElement('span');
+          crumb.className = 'list-crumb';
+          crumb.textContent = p.name + ' / ';
+          el.listTitle.append(crumb);
+        } else el.listTitle.append(document.createTextNode(p.name));
+      });
+    } else el.listTitle.textContent = titles[state.view];
     const frag = document.createDocumentFragment();
     state.notes.forEach((n, i) => {
       const li = document.createElement('li');
@@ -260,6 +293,15 @@
         '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>' +
         '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + tags + '</div>';
       li.addEventListener('click', () => selectNote(n.id));
+      if (!n.trashedAt) {
+        li.draggable = true;
+        li.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/x-note-id', n.id);
+          e.dataTransfer.effectAllowed = 'move';
+          li.classList.add('is-dragging');
+        });
+        li.addEventListener('dragend', () => li.classList.remove('is-dragging'));
+      }
       frag.append(li);
     });
     el.noteList.append(frag);
@@ -277,12 +319,294 @@
 
   // ---- views ---------------------------------------------------------------
 
-  async function setView(view, tag) {
+  async function setView(view, arg) {
     await flushSave();
     state.view = view;
-    state.tag = view === 'tag' ? tag : null;
+    state.tag = view === 'tag' ? arg : null;
+    state.folderId = view === 'folder' ? arg : null;
     el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
     await refresh();
+  }
+
+  // ---- folders -------------------------------------------------------------
+
+  function expandedSet() {
+    return new Set(state.settings.expandedFolders || []);
+  }
+
+  async function setExpanded(id, open) {
+    const set = expandedSet();
+    if (open) set.add(id); else set.delete(id);
+    await updateSettings({ expandedFolders: Array.from(set) });
+    renderFolders();
+  }
+
+  function flattenTree(nodes, out) {
+    out = out || [];
+    for (const n of nodes) { out.push(n); flattenTree(n.children, out); }
+    return out;
+  }
+
+  function editKey(edit) {
+    return edit ? edit.mode + ':' + (edit.id || edit.parentId || 'root') : '';
+  }
+
+  function renderFolders() {
+    const open = expandedSet();
+    const editing = state.editingFolder;
+    // A background refresh must not rebuild the tree under an open name field: that would blur it and commit early.
+    const liveInput = el.folderTree.querySelector('.folder-input');
+    if (editing && liveInput && liveInput.dataset.editKey === editKey(editing)) return;
+    el.folderTree.innerHTML = '';
+    if (!state.tree.length && !(editing && editing.mode === 'create' && !editing.parentId)) {
+      const d = document.createElement('div');
+      d.className = 'folders-empty';
+      d.textContent = 'No folders yet. Press + to make one.';
+      el.folderTree.append(d);
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    const addRow = (node) => {
+      const row = document.createElement('div');
+      row.className = 'folder-row' + (state.view === 'folder' && state.folderId === node.id ? ' is-active' : '');
+      row.dataset.id = node.id;
+      row.style.setProperty('--depth', node.depth);
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-expanded', node.children.length ? String(open.has(node.id)) : 'false');
+      row.draggable = !(editing && editing.mode === 'rename' && editing.id === node.id);
+
+      const chevron = document.createElement('button');
+      chevron.className = 'folder-chevron' + (node.children.length ? (open.has(node.id) ? ' is-open' : '') : ' is-leaf');
+      chevron.textContent = '▶';
+      chevron.title = open.has(node.id) ? 'Collapse' : 'Expand';
+      chevron.setAttribute('aria-label', chevron.title);
+      chevron.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(node.id, !open.has(node.id)); });
+      row.append(chevron);
+
+      const icon = document.createElement('span');
+      icon.className = 'folder-icon';
+      icon.textContent = '▰';
+      row.append(icon);
+
+      if (editing && editing.mode === 'rename' && editing.id === node.id) {
+        row.append(folderInput(node.name, (value) => commitFolderEdit(value)));
+      } else {
+        const name = document.createElement('span');
+        name.className = 'folder-name';
+        name.textContent = node.name;
+        name.title = node.name;
+        row.append(name);
+        const count = document.createElement('span');
+        count.className = 'count';
+        count.textContent = node.count;
+        row.append(count);
+        const menu = document.createElement('button');
+        menu.className = 'folder-menu-btn';
+        menu.textContent = '⋯';
+        menu.title = 'Folder actions';
+        menu.setAttribute('aria-label', 'Folder actions for ' + node.name);
+        menu.addEventListener('click', (e) => { e.stopPropagation(); openFolderMenu(node.id, menu); });
+        row.append(menu);
+      }
+
+      row.addEventListener('click', () => { if (!(editing && editing.id === node.id)) setView('folder', node.id); });
+      row.addEventListener('dblclick', (e) => { if (!e.target.closest('.folder-input')) { e.preventDefault(); startRename(node.id); } });
+      row.addEventListener('contextmenu', (e) => { e.preventDefault(); openFolderMenu(node.id, row, e); });
+      wireDropTarget(row, node.id);
+      row.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/x-folder-id', node.id);
+        e.dataTransfer.effectAllowed = 'move';
+        row.classList.add('is-dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
+      frag.append(row);
+
+      if (editing && editing.mode === 'create' && editing.parentId === node.id) frag.append(createRow(node.depth + 1));
+      if (open.has(node.id)) node.children.forEach(addRow);
+    };
+    const createRow = (depth) => {
+      const row = document.createElement('div');
+      row.className = 'folder-row is-active';
+      row.style.setProperty('--depth', depth);
+      const icon = document.createElement('span');
+      icon.className = 'folder-icon';
+      icon.textContent = '▰';
+      row.append(document.createElement('span'), icon);
+      row.firstChild.className = 'folder-chevron is-leaf';
+      row.append(folderInput('', (value) => commitFolderEdit(value)));
+      return row;
+    };
+    if (editing && editing.mode === 'create' && !editing.parentId) frag.append(createRow(0));
+    state.tree.forEach(addRow);
+    el.folderTree.append(frag);
+    const input = el.folderTree.querySelector('.folder-input');
+    if (input) { input.focus(); input.select(); }
+  }
+
+  function folderInput(value, commit) {
+    const input = document.createElement('input');
+    input.className = 'folder-input';
+    input.dataset.editKey = editKey(state.editingFolder);
+    input.value = value;
+    input.placeholder = 'Folder name';
+    input.setAttribute('aria-label', 'Folder name');
+    input.spellcheck = false;
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save) commit(input.value);
+      else cancelFolderEdit();
+    };
+    input.addEventListener('blur', () => { if (input.isConnected) finish(true); });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('dblclick', (e) => e.stopPropagation());
+    return input;
+  }
+
+  function startCreateFolder(parentId) {
+    closeFolderMenu();
+    state.editingFolder = { mode: 'create', parentId: parentId || null };
+    if (parentId) {
+      const set = expandedSet();
+      if (!set.has(parentId)) { set.add(parentId); updateSettings({ expandedFolders: Array.from(set) }).then(renderFolders); return; }
+    }
+    renderFolders();
+  }
+
+  function startRename(id) {
+    closeFolderMenu();
+    state.editingFolder = { mode: 'rename', id };
+    renderFolders();
+  }
+
+  function cancelFolderEdit() {
+    state.editingFolder = null;
+    renderFolders();
+  }
+
+  async function commitFolderEdit(value) {
+    const edit = state.editingFolder;
+    state.editingFolder = null;
+    if (!edit) return;
+    const name = String(value || '').trim();
+    if (edit.mode === 'create') {
+      if (!name) { renderFolders(); return; }
+      const folder = await api.folders.create({ name, parentId: edit.parentId });
+      await setView('folder', folder.id);
+      toast('Folder "' + H.truncate(folder.name, 30) + '" created');
+    } else {
+      if (name) await api.folders.rename(edit.id, name);
+      await refresh({ keepEditor: true });
+    }
+  }
+
+  async function deleteFolder(id) {
+    closeFolderMenu();
+    const node = flattenTree(state.tree).find((n) => n.id === id);
+    if (!node) return;
+    const what = [];
+    if (node.count) what.push(node.count + (node.count === 1 ? ' note' : ' notes'));
+    if (node.children.length) what.push(node.children.length + (node.children.length === 1 ? ' subfolder' : ' subfolders'));
+    const detail = what.length ? ' Its ' + what.join(' and ') + ' move up one level; nothing is deleted.' : '';
+    if (!window.confirm('Delete folder "' + node.name + '"?' + detail)) return;
+    await flushSave();
+    const res = await api.folders.delete(id);
+    if (state.view === 'folder' && (state.folderId === id || !flattenTree(state.tree).some((n) => n.id === state.folderId))) {
+      if (res && res.parentId) await setView('folder', res.parentId); else await setView('all');
+    } else await refresh({ keepEditor: true });
+    toast('Folder deleted');
+  }
+
+  async function moveNoteToFolder(noteId, folderId) {
+    await flushSave();
+    const updated = await api.notes.update(noteId, { folderId: folderId || null });
+    if (state.currentId === noteId && updated) state.current = updated;
+    await refresh({ keepEditor: true });
+    const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
+    toast(name ? 'Moved to ' + H.truncate(name, 30) : 'Moved out of folders');
+  }
+
+  async function moveFolderTo(folderId, parentId) {
+    const res = await api.folders.move(folderId, parentId || null);
+    if (res && res.error) { toast(res.error); return; }
+    if (parentId) { const set = expandedSet(); if (!set.has(parentId)) { set.add(parentId); await updateSettings({ expandedFolders: Array.from(set) }); } }
+    await refresh({ keepEditor: true });
+  }
+
+  function wireDropTarget(target, folderId) {
+    const accepts = (e) => e.dataTransfer && (e.dataTransfer.types.includes('text/x-note-id') || e.dataTransfer.types.includes('text/x-folder-id'));
+    target.addEventListener('dragover', (e) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      target.classList.add('is-drop-target');
+    });
+    target.addEventListener('dragleave', () => target.classList.remove('is-drop-target'));
+    target.addEventListener('drop', (e) => {
+      target.classList.remove('is-drop-target');
+      const noteId = e.dataTransfer.getData('text/x-note-id');
+      const movingFolder = e.dataTransfer.getData('text/x-folder-id');
+      if (!noteId && !movingFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (noteId) moveNoteToFolder(noteId, folderId);
+      else if (movingFolder && movingFolder !== folderId) moveFolderTo(movingFolder, folderId);
+    });
+  }
+
+  function renderFolderSelect() {
+    const sel = el.folderSelect;
+    const current = state.current ? (state.current.folderId || '') : '';
+    sel.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'No folder';
+    sel.append(none);
+    for (const node of flattenTree(state.tree)) {
+      const opt = document.createElement('option');
+      opt.value = node.id;
+      opt.textContent = '  '.repeat(node.depth) + (node.depth ? '└ ' : '') + node.name;
+      sel.append(opt);
+    }
+    sel.value = current;
+    if (sel.value !== current) sel.value = '';
+  }
+
+  function openFolderMenu(id, anchor, ev) {
+    state.menuFolderId = id;
+    const menu = el.folderMenu;
+    menu.classList.remove('hidden');
+    const rect = anchor.getBoundingClientRect();
+    let x = ev ? ev.clientX : rect.right - 4;
+    let y = ev ? ev.clientY : rect.bottom + 4;
+    menu.style.left = '0px'; menu.style.top = '0px';
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+    if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.querySelector('button').focus();
+  }
+
+  function closeFolderMenu() {
+    state.menuFolderId = null;
+    el.folderMenu.classList.add('hidden');
+  }
+
+  async function folderMenuAction(action) {
+    const id = state.menuFolderId;
+    closeFolderMenu();
+    if (!id) return;
+    if (action === 'new-note') { await setView('folder', id); await newNote(); }
+    else if (action === 'new-subfolder') startCreateFolder(id);
+    else if (action === 'rename') startRename(id);
+    else if (action === 'delete') deleteFolder(id);
   }
 
   // ---- editor --------------------------------------------------------------
@@ -316,6 +640,8 @@
     el.destroyBtn.classList.toggle('hidden', !inTrash);
     el.pinBtn.textContent = note.pinned ? '★' : '☆';
     el.pinBtn.classList.toggle('is-on', note.pinned);
+    el.folderSelect.disabled = inTrash;
+    renderFolderSelect();
     el.editorEmpty.classList.add('hidden');
     el.editor.classList.remove('hidden');
     el.noteList.querySelectorAll('.note-card').forEach((c) => c.classList.toggle('is-active', c.dataset.id === id));
@@ -380,6 +706,7 @@
     const data = {};
     if (state.view === 'tag' && state.tag) data.tags = [state.tag];
     if (state.view === 'pinned') data.pinned = true;
+    if (state.view === 'folder' && state.folderId) data.folderId = state.folderId;
     const note = await api.notes.create(data);
     state.query = '';
     el.searchInput.value = '';
@@ -601,6 +928,7 @@
     const inDialog = el.settingsDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
+      if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
         state.query = '';
@@ -634,6 +962,11 @@
       updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
       return;
     }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      startCreateFolder(state.view === 'folder' ? state.folderId : null);
+      return;
+    }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       const idx = state.notes.findIndex((n) => n.id === state.currentId);
@@ -652,6 +985,13 @@
     el.toggleSidebarBtn.addEventListener('click', () => updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }));
     setupResizer(el.sidebarResizer, 'sidebarWidth');
     setupResizer(el.listResizer, 'listWidth');
+
+    // Folders
+    el.newFolderBtn.addEventListener('click', () => startCreateFolder(state.view === 'folder' ? state.folderId : null));
+    el.folderSelect.addEventListener('change', () => { if (state.currentId) moveNoteToFolder(state.currentId, el.folderSelect.value || null); });
+    el.folderMenu.querySelectorAll('button[data-action]').forEach((b) => b.addEventListener('click', () => folderMenuAction(b.dataset.action)));
+    document.addEventListener('pointerdown', (e) => { if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu(); });
+    wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
     window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });
 
     let searchTimer = null;

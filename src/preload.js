@@ -23,6 +23,14 @@ contextBridge.exposeInMainWorld('notesApi', {
     tags: invoke('notes:tags'),
     counts: invoke('notes:counts'),
   },
+  folders: {
+    tree: invoke('folders:tree'),
+    path: invoke('folders:path'),
+    create: invoke('folders:create'),
+    rename: invoke('folders:rename'),
+    move: invoke('folders:move'),
+    delete: invoke('folders:delete'),
+  },
   settings: {
     get: invoke('settings:get'),
     set: invoke('settings:set'),

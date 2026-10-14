@@ -237,6 +237,13 @@ function main() {
   ipcMain.handle('notes:tags', () => store.tags());
   ipcMain.handle('notes:counts', () => store.counts());
 
+  ipcMain.handle('folders:tree', () => store.folderTree());
+  ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
+  ipcMain.handle('folders:create', (_e, data) => store.createFolder(data));
+  ipcMain.handle('folders:rename', (_e, id, name) => store.renameFolder(id, name));
+  ipcMain.handle('folders:move', (_e, id, parentId) => store.moveFolder(id, parentId));
+  ipcMain.handle('folders:delete', (_e, id) => store.deleteFolder(id));
+
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:set', (_e, patch) => {
     patch = patch || {};

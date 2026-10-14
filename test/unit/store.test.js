@@ -171,6 +171,101 @@ test('malformed notes in the file are repaired rather than crashing', () => {
   assert.deepEqual(store.getSettings(), DEFAULT_SETTINGS);
 });
 
+test('folders: create, nest, tree with recursive counts, path', () => {
+  const { store } = makeStore();
+  const work = store.createFolder({ name: '  Work  ' });
+  const clients = store.createFolder({ name: 'Clients', parentId: work.id });
+  const acme = store.createFolder({ name: 'Acme', parentId: clients.id });
+  store.createFolder({ name: 'Home' });
+  assert.equal(work.name, 'Work');
+  store.create({ title: 'a', folderId: work.id });
+  store.create({ title: 'b', folderId: acme.id });
+  const t = store.create({ title: 'c', folderId: acme.id });
+  store.trash(t.id);
+  store.create({ title: 'loose' });
+  const tree = store.folderTree();
+  assert.deepEqual(tree.map((f) => f.name), ['Home', 'Work']);
+  const w = tree[1];
+  assert.equal(w.count, 2, 'recursive count excludes trashed');
+  assert.equal(w.children[0].name, 'Clients');
+  assert.equal(w.children[0].children[0].name, 'Acme');
+  assert.equal(w.children[0].children[0].depth, 2);
+  assert.deepEqual(store.folderPath(acme.id).map((p) => p.name), ['Work', 'Clients', 'Acme']);
+  assert.deepEqual(store.folderPath('nope'), []);
+  assert.deepEqual(store.list({ folderId: work.id }).map((n) => n.title), ['a']);
+  assert.deepEqual(store.list({ folderId: work.id, recursive: true }).map((n) => n.title).sort(), ['a', 'b']);
+  assert.deepEqual(store.list({ folderId: null }).map((n) => n.title), ['loose']);
+});
+
+test('folders: rename, move with cycle protection, delete lifts contents to parent', () => {
+  const { store } = makeStore();
+  const a = store.createFolder({ name: 'A' });
+  const b = store.createFolder({ name: 'B', parentId: a.id });
+  const c = store.createFolder({ name: 'C', parentId: b.id });
+  const n = store.create({ title: 'in b', folderId: b.id });
+  assert.equal(store.renameFolder(b.id, '  Bee ').name, 'Bee');
+  assert.equal(store.renameFolder(b.id, '').name, 'Untitled folder');
+  assert.equal(store.renameFolder('nope', 'x'), null);
+  assert.ok(store.moveFolder(a.id, c.id).error, 'cannot move into own descendant');
+  assert.ok(store.moveFolder(a.id, a.id).error, 'cannot move into itself');
+  assert.ok(store.moveFolder(a.id, 'missing').error);
+  assert.equal(store.moveFolder(c.id, null).folder.parentId, null);
+  assert.equal(store.moveFolder(c.id, a.id).folder.parentId, a.id);
+  const res = store.deleteFolder(b.id);
+  assert.deepEqual(res, { movedNotes: 1, movedFolders: 0, parentId: a.id });
+  assert.equal(store.get(n.id).folderId, a.id);
+  assert.equal(store.getFolder(b.id), null);
+  assert.equal(store.deleteFolder('nope'), null);
+  store.deleteFolder(a.id);
+  assert.equal(store.get(n.id).folderId, null);
+  assert.equal(store.getFolder(c.id).parentId, null);
+});
+
+test('folders: note updates validate folderId; restore drops a deleted folder; duplicate keeps folder', () => {
+  const { store } = makeStore();
+  const f = store.createFolder({ name: 'F' });
+  const n = store.create({ title: 'n' });
+  store.update(n.id, { folderId: f.id });
+  assert.equal(store.get(n.id).folderId, f.id);
+  assert.equal(store.duplicate(n.id).folderId, f.id);
+  store.update(n.id, { folderId: 'missing' });
+  assert.equal(store.get(n.id).folderId, null);
+  store.update(n.id, { folderId: f.id });
+  store.trash(n.id);
+  store.folders = store.folders.filter((x) => x.id !== f.id);
+  store.restore(n.id);
+  assert.equal(store.get(n.id).folderId, null);
+  assert.equal(store.create({ title: 'x', folderId: 'ghost' }).folderId, null);
+});
+
+test('folders: load repairs cycles, dangling parents, duplicates, and orphaned notes', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({
+    folders: [
+      { id: 'a', name: 'A', parentId: 'b' },
+      { id: 'b', name: 'B', parentId: 'a' },
+      { id: 'c', name: 'C', parentId: 'zzz' },
+      { id: 'c', name: 'C dup' },
+      { id: 'd', name: 'D', parentId: 'd' },
+      { id: 'e', name: '', parentId: 'a' },
+      'junk',
+    ],
+    notes: [{ id: 'n1', title: 'n1', folderId: 'gone' }, { id: 'n2', title: 'n2', folderId: 'a' }],
+    settings: { expandedFolders: ['a', 'gone', 7] },
+  }));
+  const store = new Store(dir).load();
+  const byId = Object.fromEntries(store.folders.map((f) => [f.id, f]));
+  assert.deepEqual(Object.keys(byId).sort(), ['a', 'b', 'c', 'd', 'e']);
+  assert.ok(byId.a.parentId === null || byId.b.parentId === null, 'cycle broken');
+  assert.equal(byId.c.parentId, null);
+  assert.equal(byId.d.parentId, null);
+  assert.equal(byId.e.name, 'Untitled folder');
+  assert.equal(store.get('n1').folderId, null);
+  assert.equal(store.get('n2').folderId, 'a');
+  assert.deepEqual(store.getSettings().expandedFolders, ['a']);
+  assert.ok(store.folderTree().length >= 1, 'tree renders after repair');
+});
+
 test('export and import markdown', () => {
   const { store } = makeStore();
   const a = store.create({ title: 'Re: plan?', body: 'body', tags: ['x'] });

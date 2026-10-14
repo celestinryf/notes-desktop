@@ -27,6 +27,12 @@
         <button class="nav-item" data-view="trash"><span>Trash</span><span class="count" id="countTrash">0</span></button>
       </nav>
 
+      <div class="nav-heading nav-heading-row">
+        <span>Folders</span>
+        <button class="mini-btn" id="newFolderBtn" title="New folder (Ctrl+Shift+N)" aria-label="New folder">+</button>
+      </div>
+      <nav class="nav folders" id="folderTree" aria-label="Folders"></nav>
+
       <div class="nav-heading">Tags</div>
       <nav class="nav tags" id="tagList" aria-label="Tags"></nav>
 
@@ -85,6 +91,7 @@
             <button class="tool-btn" id="toggleSidebarBtn" title="Toggle sidebar (Ctrl+\)" aria-label="Toggle sidebar">☰</button>
             <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
             <button class="tool-btn" id="previewBtn" title="Preview (Ctrl+E)" aria-label="Toggle preview">Preview</button>
+            <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
           </div>
           <div class="toolbar-right">
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
@@ -162,6 +169,12 @@
     </dialog>
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+    <div class="popover hidden" id="folderMenu" role="menu">
+      <button role="menuitem" data-action="new-note">New note here</button>
+      <button role="menuitem" data-action="new-subfolder">New subfolder</button>
+      <button role="menuitem" data-action="rename">Rename</button>
+      <button role="menuitem" data-action="delete" class="danger">Delete folder</button>
+    </div>
   </div>
 
   <script src="vendor/marked.umd.js"></script>
