@@ -137,3 +137,19 @@ test('forgetNote removes a note\'s exported file and manifest entry', () => {
   assert.match(r.details.join('\n'), /skipped \(note locked meanwhile\)/);
   assert.ok(!store.notes.some((n) => n.title === 'Other (bot)'));
 });
+
+test('exportNotes keeps notes apart when two folders differ only by case (one folder on Windows)', () => {
+  const store = new Store(tmp()).load();
+  const upper = store.createFolder({ name: 'Work' });
+  const lower = store.createFolder({ name: 'work' });
+  const x = store.create({ title: 'T', body: 'X body', folderId: upper.id });
+  const y = store.create({ title: 'T', body: 'Y body', folderId: lower.id });
+  const dir = tmp();
+  const manifest = W.exportNotes(store, dir);
+  const rels = manifest.files.map((f) => f.rel.toLowerCase());
+  assert.equal(new Set(rels).size, 2, 'two distinct files: ' + rels.join(', '));
+  const r = W.importNotes(store, dir);
+  assert.equal(r.updated, 0, 'an import with no edits changes nothing');
+  assert.equal(store.get(x.id).body, 'X body');
+  assert.equal(store.get(y.id).body, 'Y body');
+});

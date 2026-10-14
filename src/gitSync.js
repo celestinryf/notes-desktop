@@ -11,7 +11,7 @@ const COPY_RETRIES = 8;
 
 function run(args, cwd, timeoutMs) {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
     });
   });
