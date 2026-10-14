@@ -61,6 +61,9 @@ class StickyManager {
       },
     });
     this.windows.set(id, w);
+    // Same guards as the main window: nothing navigates or opens windows from the privileged page.
+    w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); return { action: 'deny' }; });
+    w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); } });
     w.loadFile(path.join(__dirname, 'renderer', 'sticky.html'), { query: { id } });
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;
@@ -111,6 +114,12 @@ class StickyManager {
   // Opens every note that was a sticky when the app last ran.
   restoreAll() {
     for (const n of this.store.stickies()) { try { this.open(n.id, { focus: false }); } catch (err) { console.error('[stickies] restore failed', err); } }
+  }
+
+  // Gives every sticky the chance to write a pending edit; flushFn(window) resolves when it has.
+  flushAll(flushFn) {
+    const open = Array.from(this.windows.values()).filter((w) => !w.isDestroyed());
+    return Promise.all(open.map((w) => flushFn(w).catch(() => {})));
   }
 
   closeAll() {

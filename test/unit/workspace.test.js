@@ -55,3 +55,40 @@ test('importNotes applies edits, creates notes for new files in the right folder
   const r2 = W.importNotes(store, dir);
   assert.deepEqual([r2.updated, r2.created], [0, 0]);
 });
+
+test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s version beside it; refreshWorkspace imports before it rewrites', () => {
+  const store = new Store(tmp()).load();
+  const a = store.create({ title: 'Plan', body: 'v1' });
+  const dir = tmp();
+  W.exportNotes(store, dir);
+  // Both sides change: the app saves first (later updatedAt than the export), the agent edits the file.
+  store.update(a.id, { body: 'v2 (mine)' });
+  fs.writeFileSync(path.join(dir, 'Plan.md'), 'v2 (agent)', 'utf8');
+  const r = W.importNotes(store, dir);
+  assert.equal(r.conflicts, 1);
+  assert.equal(r.updated, 0);
+  assert.equal(store.get(a.id).body, 'v2 (mine)', 'my text kept');
+  const copy = store.notes.find((n) => n.title === 'Plan (bot)');
+  assert.ok(copy && copy.body === 'v2 (agent)', 'agent text saved beside it');
+  assert.match(r.details.join('\n'), /conflict: Plan\.md/);
+  // A note trashed mid-run is skipped, not resurrected.
+  const t = store.create({ title: 'Doomed', body: 'x' });
+  W.exportNotes(store, dir);
+  store.trash(t.id);
+  fs.writeFileSync(path.join(dir, 'Doomed.md'), 'agent wrote', 'utf8');
+  const r2 = W.importNotes(store, dir);
+  assert.equal(r2.updated, 0);
+  assert.ok(store.get(t.id).trashedAt, 'still trashed');
+  assert.match(r2.details.join('\n'), /skipped \(note trashed meanwhile\): Doomed\.md/);
+  // refreshWorkspace: edits made in the folder since the last export (a terminal session) survive the rewrite.
+  W.exportNotes(store, dir);
+  fs.writeFileSync(path.join(dir, 'Plan.md'), 'v3 from terminal', 'utf8');
+  fs.writeFileSync(path.join(dir, 'Terminal note.md'), 'typed in a terminal', 'utf8');
+  const { imported, manifest } = W.refreshWorkspace(store, dir);
+  assert.equal(imported.updated, 1);
+  assert.equal(imported.created, 1);
+  assert.equal(store.get(a.id).body, 'v3 from terminal');
+  assert.ok(store.notes.find((n) => n.title === 'Terminal note'));
+  assert.ok(manifest.files.some((f) => f.rel === 'Terminal note.md'), 're-exported with the new note');
+  assert.equal(fs.readFileSync(path.join(dir, 'Plan.md'), 'utf8'), 'v3 from terminal');
+});

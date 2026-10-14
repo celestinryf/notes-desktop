@@ -141,6 +141,7 @@ function main() {
     // Windows logoff/shutdown does not emit before-quit; do what can be done synchronously.
     win.on('session-end', () => {
       try { win.webContents.send('app:flush'); } catch (_) { /* ignore */ }
+      stickies.broadcast('app:flush');
       git.flush().catch(() => {});
     });
     win.on('hide', () => writeRuntime());
@@ -441,23 +442,39 @@ function main() {
   // ---- bot: Claude Code over the notes -------------------------------------
 
   const workspace = require('./workspace');
+  const claudeBin = require('./claude-bin');
   const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
-  const CLAUDE_BIN = process.env.NOTES_APP_CLAUDE_BIN || 'claude';
   let botChild = null;
 
+  function findClaude() {
+    return claudeBin.resolveClaude({ override: process.env.NOTES_APP_CLAUDE_BIN || null });
+  }
+
   // Where the agent should work for the note in front of the user: the vault folder for vault notes, the
-  // file's folder for other file notes, otherwise the exported workspace of plain notes.
+  // file's folder for other file notes, otherwise the exported workspace of plain notes. The workspace is
+  // imported before it is rewritten, so edits made there in a terminal session are never thrown away.
   function botCwdFor(noteId) {
     const note = noteId ? store.get(noteId) : null;
     if (note && note.vaultId) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
     if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
-    const manifest = workspace.exportNotes(store, WORKSPACE_DIR);
+    const { imported, manifest } = workspace.refreshWorkspace(store, WORKSPACE_DIR);
+    if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentHash = contentHash(); if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' }); }
     const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
-    return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null };
+    return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null, imported };
   }
 
   function botSend(type, data) {
     if (win && !win.isDestroyed()) win.webContents.send('bot:event', Object.assign({ type }, data || {}));
+  }
+
+  function killTree(child) {
+    if (!child || child.exitCode !== null) return;
+    if (process.platform === 'win32') {
+      // kill() alone would leave grandchildren (and their edits) running.
+      try { require('child_process').execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {}); } catch (_) { /* ignore */ }
+    } else {
+      try { child.kill('SIGTERM'); } catch (_) { /* ignore */ }
+    }
   }
 
   ipcMain.handle('bot:run', async (_e, opts) => {
@@ -465,6 +482,8 @@ function main() {
     if (botChild) return { ok: false, error: 'A run is already in progress.' };
     const prompt = String(opts.prompt || '').trim();
     if (!prompt) return { ok: false, error: 'Type what you want done.' };
+    const spec = findClaude();
+    if (!spec) return { ok: false, error: 'Claude Code was not found. Install it (npm i -g @anthropic-ai/claude-code, or the native installer) and make sure "claude" is on your PATH.' };
     let target;
     try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not prepare the workspace: ' + err.message }; }
     const intro = target.kind === 'workspace'
@@ -474,28 +493,25 @@ function main() {
     const fullPrompt = intro + focusLine + '\n\nTask: ' + prompt;
     const allowed = opts.allowEdits === false ? 'Read,Glob,Grep' : 'Read,Glob,Grep,Edit,Write,MultiEdit';
     const args = ['-p', fullPrompt, '--output-format', 'text', '--permission-mode', 'dontAsk', '--allowedTools', allowed];
-    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus });
+    // Never through a shell: the prompt is one argv entry, whatever it contains.
+    const launch = claudeBin.launchSpec(spec, args);
+    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, imported: target.imported });
     const { spawn } = require('child_process');
     let child;
     try {
-      const env = Object.assign({}, process.env, { CLAUDE_CODE_NONINTERACTIVE: '1' });
-      if (/\.js$/i.test(CLAUDE_BIN)) {
-        // A script stand-in (tests): run it with this executable acting as plain Node.
-        child = spawn(process.execPath, [CLAUDE_BIN].concat(args), { cwd: target.cwd, windowsHide: true, env: Object.assign(env, { ELECTRON_RUN_AS_NODE: '1' }) });
-      } else {
-        // `claude` on Windows is an npm .cmd shim, which needs a shell to resolve; a full path to an .exe does not.
-        child = spawn(CLAUDE_BIN, args, { cwd: target.cwd, windowsHide: true, shell: process.platform === 'win32' && !/\.exe$/i.test(CLAUDE_BIN), env });
-      }
+      child = spawn(launch.file, launch.args, { cwd: target.cwd, windowsHide: true, shell: false, env: Object.assign({}, process.env, { CLAUDE_CODE_NONINTERACTIVE: '1' }, launch.env) });
     } catch (err) {
       botSend('end', { ok: false, error: err.message });
       return { ok: false, error: err.message };
     }
     botChild = child;
+    let ended = false;
+    const end = (data) => { if (ended) return; ended = true; if (botChild === child) botChild = null; botSend('end', data); };
     child.stdout.on('data', (d) => botSend('out', { text: String(d) }));
     child.stderr.on('data', (d) => botSend('err', { text: String(d) }));
-    child.on('error', (err) => { botSend('end', { ok: false, error: 'Could not start "' + CLAUDE_BIN + '": ' + err.message + '. Is Claude Code installed and on PATH?' }); botChild = null; });
+    child.on('error', (err) => end({ ok: false, error: 'Could not start "' + launch.file + '": ' + err.message }));
     child.on('close', (code) => {
-      botChild = null;
+      if (ended) return;
       let imported = null;
       if (target.kind === 'workspace') {
         try { imported = workspace.importNotes(store, WORKSPACE_DIR); } catch (err) { imported = { error: err.message }; }
@@ -505,27 +521,38 @@ function main() {
       }
       lastContentHash = contentHash();
       if (store.settings.gitEnabled) git.noteChanged();
-      botSend('end', { ok: code === 0, code, imported });
+      end({ ok: code === 0, code, imported });
       if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' });
     });
     return { ok: true, cwd: target.cwd, kind: target.kind };
   });
-  ipcMain.handle('bot:cancel', () => { if (botChild) { try { botChild.kill(); } catch (_) { /* ignore */ } return true; } return false; });
+  ipcMain.handle('bot:cancel', () => { if (botChild) { killTree(botChild); return true; } return false; });
   ipcMain.handle('bot:openTerminal', (_e, noteId) => {
     let target;
     try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
+    const spec = findClaude();
+    if (!spec) return { ok: false, error: 'Claude Code was not found on this machine.' };
     const { spawn } = require('child_process');
     try {
       // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.
+      // The command is a PowerShell call of the resolved file, single-quoted for PowerShell.
+      const psq = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+      const psCommand = spec.isScript ? ('& ' + psq(claudeBin.resolveNode() || 'node') + ' ' + psq(spec.file)) : ('& ' + psq(spec.file));
       const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
-      if (hasWt) spawn('wt', ['-d', target.cwd, 'powershell', '-NoExit', '-Command', CLAUDE_BIN], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
-      else spawn('powershell', ['-NoExit', '-Command', 'Set-Location -LiteralPath \'' + target.cwd.replace(/'/g, "''") + "'; " + CLAUDE_BIN], { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
+      if (hasWt) spawn('wt', ['-d', target.cwd, 'powershell', '-NoExit', '-Command', psCommand], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      else spawn('powershell', ['-NoExit', '-Command', 'Set-Location -LiteralPath ' + psq(target.cwd) + '; ' + psCommand], { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
       return { ok: true, cwd: target.cwd, kind: target.kind };
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('bot:importWorkspace', () => { const r = workspace.importNotes(store, WORKSPACE_DIR); lastContentHash = contentHash(); return r; });
+  // Pulls edits made in the workspace (e.g. in a terminal session) back into the notes.
+  ipcMain.handle('bot:importWorkspace', () => {
+    const r = workspace.importNotes(store, WORKSPACE_DIR);
+    lastContentHash = contentHash();
+    if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', { reason: 'bot' });
+    return r;
+  });
 
   ipcMain.handle('folders:tree', () => store.folderTree());
   ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
@@ -669,18 +696,26 @@ function main() {
 
   app.on('second-instance', () => showWindow());
   let quitPrepared = false;
+  // Asks one window to write any pending edit and waits for its own flush-done (not another window's).
+  function flushWindow(w, ms) {
+    return new Promise((resolve) => {
+      if (!w || w.isDestroyed()) return resolve();
+      const id = w.webContents.id;
+      const done = (e) => { if (e.sender.id === id) finish(); };
+      const timer = setTimeout(finish, ms);
+      function finish() { clearTimeout(timer); ipcMain.removeListener('app:flush-done', done); resolve(); }
+      ipcMain.on('app:flush-done', done);
+      try { w.webContents.send('app:flush'); } catch (_) { finish(); }
+    });
+  }
+
   app.on('before-quit', (e) => {
     quitting = true;
     if (quitPrepared) return;
     quitPrepared = true;
     // Let the renderer flush an in-flight edit, then finish any pending git commit, then quit for real.
     e.preventDefault();
-    const rendererFlushed = new Promise((resolve) => {
-      if (!win || win.isDestroyed()) return resolve();
-      const timer = setTimeout(resolve, 800);
-      ipcMain.once('app:flush-done', () => { clearTimeout(timer); resolve(); });
-      try { win.webContents.send('app:flush'); } catch (_) { clearTimeout(timer); resolve(); }
-    });
+    const rendererFlushed = Promise.all([flushWindow(win, 800), stickies.flushAll((w) => flushWindow(w, 800))]);
     // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
     // cannot keep the tray icon alive for a minute after Quit.
     rendererFlushed
