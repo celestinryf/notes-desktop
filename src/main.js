@@ -321,7 +321,7 @@ function main() {
   ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
   ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
   ipcMain.handle('files:openExternal', async (_e, id) => { const n = store.get(id); return n && n.filePath ? shell.openPath(n.filePath) : 'No file'; });
-  ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? 'file:///' + n.filePath.replace(/\\/g, '/') : null; });
+  ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
 
   const { discoverAgentFiles } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
@@ -329,10 +329,16 @@ function main() {
     const folder = store.ensureFolder('Agent files', null);
     const found = discoverAgentFiles();
     const res = await linkPaths(found.map((f) => f.filePath), { folderId: folder.id });
-    // Give each linked note its descriptive label and tag, and move pre-existing links into the folder.
+    // Label newly linked notes (or ones still carrying an auto label); never overwrite a title the user chose.
     for (const f of found) {
       const n = store.findByPath(f.filePath);
-      if (n) store.update(n.id, { title: f.label, tags: Array.from(new Set((n.tags || []).concat(['agent']))), folderId: folder.id });
+      if (!n) continue;
+      const base = path.basename(f.filePath);
+      const autoTitled = n.title === base || n.title.startsWith(base + ' — ');
+      const patch = { tags: Array.from(new Set((n.tags || []).concat(['agent']))) };
+      if (autoTitled) patch.title = f.label;
+      if (!n.folderId) patch.folderId = folder.id;
+      store.update(n.id, patch);
     }
     return Object.assign(res, { folderId: folder.id, found: found.length });
   });

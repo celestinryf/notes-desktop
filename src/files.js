@@ -35,16 +35,35 @@ function kindOf(filePath) {
   }
 }
 
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
+
+// Strict UTF-8: a file that is not valid UTF-8 (Latin-1, UTF-16, binary) must never be rewritten as UTF-8 garbage.
 function readText(filePath) {
   const stat = fs.statSync(filePath);
   if (stat.size > MAX_TEXT_BYTES) throw Object.assign(new Error('File is larger than 4 MB'), { code: 'ETOOBIG' });
-  return { body: fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
+  const bytes = fs.readFileSync(filePath);
+  let text;
+  try { text = UTF8_STRICT.decode(bytes); } catch (_) { throw Object.assign(new Error('Not UTF-8 text'), { code: 'EENCODING' }); }
+  return { body: text.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size, bom: bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf };
+}
+
+function hasBom(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const b = Buffer.alloc(3);
+    const n = fs.readSync(fd, b, 0, 3, 0);
+    fs.closeSync(fd);
+    return n === 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+  } catch (_) { return false; }
 }
 
 // Writes in place (truncate + write), never via rename, so hard links such as CLAUDE.md <-> AGENTS.md stay joined.
+// Keeps the file's line-ending style and its byte-order mark if it had one.
 function writeTextInPlace(filePath, body) {
   const eol = detectEol(filePath);
-  fs.writeFileSync(filePath, eol === '\r\n' ? String(body).replace(/\r?\n/g, '\r\n') : String(body), 'utf8');
+  const bom = hasBom(filePath);
+  const text = eol === '\r\n' ? String(body).replace(/\r?\n/g, '\r\n') : String(body);
+  fs.writeFileSync(filePath, (bom ? '﻿' : '') + text, 'utf8');
   return fs.statSync(filePath).mtimeMs;
 }
 
@@ -107,7 +126,9 @@ function discoverAgentFiles(opts) {
   const memDir = path.join(claudeDir, 'projects');
   for (const proj of safeList(memDir)) {
     const m = path.join(memDir, proj, 'memory');
-    for (const f of safeList(m)) if (/\.md$/i.test(f)) add(path.join(m, f), f + ' — Claude memory');
+    // Project folders are named after the path, e.g. "C--Users-celes-tennis"; keep the tail as the label.
+    const slug = proj.replace(/^[A-Za-z]--Users-[^-]+-?/, '') || 'home';
+    for (const f of safeList(m)) if (/\.md$/i.test(f)) add(path.join(m, f), f + ' — Claude memory (' + slug + ')');
   }
   const skip = new Set(['node_modules', '.git', 'AppData', '.vscode', '.cursor', 'scoop', 'pipx', 'curseforge', 'OneDrive']);
   const roots = [home].concat(opts.extraRoots || []);
