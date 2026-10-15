@@ -64,6 +64,11 @@ class StickyManager {
     // Same guards as the main window: nothing navigates or opens windows from the privileged page.
     w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); return { action: 'deny' }; });
     w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); });
+    // Same zoom keys and right-click menu as the main window (zoom is per sticky and not remembered).
+    const windowInput = require('./window-input');
+    const { Menu, shell, clipboard } = require('electron');
+    windowInput.attachZoom(w.webContents);
+    windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard });
     w.loadFile(path.join(__dirname, 'renderer', 'sticky.html'), { query: { id } });
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;

@@ -95,6 +95,17 @@ async function main() {
     log('note persisted:', JSON.stringify({ title: saved.title, body: saved.body }));
     await page.screenshot({ path: path.join(shotDir, 'e2e-light.png') });
 
+    // Zoom with real OS key presses (Ctrl+= used to do nothing because Electron's default menu wants Ctrl+Shift+=).
+    const zoom = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel());
+    sendKeys('^=');
+    await waitFor('Ctrl+= zoomed in', async () => (await zoom()) === 0.5, 5000);
+    sendKeys('^-');
+    await waitFor('Ctrl+- zoomed out', async () => (await zoom()) === 0, 5000);
+    sendKeys('^=');
+    sendKeys('^0');
+    await waitFor('Ctrl+0 reset', async () => (await zoom()) === 0, 5000);
+    log('zoom keys work with real key presses');
+
     sendKeys(SENDKEYS_HOTKEY);
     await waitFor('window hidden after second hotkey press', async () => !(await win()).visible, 8000);
     log('window hidden by hotkey');
