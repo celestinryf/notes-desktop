@@ -7,7 +7,7 @@ const path = require('path');
 const { Store, DEFAULT_SETTINGS, sanitizeSettings } = require('../../src/store');
 
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'notes-store-'));
+  return require('../helpers/tmp').tmpDir('notes-store-'); // removed when the test process exits
 }
 
 function makeStore(opts) {

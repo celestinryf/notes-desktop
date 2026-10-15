@@ -33,6 +33,8 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 - Replace in the open note (Ctrl+H, or ⇄ in the find bar): one match at a time or all at once, in either view.
 - Earlier versions (🕘 History or Ctrl+Shift+H): every saved change of a note, from the local git history; preview and restore any of them.
 - Attachments (📎 Attach or Ctrl+Shift+O) and voice memos (🎙 Record or Ctrl+Shift+G): files are copied into the app's attachments folder and linked from the note; Ctrl+click a link to open it. Programs and scripts are never launched.
+- Books (prototype; folder menu → Turn into a book): a folder whose notes are pages in a set order. Opening a page shows a strip of page tabs like Google Docs' document tabs: click to jump, ‹ › or Ctrl+PageUp/PageDown to turn pages, + Page to add one at the end, drag a tab to reorder. The note list shows the pages numbered in reading order.
+- Related notes: under each note, the notes it links to, the notes that link to it, and notes that share its tags; click one to open it.
 - Links between notes: in the link dialog (Ctrl+K) pick a note, or Share ▾ → Copy link to this note and paste it elsewhere. Ctrl+click follows it.
 - Find in the open note (Ctrl+Shift+F; Enter/Shift+Enter or F3 step through, Esc closes). Ctrl+F searches all notes.
 - Print the open note (🖨 Print or Ctrl+Shift+P): just the note, no chrome.

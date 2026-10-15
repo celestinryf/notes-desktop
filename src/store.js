@@ -63,6 +63,9 @@ function sanitizeFolder(raw, now) {
     // Vault folders mirror a directory on disk.
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
+    // A book is a folder whose notes are pages, read in this order (ids not listed follow, oldest first).
+    book: !!raw.book,
+    pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x) => typeof x === 'string' && x).slice(0, 5000) : [],
   };
 }
 
@@ -363,6 +366,11 @@ class Store {
     if (opts.reminders) out = out.filter((n) => n.remindAt);
     if (opts.query) out = out.filter((n) => H.matchesQuery(n, opts.query));
     if (opts.reminders) return out.slice().sort((a, b) => a.remindAt - b.remindAt); // soonest first
+    // A book lists its pages in reading order, whatever the sort setting.
+    if (opts.folderId && !opts.recursive && !opts.query && !trashed) {
+      const f = this.getFolder(opts.folderId);
+      if (f && f.book) return this._orderPages(f, out);
+    }
     return H.sortNotes(out, opts.sort || this.settings.sort);
   }
 
@@ -569,6 +577,72 @@ class Store {
     const next = sticky ? sanitizeSticky(Object.assign({}, note.sticky || {}, sticky)) : null;
     if (JSON.stringify(next) === JSON.stringify(note.sticky || null)) return note;
     return this._commit(() => { note.sticky = next; return note; });
+  }
+
+  // ---- books -------------------------------------------------------------------
+
+  _orderPages(folder, notes) {
+    const rank = new Map((folder.pageOrder || []).map((id, i) => [id, i]));
+    return notes.slice().sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id) : Infinity, rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
+      if (ra !== rb) return ra - rb;
+      return (a.createdAt - b.createdAt) || a.id.localeCompare(b.id); // unlisted pages: oldest first, i.e. new pages go last
+    });
+  }
+
+  // Live pages of a book, in reading order.
+  bookPages(folderId) {
+    const f = this.getFolder(folderId);
+    if (!f) return [];
+    return this._orderPages(f, this.notes.filter((n) => !n.trashedAt && n.folderId === folderId));
+  }
+
+  setBook(folderId, on) {
+    const f = this.getFolder(folderId);
+    if (!f) return null;
+    if (!!f.book === !!on) return f;
+    return this._commit(() => {
+      f.book = !!on;
+      // Turning a folder into a book fixes the current order (oldest first) so it stays put.
+      if (f.book && !(f.pageOrder || []).length) f.pageOrder = this.bookPages(folderId).map((n) => n.id);
+      return f;
+    });
+  }
+
+  // ids: the new reading order. Unknown ids are dropped; pages missing from the list keep their relative order after it.
+  reorderPages(folderId, ids) {
+    const f = this.getFolder(folderId);
+    if (!f || !f.book) return null;
+    const pages = this.bookPages(folderId).map((n) => n.id);
+    const wanted = (Array.isArray(ids) ? ids : []).filter((id, i, a) => pages.includes(id) && a.indexOf(id) === i);
+    const next = wanted.concat(pages.filter((id) => !wanted.includes(id)));
+    return this._commit(() => { f.pageOrder = next; return f; });
+  }
+
+  // ---- related notes --------------------------------------------------------------
+
+  // What a note links to, what links to it, and notes that share its tags. Locked bodies are only read
+  // while unlocked this session (their stored body is empty); titles are always visible.
+  related(id, limit) {
+    const note = this.get(id);
+    if (!note) return null;
+    const bodyOf = (n) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
+    const view = (n) => ({ id: n.id, title: H.deriveTitle(this.publicNote(n)) || 'Untitled', trashed: !!n.trashedAt, locked: !!n.lock });
+    const outgoing = H.noteLinkIds(bodyOf(note)).filter((x) => x !== id).map((x) => {
+      const t = this.get(x);
+      return t ? view(t) : { id: x, title: 'Deleted note', missing: true };
+    });
+    const needle = 'note://' + id.toLowerCase();
+    const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && bodyOf(n).toLowerCase().includes(needle)).map(view);
+    const seen = new Set([id].concat(outgoing.map((x) => x.id), incoming.map((x) => x.id)));
+    const tags = new Set(note.tags || []);
+    const byTags = tags.size ? this.notes
+      .filter((n) => !n.trashedAt && !seen.has(n.id) && (n.tags || []).some((t) => tags.has(t)))
+      .map((n) => ({ n, shared: n.tags.filter((t) => tags.has(t)) }))
+      .sort((a, b) => (b.shared.length - a.shared.length) || (b.n.updatedAt - a.n.updatedAt))
+      .slice(0, limit || 5)
+      .map(({ n, shared }) => Object.assign(view(n), { sharedTags: shared })) : [];
+    return { outgoing, incoming, byTags };
   }
 
   setLive(id, live) {
@@ -1017,7 +1091,7 @@ class Store {
         const children = build(f.id, depth + 1);
         const count = direct.get(f.id) || 0;
         const total = count + children.reduce((s, c) => s + c.total, 0);
-        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, total, children, vaultId: f.vaultId || null, isVaultRoot: !!(f.vaultId && !f.parentId) };
+        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, total, children, vaultId: f.vaultId || null, isVaultRoot: !!(f.vaultId && !f.parentId), book: !!f.book };
       });
     return build(null, 0);
   }

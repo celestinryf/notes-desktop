@@ -514,6 +514,29 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   pointer-events: none;
 }
 
+/* Books: a page strip like document tabs */
+.book-strip { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; padding: 6px 8px; border: 2px solid var(--line); border-radius: 12px; background: var(--bg-raised); box-shadow: 3px 3px 0 var(--shadow); }
+.book-name { font-family: var(--font-display); font-weight: 600; font-size: 13px; white-space: nowrap; padding-right: 4px; }
+.book-name::before { content: '📖 '; }
+.book-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: thin; }
+.book-tab { display: flex; align-items: center; gap: 6px; max-width: 200px; padding: 4px 10px; border: 1.5px solid var(--line-soft); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.book-tab .no { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); }
+.book-tab .t { overflow: hidden; text-overflow: ellipsis; }
+.book-tab.is-active { background: var(--accent); color: var(--accent-ink); border-color: var(--line); }
+.book-tab.is-active .no { color: var(--accent-ink); }
+.book-tab.drop-before { box-shadow: -3px 0 0 var(--accent-strong); }
+.page-no { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); margin-right: 6px; }
+
+/* Related notes */
+.related { margin-top: 28px; padding-top: 12px; border-top: 2px dashed var(--line-soft); display: grid; gap: 10px; }
+.related h3 { margin: 0 0 4px; font-family: var(--font-display); font-size: 13px; color: var(--fg-muted); font-weight: 600; }
+.related ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.related button { padding: 3px 10px; border: 1.5px solid var(--line-soft); border-radius: 999px; background: var(--bg-raised); color: var(--fg); font-size: 12px; cursor: pointer; }
+.related button:hover { border-color: var(--line); }
+.related button.is-missing { opacity: 0.6; text-decoration: line-through; cursor: default; }
+.related .tags { color: var(--fg-muted); font-size: 11px; margin-left: 4px; }
+@media print { .book-strip, .related { display: none !important; } }
+
 /* Live share */
 .live-row { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border: 2px solid var(--line); border-radius: 10px; background: var(--bg-raised); font-size: 12px; }
 .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--leaf); box-shadow: 0 0 0 3px color-mix(in srgb, var(--leaf) 30%, transparent); }

@@ -279,6 +279,15 @@
     return out;
   }
 
+  // Ids of the notes a body links to with note://<id> links, in order, without repeats.
+  function noteLinkIds(body) {
+    const out = [];
+    const re = /note:\/\/([0-9a-f][0-9a-f-]{7,})/gi;
+    let m;
+    while ((m = re.exec(String(body || ''))) !== null) { const id = m[1].toLowerCase(); if (!out.includes(id)) out.push(id); }
+    return out;
+  }
+
   function safeFilename(name) {
     // Cut by code point: a UTF-16 slice through an emoji would leave a lone surrogate, which the file system
     // turns into U+FFFD, so the stored name and the name on disk would never match again.
@@ -291,6 +300,6 @@
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
-    plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor,
+    plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds,
   };
 });

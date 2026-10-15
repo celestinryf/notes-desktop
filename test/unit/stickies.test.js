@@ -6,7 +6,8 @@ const os = require('os');
 const path = require('path');
 const { Store, sanitizeSticky } = require('../../src/store');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-sticky-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-sticky-'); // removed when the test process exits
 
 test('sanitizeSticky clamps sizes, defaults colour and onTop, rejects junk', () => {
   assert.equal(sanitizeSticky(null), null);

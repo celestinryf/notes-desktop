@@ -439,6 +439,9 @@ function main() {
   ipcMain.handle('stickies:openInNotes', (_e, id) => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   ipcMain.handle('notes:tags', () => store.tags());
   ipcMain.handle('notes:counts', () => store.counts());
+  ipcMain.handle('notes:related', (_e, id) => store.related(id));
+  ipcMain.handle('folders:setBook', (_e, id, on) => store.setBook(id, on));
+  ipcMain.handle('folders:reorderPages', (_e, id, ids) => store.reorderPages(id, ids));
 
   // ---- file-backed notes ---------------------------------------------------
 

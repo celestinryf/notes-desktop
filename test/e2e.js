@@ -19,7 +19,8 @@ const ROOT = path.resolve(__dirname, '..');
 const ELECTRON = require('electron');
 const HOTKEY = 'Control+Alt+Shift+F9';
 const SENDKEYS_HOTKEY = '^%+{F9}';
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-e2e-'));
+const { tmpDir } = require('./helpers/tmp'); // removed when the run exits
+const dataDir = tmpDir('notes-e2e-');
 const shotDir = process.env.NOTES_E2E_SHOTS || dataDir;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

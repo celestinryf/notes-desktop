@@ -6,7 +6,8 @@ const os = require('os');
 const path = require('path');
 const CB = require('../../src/claude-bin');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-cb-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-cb-'); // removed when the test process exits
 const win = process.platform === 'win32';
 
 test('an npm .cmd shim is resolved to the executable it runs, never run through a shell', { skip: !win && 'windows shim' }, () => {

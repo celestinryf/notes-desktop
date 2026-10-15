@@ -8,7 +8,8 @@ const { Store } = require('../../src/store');
 const { ReminderScheduler } = require('../../src/reminders');
 const H = require('../../src/shared/helpers');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-rem-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-rem-'); // removed when the test process exits
 
 test('remindAt is set and cleared through update(), survives reload, and is listed and counted', () => {
   const dir = tmp();
