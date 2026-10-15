@@ -133,6 +133,7 @@
     api.on.settingsChanged((s) => { state.settings = s; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
     api.on.stickyChanged((sticky) => applySticky(sticky));
+    api.on.editCommand((cmd) => { if (state.rich && !state.readOnly) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run(); });
     api.on.noteChanged((info) => { if (info && info.id === id && !state.dirty) reload(); });
     api.on.reloaded(() => { if (!state.dirty) reload(); });
 

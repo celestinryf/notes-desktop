@@ -947,7 +947,7 @@
 
   // ---- books: folders read as pages ---------------------------------------------
 
-  const book = { id: null, pages: [], dragId: null };
+  const book = { id: null, pages: [], dragId: null, seq: 0 };
 
   function bookOf(note) {
     if (!note || !note.folderId || note.trashedAt) return null;
@@ -956,12 +956,13 @@
   }
 
   async function renderBookStrip(note) {
+    const seq = ++book.seq; // only the newest call may draw: an older one resolving late must not revive a book
     const b = bookOf(note);
     el.bookStrip.classList.toggle('hidden', !b);
     if (!b) { book.id = null; book.pages = []; return; }
     const forNote = note.id;
     const pages = await api.notes.list({ folderId: b.id });
-    if (state.currentId !== forNote) return; // moved on while loading
+    if (seq !== book.seq || state.currentId !== forNote) return; // superseded, or moved on while loading
     book.id = b.id; book.pages = pages;
     el.bookName.textContent = b.name;
     el.bookTabs.innerHTML = '';
@@ -2792,6 +2793,8 @@
     el.remindCancelBtn.addEventListener('click', () => el.remindDialog.close());
     el.remindDialog.addEventListener('close', () => focusBody());
     api.on.notice((text) => toast(String(text)));
+    // Undo/Redo from the right-click menu: the rich editor has its own history; the textarea uses the native one.
+    api.on.editCommand((cmd) => { if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run(); else document.execCommand(cmd === 'redo' ? 'redo' : 'undo'); });
     api.on.reminderFired(({ id, title }) => {
       toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await selectNoteNow(id); } });
       refresh({ keepEditor: true }).then(() => { if (state.currentId === id) refreshCurrentMeta(); });

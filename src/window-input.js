@@ -65,8 +65,16 @@ function contextMenuTemplate(params) {
     items.push({ type: 'separator' });
   }
   if (p.isEditable) {
-    items.push({ role: 'undo', label: 'Undo', enabled: flags.canUndo !== false });
-    items.push({ role: 'redo', label: 'Redo', enabled: flags.canRedo !== false });
+    // A rich (contenteditable) editor keeps its own history, so Chromium's native undo stack is empty there:
+    // send undo/redo to the page instead. Real form fields (the Markdown textarea, inputs) use the native roles.
+    const nativeField = /^(text-area|input-)/.test(String(p.formControlType || ''));
+    if (nativeField) {
+      items.push({ role: 'undo', label: 'Undo', enabled: flags.canUndo !== false });
+      items.push({ role: 'redo', label: 'Redo', enabled: flags.canRedo !== false });
+    } else {
+      items.push({ label: 'Undo', action: 'editUndo' });
+      items.push({ label: 'Redo', action: 'editRedo' });
+    }
     items.push({ type: 'separator' });
     items.push({ role: 'cut', label: 'Cut', enabled: !!flags.canCut });
     items.push({ role: 'copy', label: 'Copy', enabled: !!flags.canCopy });
@@ -100,6 +108,8 @@ function attachContextMenu(webContents, getWindow, deps) {
           case 'addToDictionary': webContents.session.addWordToSpellCheckerDictionary(item.arg); break;
           case 'openLink': if (/^https?:\/\//i.test(item.arg)) shell.openExternal(item.arg); break;
           case 'copyText': clipboard.writeText(item.arg); break;
+          case 'editUndo': webContents.send('app:editCommand', 'undo'); break;
+          case 'editRedo': webContents.send('app:editCommand', 'redo'); break;
           case 'zoomIn': case 'zoomOut': case 'zoomReset': {
             const level = nextZoom(webContents.getZoomLevel(), item.action === 'zoomIn' ? 'in' : item.action === 'zoomOut' ? 'out' : 'reset');
             webContents.setZoomLevel(level);
