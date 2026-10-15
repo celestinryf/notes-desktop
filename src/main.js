@@ -4,6 +4,7 @@ const fs = require('fs');
 const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem } = require('electron');
 const { Store } = require('./store');
 const { GitSync } = require('./gitSync');
+const windowInput = require('./window-input');
 const { VaultManager } = require('./vaults');
 const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
@@ -179,6 +180,10 @@ function main() {
       if (/^https?:/i.test(url)) shell.openExternal(url);
       return { action: 'deny' };
     });
+    // Ctrl+= / Ctrl+- / Ctrl+0 and the right-click menu (Electron supplies neither properly on its own).
+    const rememberZoom = (level) => { try { store.setSettings({ zoomLevel: level }); } catch (_) { /* saving paused */ } };
+    windowInput.attachZoom(win.webContents, { initial: store.settings.zoomLevel, onChange: rememberZoom });
+    windowInput.attachContextMenu(win.webContents, () => win, { Menu, shell, clipboard, onZoom: rememberZoom });
     win.webContents.on('will-navigate', (e, url) => {
       e.preventDefault(); // the app page never navigates (a dropped file must not replace it)
       if (/^https?:/i.test(url)) shell.openExternal(url);

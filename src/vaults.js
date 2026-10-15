@@ -147,7 +147,10 @@ class VaultManager {
     let ahead = 0, behind = 0;
     const ab = await git(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], v.path, 10000);
     if (ab.ok) { const m = ab.stdout.trim().split(/\s+/); ahead = parseInt(m[0], 10) || 0; behind = parseInt(m[1], 10) || 0; }
-    const conflict = fs.existsSync(path.join(v.path, '.git', 'rebase-merge')) || fs.existsSync(path.join(v.path, '.git', 'rebase-apply')) || fs.existsSync(path.join(v.path, '.git', 'MERGE_HEAD'));
+    // Unmerged paths count too: an autostash that failed to re-apply leaves them with no rebase or merge
+    // marker, and the flag must survive until the person resolves them (or the next Sync would commit markers).
+    const unmerged = porcelain.ok && /^(UU|AA|DD|AU|UA|DU|UD) /m.test(porcelain.stdout);
+    const conflict = unmerged || fs.existsSync(path.join(v.path, '.git', 'rebase-merge')) || fs.existsSync(path.join(v.path, '.git', 'rebase-apply')) || fs.existsSync(path.join(v.path, '.git', 'MERGE_HEAD'));
     this._set(id, { isRepo: true, branch, remote: remoteUrl || v.remote || '', dirty: porcelain.ok && porcelain.stdout.trim().length > 0, ahead, behind, conflict });
     return this.statusOf(id);
   }

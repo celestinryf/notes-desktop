@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   gitRemote: '',            // optional remote URL to push to after each commit
   ttsVoice: '',             // speechSynthesis voice name; '' = system default
   ttsRate: 1,               // 0.5 .. 2
+  zoomLevel: 0,             // main window zoom (Chromium levels, -3 .. 5); Ctrl+= / Ctrl+- / Ctrl+0
   window: null,             // { x, y, width, height }
 });
 
@@ -136,6 +137,7 @@ function sanitizeSettings(input) {
   s.openAtLogin = !!s.openAtLogin;
   s.alwaysOnTop = !!s.alwaysOnTop;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
+  s.zoomLevel = Number.isFinite(Number(s.zoomLevel)) ? Math.max(-3, Math.min(5, Math.round(Number(s.zoomLevel) * 2) / 2)) : 0;
   s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
   s.listWidth = H.clampPane('listWidth', s.listWidth);
   s.expandedFolders = Array.isArray(s.expandedFolders) ? s.expandedFolders.filter((x) => typeof x === 'string').slice(0, 5000) : [];

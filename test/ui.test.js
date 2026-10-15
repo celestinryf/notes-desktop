@@ -1259,6 +1259,43 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
+test('zoom: Ctrl+= zooms in, Ctrl+- out, Ctrl+0 resets, and the level is remembered; right-click shows a menu', async () => {
+  const level = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel());
+  // Through Electron's real input path (what a physical key press takes); Playwright's keyboard injects below it.
+  const realKey = (k) => app.evaluate(({ BrowserWindow }, keyCode) => { const wc = BrowserWindow.getAllWindows()[0].webContents; wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] }); wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] }); }, k);
+  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  const start = await level();
+  await realKey('=');
+  await waitFor('zoomed in', async () => (await level()) === start + 0.5);
+  await realKey('=');
+  await waitFor('zoomed in twice', async () => (await level()) === start + 1);
+  await waitFor('remembered', () => readNotes().settings.zoomLevel === start + 1);
+  await realKey('-');
+  await waitFor('zoomed out', async () => (await level()) === start + 0.5);
+  await realKey('0');
+  await waitFor('reset', async () => (await level()) === 0);
+  await waitFor('reset remembered', () => readNotes().settings.zoomLevel === 0);
+  // Right-click in the editor: the menu is built with the edit actions and popped up.
+  await app.evaluate(({ Menu }) => { global.__menus = []; const orig = Menu.prototype.popup; Menu.prototype.popup = function () { global.__menus.push(this.items.map((i) => i.label).filter(Boolean)); }; global.__restorePopup = () => { Menu.prototype.popup = orig; }; });
+  await useSourceMode(true);
+  await page.click('#bodyInput', { button: 'right' });
+  await waitFor('menu shown', () => app.evaluate(() => global.__menus.length).then((n) => n >= 1));
+  const labels = await app.evaluate(() => global.__menus[global.__menus.length - 1]);
+  for (const l of ['Cut', 'Copy', 'Paste', 'Select all', 'Zoom in']) assert.ok(labels.includes(l), 'menu has ' + l + ': ' + labels.join(', '));
+  // A folder row keeps its own menu: no native menu on top of it.
+  const before = await app.evaluate(() => global.__menus.length);
+  const row = await page.$('.folder-row');
+  if (row) {
+    await row.click({ button: 'right' });
+    await waitForDom(() => !document.getElementById('folderMenu').classList.contains('hidden'));
+    await sleep(300);
+    assert.equal(await app.evaluate(() => global.__menus.length), before, 'folder row shows only the app menu');
+    await page.keyboard.press('Escape');
+  }
+  await app.evaluate(() => global.__restorePopup());
+});
+
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

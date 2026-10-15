@@ -379,3 +379,32 @@ test('vault folders cannot be renamed to a dot name or a skipped directory name'
   assert.equal(store.getFolder(projects.id).name, 'Projects');
   assert.ok(fs.existsSync(path.join(dir, 'Projects')));
 });
+
+test('unmerged paths with no merge marker block every sync until resolved (no conflict markers pushed)', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const bare = tmp();
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir, autoSync: false });
+  const vm = new VaultManager(store, { debounceMs: 50 });
+  await vm.open(v.id, { pull: false });
+  await vm.initRepo(v.id, bare);
+  assert.equal((await vm.sync(v.id, 'test')).ok, true);
+  const pushed = git(bare, ['rev-list', '--count', 'main']);
+  // Make a real UU entry: conflicting branch merged, then the MERGE_HEAD marker removed (as an autostash pop leaves it).
+  const g = (args) => git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t'].concat(args));
+  g(['checkout', '-q', '-b', 'other']);
+  fs.writeFileSync(path.join(dir, 'Inbox.md'), 'other side\n'); g(['commit', '-qam', 'other']);
+  g(['checkout', '-q', 'main']);
+  fs.writeFileSync(path.join(dir, 'Inbox.md'), 'main side\n'); g(['commit', '-qam', 'main']);
+  try { g(['merge', 'other']); } catch (_) { /* conflict expected */ }
+  fs.rmSync(path.join(dir, '.git', 'MERGE_HEAD'), { force: true });
+  assert.match(git(dir, ['status', '--porcelain']), /^UU /m);
+  for (let i = 0; i < 2; i++) {
+    const r = await vm.sync(v.id, 'test');
+    assert.equal(r.ok, false, 'sync ' + (i + 1) + ' refused');
+    assert.equal(vm.statusOf(v.id).conflict, true);
+  }
+  assert.equal(git(bare, ['rev-list', '--count', 'main']), pushed, 'nothing pushed while unresolved');
+  vm.closeAll();
+});
