@@ -7,7 +7,8 @@ const path = require('path');
 const { Store } = require('../../src/store');
 const L = require('../../src/lock');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-lock-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-lock-'); // removed when the test process exits
 
 test('lock/unlock round-trips, rejects a wrong password, and sanitizes junk', () => {
   const { blob, key } = L.lock('secret body 🔐', 'pw');

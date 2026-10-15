@@ -8,7 +8,8 @@ const http = require('http');
 const { Store } = require('../../src/store');
 const { LiveShare } = require('../../src/live');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-live-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-live-'); // removed when the test process exits
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(label, fn, timeout = 5000) {
   const start = Date.now();

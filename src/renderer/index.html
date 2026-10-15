@@ -117,6 +117,13 @@
 
         <div class="editor-scroll">
           <div class="editor-column align-left" id="editorColumn">
+            <nav class="book-strip hidden" id="bookStrip" aria-label="Pages of this book">
+              <span class="book-name" id="bookName"></span>
+              <button class="tool-btn" id="bookPrevBtn" title="Previous page (Ctrl+PageUp)" aria-label="Previous page">‹</button>
+              <div class="book-tabs" id="bookTabs" role="tablist"></div>
+              <button class="tool-btn" id="bookNextBtn" title="Next page (Ctrl+PageDown)" aria-label="Next page">›</button>
+              <button class="tool-btn" id="bookAddBtn" title="Add a page at the end">+ Page</button>
+            </nav>
             <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
             <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
             <div class="live-row hidden" id="liveRow">
@@ -147,6 +154,11 @@
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
               <iframe id="pdfFrame" class="pdf-frame hidden" title="PDF"></iframe>
             </div>
+            <section class="related hidden" id="relatedPanel" aria-label="Related notes">
+              <div class="related-group hidden" id="relatedOut"><h3>Links to</h3><ul></ul></div>
+              <div class="related-group hidden" id="relatedIn"><h3>Linked from</h3><ul></ul></div>
+              <div class="related-group hidden" id="relatedTags"><h3>Shares tags with</h3><ul></ul></div>
+            </section>
           </div>
         </div>
 
@@ -435,6 +447,7 @@
       <button role="menuitem" data-action="new-note">New note here</button>
       <button role="menuitem" data-action="new-subfolder">New subfolder</button>
       <button role="menuitem" data-action="rename">Rename</button>
+      <button role="menuitem" data-action="toggle-book" id="folderMenuBook">Turn into a book</button>
       <button role="menuitem" data-action="sync" id="folderMenuSync">Sync vault now</button>
       <button role="menuitem" data-action="open-folder" id="folderMenuOpen">Open folder in Explorer</button>
       <button role="menuitem" data-action="delete" class="danger">Delete folder</button>

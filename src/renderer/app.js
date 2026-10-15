@@ -20,6 +20,8 @@
     liveRow: $('#liveRow'), liveText: $('#liveText'), liveLinkBtn: $('#liveLinkBtn'), liveStopBtn: $('#liveStopBtn'), shareLiveHost: $('#shareLiveHost'), shareLiveStop: $('#shareLiveStop'),
     liveDialog: $('#liveDialog'), liveForm: $('#liveForm'), liveDialogTitle: $('#liveDialogTitle'), liveDialogHint: $('#liveDialogHint'), liveLinkLabel: $('#liveLinkLabel'), liveLinkInput: $('#liveLinkInput'),
     liveError: $('#liveError'), liveCopyBtn: $('#liveCopyBtn'), liveCancelBtn: $('#liveCancelBtn'), liveSubmitBtn: $('#liveSubmitBtn'),
+    bookStrip: $('#bookStrip'), bookName: $('#bookName'), bookTabs: $('#bookTabs'), bookPrevBtn: $('#bookPrevBtn'), bookNextBtn: $('#bookNextBtn'), bookAddBtn: $('#bookAddBtn'),
+    relatedPanel: $('#relatedPanel'), relatedOut: $('#relatedOut'), relatedIn: $('#relatedIn'), relatedTags: $('#relatedTags'), folderMenuBook: $('#folderMenuBook'),
     lockScreen: $('#lockScreen'), lockScreenPassword: $('#lockScreenPassword'), lockScreenBtn: $('#lockScreenBtn'), lockScreenError: $('#lockScreenError'),
     tagList: $('#tagList'),
     themeBtn: $('#themeBtn'), settingsBtn: $('#settingsBtn'),
@@ -270,6 +272,8 @@
     renderFolders();
     renderFolderSelect();
     renderList();
+    // Page order or titles may have changed elsewhere (list, another window, a reorder): keep the strip in step.
+    if (state.current && (book.id || bookOf(state.current))) renderBookStrip(state.current);
     const inList = notes.some((n) => n.id === state.currentId);
     if (!inList && !opts.keepEditor) {
       if (notes.length) await selectNote(notes[0].id);
@@ -326,6 +330,7 @@
         } else el.listTitle.append(document.createTextNode(p.name));
       });
     } else el.listTitle.textContent = titles[state.view];
+    const viewingBook = state.view === 'folder' && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
     const frag = document.createDocumentFragment();
     state.notes.forEach((n, i) => {
       const li = document.createElement('li');
@@ -334,6 +339,7 @@
       li.setAttribute('role', 'option');
       li.style.animationDelay = Math.min(i, 12) * 20 + 'ms';
       li.innerHTML = cardHtml(n, q);
+      if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.querySelector('.note-card-title').prepend(no); }
       li.addEventListener('click', () => selectNote(n.id));
       if (!n.trashedAt) {
         li.draggable = true;
@@ -443,7 +449,7 @@
 
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.textContent = '▰';
+      icon.textContent = node.book ? '📖' : '▰';
       row.append(icon);
       if (node.isVaultRoot) {
         const st = state.vaultStatus[node.vaultId] || {};
@@ -496,7 +502,7 @@
       row.style.setProperty('--depth', depth);
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.textContent = '▰';
+      icon.textContent = '▰'; // a folder being created is never a book yet
       row.append(document.createElement('span'), icon);
       row.firstChild.className = 'folder-chevron is-leaf';
       row.append(folderInput('', (value) => commitFolderEdit(value)));
@@ -659,6 +665,7 @@
     const menu = el.folderMenu;
     const node = flattenTree(state.tree).find((n) => n.id === id) || {};
     el.folderMenuSync.classList.toggle('hidden', !node.isVaultRoot);
+    el.folderMenuBook.textContent = node.book ? 'Turn back into a folder' : 'Turn into a book';
     el.folderMenuOpen.classList.toggle('hidden', !node.vaultId);
     menu.querySelector('[data-action="delete"]').textContent = node.isVaultRoot ? 'Remove vault (keeps files)' : 'Delete folder';
     menu.classList.remove('hidden');
@@ -687,6 +694,7 @@
     if (action === 'new-note') { await setView('folder', id); await newNote(); }
     else if (action === 'new-subfolder') startCreateFolder(id);
     else if (action === 'rename') startRename(id);
+    else if (action === 'toggle-book') toggleBook(id, !node.book);
     else if (action === 'sync' && node.vaultId) syncVault(node.vaultId);
     else if (action === 'open-folder' && node.vaultId) api.vaults.openFolder(node.vaultId);
     else if (action === 'delete' && node.isVaultRoot) removeVault(node.vaultId);
@@ -897,6 +905,8 @@
     renderStickyButton(note);
     renderRemindButton(note);
     renderLiveRow(note);
+    renderBookStrip(note);
+    renderRelated(note);
     el.shareBtn.classList.toggle('hidden', !!note.trashedAt);
     if (find.open) closeFind();
     if (bot.open) describeBotScope();
@@ -933,6 +943,128 @@
     el.statusSaved.textContent = label;
     el.statusSaved.classList.toggle('is-saving', label === 'Saving…');
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
+  }
+
+  // ---- books: folders read as pages ---------------------------------------------
+
+  const book = { id: null, pages: [], dragId: null };
+
+  function bookOf(note) {
+    if (!note || !note.folderId || note.trashedAt) return null;
+    const f = flattenTree(state.tree).find((x) => x.id === note.folderId);
+    return f && f.book ? f : null;
+  }
+
+  async function renderBookStrip(note) {
+    const b = bookOf(note);
+    el.bookStrip.classList.toggle('hidden', !b);
+    if (!b) { book.id = null; book.pages = []; return; }
+    const forNote = note.id;
+    const pages = await api.notes.list({ folderId: b.id });
+    if (state.currentId !== forNote) return; // moved on while loading
+    book.id = b.id; book.pages = pages;
+    el.bookName.textContent = b.name;
+    el.bookTabs.innerHTML = '';
+    pages.forEach((p, i) => {
+      // A focusable div, not a <button>: Chromium does not start a drag from a button, and tabs reorder by dragging.
+      const tab = document.createElement('div');
+      tab.tabIndex = 0;
+      tab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tab.click(); } });
+      tab.className = 'book-tab' + (p.id === note.id ? ' is-active' : '');
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(p.id === note.id));
+      tab.dataset.id = p.id;
+      tab.draggable = true;
+      tab.innerHTML = '<span class="no"></span><span class="t"></span>';
+      tab.querySelector('.no').textContent = String(i + 1);
+      tab.querySelector('.t').textContent = H.truncate(H.deriveTitle(p) || 'Untitled', 28);
+      tab.title = H.deriveTitle(p) || 'Untitled';
+      tab.addEventListener('click', () => { if (p.id !== state.currentId) selectNote(p.id); });
+      tab.addEventListener('dragstart', (e) => { book.dragId = p.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'page'); });
+      tab.addEventListener('dragover', (e) => { if (!book.dragId || book.dragId === p.id) return; e.preventDefault(); tab.classList.add('drop-before'); });
+      tab.addEventListener('dragleave', () => tab.classList.remove('drop-before'));
+      tab.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); tab.classList.remove('drop-before'); movePage(book.dragId, p.id); });
+      tab.addEventListener('dragend', () => { book.dragId = null; });
+      el.bookTabs.append(tab);
+    });
+    const idx = pages.findIndex((p) => p.id === note.id);
+    el.bookPrevBtn.disabled = idx <= 0;
+    el.bookNextBtn.disabled = idx === -1 || idx >= pages.length - 1;
+    const active = el.bookTabs.querySelector('.is-active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  // Moves page dragId so it sits just before page beforeId.
+  async function movePage(dragId, beforeId) {
+    if (!book.id || !dragId || dragId === beforeId) return;
+    const ids = book.pages.map((p) => p.id).filter((x) => x !== dragId);
+    const at = ids.indexOf(beforeId);
+    ids.splice(at === -1 ? ids.length : at, 0, dragId);
+    await api.folders.reorderPages(book.id, ids);
+    await refresh({ keepEditor: true });
+    if (state.current) renderBookStrip(state.current);
+  }
+
+  function stepPage(delta) {
+    if (!book.id || !state.currentId) return false;
+    const idx = book.pages.findIndex((p) => p.id === state.currentId);
+    const next = book.pages[idx + delta];
+    if (idx === -1 || !next) return false;
+    selectNote(next.id);
+    return true;
+  }
+
+  async function addPage() {
+    if (!book.id) return;
+    await flushSave();
+    let note;
+    try { note = await api.notes.create({ folderId: book.id, title: '' }); }
+    catch (err) { toast('Could not add a page: ' + (err.message || err)); return; }
+    await refresh({ keepEditor: true });
+    await selectNoteNow(note.id);
+    el.titleInput.focus();
+  }
+
+  async function toggleBook(folderId, on) {
+    try { await api.folders.setBook(folderId, on); }
+    catch (err) { toast('Could not change the folder: ' + (err.message || err)); return; }
+    await refresh({ keepEditor: true });
+    if (state.current) renderBookStrip(state.current);
+    toast(on ? 'This folder is now a book: its notes are pages you can page through and reorder.' : 'Back to an ordinary folder.');
+  }
+
+  // ---- related notes --------------------------------------------------------------
+
+  let relatedTimer = null;
+  function renderRelatedSoon() { clearTimeout(relatedTimer); relatedTimer = setTimeout(() => { if (state.current) renderRelated(state.current); }, 400); }
+
+  async function renderRelated(note) {
+    if (!note || note.trashedAt) { el.relatedPanel.classList.add('hidden'); return; }
+    const forNote = note.id;
+    let r;
+    try { r = await api.notes.related(note.id); } catch (_) { r = null; }
+    if (state.currentId !== forNote) return;
+    if (!r) { el.relatedPanel.classList.add('hidden'); return; }
+    const fill = (group, items) => {
+      const ul = group.querySelector('ul');
+      ul.innerHTML = '';
+      for (const it of items) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = (it.locked ? '🔒 ' : '') + it.title;
+        if (it.sharedTags && it.sharedTags.length) { const t = document.createElement('span'); t.className = 'tags'; t.textContent = it.sharedTags.map((x) => '#' + x).join(' '); b.append(t); }
+        if (it.missing) { b.classList.add('is-missing'); b.disabled = true; b.title = 'This link points at a note that no longer exists.'; }
+        else { b.title = it.trashed ? 'In the trash' : 'Open'; b.addEventListener('click', () => followLink('note://' + it.id)); }
+        li.append(b);
+        ul.append(li);
+      }
+      group.classList.toggle('hidden', !items.length);
+    };
+    fill(el.relatedOut, r.outgoing);
+    fill(el.relatedIn, r.incoming);
+    fill(el.relatedTags, r.byTags);
+    el.relatedPanel.classList.toggle('hidden', !(r.outgoing.length || r.incoming.length || r.byTags.length));
   }
 
   // ---- live share --------------------------------------------------------------
@@ -2143,6 +2275,8 @@
       state.current = updated;
       updateStatus(updated);
       setSaved(state.dirty ? 'Saving…' : 'Saved'); // typing during the write means another save is coming
+      renderRelatedSoon();
+      if (book.id && patch.title !== undefined) { const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t'); if (t) t.textContent = H.truncate(H.deriveTitle(updated) || 'Untitled', 28); }
       // A vault note's title is its file name: the store may have settled it (illegal characters, a clash),
       // and the file row must show the renamed path.
       if (updated.filePath && el.filePath.textContent !== updated.filePath) { el.filePath.textContent = updated.filePath; el.filePath.title = updated.filePath; }
@@ -2581,6 +2715,7 @@
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); attachFiles(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); toggleRecording(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); openHistory(); return; }
+    if (ctrl && !e.shiftKey && (e.key === 'PageDown' || e.key === 'PageUp')) { if (stepPage(e.key === 'PageDown' ? 1 : -1)) e.preventDefault(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); openRemindDialog(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
@@ -2626,6 +2761,9 @@
     el.printBtn.addEventListener('click', printNote);
     el.remindBtn.addEventListener('click', openRemindDialog);
     el.lockBtn.addEventListener('click', onLockButton);
+    el.bookPrevBtn.addEventListener('click', () => stepPage(-1));
+    el.bookNextBtn.addEventListener('click', () => stepPage(1));
+    el.bookAddBtn.addEventListener('click', addPage);
     el.liveLinkBtn.addEventListener('click', async () => { const s = state.current && (await api.live.status(state.current.id)); if (s && s.url) openLiveDialog('link', s.url); });
     el.liveStopBtn.addEventListener('click', stopLive);
     el.liveForm.addEventListener('submit', (e) => { e.preventDefault(); submitLiveDialog(); });

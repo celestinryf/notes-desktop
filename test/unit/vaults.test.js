@@ -10,7 +10,8 @@ const { VaultManager } = require('../../src/vaults');
 
 let gitAvailable = true;
 try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch (_) { gitAvailable = false; }
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-vault-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-vault-'); // removed when the test process exits
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 
 function makeVaultDir() {

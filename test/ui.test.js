@@ -12,7 +12,8 @@ const { _electron: electron } = require('playwright-core');
 
 const ROOT = path.resolve(__dirname, '..');
 const ELECTRON_PATH = require('electron');
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-'));
+const { tmpDir } = require('./helpers/tmp'); // folders are removed when the run exits
+const dataDir = tmpDir('notes-ui-');
 const notesFile = path.join(dataDir, 'notes.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readNotes = () => JSON.parse(fs.readFileSync(notesFile, 'utf8'));
@@ -488,7 +489,7 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
 });
 
 test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
-  const fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-files-'));
+  const fileDir = tmpDir('notes-ui-files-');
   const mdPath = path.join(fileDir, 'External note.md');
   fs.writeFileSync(mdPath, '# From disk\n\nline one\n');
   const pdfPath = path.join(fileDir, 'paper.pdf');
@@ -584,7 +585,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 });
 
 test('vaults: a folder of Markdown becomes notes; new note writes a file; rename renames; external files appear', { timeout: 60000 }, async () => {
-  const vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ui-vault-'));
+  const vaultDir = tmpDir('notes-ui-vault-');
   fs.mkdirSync(path.join(vaultDir, 'Work'));
   fs.writeFileSync(path.join(vaultDir, 'Hello.md'), '# Hello\n\nfrom the vault\n');
   fs.writeFileSync(path.join(vaultDir, 'Work', 'Plan.md'), 'plan\n');
@@ -1294,6 +1295,75 @@ test('zoom: Ctrl+= zooms in, Ctrl+- out, Ctrl+0 resets, and the level is remembe
     await page.keyboard.press('Escape');
   }
   await app.evaluate(() => global.__restorePopup());
+});
+
+test('books: a folder becomes a book with page tabs; pages turn, get added and reorder; related notes list links and backlinks', { timeout: 60000 }, async () => {
+  // A folder with three notes, made into a book from the folder menu.
+  const folder = await page.evaluate(() => window.notesApi.folders.create({ name: 'Novel' }));
+  const mk = (title) => page.evaluate(([t, f]) => window.notesApi.notes.create({ title: t, body: t + ' text', folderId: f }), [title, folder.id]);
+  const one = await mk('Chapter 1'); await sleep(5); const two = await mk('Chapter 2'); await sleep(5); const three = await mk('Chapter 3');
+  await page.click('.nav-item[data-view="all"]');
+  await page.waitForSelector('.folder-row[data-id="' + folder.id + '"]');
+  await page.click('.folder-row[data-id="' + folder.id + '"]', { button: 'right' });
+  await waitForDom(() => !document.getElementById('folderMenu').classList.contains('hidden'));
+  assert.equal(await page.textContent('#folderMenuBook'), 'Turn into a book');
+  await page.click('#folderMenuBook');
+  await waitFor('book flag', () => readNotes().folders.find((f) => f.id === folder.id).book === true);
+  await page.click('.folder-row[data-id="' + folder.id + '"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length === 3 && /p\. 1/.test(document.querySelector('.note-card').textContent));
+  const order = () => page.$$eval('.note-card', (els) => els.map((e) => e.querySelector('.note-card-title').textContent.replace(/^p\. \d+/, '').trim()));
+  assert.deepEqual(await order(), ['Chapter 1', 'Chapter 2', 'Chapter 3'], 'reading order = creation order');
+  await page.click('.note-card[data-id="' + one.id + '"]');
+  await page.waitForSelector('#bookStrip:not(.hidden)');
+  await waitForDom(() => document.querySelectorAll('#bookTabs .book-tab').length === 3);
+  assert.equal(await page.textContent('#bookName'), 'Novel');
+  assert.equal(await page.evaluate(() => document.getElementById('bookPrevBtn').disabled), true);
+  // Turn pages with the button and with Ctrl+PageDown / Ctrl+PageUp.
+  await page.click('#bookNextBtn');
+  await waitForDom((id) => document.querySelector('#bookTabs .book-tab.is-active') && document.querySelector('#bookTabs .book-tab.is-active').dataset.id === id, two.id);
+  await page.keyboard.press('Control+PageDown');
+  await waitForDom((id) => document.getElementById('titleInput').value === 'Chapter 3', three.id);
+  assert.equal(await page.evaluate(() => document.getElementById('bookNextBtn').disabled), true);
+  await page.keyboard.press('Control+PageUp');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 2');
+  // Click a tab.
+  await page.click('#bookTabs .book-tab[data-id="' + one.id + '"]');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 1');
+  // Reorder: Chapter 3 before Chapter 1 (the store call the drag-and-drop makes).
+  await page.evaluate(([f, ids]) => window.notesApi.folders.reorderPages(f, ids), [folder.id, [three.id, one.id, two.id]]);
+  await page.click('.folder-row[data-id="' + folder.id + '"]');
+  await waitForDom(() => /Chapter 3/.test(document.querySelector('.note-card').textContent));
+  assert.deepEqual(await order(), ['Chapter 3', 'Chapter 1', 'Chapter 2']);
+  // Drag a tab in the strip: Chapter 2 onto Chapter 3 puts it first.
+  await page.click('.note-card[data-id="' + one.id + '"]');
+  await waitForDom(() => document.querySelectorAll('#bookTabs .book-tab').length === 3);
+  await page.dragAndDrop('#bookTabs .book-tab[data-id="' + two.id + '"]', '#bookTabs .book-tab[data-id="' + three.id + '"]');
+  await waitFor('dragged order saved', () => JSON.stringify(readNotes().folders.find((f) => f.id === folder.id).pageOrder) === JSON.stringify([two.id, three.id, one.id]), 8000);
+  // + Page adds a page at the end and opens it.
+  await page.click('#bookAddBtn');
+  await waitFor('page added', () => readNotes().notes.filter((n) => n.folderId === folder.id && !n.trashedAt).length === 4);
+  await waitForDom(() => document.querySelectorAll('#bookTabs .book-tab').length === 4 && document.querySelector('#bookTabs .book-tab:last-child').classList.contains('is-active'));
+  await page.fill('#titleInput', 'Epilogue');
+  await waitFor('epilogue saved', () => readNotes().notes.some((n) => n.title === 'Epilogue' && n.folderId === folder.id));
+  // Related notes: Chapter 1 links to Chapter 2 -> Chapter 2 shows it under "Linked from".
+  await page.evaluate(([id, target]) => window.notesApi.notes.update(id, { body: 'see [next](note://' + target + ')', tags: 'novel' }), [one.id, two.id]);
+  await page.evaluate((id) => window.notesApi.notes.update(id, { tags: 'novel' }), three.id);
+  await page.click('#bookTabs .book-tab[data-id="' + two.id + '"]');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 2');
+  await waitForDom(() => !document.getElementById('relatedIn').classList.contains('hidden') && /Chapter 1/.test(document.getElementById('relatedIn').textContent), 8000);
+  await page.click('#bookTabs .book-tab[data-id="' + one.id + '"]');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 1');
+  await waitForDom(() => /Chapter 2/.test(document.getElementById('relatedOut').textContent) && /Chapter 3/.test(document.getElementById('relatedTags').textContent), 8000);
+  await page.click('#relatedOut button');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 2');
+  // Back to a folder: no strip.
+  await page.click('.folder-row[data-id="' + folder.id + '"]', { button: 'right' });
+  await waitForDom(() => document.getElementById('folderMenuBook').textContent === 'Turn back into a folder');
+  await page.click('#folderMenuBook');
+  await waitFor('book off', () => readNotes().folders.find((f) => f.id === folder.id).book === false);
+  await page.click('.note-card[data-id="' + one.id + '"]');
+  await waitForDom(() => document.getElementById('bookStrip').classList.contains('hidden'));
+  await page.click('.nav-item[data-view="all"]');
 });
 
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {

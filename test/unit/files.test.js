@@ -7,7 +7,8 @@ const path = require('path');
 const F = require('../../src/files');
 const { Store } = require('../../src/store');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-files-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-files-'); // removed when the test process exits
 
 test('kindOf: extensions, sniffing, pdf and docx', () => {
   const dir = tmp();

@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     emptyTrash: invoke('notes:emptyTrash'),
     tags: invoke('notes:tags'),
     counts: invoke('notes:counts'),
+    related: invoke('notes:related'),
   },
   files: {
     openDialog: invoke('files:openDialog'),
@@ -89,6 +90,8 @@ contextBridge.exposeInMainWorld('notesApi', {
     path: invoke('folders:path'),
     create: invoke('folders:create'),
     rename: invoke('folders:rename'),
+    setBook: invoke('folders:setBook'),
+    reorderPages: invoke('folders:reorderPages'),
     move: invoke('folders:move'),
     delete: invoke('folders:delete'),
   },

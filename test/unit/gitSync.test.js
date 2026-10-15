@@ -10,7 +10,8 @@ const { GitSync } = require('../../src/gitSync');
 let gitAvailable = true;
 try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch (_) { gitAvailable = false; }
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-git-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-git-'); // removed when the test process exits
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 
 test('commits snapshots of notes.json into <data>/history, skips empty commits, keeps the data folder repo-free', { skip: !gitAvailable && 'git not installed' }, async () => {

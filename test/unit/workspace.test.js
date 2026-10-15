@@ -7,7 +7,8 @@ const path = require('path');
 const { Store } = require('../../src/store');
 const W = require('../../src/workspace');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notes-ws-'));
+const { tmpDir } = require('../helpers/tmp');
+const tmp = () => tmpDir('notes-ws-'); // removed when the test process exits
 
 test('exportNotes mirrors plain notes and folders; file-backed and trashed notes are left out', () => {
   const store = new Store(tmp()).load();

@@ -11,7 +11,7 @@ const { _electron: electron } = require('playwright-core');
 
 const ROOT = path.resolve(__dirname, '..');
 const ELECTRON_PATH = require('electron');
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-live-'));
+const dataDir = require('../test/helpers/tmp').tmpDir('notes-live-');
 const notesFile = path.join(dataDir, 'notes.json');
 const shots = path.join(ROOT, 'scratchpad', 'shots');
 fs.mkdirSync(shots, { recursive: true });
@@ -41,7 +41,7 @@ async function main() {
   try { gh('repo', 'create', owner + '/' + REPO, '--private', '--description', 'temporary live test of the notes app vault sync'); } catch (e) { log('repo create failed (reusing existing): ' + String(e.message).slice(0, 80)); }
   repoUrl = 'https://github.com/' + owner + '/' + REPO + '.git';
   log('repo', repoUrl);
-  vaultParent = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-live-vault-'));
+  vaultParent = require('../test/helpers/tmp').tmpDir('notes-live-vault-');
 
   fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F7', openAtLogin: false, theme: 'light' }, notes: [] }));
   const env = Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1', NOTES_APP_VAULT_DEBOUNCE_MS: '1500' });
@@ -83,7 +83,7 @@ async function main() {
   record('vault: auto-commit and push reach GitHub', !!pushed);
 
   // 3. Another device: clone elsewhere, add a file, push; the app syncs and the note appears.
-  otherClone = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-live-other-')), 'clone');
+  otherClone = path.join(require('../test/helpers/tmp').tmpDir('notes-live-other-'), 'clone');
   git(path.dirname(otherClone), 'clone', '-q', repoUrl, otherClone);
   fs.writeFileSync(path.join(otherClone, OTHER + '.md'), 'Hello from the other device\n');
   git(otherClone, 'add', '-A'); git(otherClone, '-c', 'user.name=Other', '-c', 'user.email=o@x', 'commit', '-q', '-m', 'from other device'); git(otherClone, 'push', '-q');
