@@ -36,7 +36,11 @@ test('contextMenuTemplate: editable text gets spelling, edit actions and zoom; l
   const labels = edit.filter((i) => i.label).map((i) => i.label);
   assert.deepEqual(labels.slice(0, 3), ['the', 'ten', 'Add "teh" to dictionary']);
   assert.ok(labels.includes('Cut') && labels.includes('Copy') && labels.includes('Paste') && labels.includes('Select all'));
-  assert.equal(edit.find((i) => i.label === 'Redo').enabled, false);
+  // The rich editor (contenteditable) sends undo/redo to the page; a textarea uses the native roles.
+  assert.equal(edit.find((i) => i.label === 'Undo').action, 'editUndo');
+  const ta = W.contextMenuTemplate({ isEditable: true, formControlType: 'text-area', editFlags: { canUndo: true, canRedo: false } });
+  assert.equal(ta.find((i) => i.label === 'Undo').role, 'undo');
+  assert.equal(ta.find((i) => i.label === 'Redo').enabled, false);
   assert.equal(edit.find((i) => i.label === 'the').action, 'replaceMisspelling');
   assert.ok(labels.includes('Zoom in') && labels.includes('Zoom out') && labels.includes('Actual size'));
   // No suggestions: a disabled line, still "Add to dictionary".

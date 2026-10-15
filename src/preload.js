@@ -142,5 +142,6 @@ contextBridge.exposeInMainWorld('notesApi', {
     notice: on('app:notice'),
     liveStatus: on('live:status'),
     relocked: on('lock:relocked'),
+    editCommand: on('app:editCommand'),
   },
 });

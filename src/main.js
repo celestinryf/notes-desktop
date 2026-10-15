@@ -181,7 +181,12 @@ function main() {
       return { action: 'deny' };
     });
     // Ctrl+= / Ctrl+- / Ctrl+0 and the right-click menu (Electron supplies neither properly on its own).
-    const rememberZoom = (level) => { try { store.setSettings({ zoomLevel: level }); } catch (_) { /* saving paused */ } };
+    // Debounced: holding Ctrl+= repeats ~30 times a second, and each save writes notes.json.
+    let zoomSaveTimer = null;
+    const rememberZoom = (level) => {
+      clearTimeout(zoomSaveTimer);
+      zoomSaveTimer = setTimeout(() => { if (store.settings.zoomLevel === level) return; try { store.setSettings({ zoomLevel: level }); } catch (_) { /* saving paused */ } }, 400);
+    };
     windowInput.attachZoom(win.webContents, { initial: store.settings.zoomLevel, onChange: rememberZoom });
     windowInput.attachContextMenu(win.webContents, () => win, { Menu, shell, clipboard, onZoom: rememberZoom });
     win.webContents.on('will-navigate', (e, url) => {
