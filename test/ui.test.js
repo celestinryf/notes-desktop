@@ -679,7 +679,9 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await waitForDom(() => /not signed in/.test(document.getElementById('botOutput').textContent), 10000);
   await app.evaluate(() => { delete process.env.FAKE_CLAUDE_AUTH; });
   await page.keyboard.press('Control+Enter');
-  await waitForDom(() => /done/.test(document.getElementById('botOutput').textContent), 20000);
+  // Wait for the app's own end-of-run line, written when the run has exited and the workspace has been imported.
+  // The fake agent's lowercase "done" on stdout streams in earlier, before the import summary exists.
+  await waitForDom(() => [...document.querySelectorAll('#botOutput .bot-meta')].some((s) => s.textContent.startsWith('\nDone')), 20000);
   const out = await page.textContent('#botOutput');
   assert.match(out, /Claude Code, on your Claude Max subscription \(no API credits\)/);
   assert.match(out, /api key env: absent/);
