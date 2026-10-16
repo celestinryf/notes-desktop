@@ -123,6 +123,11 @@ test('settings are sanitized on load and on set', () => {
   assert.equal(sanitizeSettings({ fontSize: 3 }).fontSize, 12);
   assert.equal(sanitizeSettings({ ttsRate: 9 }).ttsRate, 2);
   assert.equal(sanitizeSettings({ ttsRate: 'fast' }).ttsRate, 1);
+  assert.equal(sanitizeSettings({}).listCollapsed, false);
+  assert.equal(sanitizeSettings({ listCollapsed: 'yes' }).listCollapsed, true);
+  assert.equal(sanitizeSettings({}).lastFolderId, null);
+  assert.equal(sanitizeSettings({ lastFolderId: 'f1' }).lastFolderId, 'f1');
+  for (const bad of ['', 7, {}, ['f']]) assert.equal(sanitizeSettings({ lastFolderId: bad }).lastFolderId, null);
   assert.equal(sanitizeSettings({ ttsRate: 1.26 }).ttsRate, 1.3);
   assert.equal(sanitizeSettings({ ttsVoice: 42 }).ttsVoice, '');
   assert.equal(sanitizeSettings({ sidebarWidth: 50 }).sidebarWidth, 160);

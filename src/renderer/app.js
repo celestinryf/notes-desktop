@@ -30,7 +30,7 @@
     listTitle: $('#listTitle'), emptyTrashBtn: $('#emptyTrashBtn'),
     noteList: $('#noteList'), listEmpty: $('#listEmpty'),
     editorEmpty: $('#editorEmpty'), editor: $('#editor'),
-    toggleSidebarBtn: $('#toggleSidebarBtn'), pinBtn: $('#pinBtn'), sourceBtn: $('#sourceBtn'),
+    toggleSidebarBtn: $('#toggleSidebarBtn'), toggleListBtn: $('#toggleListBtn'), hideListBtn: $('#hideListBtn'), pinBtn: $('#pinBtn'), sourceBtn: $('#sourceBtn'),
     editorColumn: $('#editorColumn'), richEditor: $('#richEditor'),
     linkDialog: $('#linkDialog'), linkForm: $('#linkForm'), linkInput: $('#linkInput'), linkRemoveBtn: $('#linkRemoveBtn'), linkCancelBtn: $('#linkCancelBtn'),
     alignSeg: $('#alignSeg'), editorWidthInput: $('#editorWidthInput'), editorWidthValue: $('#editorWidthValue'), editorFullWidthInput: $('#editorFullWidthInput'),
@@ -133,6 +133,7 @@
     document.documentElement.dataset.theme = effectiveTheme();
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
     el.app.classList.toggle('sidebar-collapsed', !!settings.sidebarCollapsed);
+    syncListCollapsed();
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
@@ -383,13 +384,45 @@
 
   // ---- views ---------------------------------------------------------------
 
-  async function setView(view, arg) {
+  async function setView(view, arg, refreshOpts) {
     await flushSave();
     state.view = view;
     state.tag = view === 'tag' ? arg : null;
     state.folderId = view === 'folder' ? arg : null;
     el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
-    await refresh();
+    // Remember the folder so the app starts in it next time.
+    if ((state.settings.lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
+    await refresh(refreshOpts);
+  }
+
+  // The list shows the folder (or book) of the note in front of the user. Called when a note is opened from
+  // outside the list (a link, the related panel, a search result) so the list never shows some other folder.
+  // A search keeps looking everywhere until it is cleared; the trash and unfiled notes keep their own views.
+  async function scopeListToNote(note) {
+    if (!note || state.query) return;
+    if (note.trashedAt) { if (state.view !== 'trash') await setView('trash', null, { keepEditor: true }); return; }
+    if (note.folderId) { if (!(state.view === 'folder' && state.folderId === note.folderId)) await setView('folder', note.folderId, { keepEditor: true }); return; }
+    if (state.view === 'folder' || state.view === 'trash') await setView('all', null, { keepEditor: true });
+  }
+
+  // Applies the search box. Clearing a search brings the list back to the folder of the note now open.
+  let searchTimer = null;
+  async function endSearchStep() {
+    const had = !!state.query;
+    state.query = el.searchInput.value.trim();
+    await refresh({ keepEditor: true });
+    if (had && !state.query) await scopeListToNote(state.current);
+  }
+
+  // The list can be put away while a note is open; with no note open it always shows, so there is a way back.
+  function syncListCollapsed() {
+    const collapsed = !!(state.settings && state.settings.listCollapsed && state.current);
+    el.app.classList.toggle('list-collapsed', collapsed);
+    if (el.toggleListBtn) el.toggleListBtn.classList.toggle('is-on', !collapsed);
+  }
+
+  function toggleList() {
+    updateSettings({ listCollapsed: !state.settings.listCollapsed });
   }
 
   // ---- folders -------------------------------------------------------------
@@ -842,6 +875,7 @@
     state.currentId = null;
     state.current = null;
     state.dirty = false;
+    syncListCollapsed();
     el.editor.classList.add('hidden');
     el.editorEmpty.classList.remove('hidden');
     el.noteList.querySelectorAll('.note-card.is-active').forEach((c) => c.classList.remove('is-active'));
@@ -872,6 +906,7 @@
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
+    syncListCollapsed();
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
@@ -1900,6 +1935,7 @@
       bot.running = true;
       el.botPanel.classList.add('is-running');
       el.botRunBtn.textContent = 'Stop';
+      botAppend('Claude Code, on your Claude ' + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + ' ' : '') + 'subscription (no API credits)\n', 'bot-meta');
       botAppend('Working in ' + ev.cwd + (ev.focus ? '  (looking at ' + ev.focus + ')' : '') + '\n', 'bot-meta');
       if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend('Pulled in earlier workspace edits first. ' + importSummary(ev.imported) + '\n', 'bot-meta');
     } else if (ev.type === 'out') {
@@ -2476,7 +2512,7 @@
       const id = href.replace(/^note:\/\//i, '').replace(/\/$/, '');
       const target = await api.notes.get(id);
       if (!target) { toast('That note no longer exists.'); return; }
-      if (target.trashedAt) await setView('trash'); else if (state.view === 'trash') await setView('all');
+      await scopeListToNote(target);
       await selectNoteNow(id);
       return;
     }
@@ -2665,8 +2701,8 @@
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
-        state.query = '';
-        refresh();
+        clearTimeout(searchTimer);
+        endSearchStep();
         return;
       }
       e.preventDefault();
@@ -2709,6 +2745,7 @@
       startCreateFolder(state.view === 'folder' ? state.folderId : null);
       return;
     }
+    if (ctrl && e.shiftKey && !e.altKey && e.code === 'Backslash') { e.preventDefault(); toggleList(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
@@ -2853,6 +2890,8 @@
     el.themeBtn.addEventListener('click', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }));
     el.settingsBtn.addEventListener('click', openSettings);
     el.toggleSidebarBtn.addEventListener('click', () => updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }));
+    el.toggleListBtn.addEventListener('click', toggleList);
+    el.hideListBtn.addEventListener('click', toggleList);
     setupResizer(el.sidebarResizer, 'sidebarWidth');
     setupResizer(el.listResizer, 'listWidth');
 
@@ -2868,10 +2907,9 @@
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
     window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });
 
-    let searchTimer = null;
     el.searchInput.addEventListener('input', () => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => { state.query = el.searchInput.value.trim(); refresh({ keepEditor: true }); }, 120);
+      searchTimer = setTimeout(endSearchStep, 120);
     });
     el.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && state.notes.length) { selectNote(state.notes[0].id).then(() => focusBody()); }
@@ -3036,6 +3074,8 @@
     applySettings(settings);
     applyInfo(info);
     bind();
+    // Start in the folder the list showed last time, if it still exists (refresh falls back to all notes).
+    if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();
     if (state.current) focusBody();
     // Tell main we can receive events now; it replays 'app:shown' if the window is already on screen.

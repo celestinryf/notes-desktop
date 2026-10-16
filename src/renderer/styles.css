@@ -80,14 +80,27 @@ kbd {
   --list-w: 300px;
   display: grid;
   grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr);
+  /* One row exactly the window's height. Without it the implicit row grows to fit its content, the panes
+     never overflow, and nothing scrolls (the body hides its own overflow). */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   animation: rise 0.5s var(--ease) both;
 }
 .app.sidebar-collapsed { grid-template-columns: 0 var(--list-w) minmax(0, 1fr); }
 .app.sidebar-collapsed .sidebar { display: none; }
+.app.list-collapsed { grid-template-columns: var(--sidebar-w) 0 minmax(0, 1fr); }
+.app.sidebar-collapsed.list-collapsed { grid-template-columns: 0 0 minmax(0, 1fr); }
+.app.list-collapsed .list-pane { display: none; }
+.list-title-actions { display: flex; align-items: center; gap: 6px; }
 
 /* Drag handles on the right edge of the sidebar and the list pane. */
 .sidebar, .list-pane { position: relative; }
+.app > * { min-height: 0; }
+/* Each pane keeps its own column: a hidden pane leaves the grid, and without this the next pane would slide
+   into its zero-width column. */
+.sidebar { grid-column: 1; grid-row: 1; }
+.list-pane { grid-column: 2; grid-row: 1; }
+.editor-pane { grid-column: 3; grid-row: 1; }
 .resizer {
   position: absolute;
   top: 0; right: -5px;

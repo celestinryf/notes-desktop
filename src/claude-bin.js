@@ -76,4 +76,28 @@ function launchSpec(spec, args, opts) {
   return { file: process.execPath, args: [spec.file].concat(args), env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
 
-module.exports = { resolveClaude, resolveNode, launchSpec, shimTarget };
+// Variables that make Claude Code bill an API account (pay per token) instead of the user's Claude
+// subscription: an API key or bearer token for the Anthropic API, or routing to Bedrock, Vertex or Foundry.
+// With none of them set, Claude Code uses the claude.ai login. CLAUDE_CODE_OAUTH_TOKEN is a subscription
+// token and stays.
+const API_BILLING_VAR = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY))$/i;
+
+function subscriptionEnv(env) {
+  const out = Object.assign({}, env);
+  for (const k of Object.keys(out)) if (API_BILLING_VAR.test(k)) delete out[k];
+  return out;
+}
+
+// Reads the JSON printed by `claude auth status` and decides whether runs will use the Claude subscription.
+// Returns { ok: true, plan } or { ok: false, reason }.
+function checkSubscriptionAuth(text) {
+  let s;
+  try { s = JSON.parse(String(text || '').trim()); } catch (_) { return { ok: false, reason: 'Claude Code did not report how it is signed in. Update it (claude update) and try again.' }; }
+  if (!s || typeof s !== 'object') return { ok: false, reason: 'Claude Code did not report how it is signed in.' };
+  if (!s.loggedIn) return { ok: false, reason: 'Claude Code is not signed in. Open a terminal, run claude, and sign in with your Claude account.' };
+  if (s.authMethod !== 'claude.ai') return { ok: false, reason: 'Claude Code is signed in with ' + (s.authMethod || 'an API key') + ', which bills API credits. Run claude, then /login with your Claude account.' };
+  if (s.apiProvider && s.apiProvider !== 'firstParty') return { ok: false, reason: 'Claude Code is set to use ' + s.apiProvider + ', which bills that provider. Remove that setting to use your Claude subscription.' };
+  return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
+}
+
+module.exports = { resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth };

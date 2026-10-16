@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   alwaysOnTop: false,
   sort: 'updated',          // updated | created | title
   sidebarCollapsed: false,
+  listCollapsed: false,      // note list hidden (only while a note is open)
+  lastFolderId: null,       // folder the list showed last, restored at start
   sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
   listWidth: H.PANE_LIMITS.listWidth.def,
   expandedFolders: [],      // folder ids whose children are shown in the sidebar
@@ -140,6 +142,8 @@ function sanitizeSettings(input) {
   s.openAtLogin = !!s.openAtLogin;
   s.alwaysOnTop = !!s.alwaysOnTop;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
+  s.listCollapsed = !!s.listCollapsed;
+  s.lastFolderId = typeof s.lastFolderId === 'string' && s.lastFolderId ? s.lastFolderId : null;
   s.zoomLevel = Number.isFinite(Number(s.zoomLevel)) ? Math.max(-3, Math.min(5, Math.round(Number(s.zoomLevel) * 2) / 2)) : 0;
   s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
   s.listWidth = H.clampPane('listWidth', s.listWidth);

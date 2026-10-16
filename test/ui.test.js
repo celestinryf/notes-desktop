@@ -44,6 +44,8 @@ test.before(async () => {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_REMINDER_TICK_MS: '300',
       // The bot panel is exercised against a fake `claude` so no real agent (or tokens) is involved.
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
+      // Must never reach the agent: runs bill the Claude subscription, not API credits.
+      ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
     }),
   });
   page = await app.firstWindow();
@@ -665,10 +667,21 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await page.keyboard.press('Control+Shift+a');
   await page.waitForSelector('#botPanel:not(.hidden)');
   assert.match(await page.textContent('#botScope'), /plain notes/);
+  // A Claude Code signed in with an API key, or not signed in, is refused before anything runs.
+  await app.evaluate(() => { process.env.FAKE_CLAUDE_AUTH = 'apiKey'; });
   await page.fill('#botPrompt', 'Append a bullet to the current note');
+  await page.keyboard.press('Control+Enter');
+  await waitForDom(() => /bills API credits/.test(document.getElementById('botOutput').textContent), 10000);
+  assert.doesNotMatch(await page.textContent('#botOutput'), /fake claude: cwd/, 'nothing ran');
+  await app.evaluate(() => { process.env.FAKE_CLAUDE_AUTH = 'none'; });
+  await page.keyboard.press('Control+Enter');
+  await waitForDom(() => /not signed in/.test(document.getElementById('botOutput').textContent), 10000);
+  await app.evaluate(() => { delete process.env.FAKE_CLAUDE_AUTH; });
   await page.keyboard.press('Control+Enter');
   await waitForDom(() => /done/.test(document.getElementById('botOutput').textContent), 20000);
   const out = await page.textContent('#botOutput');
+  assert.match(out, /Claude Code, on your Claude Max subscription \(no API credits\)/);
+  assert.match(out, /api key env: absent/);
   assert.match(out, /fake claude: cwd=.*workspace/);
   assert.match(out, /edited .*Gamma \(copy\)\.md/);
   assert.match(out, /Notes updated: 1, created: 1/);
@@ -1406,7 +1419,8 @@ test('writing column: alignment and width settings move and size the block', asy
   const col = () => page.evaluate(() => {
     const c = document.getElementById('editorColumn');
     const cs = getComputedStyle(c);
-    return { cls: c.className, width: c.getBoundingClientRect().width, left: c.getBoundingClientRect().left, paneLeft: document.getElementById('editorPane').getBoundingClientRect().left, paneWidth: document.getElementById('editorPane').getBoundingClientRect().width, maxWidth: cs.maxWidth };
+    return { cls: c.className, width: c.getBoundingClientRect().width, left: c.getBoundingClientRect().left, // The scroll area minus its scrollbar: a long note shows one, and the column centres in what is left.
+    paneLeft: document.querySelector('.editor-scroll').getBoundingClientRect().left, paneWidth: document.querySelector('.editor-scroll').clientWidth, maxWidth: cs.maxWidth };
   });
   const before = await col();
   assert.match(before.cls, /align-left/);
@@ -1770,6 +1784,74 @@ test('drag handles resize the sidebar and list, persist, clamp, and reset on dou
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 720));
   await page.dblclick('#listResizer');
   await waitFor('list reset again', () => readNotes().settings.listWidth === 300);
+});
+
+test('layout: panes scroll with the wheel; the note list hides and follows the open note\'s folder', { timeout: 60000 }, async () => {
+  // The grid row is the window's height, so a long list scrolls inside its pane.
+  const rows = await page.evaluate(() => ({ row: parseFloat(getComputedStyle(document.getElementById('app')).gridTemplateRows), win: innerHeight }));
+  assert.ok(Math.abs(rows.row - rows.win) < 2, 'grid row ' + rows.row + ' vs window ' + rows.win);
+  const many = await page.evaluate(async () => { const ids = []; for (let i = 0; i < 40; i++) ids.push((await window.notesApi.notes.create({ title: 'Scroll filler ' + i, body: 'x' })).id); return ids; });
+  await page.click('.nav-item[data-view="all"]');
+  await waitForDom(() => document.querySelectorAll('.note-card').length >= 40);
+  const listBox = await page.evaluate(() => { const e = document.getElementById('noteList'); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 60, sh: e.scrollHeight, ch: e.clientHeight }; });
+  assert.ok(listBox.sh > listBox.ch, 'the list overflows its pane');
+  await page.mouse.move(listBox.x, listBox.y);
+  await page.mouse.wheel(0, 500);
+  await waitForDom(() => document.getElementById('noteList').scrollTop > 0);
+  // A long note scrolls inside the editor.
+  await page.click('.note-card:has-text("Scroll filler 0")');
+  await useSourceMode(true);
+  await page.fill('#bodyInput', Array.from({ length: 150 }, (_, i) => 'line ' + i).join('\n'));
+  await page.evaluate(() => { document.querySelector('.editor-scroll').scrollTop = 0; });
+  const edBox = await page.evaluate(() => { const r = document.querySelector('.editor-scroll').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(edBox.x, edBox.y);
+  await page.mouse.wheel(0, 500);
+  await waitForDom(() => document.querySelector('.editor-scroll').scrollTop > 0);
+  await page.evaluate((ids) => Promise.all(ids.map((id) => window.notesApi.notes.destroy(id))), many);
+
+  // Folder scope: following a link opens the target's folder in the list, and only that folder's notes.
+  const folder = await page.evaluate(() => window.notesApi.folders.create({ name: 'Scoped folder' }));
+  const inside = await page.evaluate((f) => window.notesApi.notes.create({ title: 'Inside the folder', body: 'in', folderId: f }), folder.id);
+  const outside = await page.evaluate((id) => window.notesApi.notes.create({ title: 'Outside note', body: 'see [it](note://' + id + ')' }), inside.id);
+  await page.click('.nav-item[data-view="all"]');
+  await page.click('.note-card:has-text("Outside note")');
+  await waitForDom(() => /Inside the folder/.test(document.getElementById('relatedOut').textContent), 8000);
+  await page.click('#relatedOut button');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Inside the folder');
+  await waitForDom(() => document.getElementById('listTitle').textContent.includes('Scoped folder'));
+  const titles = await page.evaluate(() => [...document.querySelectorAll('.note-card-title')].map((e) => e.textContent));
+  assert.deepEqual(titles, ['Inside the folder'], 'only the folder\'s notes are listed');
+  await waitFor('folder remembered for the next start', () => readNotes().settings.lastFolderId === folder.id);
+  // A search looks everywhere; picking an unfiled result and clearing the search brings the list to All notes.
+  await page.fill('#searchInput', 'Outside note');
+  await waitForDom(() => [...document.querySelectorAll('.note-card-title')].some((e) => e.textContent === 'Outside note'));
+  await page.click('.note-card:has-text("Outside note")');
+  await page.focus('#searchInput');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('listTitle').textContent === 'All notes');
+  await waitFor('back to no remembered folder', () => readNotes().settings.lastFolderId === null);
+
+  // The list hides from its own button and comes back from the toolbar or Ctrl+Shift+Backslash.
+  const listShown = () => page.evaluate(() => getComputedStyle(document.querySelector('.list-pane')).display !== 'none');
+  await page.click('#hideListBtn');
+  await waitFor('list hidden', async () => !(await listShown()));
+  await waitFor('hidden state saved', () => readNotes().settings.listCollapsed === true);
+  const edWidth = await page.evaluate(() => document.getElementById('editor').getBoundingClientRect().width);
+  assert.ok(edWidth > 600, 'the editor takes the space: ' + edWidth);
+  await page.click('#toggleListBtn');
+  await waitFor('list shown', listShown);
+  await page.keyboard.press('Control+Shift+Backslash');
+  await waitFor('list hidden by key', async () => !(await listShown()));
+  // With no note open the list always shows, so there is a way back to the notes.
+  await page.click('.nav-item[data-view="trash"]');
+  await waitFor('list shown with no note open', listShown);
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('hidden again once a note is open', async () => !(await listShown()));
+  await page.keyboard.press('Control+Shift+Backslash');
+  await waitFor('list shown by key', listShown);
+  await waitFor('shown state saved', () => readNotes().settings.listCollapsed === false);
+  await page.evaluate(async ([a, b, f]) => { await window.notesApi.notes.destroy(a); await window.notesApi.notes.destroy(b); await window.notesApi.folders.delete(f); }, [inside.id, outside.id, folder.id]);
+  await page.click('.nav-item[data-view="all"]');
 });
 
 test('window state: Esc hides, a second launch re-shows the first instance, data survives reload', async () => {

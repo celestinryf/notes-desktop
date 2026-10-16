@@ -562,6 +562,7 @@ function main() {
   const claudeBin = require('./claude-bin');
   const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
   let botChild = null;
+  let botStarting = false; // a run is past its checks but its process is not spawned yet
 
   function findClaude() {
     return claudeBin.resolveClaude({ override: process.env.NOTES_APP_CLAUDE_BIN || null });
@@ -589,7 +590,22 @@ function main() {
     // Only the variables that attach a process to a running Claude Code session; auth and provider
     // settings such as CLAUDE_CODE_OAUTH_TOKEN or CLAUDE_CODE_GIT_BASH_PATH must stay.
     for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CODE_(ENTRYPOINT|EXECPATH|SESSION_ID|SESSION_ATTENDED|CHILD_SESSION|MESSAGING_SOCKET|MESSAGING_TOKEN))$/i.test(k)) delete env[k];
-    return env;
+    // Runs go on the user's Claude subscription, never on API credits.
+    return claudeBin.subscriptionEnv(env);
+  }
+
+  // Asks Claude Code how it is signed in and refuses to start an agent that would bill API credits.
+  // A confirmed subscription is remembered for ten minutes so each run does not pay for the check.
+  let authOkUntil = 0, authPlan = null;
+  async function ensureSubscription(spec) {
+    if (Date.now() < authOkUntil) return { ok: true, plan: authPlan };
+    const launch = claudeBin.launchSpec(spec, ['auth', 'status']);
+    const text = await new Promise((resolve) => {
+      require('child_process').execFile(launch.file, launch.args, { windowsHide: true, timeout: 20000, env: Object.assign(cleanEnv(), launch.env) }, (_err, stdout) => resolve(String(stdout || '')));
+    });
+    const r = claudeBin.checkSubscriptionAuth(text);
+    if (r.ok) { authOkUntil = Date.now() + 10 * 60 * 1000; authPlan = r.plan; }
+    return r;
   }
 
   function botSend(type, data) {
@@ -608,11 +624,15 @@ function main() {
 
   ipcMain.handle('bot:run', async (_e, opts) => {
     opts = opts || {};
-    if (botChild) return { ok: false, error: 'A run is already in progress.' };
+    if (botChild || botStarting) return { ok: false, error: 'A run is already in progress.' };
     const prompt = String(opts.prompt || '').trim();
     if (!prompt) return { ok: false, error: 'Type what you want done.' };
     const spec = findClaude();
     if (!spec) return { ok: false, error: 'Claude Code was not found. Install it (npm i -g @anthropic-ai/claude-code, or the native installer) and make sure "claude" is on your PATH.' };
+    botStarting = true; // holds the slot while the sign-in check runs, so two runs cannot start
+    let auth;
+    try { auth = await ensureSubscription(spec); } finally { botStarting = false; }
+    if (!auth.ok) return { ok: false, error: auth.reason };
     let target;
     try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not prepare the workspace: ' + err.message }; }
     const intro = target.kind === 'workspace'
@@ -624,7 +644,7 @@ function main() {
     const args = ['-p', fullPrompt, '--output-format', 'text', '--permission-mode', 'dontAsk', '--allowedTools', allowed];
     // Never through a shell: the prompt is one argv entry, whatever it contains.
     const launch = claudeBin.launchSpec(spec, args);
-    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, imported: target.imported });
+    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, imported: target.imported, plan: auth.plan });
     const { spawn } = require('child_process');
     let child;
     try {
@@ -660,12 +680,14 @@ function main() {
     return { ok: true, cwd: target.cwd, kind: target.kind };
   });
   ipcMain.handle('bot:cancel', () => { if (botChild) { killTree(botChild); return true; } return false; });
-  ipcMain.handle('bot:openTerminal', (_e, noteId) => {
-    if (botChild) return { ok: false, error: 'A run is in progress; wait for it to finish (or stop it) first.' }; // the workspace is in use
+  ipcMain.handle('bot:openTerminal', async (_e, noteId) => {
+    if (botChild || botStarting) return { ok: false, error: 'A run is in progress; wait for it to finish (or stop it) first.' }; // the workspace is in use
     let target;
     try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
     const spec = findClaude();
     if (!spec) return { ok: false, error: 'Claude Code was not found on this machine.' };
+    const auth = await ensureSubscription(spec);
+    if (!auth.ok) return { ok: false, error: auth.reason };
     const { spawn } = require('child_process');
     try {
       // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.

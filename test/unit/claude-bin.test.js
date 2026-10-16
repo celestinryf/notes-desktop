@@ -70,3 +70,22 @@ test('the native installer location (~/.local/bin) is found when PATH has nothin
   fs.writeFileSync(exe, 'MZ');
   assert.deepEqual(CB.resolveClaude({ pathDirs: [], home }), { file: exe, isScript: false });
 });
+
+test('subscriptionEnv drops every variable that would bill API credits and keeps the rest', () => {
+  const env = { PATH: 'x', ANTHROPIC_API_KEY: 'sk', anthropic_auth_token: 't', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_CODE_USE_FOUNDRY: '1', CLAUDE_CODE_OAUTH_TOKEN: 'sub', ANTHROPIC_MODEL: 'm' };
+  const out = CB.subscriptionEnv(env);
+  assert.deepEqual(out, { PATH: 'x', CLAUDE_CODE_OAUTH_TOKEN: 'sub', ANTHROPIC_MODEL: 'm' });
+  assert.equal(env.ANTHROPIC_API_KEY, 'sk', 'the input is not modified');
+});
+
+test('checkSubscriptionAuth accepts only a claude.ai login on the first-party API', () => {
+  const ok = (o) => CB.checkSubscriptionAuth(JSON.stringify(o));
+  assert.deepEqual(ok({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }), { ok: true, plan: 'max' });
+  assert.deepEqual(ok({ loggedIn: true, authMethod: 'claude.ai' }), { ok: true, plan: null }, 'older versions omit the provider and plan');
+  assert.match(ok({ loggedIn: false }).reason, /not signed in/);
+  assert.match(ok({ loggedIn: true, authMethod: 'apiKey' }).reason, /apiKey, which bills API credits/);
+  assert.match(ok({ loggedIn: true }).reason, /an API key/);
+  assert.match(ok({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'bedrock' }).reason, /bedrock/);
+  for (const bad of ['', 'Usage: claude [options]', 'null', '42', undefined]) assert.equal(CB.checkSubscriptionAuth(bad).ok, false, String(bad));
+  assert.equal(CB.checkSubscriptionAuth('\n  {"loggedIn":true,"authMethod":"claude.ai"}\n').ok, true, 'whitespace around the JSON is fine');
+});
