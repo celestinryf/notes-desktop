@@ -554,6 +554,9 @@ button.book-name:hover { border-color: var(--line); background: var(--bg); }
 .book-page-head h2 { margin: 0 0 10px; font-family: var(--font-display); font-size: 24px; flex: 1; }
 .book-page-head .no { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted); }
 .book-page-locked { color: var(--fg-muted); font-style: italic; }
+.split-lead { margin: 0 0 8px; }
+.split-pages { margin: 0 0 14px; padding: 8px 12px 8px 34px; max-height: 40vh; overflow: auto; border: 2px solid var(--line-soft); border-radius: 10px; background: var(--bg-sunken); display: grid; gap: 3px; }
+.split-pages .lines { color: var(--fg-muted); font-size: 12px; margin-left: 6px; }
 .book-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: thin; }
 .book-tab { display: flex; align-items: center; gap: 6px; max-width: 200px; padding: 4px 10px; border: 1.5px solid var(--line-soft); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .book-tab .no { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); }

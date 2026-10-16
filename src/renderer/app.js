@@ -21,6 +21,7 @@
     liveDialog: $('#liveDialog'), liveForm: $('#liveForm'), liveDialogTitle: $('#liveDialogTitle'), liveDialogHint: $('#liveDialogHint'), liveLinkLabel: $('#liveLinkLabel'), liveLinkInput: $('#liveLinkInput'),
     liveError: $('#liveError'), liveCopyBtn: $('#liveCopyBtn'), liveCancelBtn: $('#liveCancelBtn'), liveSubmitBtn: $('#liveSubmitBtn'),
     pageMenu: $('#pageMenu'), bookMenu: $('#bookMenu'), newBookBtn: $('#newBookBtn'),
+    splitBtn: $('#splitBtn'), splitDialog: $('#splitDialog'), splitForm: $('#splitForm'), splitLead: $('#splitLead'), splitPages: $('#splitPages'), splitName: $('#splitName'), splitKeep: $('#splitKeep'), splitCancelBtn: $('#splitCancelBtn'),
     bookReader: $('#bookReader'), bookReaderTitle: $('#bookReaderTitle'), bookReaderToc: $('#bookReaderToc'), bookReaderBody: $('#bookReaderBody'), bookReaderScroll: $('#bookReaderScroll'),
     bookReaderPdfBtn: $('#bookReaderPdfBtn'), bookReaderPrintBtn: $('#bookReaderPrintBtn'), bookReaderCloseBtn: $('#bookReaderCloseBtn'),
     bookStrip: $('#bookStrip'), bookName: $('#bookName'), bookTabs: $('#bookTabs'), bookPrevBtn: $('#bookPrevBtn'), bookNextBtn: $('#bookNextBtn'), bookAddBtn: $('#bookAddBtn'),
@@ -1097,6 +1098,60 @@
     await refresh({ keepEditor: true });
     if (state.current) renderBookStrip(state.current);
     toast(on ? 'This folder is now a book: its notes are pages you can page through and reorder.' : 'Back to an ordinary folder.');
+  }
+
+  // ---- split a long note into a book at its headings -------------------------------
+
+  async function openSplitDialog() {
+    const note = state.current;
+    if (!note) return;
+    if (note.locked || note.lock) { toast('Unlock and remove the lock first: a locked note cannot be split.'); return; }
+    if (note.filePath) { toast('This note is a file on disk; only notes kept in the app can be split.'); return; }
+    await flushSave();
+    if (!state.current || state.current.id !== note.id) return;
+    const plan = H.splitAtHeadings(state.current.body, H.deriveTitle(state.current));
+    if (plan.pages.length < 2) { toast('Add at least two headings (lines starting with #) to split this note into pages.'); return; }
+    state.splitNoteId = note.id;
+    el.splitLead.textContent = 'This makes a book with ' + plan.pages.length + ' pages, one per ' + (plan.level ? '#'.repeat(plan.level) + ' heading' : 'heading') + ':';
+    el.splitPages.innerHTML = '';
+    for (const p of plan.pages) {
+      const li = document.createElement('li');
+      li.textContent = p.title;
+      const n = p.body ? p.body.split('\n').length : 0;
+      const small = document.createElement('span');
+      small.className = 'lines';
+      small.textContent = n ? n + (n === 1 ? ' line' : ' lines') : 'empty';
+      li.append(small);
+      el.splitPages.append(li);
+    }
+    el.splitName.value = plan.name;
+    el.splitKeep.checked = false;
+    el.splitDialog.showModal();
+    el.splitName.focus(); el.splitName.select();
+  }
+
+  async function applySplit() {
+    const id = state.splitNoteId;
+    state.splitNoteId = null;
+    el.splitDialog.close();
+    if (!id) return;
+    await flushSave();
+    let r;
+    try { r = await api.notes.splitIntoBook(id, { name: el.splitName.value, keepOriginal: el.splitKeep.checked }); }
+    catch (err) { toast('Could not split the note: ' + String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); return; }
+    if (r.originalTrashed && state.currentId === id) clearEditor();
+    await setView('folder', r.folder.id, { keepEditor: true });
+    await selectNoteNow(r.pageIds[0]);
+    toast('Made the book "' + H.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + ' pages' + (r.originalTrashed ? '; the original note is in the trash.' : '.'), {
+      label: 'Undo',
+      run: async () => {
+        await flushSave();
+        await api.notes.undoSplit(r.folder.id, r.pageIds, r.originalTrashed ? id : null);
+        clearEditor();
+        await setView('all', null, { keepEditor: true });
+        await selectNoteNow(id);
+      },
+    });
   }
 
   // Puts page id right after page afterId in the book's reading order.
@@ -2915,7 +2970,7 @@
   function onKeydown(e) {
     if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
+    const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
@@ -3203,6 +3258,9 @@
     api.on.gitStatus((s) => renderGitStatus(s));
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
+    el.splitBtn.addEventListener('click', openSplitDialog);
+    el.splitForm.addEventListener('submit', (e) => { e.preventDefault(); applySplit(); });
+    el.splitCancelBtn.addEventListener('click', () => { state.splitNoteId = null; el.splitDialog.close(); });
     el.restoreBtn.addEventListener('click', restoreCurrent);
     el.deleteBtn.addEventListener('click', trashCurrent);
     el.destroyBtn.addEventListener('click', destroyCurrent);

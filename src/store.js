@@ -695,6 +695,45 @@ class Store {
     return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
 
+  // Turns a note into a book: a new folder (next to the note) whose pages are the note's sections, cut at its
+  // headings (H.splitAtHeadings). One write. opts: { name, keepOriginal }. The original goes to the trash unless
+  // kept. Returns { folder, pageIds, originalTrashed }.
+  splitIntoBook(id, opts) {
+    opts = opts || {};
+    const note = this.get(id);
+    if (!note || note.trashedAt) throw new Error('Note not found');
+    if (note.lock) throw new Error('This note is locked. Remove the lock to split it.');
+    if (note.filePath) throw new Error('This note is a file on disk; only notes kept in the app can be split.');
+    const plan = H.splitAtHeadings(note.body, H.deriveTitle(note));
+    if (plan.pages.length < 2) throw new Error('This note needs at least two headings (lines starting with #) to split.');
+    const now = this.now();
+    const parent = note.folderId ? this.getFolder(note.folderId) : null;
+    const parentId = parent && !parent.vaultId ? parent.id : null; // a vault folder holds files; the book sits at the top
+    const folder = { id: crypto.randomUUID(), name: cleanFolderName(String(opts.name || '').trim() || plan.name), parentId, createdAt: now, book: true, pageOrder: [] };
+    const pages = plan.pages.map((p) => sanitizeNote({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
+    folder.pageOrder = pages.map((p) => p.id);
+    const originalTrashed = !opts.keepOriginal;
+    return this._commit(() => {
+      this.folders.push(folder);
+      this.notes.unshift(...pages);
+      if (originalTrashed) { note.trashedAt = now; note.sticky = null; }
+      return { folder, pageIds: folder.pageOrder.slice(), originalTrashed };
+    });
+  }
+
+  // Takes back splitIntoBook: removes the pages it made (edited or not) and the book folder, and restores the
+  // original note if it was trashed. Pages moved out of the book meanwhile are left alone.
+  undoSplit(folderId, pageIds, originalId) {
+    const ids = new Set(Array.isArray(pageIds) ? pageIds : []);
+    return this._commit(() => {
+      this.notes = this.notes.filter((n) => !(ids.has(n.id) && n.folderId === folderId));
+      if (!this.notes.some((n) => n.folderId === folderId) && !this.folders.some((f) => f.parentId === folderId)) this.folders = this.folders.filter((f) => f.id !== folderId);
+      const orig = originalId ? this.get(originalId) : null;
+      if (orig && orig.trashedAt) orig.trashedAt = null;
+      return { restored: !!orig };
+    });
+  }
+
   ensureFolder(name, parentId) {
     const found = this.folders.find((f) => (f.parentId || null) === (parentId || null) && f.name.toLowerCase() === String(name).toLowerCase());
     return found || this.createFolder({ name, parentId: parentId || null });

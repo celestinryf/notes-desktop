@@ -412,6 +412,12 @@ function main() {
   ipcMain.handle('live:status', (_e, id) => live.statusOf(id));
   ipcMain.handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
   ipcMain.handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
+  ipcMain.handle('notes:splitIntoBook', (_e, id, opts) => {
+    const r = store.splitIntoBook(id, opts);
+    if (r.originalTrashed) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
+    return r;
+  });
+  ipcMain.handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => store.undoSplit(folderId, pageIds, originalId));
   ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
   ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
   ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });

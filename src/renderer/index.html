@@ -114,6 +114,7 @@
             <button class="tool-btn" id="shareBtn" title="Share: copy, email, PDF, HTML (Ctrl+Shift+S)" aria-haspopup="menu">Share ▾</button>
             <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
             <button class="tool-btn" id="duplicateBtn" title="Duplicate note">Duplicate</button>
+            <button class="tool-btn" id="splitBtn" title="Split this note into a book, one page per heading">📖 Split</button>
             <button class="tool-btn" id="restoreBtn" title="Restore from trash">Restore</button>
             <button class="tool-btn tool-danger" id="deleteBtn" title="Move to trash (Ctrl+Shift+Del)">Trash</button>
             <button class="tool-btn tool-danger" id="destroyBtn" title="Delete forever">Delete forever</button>
@@ -419,6 +420,23 @@
           <span class="spacer"></span>
           <button type="button" class="btn btn-small" id="remindCancelBtn">Cancel</button>
           <button type="submit" class="btn btn-primary btn-small" id="remindSetBtn">Set</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="splitDialog" class="dialog dialog-small">
+      <form method="dialog" class="dialog-form" id="splitForm">
+        <h2 class="dialog-title">Split into a book</h2>
+        <p class="split-lead" id="splitLead"></p>
+        <ol class="split-pages" id="splitPages"></ol>
+        <label class="field">
+          <span class="field-label">Book name</span>
+          <input id="splitName" class="input" type="text" autocomplete="off" spellcheck="true" />
+        </label>
+        <label class="field-check"><input type="checkbox" id="splitKeep" /><span>Keep the original note too</span></label>
+        <div class="dialog-actions">
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="splitCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="splitApplyBtn">Make the book</button>
         </div>
       </form>
     </dialog>
