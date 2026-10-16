@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('notesApi', {
     update: invoke('notes:update'),
     togglePin: invoke('notes:togglePin'),
     duplicate: invoke('notes:duplicate'),
+    splitIntoBook: invoke('notes:splitIntoBook'),
+    undoSplit: invoke('notes:undoSplit'),
     trash: invoke('notes:trash'),
     restore: invoke('notes:restore'),
     destroy: invoke('notes:destroy'),

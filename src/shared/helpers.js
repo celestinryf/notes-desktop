@@ -296,7 +296,57 @@
     return s || UNTITLED;
   }
 
+  // Plans splitting a note into book pages at its headings. Returns { name, level, pages: [{ title, body }] };
+  // fewer than two pages means the note cannot be split. Rules:
+  // - Headings inside fenced code blocks do not count.
+  // - The pages start at the highest heading level used. If that level appears once, as the note's first line,
+  //   it is the book's title and the pages start at the next level down.
+  // - Text before the first page heading becomes an "Introduction" page; deeper headings stay inside their page.
+  function splitAtHeadings(markdown, fallbackName) {
+    const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n');
+    const heads = [];
+    let fence = null;
+    lines.forEach((line, i) => {
+      const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (f) {
+        const ch = f[1][0], len = f[1].length;
+        if (!fence) { fence = { ch, len }; return; }
+        if (ch === fence.ch && len >= fence.len && !f[2].trim()) { fence = null; return; }
+      }
+      if (fence) return;
+      const h = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
+      if (!h) return;
+      const text = plainTextFromMarkdown(String(h[2] || '').replace(/[ \t]+#+$/, '').replace(/^#+$/, '')).replace(/\s+/g, ' ').trim();
+      heads.push({ i, level: h[1].length, text });
+    });
+    let name = String(fallbackName || '').trim();
+    let usable = heads;
+    if (heads.length) {
+      const top = Math.min(...heads.map((h) => h.level));
+      const atTop = heads.filter((h) => h.level === top);
+      const firstText = lines.findIndex((l) => l.trim());
+      if (atTop.length === 1 && atTop[0].i === firstText) {
+        if (atTop[0].text) name = atTop[0].text;
+        usable = heads.filter((h) => h !== atTop[0]);
+      }
+    }
+    const titleLine = usable === heads ? -1 : heads.find((h) => !usable.includes(h)).i;
+    if (!usable.length) return { name: name || 'Book', level: 0, pages: [] };
+    const level = Math.min(...usable.map((h) => h.level));
+    const cuts = usable.filter((h) => h.level === level);
+    const trimBlank = (arr) => { let a = 0, b = arr.length; while (a < b && !arr[a].trim()) a++; while (b > a && !arr[b - 1].trim()) b--; return arr.slice(a, b).join('\n'); };
+    const pages = [];
+    const intro = trimBlank(lines.slice(0, cuts[0].i).filter((_, i) => i !== titleLine));
+    if (intro) pages.push({ title: 'Introduction', body: intro });
+    cuts.forEach((c, k) => {
+      const end = k + 1 < cuts.length ? cuts[k + 1].i : lines.length;
+      pages.push({ title: c.text || 'Untitled', body: trimBlank(lines.slice(c.i + 1, end)) });
+    });
+    return { name: name || 'Book', level, pages };
+  }
+
   return {
+    splitAtHeadings,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
