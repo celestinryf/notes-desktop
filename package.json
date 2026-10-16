@@ -12,7 +12,9 @@
     "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",
     "test:ui": "node --test --test-timeout=25000 test/ui.test.js",
     "test:all": "npm test && npm run test:ui && npm run test:e2e",
-    "build": "esbuild src/editor/index.js --bundle --format=iife --global-name=NotesEditor --target=chrome120 --minify --outfile=src/renderer/vendor/editor.bundle.js"
+    "build": "npm run build:editor && npm run build:docx",
+    "build:editor": "esbuild src/editor/index.js --bundle --format=iife --global-name=NotesEditor --target=chrome120 --minify --outfile=src/renderer/vendor/editor.bundle.js",
+    "build:docx": "esbuild src/docx-view/index.js --bundle --format=iife --global-name=DocxView --target=chrome120 --minify --outfile=src/renderer/vendor/docx.bundle.js"
   },
   "license": "MIT",
   "devDependencies": {
@@ -33,6 +35,7 @@
     "@tiptap/extension-task-list": "^2.27.3",
     "@tiptap/pm": "^2.27.3",
     "@tiptap/starter-kit": "^2.27.3",
+    "docx-preview": "^0.4.1",
     "mammoth": "^1.13.0",
     "tiptap-markdown": "^0.8.10"
   }

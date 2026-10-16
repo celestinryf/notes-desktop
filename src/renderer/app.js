@@ -4,6 +4,7 @@
 
   const api = window.notesApi;
   const H = window.NotesHelpers;
+  const { isViewerOnlyFile, isPlainTextFile } = H;
   const $ = (sel) => document.querySelector(sel);
 
   const el = {
@@ -54,7 +55,7 @@
     newFolderBtn: $('#newFolderBtn'), folderTree: $('#folderTree'), folderSelect: $('#folderSelect'), folderMenu: $('#folderMenu'),
     navAll: document.querySelector('.nav-item[data-view="all"]'),
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
-    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'),
+    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
     fileBanner: $('#fileBanner'), pdfFrame: $('#pdfFrame'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
     vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
@@ -146,8 +147,9 @@
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
-    // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it.
-    const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich;
+    // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it; a
+    // plain-text file always does.
+    const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich || isPlainTextFile(state.current);
     const wantSource = settings.editorMode === 'source' || forcedSource;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
@@ -946,19 +948,24 @@
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
     const hasPending = applyPendingTo(note);
+    // Only Markdown goes into the rendered editor. A plain-text file is always shown as the text it is, and a
+    // PDF or Word file is shown by its own viewer, so neither gets the Markdown checks or their toasts.
+    const plainFile = isPlainTextFile(note);
+    const markdown = !plainFile && !isViewerOnlyFile(note);
     let lossless = true;
     if (state.rich) {
-      lossless = state.rich.setMarkdown(el.bodyInput.value);
+      lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : '');
       // A real file on disk gets the strict test: the rendered view may only be used if it reproduces the
       // file exactly, otherwise the first keystroke would reformat someone's CLAUDE.md or README.
-      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+      if (markdown && note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
     }
     state.currentLossless = lossless;
     state.lossyOverride = null;
+    el.bodyInput.placeholder = plainFile ? 'Plain text.' : 'Markdown source. Ctrl+E switches back to the rendered view.';
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
-    const wantSource = state.settings.editorMode === 'source' || !lossless || !state.rich;
+    const wantSource = plainFile || state.settings.editorMode === 'source' || !lossless || !state.rich;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
-    if (!lossless && state.lossyToastFor !== note.id) {
+    if (markdown && !lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
       toast(note.filePath
         ? 'Opened as source: the rendered view would reformat this file. Ctrl+E switches anyway.'
@@ -966,7 +973,8 @@
     }
     autoGrow();
     const inTrash = !!note.trashedAt;
-    const fileReadOnly = !!(note.filePath && note.fileKind !== 'text');
+    const fileReadOnly = isViewerOnlyFile(note);
+    el.sourceBtn.classList.toggle('hidden', plainFile || fileReadOnly); // nothing to switch between
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
     renderLockState(note);
@@ -1480,7 +1488,7 @@
       if (state.rich) state.rich.setEditable(false);
     } else if (note) {
       renderFileRow(note); // restores the right editor for the mode
-      if (state.rich) state.rich.setEditable(!note.trashedAt && !(note.filePath && note.fileKind !== 'text'));
+      if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note));
     }
   }
 
@@ -1748,7 +1756,7 @@
   }
 
   async function attachFiles() {
-    if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
+    if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
     const forNote = state.current.id;
     await flushSave();
     const items = await api.attachments.pick();
@@ -1757,7 +1765,7 @@
     const ok = items.filter((x) => x && !x.error);
     if (!ok.length) { insertAttachmentLinks(items); return; }
     const target = await api.notes.get(forNote);
-    if (target && !target.locked && !target.trashedAt && !(target.filePath && target.fileKind !== 'text')) {
+    if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
       const links = ok.map((it) => '[📎 ' + it.name.replace(/[[\]]/g, '') + '](' + it.href + ')').join('\n');
       await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + links + '\n' });
       toast('Attached to "' + H.truncate(H.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
@@ -1770,7 +1778,7 @@
   async function toggleRecording() {
     if (rec.recorder) { rec.recorder.stop(); return; }
     if (rec.starting) return; // the microphone prompt is still up
-    if (!state.current || lockedNow() || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) { toast('Open an editable, unlocked note first.'); return; }
+    if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
     if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
     rec.noteId = state.current.id;
     rec.starting = true;
@@ -1801,7 +1809,7 @@
         } else {
           // The person moved to another note meanwhile: the memo still belongs to the note it was recorded in.
           const target = await api.notes.get(rec.noteId);
-          if (target && !target.locked && !target.trashedAt && !(target.filePath && target.fileKind !== 'text')) {
+          if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
             await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + '[' + label + '](' + saved.href + ')\n' });
             toast('Voice memo saved into "' + H.truncate(H.deriveTitle(target), 30) + '", the note it was recorded in.');
             refresh({ keepEditor: true });
@@ -1861,7 +1869,7 @@
     const note = state.current;
     if (!v || !note) return;
     el.historyDialog.close();
-    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || (note.filePath && note.fileKind !== 'text')) { toast('This note cannot take the restored text right now.'); return; }
+    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile(note)) { toast('This note cannot take the restored text right now.'); return; }
     el.bodyInput.value = v.body;
     if (state.rich) {
       let lossless = state.rich.setMarkdown(v.body);
@@ -1908,7 +1916,7 @@
   function replaceCurrent() {
     const q = el.findInput.value;
     const text = el.replaceInput.value;
-    if (!q || lockedNow() || !state.current || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) return;
+    if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
     if (state.sourceMode) {
       // Offsets can be stale (Tab, list keys and Restore change the text without an input event): recount
       // first, and only replace text that really is the query.
@@ -1964,7 +1972,7 @@
   function replaceAll() {
     const q = el.findInput.value;
     const text = el.replaceInput.value;
-    if (!q || lockedNow() || !state.current || state.current.trashedAt || (state.current.filePath && state.current.fileKind !== 'text')) return;
+    if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
     let n = 0;
     if (state.sourceMode) {
       const ta = el.bodyInput;
@@ -2134,8 +2142,10 @@
     el.stickyBtn.classList.toggle('is-on', on);
     el.stickyBtn.textContent = on ? '📌 Stuck' : '📌 Stick';
     el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
-    const viewerOnly = !!(note && note.filePath && note.fileKind !== 'text');
-    el.stickyBtn.disabled = !note || !!note.trashedAt || viewerOnly || !!note.locked;
+    // A sticky shows rendered Markdown, so neither a PDF/Word file nor a plain-text file can become one (one that
+    // already is can still be removed).
+    const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
+    el.stickyBtn.disabled = !note || !!note.trashedAt || (notMarkdown && !on) || !!note.locked;
     el.stickyBtn.title = note && note.locked ? 'Locked notes cannot be stickies' : el.stickyBtn.title;
   }
 
@@ -2342,7 +2352,7 @@
   }
 
   async function startDictation() {
-    if (!state.current || (state.current.filePath && state.current.fileKind !== 'text') || state.current.trashedAt) { toast('Open an editable note first.'); return; }
+    if (!state.current || isViewerOnlyFile(state.current) || state.current.trashedAt) { toast('Open an editable note first.'); return; }
     focusBody();
     const res = await api.app.dictate();
     if (!res.ok) toast(res.error || 'Dictation could not start.');
@@ -2351,10 +2361,77 @@
 
   // ---- file-backed notes ---------------------------------------------------
 
+  // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed
+  // (nothing in it runs), with a policy that allows only inline styles and data: images. So the file's styles
+  // cannot reach the app, and it loads nothing from the network, so opening it cannot tell anyone you did.
+  const DOCX_FRAME = '<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame">'
+    + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
+    + '<style>html, body { margin: 0; } .docx-wrapper { background: #e9e4da; padding: 16px; }</style></head><body></body></html>';
+  // docxShownKey (note id + file version) skips re-rendering the same file; docxSeq drops a render that is
+  // overtaken by a newer one.
+  let docxShownKey = null;
+  let docxSeq = 0;
+  function clearDocx() {
+    docxShownKey = null;
+    docxSeq++;
+    el.docxView.classList.add('hidden');
+    el.docxView.removeAttribute('srcdoc');
+  }
+  // A fresh frame per document, so no styles from the last one linger. Only a load of this frame page counts: the
+  // about:blank load from an earlier clearDocx can still arrive and must not be taken for it.
+  function freshDocxFrame() {
+    return new Promise((resolve) => {
+      const onLoad = () => {
+        const doc = el.docxView.contentDocument;
+        if (!doc || !doc.querySelector('meta[name="notes-docx-frame"]')) return;
+        el.docxView.removeEventListener('load', onLoad);
+        resolve(doc);
+      };
+      el.docxView.addEventListener('load', onLoad);
+      el.docxView.srcdoc = DOCX_FRAME;
+    });
+  }
+  // Links in a document never navigate: a #bookmark scrolls to its place, a web link opens in the browser only
+  // on Ctrl+click (like links in notes), and a plain click says where it goes.
+  function onDocxLinkClick(e) {
+    const a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    e.preventDefault();
+    const href = a.getAttribute('href') || '';
+    if (href.startsWith('#')) {
+      const doc = a.ownerDocument, name = decodeURIComponent(href.slice(1));
+      const target = doc.getElementById(name) || doc.getElementsByName(name)[0];
+      if (target) target.scrollIntoView();
+      return;
+    }
+    if (!/^https?:\/\//i.test(href)) return;
+    if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
+    else toast('This link goes to ' + href + '. Ctrl+click to open it.');
+  }
+  async function showDocx(note) {
+    const key = note.id + ':' + note.fileMtime;
+    if (docxShownKey === key) return;
+    docxShownKey = key;
+    const seq = ++docxSeq;
+    try {
+      const [doc, bytes] = await Promise.all([freshDocxFrame(), api.files.docxBytes(note.id)]);
+      if (seq !== docxSeq) return;
+      doc.addEventListener('click', onDocxLinkClick);
+      // altChunks are raw HTML inside the file: never show them. Images become data: URLs, which the frame allows.
+      await DocxView.renderAsync(bytes, doc.body, doc.body, { useBase64URL: true, renderAltChunks: false });
+    } catch (err) {
+      if (seq !== docxSeq) return;
+      docxShownKey = null;
+      el.docxView.removeAttribute('srcdoc');
+      showBanner('Could not show this Word document: ' + ipcErrorText(err) + ' Use "Open with…" to open it in Word.');
+    }
+  }
+
   function renderFileRow(note) {
     const isFile = !!(note && note.filePath);
     el.fileRow.classList.toggle('hidden', !isFile);
     el.fileBanner.classList.add('hidden');
+    if (!(isFile && note.fileKind === 'docx')) clearDocx();
     el.pdfFrame.classList.add('hidden');
     el.pdfFrame.removeAttribute('src');
     if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
@@ -2368,7 +2445,11 @@
       api.files.pdfUrl(note.id).then((url) => { if (url && state.currentId === note.id) el.pdfFrame.src = url; });
       showBanner('PDF shown read-only. Use "Open with…" for your PDF app.');
     } else if (note.fileKind === 'docx') {
-      showBanner('Word document converted to Markdown for reading. It is read-only here; use "Open with…" to edit in Word.');
+      el.richEditor.classList.add('hidden');
+      el.bodyInput.classList.add('hidden');
+      el.docxView.classList.remove('hidden');
+      showBanner('Word document, shown as laid out in the file. It is read-only here for now; use "Open with…" to edit it in Word.');
+      showDocx(note);
     } else if (note.fileKind === 'binary') {
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
@@ -2391,7 +2472,13 @@
       state.query = ''; el.searchInput.value = '';
       if (state.view === 'trash') { state.view = 'all'; el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all')); }
       await refresh({ keepEditor: true });
-      await selectNote(res.firstId);
+      if (res.firstId === state.currentId) {
+        // Opening the file that is already open: linking re-read it, so show it as it is now (unless the person
+        // has unsaved typing in it). Selecting it again would do nothing, and the poll would then see no change.
+        const fresh = await api.notes.get(res.firstId);
+        if (fresh && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id)
+          && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
+      } else await selectNote(res.firstId);
     }
     const failed = res.failed.length ? ' Could not open: ' + res.failed.join(', ') : '';
     toast((res.linked.length ? 'Opened ' + res.linked.length + (res.linked.length === 1 ? ' file' : ' files') : 'Nothing opened') + failed);
@@ -2421,7 +2508,9 @@
     // retried over the text we are now showing.
     if (!state.dirty) state.pending.delete(fresh.id);
     el.bodyInput.value = fresh.body;
-    if (state.rich) {
+    // A PDF or Word file is shown by its own viewer: show the new version of the file there.
+    if (isViewerOnlyFile(fresh)) { renderFileRow(fresh); updateStatus(fresh); return; }
+    if (state.rich && !isPlainTextFile(fresh)) {
       let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true }); // same note, new text: keep the caret
       if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
@@ -2479,7 +2568,7 @@
   function currentPatch() {
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
     // Read-only file kinds (PDF, Word, binary) still take title and tag edits; their body is not ours to write.
-    if (state.current && state.current.filePath && state.current.fileKind !== 'text') delete patch.body;
+    if (isViewerOnlyFile(state.current)) delete patch.body;
     if (lockedNow()) delete patch.body; // the locked view has no body to offer
     return patch;
   }
@@ -2746,16 +2835,18 @@
     el.sourceBtn.classList.toggle('is-on', state.sourceMode);
     el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
-    const viewerOnly = !!(state.current && state.current.filePath && (state.current.fileKind === 'pdf' || state.current.fileKind === 'binary')) || lockedNow();
+    const viewerOnly = isViewerOnlyFile(state.current) || lockedNow();
     el.bodyInput.classList.toggle('hidden', !state.sourceMode || viewerOnly);
     el.richEditor.classList.toggle('hidden', state.sourceMode || viewerOnly);
     if (state.sourceMode) autoGrow();
-    else if (state.rich && state.currentId) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+    else if (state.rich && state.currentId && !isViewerOnlyFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
 
   function toggleSource(force) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
+    if (isViewerOnlyFile(state.current)) { toast('This file is shown as it is; it has no Markdown view to switch to.'); return; }
     if (next === state.sourceMode) return;
+    if (!next && isPlainTextFile(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
     if (!next && !state.rich) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
     if (!next && state.currentId) {
       // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
@@ -3363,7 +3454,9 @@
         const fresh = await api.notes.get(wanted);
         if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
         if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
-        if (fresh && fresh.body !== el.bodyInput.value) {
+        // A PDF or Word file is shown from the file, so a new version of it (same text or not) is shown too.
+        if (fresh && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+        else if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
             // Someone else typed. Take their text unless this person is typing right now or a save of their
             // text is still in flight; their next save wins then.

@@ -80,9 +80,11 @@ function detectEol(filePath) {
   } catch (_) { return '\n'; }
 }
 
-async function readDocxAsMarkdown(filePath) {
+// The plain text of a Word document, kept as the note's body for search, the list snippet and links. The document
+// itself is shown from its own bytes (files:docxBytes), never from this text.
+async function readDocxText(filePath) {
   const mammoth = require('mammoth');
-  const result = await mammoth.convertToMarkdown({ path: filePath });
+  const result = await mammoth.extractRawText({ path: filePath });
   const stat = fs.statSync(filePath);
   return { body: String(result.value || '').replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
 }
@@ -161,4 +163,4 @@ function safeList(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxAsMarkdown, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

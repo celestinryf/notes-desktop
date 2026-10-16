@@ -1081,7 +1081,7 @@ class Store {
     if (kind === 'text') {
       try { ({ body, mtime } = F.readText(abs)); }
       catch (err) { if (err.code === 'EENCODING') { kind = 'binary'; body = ''; } else throw err; }
-    } else if (kind === 'docx') ({ body, mtime } = await F.readDocxAsMarkdown(abs));
+    } else if (kind === 'docx') ({ body, mtime } = await F.readDocxText(abs));
     return this.create({
       title: opts.title || path.basename(abs),
       body,
@@ -1102,8 +1102,9 @@ class Store {
     if (mtime === note.fileMtime) return { changed: false, missing: false };
     let body = note.body;
     if (note.fileKind === 'text') body = F.readText(note.filePath).body;
-    else if (note.fileKind === 'docx') body = (await F.readDocxAsMarkdown(note.filePath)).body;
-    const changed = body !== note.body;
+    else if (note.fileKind === 'docx') body = (await F.readDocxText(note.filePath)).body;
+    // A PDF or Word file is shown from the file itself, so any new version is a change, even with the same text.
+    const changed = body !== note.body || note.fileKind === 'pdf' || note.fileKind === 'docx';
     // Cache update only: the file changed, the note's own edit time is not touched.
     this._commit(() => { note.body = body; note.fileMtime = mtime; });
     return { changed, missing: false };

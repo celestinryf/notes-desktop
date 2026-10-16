@@ -2,6 +2,7 @@
 /* Sticky window page: one note, rendered editor, autosave. Talks to main through the same notesApi bridge. */
 (function () {
   const api = window.notesApi;
+  const H = window.NotesHelpers;
   const $ = (s) => document.querySelector(s);
   const el = {
     title: $('#stickyTitle'), colors: $('#stickyColors'), topBtn: $('#stickyTopBtn'), openBtn: $('#stickyOpenBtn'),
@@ -43,9 +44,11 @@
       const lossless = state.rich.setMarkdown(note.body);
       // Same rule as the main window: the rendered view may only edit what it can reproduce. A real file
       // gets the strict test. Otherwise the first keystroke would rewrite formatting the sticky cannot show.
-      const viewerOnly = !!(note.filePath && note.fileKind !== 'text');
+      // A plain-text file is text, not Markdown: the rendered sticky would rewrite it, so it is read-only here.
+      const viewerOnly = H.isViewerOnlyFile(note);
+      const plain = H.isPlainTextFile(note);
       const exactEnough = lossless && (!note.filePath || state.rich.lastRoundTripExact());
-      setReadOnly(viewerOnly || !exactEnough, viewerOnly ? 'Read-only file. Open in Notes to view it.' : 'Has formatting this sticky cannot show. Edit it in Notes (↗).');
+      setReadOnly(viewerOnly || plain || !exactEnough, viewerOnly ? 'Read-only file. Open in Notes to view it.' : plain ? 'Plain-text file. Edit it in Notes (↗).' : 'Has formatting this sticky cannot show. Edit it in Notes (↗).');
     }
   }
 
