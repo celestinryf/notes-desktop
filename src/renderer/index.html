@@ -60,7 +60,10 @@
       </div>
       <div class="list-title-row">
         <h2 class="list-title" id="listTitle">All notes</h2>
-        <button class="btn btn-small btn-danger hidden" id="emptyTrashBtn">Empty trash</button>
+        <div class="list-title-actions">
+          <button class="btn btn-small btn-danger hidden" id="emptyTrashBtn">Empty trash</button>
+          <button class="tool-btn" id="hideListBtn" title="Hide the note list (Ctrl+Shift+\)" aria-label="Hide note list">⟨</button>
+        </div>
       </div>
       <ul class="note-list" id="noteList" role="listbox" aria-label="Notes"></ul>
       <div class="empty hidden" id="listEmpty">
@@ -91,6 +94,7 @@
         <div class="editor-toolbar">
           <div class="toolbar-left">
             <button class="tool-btn" id="toggleSidebarBtn" title="Toggle sidebar (Ctrl+\)" aria-label="Toggle sidebar">☰</button>
+            <button class="tool-btn" id="toggleListBtn" title="Show or hide the note list (Ctrl+Shift+\)" aria-label="Toggle note list">▤</button>
             <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
             <button class="tool-btn" id="sourceBtn" title="Show Markdown source (Ctrl+E)" aria-label="Toggle Markdown source">Source</button>
             <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
