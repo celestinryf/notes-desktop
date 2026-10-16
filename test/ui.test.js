@@ -54,7 +54,17 @@ test.before(async () => {
   page.on('pageerror', (e) => rendererErrors.push('pageerror: ' + e.message));
   await page.waitForSelector('#app');
   await page.evaluate(() => { window.confirm = () => true; });
+  // No test may open a real window outside the app (Explorer, a browser, the mail app): record the shell calls
+  // instead. A real showItemInFolder left an Explorer window behind on every run, which fell back to %TEMP%
+  // once the run deleted its folder.
+  await app.evaluate(({ shell }) => {
+    global.__shell = { opened: [], shown: [], external: [] };
+    shell.openPath = async (p) => { global.__shell.opened.push(p); return ''; };
+    shell.showItemInFolder = (p) => { global.__shell.shown.push(p); };
+    shell.openExternal = async (url) => { global.__shell.external.push(url); };
+  });
 });
+const shellCalls = () => app.evaluate(() => global.__shell);
 
 // A failed test must not leave a modal dialog open for the next one.
 test.beforeEach(async () => {
@@ -962,9 +972,9 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   await waitFor('body saved', () => findNote('Gamma (copy)').body === '# Head\n\n**bold** text\n');
   const pdfPath = path.join(dataDir, 'share-out.pdf');
   const htmlPath = path.join(dataDir, 'share-out.html');
-  await app.evaluate(({ dialog, shell }, paths) => {
+  await app.evaluate(({ dialog }, paths) => {
     dialog.showSaveDialog = async (_w, opts) => ({ canceled: false, filePath: /PDF/.test(opts.title) ? paths.pdf : paths.html });
-    shell.openExternal = async (url) => { global.__lastExternal = url; return true; };
+    global.__shell.external = [];
   }, { pdf: pdfPath, html: htmlPath });
   const share = async (action) => {
     await page.keyboard.press('Control+Shift+s');
@@ -982,8 +992,8 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   const plain = await app.evaluate(({ clipboard }) => clipboard.readText());
   assert.ok(/bold text/.test(plain) && !/\*\*/.test(plain), 'plain text has no Markdown markers: ' + JSON.stringify(plain));
   await share('email');
-  await waitFor('mail client asked', () => app.evaluate(() => global.__lastExternal).then((u) => !!u));
-  const mailto = await app.evaluate(() => global.__lastExternal);
+  await waitFor('mail client asked', () => shellCalls().then((s) => s.external.length > 0));
+  const mailto = (await shellCalls()).external.at(-1);
   assert.ok(mailto.startsWith('mailto:?subject=Gamma%20(copy)&body='), mailto);
   assert.match(decodeURIComponent(mailto), /\*\*bold\*\* text/);
   await share('pdf');
@@ -1148,8 +1158,12 @@ test('hardening: the page cannot be navigated away, and "Open with…" refuses p
   const linked = await page.evaluate((p) => window.notesApi.files.link([p]), bat);
   const note = (Array.isArray(linked) ? linked : linked.notes || [])[0] || readNotes().notes.find((n) => n.filePath && /danger\.bat$/.test(n.filePath));
   assert.ok(note, 'linked');
+  const before = await shellCalls();
   const res = await page.evaluate((id) => window.notesApi.files.openExternal(id), note.id);
   assert.match(String(res), /Shown in Explorer instead/);
+  const after = await shellCalls();
+  assert.equal(after.shown.at(-1), bat, 'shown in Explorer');
+  assert.equal(after.opened.length, before.opened.length, 'the program was not run');
   await page.evaluate((id) => window.notesApi.notes.destroy(id), note.id);
 });
 
@@ -1235,9 +1249,9 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await waitFor('saved', () => findNote('Gamma (copy)').body === 'files:');
   const src = path.join(dataDir, 'budget.csv');
   fs.writeFileSync(src, 'a,b\n1,2\n');
-  await app.evaluate(({ dialog, shell }, p) => {
+  await app.evaluate(({ dialog }, p) => {
     dialog.showOpenDialog = async (_w, opts) => (/Attach/.test(opts.title) ? { canceled: false, filePaths: [p] } : { canceled: true, filePaths: [] });
-    global.__opened = []; shell.openPath = async (x) => { global.__opened.push(x); return ''; };
+    global.__shell.opened = []; global.__shell.shown = [];
   }, src);
   await page.keyboard.press('Control+Shift+o');
   await waitFor('attachment copied', () => fs.existsSync(path.join(dataDir, 'attachments', 'budget.csv')));
@@ -1246,11 +1260,13 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await useSourceMode(false);
   await page.waitForSelector('.rich-editor-content a[href^="attachment://"]');
   await page.click('.rich-editor-content a[href^="attachment://"]', { modifiers: ['Control'] });
-  await waitFor('opened', () => app.evaluate(() => global.__opened).then((o) => o.length === 1 && /attachments[\\/]budget\.csv$/.test(o[0])));
+  await waitFor('opened', () => shellCalls().then((s) => s.opened.length === 1 && /attachments[\\/]budget\.csv$/.test(s.opened[0])));
   // A forged link cannot escape the attachments folder or run a program.
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://..%2F..%2Fnotes.json'))), /Not an attachment|not found/);
   fs.writeFileSync(path.join(dataDir, 'attachments', 'evil.bat'), '@echo off');
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat'))), /Shown in Explorer instead/);
+  assert.deepEqual((await shellCalls()).shown.map((p) => path.basename(p)), ['evil.bat'], 'shown in Explorer, never run');
+  assert.equal((await shellCalls()).opened.length, 1, 'evil.bat was not handed to its default app');
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat.'))), /Not an attachment/);
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat%3A%3A%24DATA'))), /Not an attachment/);
   // Voice memo with the fake microphone.
