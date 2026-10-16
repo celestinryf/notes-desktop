@@ -55,6 +55,9 @@ function cleanFolderName(name) {
   return (s || 'Untitled folder').slice(0, FOLDER_NAME_MAX);
 }
 
+// The longest reading order a book keeps, and so the most pages a split may make.
+const MAX_BOOK_PAGES = 5000;
+
 function sanitizeFolder(raw, now) {
   if (!raw || typeof raw !== 'object') return null;
   return {
@@ -67,7 +70,7 @@ function sanitizeFolder(raw, now) {
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
     // A book is a folder whose notes are pages, read in this order (ids not listed follow, oldest first).
     book: !!raw.book,
-    pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x) => typeof x === 'string' && x).slice(0, 5000) : [],
+    pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x) => typeof x === 'string' && x).slice(0, MAX_BOOK_PAGES) : [],
   };
 }
 
@@ -706,6 +709,7 @@ class Store {
     if (note.filePath) throw new Error('This note is a file on disk; only notes kept in the app can be split.');
     const plan = H.splitAtHeadings(note.body, H.deriveTitle(note));
     if (plan.pages.length < 2) throw new Error('This note needs at least two headings (lines starting with #) to split.');
+    if (plan.pages.length > MAX_BOOK_PAGES) throw new Error('This note would make more than ' + MAX_BOOK_PAGES + ' pages, the most a book holds.');
     const now = this.now();
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
     const parentId = parent && !parent.vaultId ? parent.id : null; // a vault folder holds files; the book sits at the top
@@ -721,16 +725,24 @@ class Store {
     });
   }
 
-  // Takes back splitIntoBook: removes the pages it made (edited or not) and the book folder, and restores the
-  // original note if it was trashed. Pages moved out of the book meanwhile are left alone.
+  // Takes back splitIntoBook: deletes the pages it made and the emptied book folder, and restores the original
+  // note if it was trashed. All or nothing: it refuses, changing nothing, when a page was edited since (undo would
+  // lose the edit) or the trashed original is gone (undo would lose everything). Only pages still in that book
+  // are touched; pages moved out meanwhile are left alone. Returns { restored, removedIds }.
   undoSplit(folderId, pageIds, originalId) {
-    const ids = new Set(Array.isArray(pageIds) ? pageIds : []);
+    const folder = typeof folderId === 'string' ? this.getFolder(folderId) : null;
+    if (!folder || !folder.book || folder.vaultId) throw new Error('That book is gone, so there is nothing to undo.');
+    const ids = new Set(Array.isArray(pageIds) ? pageIds.filter((x) => typeof x === 'string') : []);
+    const pages = this.notes.filter((n) => ids.has(n.id) && n.folderId === folder.id);
+    if (pages.some((n) => n.lock || n.filePath)) throw new Error('A page of that book is locked or a file on disk, so the split cannot be undone.');
+    if (pages.some((n) => n.updatedAt !== n.createdAt)) throw new Error('A page was edited after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
+    const orig = originalId != null ? this.get(originalId) : null;
+    if (originalId != null && !orig) throw new Error('The original note was deleted, so the split cannot be undone.');
     return this._commit(() => {
-      this.notes = this.notes.filter((n) => !(ids.has(n.id) && n.folderId === folderId));
-      if (!this.notes.some((n) => n.folderId === folderId) && !this.folders.some((f) => f.parentId === folderId)) this.folders = this.folders.filter((f) => f.id !== folderId);
-      const orig = originalId ? this.get(originalId) : null;
+      this.notes = this.notes.filter((n) => !pages.includes(n));
+      if (!this.notes.some((n) => n.folderId === folder.id) && !this.folders.some((f) => f.parentId === folder.id)) this.folders = this.folders.filter((f) => f !== folder);
       if (orig && orig.trashedAt) orig.trashedAt = null;
-      return { restored: !!orig };
+      return { restored: !!orig, removedIds: pages.map((n) => n.id) };
     });
   }
 

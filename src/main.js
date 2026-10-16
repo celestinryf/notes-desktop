@@ -417,7 +417,11 @@ function main() {
     if (r.originalTrashed) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
     return r;
   });
-  ipcMain.handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => store.undoSplit(folderId, pageIds, originalId));
+  ipcMain.handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => {
+    const r = store.undoSplit(folderId, pageIds, originalId);
+    for (const id of r.removedIds) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
+    return r;
+  });
   ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
   ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
   ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });

@@ -296,8 +296,25 @@
     return s || UNTITLED;
   }
 
+  // The text a reader sees in an ATX heading, for use as a title. Unlike plainTextFromMarkdown (made for speech)
+  // it keeps list-like prefixes ("1. Setup"), underscores inside words (my_file.py) and backslash-escaped
+  // characters, and drops only the formatting.
+  function headingTitle(md) {
+    const escaped = [];
+    let s = String(md || '').replace(/\\([!-/:-@[-`{-~])/g, (_, c) => { escaped.push(c); return '\u0000' + (escaped.length - 1) + '\u0001'; });
+    s = s.replace(/`([^`]+)`/g, '$1');
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+    s = s.replace(/<[^>\n]+>/g, '');
+    s = s.replace(/(\*\*|~~)(\S(?:.*?\S)?)\1/g, '$2').replace(/\*(\S(?:.*?\S)?)\*/g, '$1');
+    // Underscores mark emphasis only at the edges of words; inside a word they are text.
+    s = s.replace(/(^|\W)(__?)(\S(?:.*?\S)?)\2(?!\w)/g, '$1$3');
+    s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    s = s.replace(/\u0000(\d+)\u0001/g, (_, i) => escaped[Number(i)]);
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
   // Plans splitting a note into book pages at its headings. Returns { name, level, pages: [{ title, body }] };
-  // fewer than two pages means the note cannot be split. Rules:
+  // fewer than two pages means the note cannot be split. Page titles come from headingTitle. Rules:
   // - Headings inside fenced code blocks do not count.
   // - The pages start at the highest heading level used. If that level appears once, as the note's first line,
   //   it is the book's title and the pages start at the next level down.
@@ -316,7 +333,7 @@
       if (fence) return;
       const h = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
       if (!h) return;
-      const text = plainTextFromMarkdown(String(h[2] || '').replace(/[ \t]+#+$/, '').replace(/^#+$/, '')).replace(/\s+/g, ' ').trim();
+      const text = headingTitle(String(h[2] || '').replace(/[ \t]+#+$/, '').replace(/^#+$/, ''));
       heads.push({ i, level: h[1].length, text });
     });
     let name = String(fallbackName || '').trim();
@@ -346,7 +363,7 @@
   }
 
   return {
-    splitAtHeadings,
+    splitAtHeadings, headingTitle,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
