@@ -605,6 +605,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 /* Print: the note only */
 @media print {
   .sidebar, .list-pane, .editor-toolbar, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app { display: block !important; } /* one column: the hidden panes' grid columns would push the note right */
   html, body, .app, .editor-pane, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; }
   .rich-editor-content, #bodyInput { font-size: 12pt; }

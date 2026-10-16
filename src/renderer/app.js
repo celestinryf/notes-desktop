@@ -263,8 +263,9 @@
     state.tree = tree;
     state.folderPath = folderPath;
     if (state.view === 'folder' && !folderPath.length) {
-      // The folder we were looking at is gone; fall back to all notes.
+      // The folder we were looking at is gone; fall back to all notes, and stop starting in it.
       state.view = 'all'; state.folderId = null;
+      if (state.settings.lastFolderId) updateSettings({ lastFolderId: null }).catch(() => {});
       el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all'));
       return refresh(opts);
     }
@@ -423,6 +424,11 @@
 
   function toggleList() {
     updateSettings({ listCollapsed: !state.settings.listCollapsed });
+  }
+
+  // Search lives in the list, so anything that needs it brings the list back first.
+  async function showList() {
+    if (state.settings.listCollapsed) await updateSettings({ listCollapsed: false });
   }
 
   // ---- folders -------------------------------------------------------------
@@ -2716,7 +2722,7 @@
         case 'o': e.preventDefault(); openFiles(); return;
         case 'l': e.preventDefault(); onLockButton(); return;
         case 'h': e.preventDefault(); if (!find.open) openFind(); toggleReplace(true); return;
-        case 'f': e.preventDefault(); el.searchInput.focus(); el.searchInput.select(); return;
+        case 'f': e.preventDefault(); showList().then(() => { el.searchInput.focus(); el.searchInput.select(); }); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
         case 'p': e.preventDefault(); togglePin(); return;
         case 's': e.preventDefault(); flushSave().then((ok) => toast(ok ? 'Saved' : 'Save failed, will retry')); return;

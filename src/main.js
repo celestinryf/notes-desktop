@@ -595,7 +595,7 @@ function main() {
   }
 
   // Asks Claude Code how it is signed in and refuses to start an agent that would bill API credits.
-  // A confirmed subscription is remembered for ten minutes so each run does not pay for the check.
+  // A confirmed subscription is remembered for a minute, so quick repeat runs do not pay for the check.
   let authOkUntil = 0, authPlan = null;
   async function ensureSubscription(spec) {
     if (Date.now() < authOkUntil) return { ok: true, plan: authPlan };
@@ -604,7 +604,7 @@ function main() {
       require('child_process').execFile(launch.file, launch.args, { windowsHide: true, timeout: 20000, env: Object.assign(cleanEnv(), launch.env) }, (_err, stdout) => resolve(String(stdout || '')));
     });
     const r = claudeBin.checkSubscriptionAuth(text);
-    if (r.ok) { authOkUntil = Date.now() + 10 * 60 * 1000; authPlan = r.plan; }
+    if (r.ok) { authOkUntil = Date.now() + 60 * 1000; authPlan = r.plan; }
     return r;
   }
 
@@ -686,7 +686,9 @@ function main() {
     try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
     const spec = findClaude();
     if (!spec) return { ok: false, error: 'Claude Code was not found on this machine.' };
-    const auth = await ensureSubscription(spec);
+    botStarting = true; // a run must not start on the workspace while the check runs, nor a second terminal
+    let auth;
+    try { auth = await ensureSubscription(spec); } finally { botStarting = false; }
     if (!auth.ok) return { ok: false, error: auth.reason };
     const { spawn } = require('child_process');
     try {
@@ -695,10 +697,14 @@ function main() {
       // here-strings in a script file (only a line that is exactly '@ ends one, and paths have no newlines).
       const here = (s) => "@'\n" + String(s).replace(/\r?\n/g, '') + "\n'@";
       const lines = ['$ErrorActionPreference = \'Continue\'', 'Set-Location -LiteralPath ' + here(target.cwd)];
+      // A Windows Terminal that is already open gives new tabs its own environment, not ours, so the script
+      // clears the API-billing variables itself: the session runs on the Claude subscription.
+      for (const v of claudeBin.API_BILLING_VARS) lines.push('Remove-Item -LiteralPath Env:' + v + ' -ErrorAction SilentlyContinue');
       if (spec.isScript) lines.push('$notesNode = ' + here(claudeBin.resolveNode() || 'node'), '$notesCli = ' + here(spec.file), '& $notesNode $notesCli');
       else lines.push('$notesClaude = ' + here(spec.file), '& $notesClaude');
       const script = path.join(DATA_DIR, 'bot-terminal.ps1');
       fs.writeFileSync(script, '﻿' + lines.join('\r\n') + '\r\n', 'utf8');
+      if (process.env.NOTES_APP_DRY_TERMINAL) return { ok: true, cwd: target.cwd, kind: target.kind, script }; // tests: no window
       const psArgs = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', script];
       const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
       if (hasWt) spawn('wt', ['powershell'].concat(psArgs), { detached: true, stdio: 'ignore', windowsHide: false, env: cleanEnv() }).unref();

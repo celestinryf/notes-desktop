@@ -46,6 +46,7 @@ test.before(async () => {
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
       // Must never reach the agent: runs bill the Claude subscription, not API credits.
       ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
+      NOTES_APP_DRY_TERMINAL: '1',
     }),
   });
   page = await app.firstWindow();
@@ -682,6 +683,13 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   const out = await page.textContent('#botOutput');
   assert.match(out, /Claude Code, on your Claude Max subscription \(no API credits\)/);
   assert.match(out, /api key env: absent/);
+  // The terminal session clears the API-billing variables itself (an open Windows Terminal hands new tabs
+  // its own environment, not the app's) and then starts Claude Code.
+  const term = await page.evaluate(() => window.notesApi.bot.openTerminal(null));
+  assert.equal(term.ok, true, JSON.stringify(term));
+  const ps = fs.readFileSync(term.script, 'utf8');
+  for (const v of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']) assert.match(ps, new RegExp('Remove-Item -LiteralPath Env:' + v + ' '));
+  assert.ok(ps.indexOf('Remove-Item') < ps.indexOf('& $notes'), 'variables are cleared before Claude Code starts');
   assert.match(out, /fake claude: cwd=.*workspace/);
   assert.match(out, /edited .*Gamma \(copy\)\.md/);
   assert.match(out, /Notes updated: 1, created: 1/);
@@ -1842,6 +1850,18 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   await waitFor('list shown', listShown);
   await page.keyboard.press('Control+Shift+Backslash');
   await waitFor('list hidden by key', async () => !(await listShown()));
+  // Printing lays out the note alone, from the left edge, whatever the hidden panes' columns.
+  await page.emulateMedia({ media: 'print' });
+  const printed = await page.evaluate(() => ({ display: getComputedStyle(document.getElementById('app')).display, left: document.getElementById('editorPane').getBoundingClientRect().left }));
+  await page.emulateMedia({ media: 'screen' });
+  assert.equal(printed.display, 'block');
+  assert.ok(printed.left < 2, 'note starts at the left edge: ' + printed.left);
+  // Search lives in the list, so Ctrl+F brings the list back.
+  await page.keyboard.press('Control+f');
+  await waitFor('list shown for search', listShown);
+  await waitForDom(() => document.activeElement === document.getElementById('searchInput'));
+  await page.keyboard.press('Control+Shift+Backslash');
+  await waitFor('list hidden again', async () => !(await listShown()));
   // With no note open the list always shows, so there is a way back to the notes.
   await page.click('.nav-item[data-view="trash"]');
   await waitFor('list shown with no note open', listShown);

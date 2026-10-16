@@ -80,11 +80,11 @@ function launchSpec(spec, args, opts) {
 // subscription: an API key or bearer token for the Anthropic API, or routing to Bedrock, Vertex or Foundry.
 // With none of them set, Claude Code uses the claude.ai login. CLAUDE_CODE_OAUTH_TOKEN is a subscription
 // token and stays.
-const API_BILLING_VAR = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY))$/i;
+const API_BILLING_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
 
 function subscriptionEnv(env) {
   const out = Object.assign({}, env);
-  for (const k of Object.keys(out)) if (API_BILLING_VAR.test(k)) delete out[k];
+  for (const k of Object.keys(out)) if (API_BILLING_VARS.includes(k.toUpperCase())) delete out[k];
   return out;
 }
 
@@ -100,4 +100,4 @@ function checkSubscriptionAuth(text) {
   return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
 }
 
-module.exports = { resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth };
+module.exports = { resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
