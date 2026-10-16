@@ -296,6 +296,16 @@
     return s || UNTITLED;
   }
 
+  // An opened file the app shows but does not edit as text: PDF, Word, anything binary.
+  function isViewerOnlyFile(note) {
+    return !!(note && note.filePath && note.fileKind !== 'text');
+  }
+
+  // An opened text file that is not Markdown (.txt, code, config) is edited as the plain text it is, never rendered.
+  function isPlainTextFile(note) {
+    return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
+  }
+
   // The text a reader sees in an ATX heading, for use as a title. Unlike plainTextFromMarkdown (made for speech)
   // it keeps list-like prefixes ("1. Setup"), underscores inside words (my_file.py) and backslash-escaped
   // characters, and drops only the formatting.
@@ -363,7 +373,7 @@
   }
 
   return {
-    splitAtHeadings, headingTitle,
+    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,

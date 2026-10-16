@@ -501,6 +501,14 @@ function main() {
     return openSafely(n.filePath);
   });
   ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
+  // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
+  const MAX_DOCX_BYTES = 50 * 1024 * 1024;
+  ipcMain.handle('files:docxBytes', (_e, id) => {
+    const n = store.get(id);
+    if (!n || !n.filePath || n.fileKind !== 'docx') throw new Error('Not a Word document.');
+    if (fs.statSync(n.filePath).size > MAX_DOCX_BYTES) throw new Error('This Word document is larger than 50 MB; use "Open with…" for it.');
+    return fs.readFileSync(n.filePath);
+  });
 
   const { discoverAgentFiles } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());

@@ -515,7 +515,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   background: var(--peach); color: var(--ink);
   font-size: 13px;
 }
-.pdf-frame { flex: 1 0 auto; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; background: #fff; }
+.pdf-frame, .docx-view { flex: 1 0 auto; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; background: #fff; }
 .note-card-title .file-mark { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
 .app.is-dropping::after {
   content: 'Drop files to open them as notes';
