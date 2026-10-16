@@ -934,7 +934,8 @@
     state.current = note;
     state.dirty = false;
     syncListCollapsed();
-    if (readerOpen() && !bookOf(note)) closeReader(); // left the book: its reading view goes too
+    closeAllBookMenus(); // a page or book menu belongs to the note that was open
+    if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader(); // left that book: its reading view goes too
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
@@ -1110,6 +1111,7 @@
   function openPageMenu(id, anchor, ev) {
     closeAllBookMenus();
     state.menuPageId = id;
+    state.menuBookId = book.id;
     const idx = book.pages.findIndex((p) => p.id === id);
     el.pageMenu.querySelector('[data-action="move-left"]').disabled = idx <= 0;
     el.pageMenu.querySelector('[data-action="move-right"]').disabled = idx === -1 || idx >= book.pages.length - 1;
@@ -1124,15 +1126,18 @@
 
   function closeAllBookMenus() {
     state.menuPageId = null;
+    state.menuBookId = null;
     el.pageMenu.classList.add('hidden');
     el.bookMenu.classList.add('hidden');
   }
 
   async function pageMenuAction(action) {
     const id = state.menuPageId;
+    const bookId = state.menuBookId;
     closeAllBookMenus();
-    if (!id || !book.id) return;
+    if (!id || !bookId) return;
     await flushSave();
+    if (book.id !== bookId) return; // the person moved to another book meanwhile: act on nothing
     const idx = book.pages.findIndex((p) => p.id === id);
     const page = book.pages[idx];
     try {
@@ -1213,10 +1218,10 @@
 
   // Gathers the current book: its name and pages in order, each with Markdown and HTML.
   // Locked pages stay locked: only their title goes in.
-  async function collectBook() {
+  async function collectBook(bookId) {
     await flushSave();
-    const folder = flattenTree(state.tree).find((f) => f.id === book.id);
-    const pages = await api.notes.list({ folderId: book.id });
+    const folder = flattenTree(state.tree).find((f) => f.id === bookId);
+    const pages = await api.notes.list({ folderId: bookId });
     return {
       name: folder ? folder.name : 'Book',
       pages: pages.map((p, i) => {
@@ -1242,8 +1247,9 @@
   }
 
   async function exportBook(format) {
-    if (!book.id) return;
-    const b = await collectBook();
+    const bookId = readerOpen() ? reader.bookId : book.id; // the reader's buttons export the book being read
+    if (!bookId) return;
+    const b = await collectBook(bookId);
     if (!b.pages.length) { toast('This book has no pages yet.'); return; }
     const r = await api.book.export(format, { name: b.name, markdown: bookMarkdown(b), html: bookHtml(b) });
     if (r.ok) toast(format === 'print' ? 'Sent the book to the printer' : 'Saved the book to ' + r.filePath);
@@ -1252,9 +1258,16 @@
 
   // ---- whole-book reading view ----------------------------------------------------
 
+  // The reading view is a snapshot of one book; reader.bookId says which.
+  const reader = { bookId: null, seq: 0 };
+
   async function openReader() {
-    if (!book.id) return;
-    const b = await collectBook();
+    const bookId = book.id;
+    if (!bookId) return;
+    const seq = ++reader.seq;
+    const b = await collectBook(bookId);
+    if (seq !== reader.seq || book.id !== bookId) return; // moved on while the pages loaded
+    reader.bookId = bookId;
     el.bookReaderTitle.textContent = b.name;
     el.bookReaderToc.innerHTML = '<h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol>';
     el.bookReaderBody.innerHTML = b.pages.map((p) => '<article class="book-page" id="reader-page-' + p.no + '">' +
@@ -1266,6 +1279,8 @@
   }
 
   function closeReader() {
+    reader.seq++; // an opening still loading must not appear after this
+    reader.bookId = null;
     el.bookReader.classList.add('hidden');
     el.bookReaderBody.innerHTML = '';
   }
@@ -3050,6 +3065,7 @@
     api.on.relocked(async (ids) => {
       // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
       for (const id of ids) state.pending.delete(id);
+      if (readerOpen()) closeReader(); // it may show pages that were unlocked a moment ago
       if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
       refresh({ keepEditor: true });
     });

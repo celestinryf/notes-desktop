@@ -906,14 +906,16 @@ function main() {
   // Renders the book in a hidden window with scripts off (the HTML is note content) and hands it to fn.
   async function withBookWindow(doc, fn) {
     const tmp = path.join(app.getPath('temp'), 'notes-book-' + process.pid + '-' + Date.now() + '.html');
-    fs.writeFileSync(tmp, doc, 'utf8');
-    const w = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true } });
+    let w = null;
     try {
+      fs.writeFileSync(tmp, doc, 'utf8');
+      // Parented to the main window so the print dialog comes up in front of it.
+      w = new BrowserWindow({ show: false, parent: win || undefined, webPreferences: { javascript: false, sandbox: true, contextIsolation: true } });
       await w.loadFile(tmp);
       return await fn(w);
     } finally {
-      if (!w.isDestroyed()) w.destroy();
-      try { fs.unlinkSync(tmp); } catch (_) { /* already gone */ }
+      if (w && !w.isDestroyed()) w.destroy();
+      try { fs.unlinkSync(tmp); } catch (_) { /* never written, or already gone */ }
     }
   }
   ipcMain.handle('book:export', async (_e, format, data) => {
@@ -924,7 +926,10 @@ function main() {
       if (format === 'print') {
         if (process.env.NOTES_APP_DRY_PRINT) return { ok: true, dry: true };
         return await withBookWindow(doc(), (w) => new Promise((resolve) => {
-          w.webContents.print({ printBackground: true }, (ok, reason) => resolve(ok ? { ok: true } : { ok: false, canceled: reason === 'cancelled', error: reason }));
+          // Electron sometimes never calls back (no printer, a lost dialog); give up after 10 minutes so the
+          // hidden window and its temp file are not kept forever.
+          const timer = setTimeout(() => resolve({ ok: false, error: 'the print dialog did not answer' }), 10 * 60 * 1000);
+          w.webContents.print({ printBackground: true }, (ok, reason) => { clearTimeout(timer); resolve(ok ? { ok: true } : { ok: false, canceled: reason === 'cancelled', error: reason }); });
         }));
       }
       const ext = { md: 'md', html: 'html', pdf: 'pdf' }[format];
