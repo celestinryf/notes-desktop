@@ -878,6 +878,13 @@ function main() {
       return { ok: false, error: err.message };
     }
   });
+  const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // A standalone HTML page for an exported note or book. extraCss styles book parts (contents, page breaks).
+  function htmlDocument(title, bodyHtml, extraCss) {
+    return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
+      '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
+      '<body>' + String(bodyHtml || '') + '</body></html>\n';
+  }
   ipcMain.handle('app:exportHtml', async (_e, id, bodyHtml) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
@@ -888,12 +895,61 @@ function main() {
       filters: [{ name: 'HTML', extensions: ['html'] }],
     });
     if (canceled || !filePath) return { ok: false, canceled: true };
-    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const doc = '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + esc(title) + '</title>\n' +
-      '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}</style></head>\n' +
-      '<body>' + (note.title ? '<h1>' + esc(note.title) + '</h1>\n' : '') + String(bodyHtml || '') + '</body></html>\n';
-    fs.writeFileSync(filePath, doc, 'utf8');
+    fs.writeFileSync(filePath, htmlDocument(title, (note.title ? '<h1>' + escHtml(note.title) + '</h1>\n' : '') + String(bodyHtml || '')), 'utf8');
     return { ok: true, filePath };
+  });
+
+  // ---- books: export or print the whole book as one document ----------------------
+  // The renderer assembles the book (it owns the Markdown renderer); this saves or prints it.
+  // data: { name, markdown, html }. format: md | html | pdf | print.
+  const BOOK_CSS = '.book-toc{border:2px solid #2a1a12;border-radius:10px;padding:10px 18px;margin:0 0 32px}.book-toc h2{margin:.2em 0 .4em;font-size:1.1em}.book-page{margin-bottom:40px}.book-page>h2{border-bottom:2px dashed #c9b8a8;padding-bottom:6px}@media print{body{background:#fff;margin:0;max-width:none}.book-page{break-before:page}.book-page:first-of-type{break-before:auto}}';
+  // Renders the book in a hidden window with scripts off (the HTML is note content) and hands it to fn.
+  async function withBookWindow(doc, fn) {
+    const tmp = path.join(app.getPath('temp'), 'notes-book-' + process.pid + '-' + Date.now() + '.html');
+    let w = null;
+    try {
+      fs.writeFileSync(tmp, doc, 'utf8');
+      // Parented to the main window so the print dialog comes up in front of it.
+      w = new BrowserWindow({ show: false, parent: win || undefined, webPreferences: { javascript: false, sandbox: true, contextIsolation: true } });
+      await w.loadFile(tmp);
+      return await fn(w);
+    } finally {
+      if (w && !w.isDestroyed()) w.destroy();
+      try { fs.unlinkSync(tmp); } catch (_) { /* never written, or already gone */ }
+    }
+  }
+  ipcMain.handle('book:export', async (_e, format, data) => {
+    data = data || {};
+    const name = String(data.name || 'Book');
+    const doc = () => htmlDocument(name, String(data.html || ''), BOOK_CSS);
+    try {
+      if (format === 'print') {
+        if (process.env.NOTES_APP_DRY_PRINT) return { ok: true, dry: true };
+        return await withBookWindow(doc(), (w) => new Promise((resolve) => {
+          // Electron sometimes never calls back (no printer, a lost dialog); give up after 10 minutes so the
+          // hidden window and its temp file are not kept forever.
+          const timer = setTimeout(() => resolve({ ok: false, error: 'the print dialog did not answer' }), 10 * 60 * 1000);
+          w.webContents.print({ printBackground: true }, (ok, reason) => { clearTimeout(timer); resolve(ok ? { ok: true } : { ok: false, canceled: reason === 'cancelled', error: reason }); });
+        }));
+      }
+      const ext = { md: 'md', html: 'html', pdf: 'pdf' }[format];
+      if (!ext) return { ok: false, error: 'Unknown format' };
+      const { canceled, filePath } = await dialog.showSaveDialog(win, {
+        title: 'Export book',
+        defaultPath: path.join(app.getPath('documents'), H.safeFilename(name) + '.' + ext),
+        filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+      });
+      if (canceled || !filePath) return { ok: false, canceled: true };
+      if (format === 'md') fs.writeFileSync(filePath, String(data.markdown || ''), 'utf8');
+      else if (format === 'html') fs.writeFileSync(filePath, doc(), 'utf8');
+      else {
+        const pdf = await withBookWindow(doc(), (w) => w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }));
+        fs.writeFileSync(filePath, pdf);
+      }
+      return { ok: true, filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.handle('app:exportAll', async () => {

@@ -620,6 +620,16 @@ class Store {
     const pages = this.bookPages(folderId).map((n) => n.id);
     const wanted = (Array.isArray(ids) ? ids : []).filter((id, i, a) => pages.includes(id) && a.indexOf(id) === i);
     const next = wanted.concat(pages.filter((id) => !wanted.includes(id)));
+    // Pages in the trash keep their place, so restoring one puts it back where it was.
+    const old = f.pageOrder || [];
+    old.forEach((id, i) => {
+      if (next.includes(id)) return;
+      const n = this.get(id);
+      if (!n || !n.trashedAt || n.folderId !== folderId) return;
+      let at = 0;
+      for (let j = i - 1; j >= 0; j--) { const k = next.indexOf(old[j]); if (k !== -1) { at = k + 1; break; } }
+      next.splice(at, 0, id);
+    });
     return this._commit(() => { f.pageOrder = next; return f; });
   }
 

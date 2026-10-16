@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld('notesApi', {
     openTerminal: invoke('bot:openTerminal'),
     importWorkspace: invoke('bot:importWorkspace'),
   },
+  book: {
+    export: invoke('book:export'),
+  },
   vaults: {
     list: invoke('vaults:list'),
     pickFolder: invoke('vaults:pickFolder'),
