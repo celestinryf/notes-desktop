@@ -31,6 +31,7 @@
 
       <div class="nav-heading nav-heading-row">
         <span>Folders</span>
+        <button class="mini-btn" id="newBookBtn" title="New book: a folder whose notes are pages" aria-label="New book">📖</button>
         <button class="mini-btn" id="newFolderBtn" title="New folder (Ctrl+Shift+N)" aria-label="New folder">+</button>
       </div>
       <nav class="nav folders" id="folderTree" aria-label="Folders"></nav>
@@ -119,10 +120,23 @@
           </div>
         </div>
 
+        <section class="book-reader hidden" id="bookReader" aria-label="Whole book">
+          <div class="book-reader-bar">
+            <span class="book-reader-title" id="bookReaderTitle"></span>
+            <span class="spacer"></span>
+            <button class="tool-btn" id="bookReaderPdfBtn" title="Save the book as a PDF">PDF…</button>
+            <button class="tool-btn" id="bookReaderPrintBtn" title="Print the book">Print…</button>
+            <button class="tool-btn" id="bookReaderCloseBtn" title="Back to editing (Esc)">Close</button>
+          </div>
+          <div class="book-reader-scroll" id="bookReaderScroll">
+            <nav class="book-reader-toc" id="bookReaderToc" aria-label="Contents"></nav>
+            <div class="book-reader-body" id="bookReaderBody"></div>
+          </div>
+        </section>
         <div class="editor-scroll">
           <div class="editor-column align-left" id="editorColumn">
             <nav class="book-strip hidden" id="bookStrip" aria-label="Pages of this book">
-              <span class="book-name" id="bookName"></span>
+              <button class="book-name" id="bookName" title="Book: read it all, export, rename" aria-haspopup="menu"></button>
               <button class="tool-btn" id="bookPrevBtn" title="Previous page (Ctrl+PageUp)" aria-label="Previous page">‹</button>
               <div class="book-tabs" id="bookTabs" role="tablist"></div>
               <button class="tool-btn" id="bookNextBtn" title="Next page (Ctrl+PageDown)" aria-label="Next page">›</button>
@@ -446,6 +460,24 @@
     <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
       <button role="menuitem" data-action="relock">Lock now</button>
       <button role="menuitem" data-action="remove" class="danger">Remove lock…</button>
+    </div>
+    <div class="popover hidden" id="pageMenu" role="menu" aria-label="Page">
+      <button role="menuitem" data-action="rename">Rename page</button>
+      <button role="menuitem" data-action="insert-after">New page after this</button>
+      <button role="menuitem" data-action="duplicate">Duplicate page</button>
+      <button role="menuitem" data-action="move-left">Move left</button>
+      <button role="menuitem" data-action="move-right">Move right</button>
+      <button role="menuitem" data-action="copy-link">Copy link to page</button>
+      <button role="menuitem" data-action="delete" class="danger">Delete page</button>
+    </div>
+    <div class="popover hidden" id="bookMenu" role="menu" aria-label="Book">
+      <button role="menuitem" data-action="read">Read the whole book</button>
+      <button role="menuitem" data-action="export-md">Export book as Markdown…</button>
+      <button role="menuitem" data-action="export-html">Export book as HTML…</button>
+      <button role="menuitem" data-action="export-pdf">Save book as PDF…</button>
+      <button role="menuitem" data-action="print">Print book…</button>
+      <button role="menuitem" data-action="rename">Rename book</button>
+      <button role="menuitem" data-action="unbook">Turn back into a folder</button>
     </div>
     <div class="popover hidden" id="folderMenu" role="menu">
       <button role="menuitem" data-action="new-note">New note here</button>

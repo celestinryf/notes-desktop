@@ -20,6 +20,9 @@
     liveRow: $('#liveRow'), liveText: $('#liveText'), liveLinkBtn: $('#liveLinkBtn'), liveStopBtn: $('#liveStopBtn'), shareLiveHost: $('#shareLiveHost'), shareLiveStop: $('#shareLiveStop'),
     liveDialog: $('#liveDialog'), liveForm: $('#liveForm'), liveDialogTitle: $('#liveDialogTitle'), liveDialogHint: $('#liveDialogHint'), liveLinkLabel: $('#liveLinkLabel'), liveLinkInput: $('#liveLinkInput'),
     liveError: $('#liveError'), liveCopyBtn: $('#liveCopyBtn'), liveCancelBtn: $('#liveCancelBtn'), liveSubmitBtn: $('#liveSubmitBtn'),
+    pageMenu: $('#pageMenu'), bookMenu: $('#bookMenu'), newBookBtn: $('#newBookBtn'),
+    bookReader: $('#bookReader'), bookReaderTitle: $('#bookReaderTitle'), bookReaderToc: $('#bookReaderToc'), bookReaderBody: $('#bookReaderBody'), bookReaderScroll: $('#bookReaderScroll'),
+    bookReaderPdfBtn: $('#bookReaderPdfBtn'), bookReaderPrintBtn: $('#bookReaderPrintBtn'), bookReaderCloseBtn: $('#bookReaderCloseBtn'),
     bookStrip: $('#bookStrip'), bookName: $('#bookName'), bookTabs: $('#bookTabs'), bookPrevBtn: $('#bookPrevBtn'), bookNextBtn: $('#bookNextBtn'), bookAddBtn: $('#bookAddBtn'),
     relatedPanel: $('#relatedPanel'), relatedOut: $('#relatedOut'), relatedIn: $('#relatedIn'), relatedTags: $('#relatedTags'), folderMenuBook: $('#folderMenuBook'),
     lockScreen: $('#lockScreen'), lockScreenPassword: $('#lockScreenPassword'), lockScreenBtn: $('#lockScreenBtn'), lockScreenError: $('#lockScreenError'),
@@ -541,7 +544,7 @@
       row.style.setProperty('--depth', depth);
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.textContent = '▰'; // a folder being created is never a book yet
+      icon.textContent = editing.book ? '📖' : '▰';
       row.append(document.createElement('span'), icon);
       row.firstChild.className = 'folder-chevron is-leaf';
       row.append(folderInput('', (value) => commitFolderEdit(value)));
@@ -559,8 +562,9 @@
     input.className = 'folder-input';
     input.dataset.editKey = editKey(state.editingFolder);
     input.value = value;
-    input.placeholder = 'Folder name';
-    input.setAttribute('aria-label', 'Folder name');
+    const what = state.editingFolder && state.editingFolder.book ? 'Book name' : 'Folder name';
+    input.placeholder = what;
+    input.setAttribute('aria-label', what);
     input.spellcheck = false;
     let done = false;
     const finish = (save) => {
@@ -580,9 +584,10 @@
     return input;
   }
 
-  function startCreateFolder(parentId) {
+  function startCreateFolder(parentId, asBook) {
     closeFolderMenu();
-    state.editingFolder = { mode: 'create', parentId: parentId || null };
+    if (state.settings.sidebarCollapsed) updateSettings({ sidebarCollapsed: false }); // the name field lives there
+    state.editingFolder = { mode: 'create', parentId: parentId || null, book: !!asBook };
     if (parentId) {
       const set = expandedSet();
       if (!set.has(parentId)) { set.add(parentId); updateSettings({ expandedFolders: Array.from(set) }).then(renderFolders); return; }
@@ -610,6 +615,16 @@
       if (edit.mode === 'create') {
         if (!name) { renderFolders(); return; }
         const folder = await api.folders.create({ name, parentId: edit.parentId });
+        if (edit.book) {
+          // A new book opens on its first page, ready for a title.
+          await api.folders.setBook(folder.id, true);
+          const page = await api.notes.create({ folderId: folder.id, title: '' });
+          await setView('folder', folder.id, { keepEditor: true });
+          await selectNoteNow(page.id);
+          el.titleInput.focus();
+          toast('Book "' + H.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
+          return;
+        }
         await setView('folder', folder.id);
         toast('Folder "' + H.truncate(folder.name, 30) + '" created');
       } else {
@@ -707,17 +722,23 @@
     el.folderMenuBook.textContent = node.book ? 'Turn back into a folder' : 'Turn into a book';
     el.folderMenuOpen.classList.toggle('hidden', !node.vaultId);
     menu.querySelector('[data-action="delete"]').textContent = node.isVaultRoot ? 'Remove vault (keeps files)' : 'Delete folder';
+    placePopover(menu, anchor, ev);
+  }
+
+  // Shows a popover menu at the pointer (right-click) or under its anchor, kept inside the window.
+  function placePopover(menu, anchor, ev) {
     menu.classList.remove('hidden');
     const rect = anchor.getBoundingClientRect();
-    let x = ev ? ev.clientX : rect.right - 4;
+    let x = ev ? ev.clientX : rect.left;
     let y = ev ? ev.clientY : rect.bottom + 4;
     menu.style.left = '0px'; menu.style.top = '0px';
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
     if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
     if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-    menu.querySelector('button').focus();
+    menu.style.left = Math.max(8, x) + 'px';
+    menu.style.top = Math.max(8, y) + 'px';
+    const first = menu.querySelector('button:not(.hidden):not(:disabled)');
+    if (first) first.focus();
   }
 
   function closeFolderMenu() {
@@ -913,6 +934,7 @@
     state.current = note;
     state.dirty = false;
     syncListCollapsed();
+    if (readerOpen() && !bookOf(note)) closeReader(); // left the book: its reading view goes too
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
@@ -1022,6 +1044,7 @@
       tab.querySelector('.t').textContent = H.truncate(H.deriveTitle(p) || 'Untitled', 28);
       tab.title = H.deriveTitle(p) || 'Untitled';
       tab.addEventListener('click', () => { if (p.id !== state.currentId) selectNote(p.id); });
+      tab.addEventListener('contextmenu', (e) => { e.preventDefault(); openPageMenu(p.id, tab, e); });
       tab.addEventListener('dragstart', (e) => { book.dragId = p.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'page'); });
       tab.addEventListener('dragover', (e) => { if (!book.dragId || book.dragId === p.id) return; e.preventDefault(); tab.classList.add('drop-before'); });
       tab.addEventListener('dragleave', () => tab.classList.remove('drop-before'));
@@ -1074,6 +1097,180 @@
     if (state.current) renderBookStrip(state.current);
     toast(on ? 'This folder is now a book: its notes are pages you can page through and reorder.' : 'Back to an ordinary folder.');
   }
+
+  // Puts page id right after page afterId in the book's reading order.
+  async function placePageAfter(id, afterId) {
+    const pages = await api.notes.list({ folderId: book.id });
+    const ids = pages.map((p) => p.id).filter((x) => x !== id);
+    const at = ids.indexOf(afterId);
+    ids.splice(at === -1 ? ids.length : at + 1, 0, id);
+    await api.folders.reorderPages(book.id, ids);
+  }
+
+  function openPageMenu(id, anchor, ev) {
+    closeAllBookMenus();
+    state.menuPageId = id;
+    const idx = book.pages.findIndex((p) => p.id === id);
+    el.pageMenu.querySelector('[data-action="move-left"]').disabled = idx <= 0;
+    el.pageMenu.querySelector('[data-action="move-right"]').disabled = idx === -1 || idx >= book.pages.length - 1;
+    placePopover(el.pageMenu, anchor, ev);
+  }
+
+  function openBookMenu() {
+    closeAllBookMenus();
+    if (!book.id) return;
+    placePopover(el.bookMenu, el.bookName, null);
+  }
+
+  function closeAllBookMenus() {
+    state.menuPageId = null;
+    el.pageMenu.classList.add('hidden');
+    el.bookMenu.classList.add('hidden');
+  }
+
+  async function pageMenuAction(action) {
+    const id = state.menuPageId;
+    closeAllBookMenus();
+    if (!id || !book.id) return;
+    await flushSave();
+    const idx = book.pages.findIndex((p) => p.id === id);
+    const page = book.pages[idx];
+    try {
+      if (action === 'rename') {
+        if (id !== state.currentId) await selectNoteNow(id);
+        el.titleInput.focus(); el.titleInput.select();
+      } else if (action === 'insert-after') {
+        const note = await api.notes.create({ folderId: book.id, title: '' });
+        await placePageAfter(note.id, id);
+        await refresh({ keepEditor: true });
+        await selectNoteNow(note.id);
+        el.titleInput.focus();
+      } else if (action === 'duplicate') {
+        const copy = await api.notes.duplicate(id);
+        await placePageAfter(copy.id, id);
+        await refresh({ keepEditor: true });
+        await selectNoteNow(copy.id);
+        toast('Page duplicated');
+      } else if (action === 'move-left' || action === 'move-right') {
+        const ids = book.pages.map((p) => p.id);
+        const to = idx + (action === 'move-left' ? -1 : 1);
+        if (idx === -1 || to < 0 || to >= ids.length) return;
+        ids.splice(idx, 1); ids.splice(to, 0, id);
+        await api.folders.reorderPages(book.id, ids);
+        await refresh({ keepEditor: true });
+        if (state.current) renderBookStrip(state.current);
+      } else if (action === 'copy-link') {
+        await api.app.copy({ text: '[' + (H.deriveTitle(page) || 'Page') + '](note://' + id + ')' });
+        toast('Copied. Paste it into another note to link to this page.');
+      } else if (action === 'delete') {
+        if (id === state.currentId) { await trashCurrent(); return; }
+        const title = H.deriveTitle(page) || 'Untitled';
+        await api.notes.trash(id);
+        await refresh({ keepEditor: true });
+        if (state.current) renderBookStrip(state.current);
+        toast('Moved "' + H.truncate(title, 30) + '" to trash', { label: 'Undo', run: async () => { await api.notes.restore(id); await refresh({ keepEditor: true }); if (state.current) renderBookStrip(state.current); } });
+      }
+    } catch (err) {
+      toast('Could not change the page: ' + (err.message || err));
+    }
+  }
+
+  async function bookMenuAction(action) {
+    closeAllBookMenus();
+    if (!book.id) return;
+    if (action === 'read') openReader();
+    else if (action === 'export-md') exportBook('md');
+    else if (action === 'export-html') exportBook('html');
+    else if (action === 'export-pdf') exportBook('pdf');
+    else if (action === 'print') exportBook('print');
+    else if (action === 'rename') renameBookInline();
+    else if (action === 'unbook') toggleBook(book.id, false);
+  }
+
+  // Renames the book in place: the strip's name becomes a text field.
+  function renameBookInline() {
+    const folder = flattenTree(state.tree).find((f) => f.id === book.id);
+    if (!folder) return;
+    const input = document.createElement('input');
+    input.className = 'book-name-input';
+    input.value = folder.name;
+    input.setAttribute('aria-label', 'Book name');
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      const name = input.value.trim();
+      input.replaceWith(el.bookName);
+      if (save && name && name !== folder.name) {
+        try { await api.folders.rename(folder.id, name); } catch (err) { toast('Could not rename the book: ' + (err.message || err)); }
+        await refresh({ keepEditor: true });
+      }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } });
+    input.addEventListener('blur', () => finish(true));
+    el.bookName.replaceWith(input);
+    input.focus(); input.select();
+  }
+
+  // Gathers the current book: its name and pages in order, each with Markdown and HTML.
+  // Locked pages stay locked: only their title goes in.
+  async function collectBook() {
+    await flushSave();
+    const folder = flattenTree(state.tree).find((f) => f.id === book.id);
+    const pages = await api.notes.list({ folderId: book.id });
+    return {
+      name: folder ? folder.name : 'Book',
+      pages: pages.map((p, i) => {
+        const locked = !!(p.locked && !p.unlocked);
+        const body = locked ? '' : String(p.body || '');
+        return { id: p.id, no: i + 1, title: H.deriveTitle(p) || 'Untitled', locked, body, html: locked ? '' : markdownToHtml(body) };
+      }),
+    };
+  }
+
+  function bookMarkdown(b) {
+    const toc = b.pages.map((p) => p.no + '. ' + p.title).join('\n');
+    const parts = b.pages.map((p) => '## ' + p.title + '\n\n' + (p.locked ? '_This page is locked._' : p.body.trim()) + '\n');
+    return '# ' + b.name + '\n\n**Contents**\n\n' + toc + '\n\n' + parts.join('\n');
+  }
+
+  // The book as HTML: its name, a contents list linking to the pages, then one section per page.
+  function bookHtml(b) {
+    const toc = '<nav class="book-toc"><h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a href="#page-' + p.no + '" data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol></nav>';
+    const pages = b.pages.map((p) => '<section class="book-page" id="page-' + p.no + '"><h2>' + escapeHtml(p.title) + '</h2>' +
+      (p.locked ? '<p class="book-page-locked">This page is locked.</p>' : p.html) + '</section>').join('\n');
+    return '<h1>' + escapeHtml(b.name) + '</h1>' + toc + pages;
+  }
+
+  async function exportBook(format) {
+    if (!book.id) return;
+    const b = await collectBook();
+    if (!b.pages.length) { toast('This book has no pages yet.'); return; }
+    const r = await api.book.export(format, { name: b.name, markdown: bookMarkdown(b), html: bookHtml(b) });
+    if (r.ok) toast(format === 'print' ? 'Sent the book to the printer' : 'Saved the book to ' + r.filePath);
+    else if (!r.canceled) toast('Could not export the book: ' + r.error);
+  }
+
+  // ---- whole-book reading view ----------------------------------------------------
+
+  async function openReader() {
+    if (!book.id) return;
+    const b = await collectBook();
+    el.bookReaderTitle.textContent = b.name;
+    el.bookReaderToc.innerHTML = '<h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol>';
+    el.bookReaderBody.innerHTML = b.pages.map((p) => '<article class="book-page" id="reader-page-' + p.no + '">' +
+      '<div class="book-page-head"><span class="no">' + p.no + '</span><h2>' + escapeHtml(p.title) + '</h2><button class="tool-btn" data-edit="' + p.id + '">Edit</button></div>' +
+      (p.locked ? '<p class="book-page-locked">This page is locked. Open it to unlock.</p>' : '<div class="rich-editor-content">' + p.html + '</div>') + '</article>').join('');
+    el.bookReader.classList.remove('hidden');
+    el.bookReaderScroll.scrollTop = 0;
+    el.bookReaderCloseBtn.focus();
+  }
+
+  function closeReader() {
+    el.bookReader.classList.add('hidden');
+    el.bookReaderBody.innerHTML = '';
+  }
+
+  function readerOpen() { return !el.bookReader.classList.contains('hidden'); }
 
   // ---- related notes --------------------------------------------------------------
 
@@ -1385,7 +1582,12 @@
   function currentHtml() {
     const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
     if (live) return live.innerHTML;
-    if (!window.NotesEditor) return '<pre>' + escapeHtml(el.bodyInput.value) + '</pre>';
+    return markdownToHtml(el.bodyInput.value);
+  }
+
+  // Renders Markdown with the editor itself, off screen, so exports look like the rendered view.
+  function markdownToHtml(md) {
+    if (!window.NotesEditor) return '<pre>' + escapeHtml(md) + '</pre>';
     const host = document.createElement('div');
     host.style.position = 'absolute'; host.style.left = '-99999px';
     document.body.append(host);
@@ -1393,7 +1595,7 @@
       let ed = null;
       try {
         ed = window.NotesEditor.create(host, {});
-        ed.setMarkdown(el.bodyInput.value);
+        ed.setMarkdown(String(md || ''));
         return host.querySelector('.rich-editor-content').innerHTML;
       } finally { if (ed) ed.destroy(); }
     } finally { host.remove(); }
@@ -2705,6 +2907,8 @@
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
+      if (!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) { e.preventDefault(); closeAllBookMenus(); return; }
+      if (readerOpen()) { e.preventDefault(); closeReader(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
         clearTimeout(searchTimer);
@@ -2808,6 +3012,25 @@
     el.bookPrevBtn.addEventListener('click', () => stepPage(-1));
     el.bookNextBtn.addEventListener('click', () => stepPage(1));
     el.bookAddBtn.addEventListener('click', addPage);
+    el.bookName.addEventListener('click', openBookMenu);
+    el.newBookBtn.addEventListener('click', () => startCreateFolder(null, true));
+    el.pageMenu.querySelectorAll('button[data-action]').forEach((b) => b.addEventListener('click', () => pageMenuAction(b.dataset.action)));
+    el.bookMenu.querySelectorAll('button[data-action]').forEach((b) => b.addEventListener('click', () => bookMenuAction(b.dataset.action)));
+    el.bookReaderCloseBtn.addEventListener('click', closeReader);
+    el.bookReaderPdfBtn.addEventListener('click', () => exportBook('pdf'));
+    el.bookReaderPrintBtn.addEventListener('click', () => exportBook('print'));
+    el.bookReaderToc.addEventListener('click', (e) => {
+      const a = e.target.closest('a[data-page]');
+      if (!a) return;
+      const sec = document.getElementById('reader-page-' + a.dataset.page);
+      if (sec) sec.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    el.bookReaderBody.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-edit]');
+      if (btn) { const id = btn.dataset.edit; closeReader(); selectNote(id); return; }
+      const link = e.target.closest('a[href]');
+      if (link) { e.preventDefault(); followLink(link.getAttribute('href')); }
+    });
     el.liveLinkBtn.addEventListener('click', async () => { const s = state.current && (await api.live.status(state.current.id)); if (s && s.url) openLiveDialog('link', s.url); });
     el.liveStopBtn.addEventListener('click', stopLive);
     el.liveForm.addEventListener('submit', (e) => { e.preventDefault(); submitLiveDialog(); });
@@ -2907,6 +3130,7 @@
     el.folderMenu.querySelectorAll('button[data-action]').forEach((b) => b.addEventListener('click', () => folderMenuAction(b.dataset.action)));
     document.addEventListener('pointerdown', (e) => {
       if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
+      if ((!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) && !el.pageMenu.contains(e.target) && !el.bookMenu.contains(e.target) && !el.bookName.contains(e.target)) closeAllBookMenus();
       if (!el.shareMenu.classList.contains('hidden') && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
       if (!el.lockMenu.classList.contains('hidden') && !el.lockMenu.contains(e.target) && !el.lockBtn.contains(e.target)) el.lockMenu.classList.add('hidden');
     });
