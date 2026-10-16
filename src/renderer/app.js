@@ -106,6 +106,11 @@
     return raw.split(re).map((part, i) => (i % 2 ? '<span class="mark">' + escapeHtml(part) + '</span>' : escapeHtml(part))).join('');
   }
 
+  // The message of an error thrown in the main process, without Electron's "Error invoking remote method" prefix.
+  function ipcErrorText(err) {
+    return String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  }
+
   let toastTimer = null;
   function toast(message, action) {
     clearTimeout(toastTimer);
@@ -662,7 +667,7 @@
     await flushSave();
     let updated;
     try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
-    catch (err) { const msg = String(err.message || err).replace(/^.*Error: /, ''); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); renderFolderSelect(); return; }
+    catch (err) { const msg = ipcErrorText(err); toast(/locked/i.test(msg) ? msg : (/vault/i.test(msg) ? 'Vault notes stay inside their vault; move them between its folders instead.' : 'Could not move: ' + msg)); renderFolderSelect(); return; }
     if (state.currentId === noteId && updated) state.current = updated;
     await refresh({ keepEditor: true });
     const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
@@ -982,6 +987,7 @@
     el.recordBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.historyBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
+    el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
     el.pinBtn.textContent = note.pinned ? '★' : '☆';
@@ -1104,7 +1110,7 @@
 
   async function openSplitDialog() {
     const note = state.current;
-    if (!note) return;
+    if (!note || note.trashedAt) return;
     if (note.locked || note.lock) { toast('Unlock and remove the lock first: a locked note cannot be split.'); return; }
     if (note.filePath) { toast('This note is a file on disk; only notes kept in the app can be split.'); return; }
     await flushSave();
@@ -1138,7 +1144,7 @@
     await flushSave();
     let r;
     try { r = await api.notes.splitIntoBook(id, { name: el.splitName.value, keepOriginal: el.splitKeep.checked }); }
-    catch (err) { toast('Could not split the note: ' + String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); return; }
+    catch (err) { toast('Could not split the note: ' + ipcErrorText(err)); return; }
     if (r.originalTrashed && state.currentId === id) clearEditor();
     await setView('folder', r.folder.id, { keepEditor: true });
     await selectNoteNow(r.pageIds[0]);
@@ -1146,7 +1152,11 @@
       label: 'Undo',
       run: async () => {
         await flushSave();
-        await api.notes.undoSplit(r.folder.id, r.pageIds, r.originalTrashed ? id : null);
+        try { await api.notes.undoSplit(r.folder.id, r.pageIds, r.originalTrashed ? id : null); }
+        catch (err) { toast('Could not undo the split: ' + ipcErrorText(err)); return; }
+        // Go back to the original only if the person is still in the book; otherwise leave their view alone.
+        const inBook = (state.view === 'folder' && state.folderId === r.folder.id) || r.pageIds.includes(state.currentId);
+        if (!inBook) { await refresh(); return; }
         clearEditor();
         await setView('all', null, { keepEditor: true });
         await selectNoteNow(id);
@@ -1510,7 +1520,7 @@
       applyLockedNote(updated);
       toast(mode === 'set' ? 'Locked. It stays readable until you hide the app or choose Lock now.' : 'Lock removed.');
     } catch (err) {
-      el.lockError.textContent = String(err.message || err).replace(/^.*Error: /, '');
+      el.lockError.textContent = ipcErrorText(err);
     }
   }
 
@@ -1524,7 +1534,7 @@
       applyLockedNote(updated);
       focusBody();
     } catch (err) {
-      el.lockScreenError.textContent = /wrong password/i.test(String(err.message)) ? 'Wrong password.' : String(err.message || err).replace(/^.*Error: /, '');
+      el.lockScreenError.textContent = /wrong password/i.test(String(err.message)) ? 'Wrong password.' : ipcErrorText(err);
       el.lockScreenPassword.select();
     }
   }
