@@ -8,6 +8,7 @@ const windowInput = require('./window-input');
 const { VaultManager } = require('./vaults');
 const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
+const os = require('os');
 const H = require('./shared/helpers');
 const convert = require('./convert');
 const { runWorker } = require('./run-worker');
@@ -604,36 +605,57 @@ function main() {
   const stillAsOpened = (file, expectedMtime) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
   const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Reload it, then try again.';
 
-  // Page changes (reorder, remove, add pages from another PDF, turn): bytes is the PDF pdf.js rebuilt in the renderer
-  // with the new page order, or null when only turning; rotations has one entry per page of the result. Written in
-  // place after a backup; returns the backup's name, for Undo.
-  ipcMain.handle('files:pdfApplyPages', async (_e, id, bytes, rotations, expectedMtime) => {
+  // Rewrites the opened PDF of note id: build(bytes of the file now) gives the new bytes. Refused when the file
+  // changed on disk since it was opened (or while building); written in place after a backup. Returns
+  // { ok, mtime, backup } with the backup's name, for Undo, or { ok: false, error }.
+  async function rewritePdf(id, expectedMtime, build) {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
-    if (!Array.isArray(rotations) || !rotations.length || rotations.some((r) => ![0, 90, 180, 270].includes(r))) return { ok: false, error: 'the page turns were not valid.' };
     try {
-      let buf = bytes === null ? fs.readFileSync(file) : pdfBuffer(bytes);
-      if (rotations.some((r) => r)) {
-        const res = await runWorker('pdf-rotate-worker.js', { bytes: buf, rotations }, 2 * 60 * 1000, 'Turning the pages took too long.');
-        if (!res.ok) return { ok: false, error: res.error };
-        buf = Buffer.from(res.bytes);
-      }
+      const buf = pdfBuffer(await build(fs.readFileSync(file)));
       if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
       const { mtime, backup } = replaceFile(id, file, buf);
       return { ok: true, mtime, backup: backup.name };
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  }
+  // A pdf-lib change (pdf-edit-worker.js) to bytes; resolves to the new bytes, or throws with the reason.
+  async function pdfLibTask(bytes, task, extra, what) {
+    const res = await runWorker('pdf-edit-worker.js', Object.assign({ bytes, task }, extra), 2 * 60 * 1000, what + ' took too long.');
+    if (!res.ok) throw new Error(res.error);
+    return res.bytes;
+  }
+
+  // Page changes (reorder, remove, add pages from another PDF, turn): bytes is the PDF pdf.js rebuilt in the renderer
+  // with the new page order, or null when only turning; rotations has one entry per page of the result.
+  ipcMain.handle('files:pdfApplyPages', (_e, id, bytes, rotations, expectedMtime) => {
+    if (!Array.isArray(rotations) || !rotations.length || rotations.some((r) => ![0, 90, 180, 270].includes(r))) return { ok: false, error: 'the page turns were not valid.' };
+    return rewritePdf(id, expectedMtime, async (current) => {
+      // Rebuilding the file breaks a digital signature: the worker refuses a signed PDF.
+      if (bytes !== null) await pdfLibTask(current, 'check', {}, 'Reading the PDF');
+      const buf = bytes === null ? current : pdfBuffer(bytes);
+      return rotations.some((r) => r) ? pdfLibTask(buf, 'rotate', { rotations }, 'Turning the pages') : buf;
+    });
   });
-  // Undo for page changes: the backup taken just before them goes back in place (after a backup of what is there).
-  // expectedMtime is the time the page change itself wrote, so an Undo never wipes out anything saved after it.
+  // Comments: sticky notes added, retyped or deleted (ops as pdf-edit-worker.js takes them). A new note is signed
+  // with the Windows user name, as other PDF apps do.
+  function commentAuthor() {
+    try { return os.userInfo().username || ''; } catch (_) { return ''; }
+  }
+  ipcMain.handle('files:pdfComments', (_e, id, ops, expectedMtime) => {
+    if (!Array.isArray(ops) || !ops.length || ops.length > 100) return { ok: false, error: 'that comment change was not valid.' };
+    return rewritePdf(id, expectedMtime, (current) => pdfLibTask(current, 'comments', { ops, author: commentAuthor() }, 'Saving the comment'));
+  });
+  // Undo for page and comment changes: the backup taken just before goes back in place (after a backup of what is
+  // there). expectedMtime is the time the change itself wrote, so an Undo never wipes out anything saved after it.
   ipcMain.handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     const dir = backupDirFor(file);
     let names = [];
     try { names = fs.readdirSync(dir); } catch (_) { /* no backups */ }
     if (typeof name !== 'string' || !names.includes(name)) return { ok: false, error: 'that backup is gone.' };
-    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after the page change, so undoing it would lose that. Its earlier versions are in the backups folder.' };
+    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier versions are in the backups folder.' };
     try {
       return Object.assign({ ok: true }, { mtime: replaceFile(id, file, pdfBuffer(fs.readFileSync(path.join(dir, name)))).mtime });
     } catch (err) {

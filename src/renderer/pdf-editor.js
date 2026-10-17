@@ -11,6 +11,14 @@
   lib.GlobalWorkerOptions.workerSrc = PKG + 'build/pdf.worker.min.mjs';
 
   const T = lib.AnnotationEditorType;
+
+  // pdf.js focuses a mark when a drawing ends or the tool changes (the person clicked outside the page: Save, Add
+  // comment), and the browser then scrolls to it, throwing the person back to an earlier page. pdf.js has no option for
+  // this, so a focus() inside a PDF viewer never scrolls; the element is in view anyway when the person is using it.
+  const plainFocus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function (options) {
+    return plainFocus.call(this, options === undefined && this.closest && this.closest('.pdf-viewport') ? { preventScroll: true } : options);
+  };
   const LOAD_OPTIONS = {
     isEvalSupported: false,
     enableXfa: false,
@@ -32,6 +40,15 @@
     await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
   }
   const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
+  // Annotation kinds that can carry a comment (PDF "markup" annotations). A text box is left out: its text is on the
+  // page itself.
+  const MARKUP = new Set(['Text', 'Line', 'Square', 'Circle', 'Polygon', 'PolyLine', 'Highlight', 'Underline', 'Squiggly',
+    'StrikeOut', 'Stamp', 'Caret', 'Ink', 'FileAttachment', 'Sound']);
+  // pdf.js names an annotation by its object: "12R", or "12R3" when the generation is not 0.
+  function refOf(id) {
+    const m = /^(\d+)R(\d*)$/.exec(String(id || ''));
+    return m ? [Number(m[1]), Number(m[2] || 0)] : null;
+  }
 
   // root holds a .pdf-viewport whose first child is the .pdfViewer element. hooks:
   //   onDirty(bool)  the edits now differ (or no longer differ) from what was last written to the file
@@ -64,8 +81,30 @@
     const undo = { canUndo: false, canRedo: false };
     const report = () => hooks.onState && hooks.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
 
-    eventBus.on('pagesinit', () => { viewer.currentScaleValue = 'page-width'; });
+    // location: where the person is in the PDF (page, point at the top left, zoom), as pdf.js reports it. restore: the
+    // location to go back to once the next PDF is laid out, when it is the same PDF reopened after the app changed it.
+    let location = null, restore = null;
+    eventBus.on('updateviewarea', (e) => { location = e.location; });
+    eventBus.on('pagesinit', () => {
+      const at = restore;
+      restore = null;
+      if (!at || !doc) { viewer.currentScaleValue = 'page-width'; return; }
+      viewer.currentScaleValue = typeof at.scale === 'number' ? String(at.scale / 100) : at.scale;
+      viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: 'XYZ' }, at.left, at.top, null], allowNegativeOffset: true });
+    });
     eventBus.on('scalechanging', report);
+    // A fitted zoom (page width) fits again when the space changes: the window is resized, or the comments open.
+    // Only on a change of width, and in the next frame, so the refit's own layout does not feed back into the observer.
+    let fittedWidth = 0;
+    new ResizeObserver(() => {
+      const w = container.clientWidth;
+      if (!w || w === fittedWidth) return;
+      fittedWidth = w;
+      requestAnimationFrame(() => {
+        const v = viewer.currentScaleValue;
+        if (doc && (v === 'page-width' || v === 'page-fit' || v === 'auto')) viewer.currentScaleValue = v;
+      });
+    }).observe(container);
     eventBus.on('annotationlayerrendered', () => { if (!touched && doc) { savedHash = currentHash(); refreshDirty(); } });
     eventBus.on('editingstateschanged', ({ details }) => {
       if ('hasSomethingToUndo' in details) undo.canUndo = details.hasSomethingToUndo;
@@ -118,6 +157,7 @@
     }
 
     async function unload() {
+      cancelPick();
       closeOthers();
       viewer.setDocument(null);
       linkService.setDocument(null);
@@ -130,9 +170,11 @@
       if (t) await t.destroy().catch(() => {});
     }
 
-    // Shows the PDF in bytes (a Uint8Array). Resolves false if another open() or close() came first.
-    async function open(bytes) {
+    // Shows the PDF in bytes (a Uint8Array). opts.keepView: it is the PDF on show, reopened after the app rewrote it,
+    // so the same page and zoom are shown again. Resolves false if another open() or close() came first.
+    async function open(bytes, opts) {
       const my = ++seq;
+      const at = opts && opts.keepView ? location : null;
       await unload();
       if (my !== seq) return false;
       const t = lib.getDocument(Object.assign({ data: bytes }, LOAD_OPTIONS));
@@ -142,6 +184,8 @@
       // pdf.js would only log this (and show nothing): a PDF without pages is refused here, so the caller can say so.
       if (d.numPages < 1) { task = null; await t.destroy().catch(() => {}); throw new Error('this PDF has no pages.'); }
       doc = d;
+      restore = at;
+      location = null;
       touched = false;
       savedHash = currentHash();
       doc.annotationStorage.onSetModified = refreshDirty;
@@ -205,6 +249,79 @@
       return true;
     }
 
+    // Waits for a click on a page: resolves { page (0-based), x, y } in that page's PDF space, or null when cancelled
+    // (Escape, cancelPick, another PDF). The tool goes back to Read first, so the click makes no mark.
+    let picking = null;
+    function pickPoint() {
+      cancelPick();
+      if (!doc) return Promise.resolve(null);
+      if (mode !== 'select') setMode('select');
+      root.classList.add('picking');
+      return new Promise((resolve) => {
+        const onDown = (e) => {
+          const pageEl = e.button === 0 && e.target.closest && e.target.closest('.page[data-page-number]');
+          if (!pageEl) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
+          const r = pageEl.getBoundingClientRect();
+          const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
+          // The click that follows must not open a link under it either.
+          const eat = (c) => { c.preventDefault(); c.stopPropagation(); };
+          container.addEventListener('click', eat, true);
+          setTimeout(() => container.removeEventListener('click', eat, true), 400);
+          finish({ page: view.id - 1, x, y });
+        };
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); } };
+        function finish(value) {
+          container.removeEventListener('pointerdown', onDown, true);
+          window.removeEventListener('keydown', onKey, true);
+          root.classList.remove('picking');
+          picking = null;
+          resolve(value);
+        }
+        container.addEventListener('pointerdown', onDown, true);
+        window.addEventListener('keydown', onKey, true);
+        picking = finish;
+      });
+    }
+    function cancelPick() { if (picking) picking(null); }
+
+    // The comments in the PDF as saved: sticky notes, and other marks (highlights and the like) that carry a comment.
+    // [{ id, page (0-based), ref ([num, gen], null when it cannot be changed), kind, text, author, date, rect,
+    // replyTo (id) }]. null when another PDF was opened meanwhile.
+    async function comments() {
+      const d = doc, list = [];
+      if (!d) return null;
+      for (let i = 0; i < d.numPages; i++) {
+        const annots = await (await d.getPage(i + 1)).getAnnotations();
+        if (d !== doc) return null;
+        for (const a of annots) {
+          const text = (a.contentsObj && a.contentsObj.str) || '';
+          // A review state ("Accepted") is a reply with no text of its own; it is not listed.
+          if (!MARKUP.has(a.subtype) || (a.subtype !== 'Text' && !text.trim()) || a.state) continue;
+          list.push({
+            id: a.id,
+            page: i,
+            ref: refOf(a.id),
+            kind: a.subtype,
+            text,
+            author: (a.titleObj && a.titleObj.str) || '',
+            date: lib.PDFDateString.toDateObject(a.modificationDate || a.creationDate || ''),
+            rect: a.rect,
+            replyTo: a.inReplyTo || null,
+          });
+        }
+      }
+      return list;
+    }
+
+    // Shows the place on page (0-based) where rect is.
+    function goTo(page, rect) {
+      if (!doc || page >= doc.numPages) return;
+      viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: 'XYZ' }, rect[0] - 40, rect[3] + 40, null], allowNegativeOffset: true });
+    }
+
     // The PDF with its edits: { bytes, hash }, hash identifying exactly the edits in those bytes (pass it to
     // markSaved once they are on disk). null when nothing is open.
     async function save() {
@@ -220,6 +337,10 @@
       setMode,
       commit,
       placePicture,
+      pickPoint,
+      cancelPick,
+      comments,
+      goTo,
       save,
       pageCount: () => (doc ? doc.numPages : 0),
       drawPage: (i, canvas, width) => (doc ? drawPage(doc, i, canvas, width) : Promise.resolve()),

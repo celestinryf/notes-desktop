@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('notesApi', {
     savePdf: invoke('files:savePdf'),
     pdfApplyPages: invoke('files:pdfApplyPages'),
     pdfRestore: invoke('files:pdfRestore'),
+    pdfComments: invoke('files:pdfComments'),
     pdfPickPages: invoke('files:pdfPickPages'),
     docxBytes: invoke('files:docxBytes'),
     convertOptions: invoke('files:convertOptions'),
