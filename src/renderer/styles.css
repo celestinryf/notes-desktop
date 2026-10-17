@@ -528,6 +528,20 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .pdf-grow { flex: 1; }
 .pdf-stage { position: relative; flex: 1; min-height: 0; }
 .pdf-viewport { position: absolute; inset: 0; overflow: auto; background: #e9e4da; }
+/* The page organizer replaces the tool row and the pages while it is open. */
+.pdf-pages { display: none; flex: 1; flex-direction: column; min-height: 0; }
+.pdf-editor.organizing .pdf-pages { display: flex; }
+.pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-stage { display: none; }
+.pdf-pages.is-working { opacity: 0.6; pointer-events: none; }
+.pdf-pages-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border-bottom: 2px solid var(--line-soft); background: var(--bg-raised); }
+.pdf-pages-title { font-size: 12.5px; color: var(--fg-muted); }
+.pdf-pages-grid { flex: 1; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; padding: 14px; background: #e9e4da; }
+.pdf-page-card { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 156px; margin: 0; padding: 8px; border: 2px solid var(--line-soft); border-radius: 8px; background: var(--bg); }
+.pdf-page-thumb { width: 130px; height: 170px; display: flex; align-items: center; justify-content: center; }
+.pdf-page-thumb canvas { background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+.pdf-page-num { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--fg-muted); }
+.pdf-page-acts { display: flex; gap: 2px; }
+.pdf-page-acts .tool-btn { padding: 2px 6px; }
 .note-card-title .file-mark { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
 .app.is-dropping::after {
   content: 'Drop files to open them as notes';

@@ -8,7 +8,7 @@
    shows, Word to HTML and text come straight from mammoth, and a web page prints to PDF as itself. */
 const fs = require('fs');
 const path = require('path');
-const { Worker } = require('worker_threads');
+const { runWorker } = require('./run-worker');
 const { extOf, readText, readDocxBuffer, readDocxText } = require('./files');
 
 const FORMATS = {
@@ -130,13 +130,7 @@ async function docxToHtml(filePath, convertImage) {
 // The text of a PDF as Markdown paragraphs. Says how many pages had no text (scanned), and refuses when none did.
 async function pdfToMarkdown(filePath) {
   if (fs.statSync(filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
-  const bytes = fs.readFileSync(filePath);
-  const res = await new Promise((resolve, reject) => {
-    const w = new Worker(path.join(__dirname, 'pdf-text-worker.js'), { workerData: { bytes } });
-    const timer = setTimeout(() => { w.terminate(); reject(new Error('Reading the PDF took too long.')); }, PDF_TIMEOUT_MS);
-    w.once('message', (m) => { clearTimeout(timer); w.terminate(); resolve(m); });
-    w.once('error', (err) => { clearTimeout(timer); reject(err); });
-  });
+  const res = await runWorker('pdf-text-worker.js', { bytes: fs.readFileSync(filePath) }, PDF_TIMEOUT_MS, 'Reading the PDF took too long.');
   if (!res.ok) throw new Error(res.error);
   const empty = res.pages.filter((p) => !p.length).length;
   if (empty === res.pages.length) throw new Error('This PDF has no text to convert; it is probably scanned pages. Converting it needs OCR, which Notes does not do.');

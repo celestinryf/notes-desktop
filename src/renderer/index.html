@@ -181,6 +181,8 @@
                   <button class="tool-btn" data-pdf-mode="draw" title="Draw freehand">Draw</button>
                   <button class="tool-btn" data-pdf-mode="picture" title="Add a picture from a file">Picture</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
+                  <button class="tool-btn" data-pdf-act="pages" title="Turn, move or remove pages, or add pages from another PDF">Pages</button>
+                  <span class="pdf-sep" aria-hidden="true"></span>
                   <button class="tool-btn" data-pdf-act="undo" id="pdfUndoBtn" title="Undo" disabled>Undo</button>
                   <button class="tool-btn" data-pdf-act="redo" id="pdfRedoBtn" title="Redo" disabled>Redo</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
@@ -191,6 +193,16 @@
                   <button class="btn btn-primary btn-small" id="pdfSaveBtn" title="Write your changes into the PDF (Ctrl+S)">Saved</button>
                 </div>
                 <div class="pdf-stage"><div class="pdf-viewport"><div class="pdfViewer"></div></div></div>
+                <div class="pdf-pages" id="pdfPages" aria-label="Pages">
+                  <div class="pdf-pages-bar">
+                    <span class="pdf-pages-title">Turn, move or remove pages, or add pages from another PDF. Nothing changes until you apply.</span>
+                    <button class="tool-btn" data-pages-act="add">Add pages from a PDF…</button>
+                    <span class="pdf-grow"></span>
+                    <button class="tool-btn" data-pages-act="cancel">Cancel</button>
+                    <button class="btn btn-primary btn-small" data-pages-act="apply">Apply changes</button>
+                  </div>
+                  <div class="pdf-pages-grid"></div>
+                </div>
               </div>
               <iframe id="docxView" class="docx-view hidden" sandbox="allow-same-origin" title="Word document"></iframe>
             </div>
@@ -534,6 +546,7 @@
   <script src="vendor/docx.bundle.js"></script>
   <script src="vendor/pdf.bundle.js"></script>
   <script src="pdf-editor.js"></script>
+  <script src="pdf-pages.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>
 </body>

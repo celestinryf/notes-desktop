@@ -10,6 +10,7 @@ const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
 const convert = require('./convert');
+const { runWorker } = require('./run-worker');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
@@ -523,9 +524,11 @@ function main() {
   const FILE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'files');
   const KEEP_FILE_VERSIONS = 10;
   const sessionOriginals = new Map(); // pathKey -> name of that first copy
+  const backupDirFor = (file) => path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
+  // Returns { first, name }: whether this was the session's first copy of the file, and the copy's file name.
   function backUpBeforeWrite(file) {
     const key = pathKey(file);
-    const dir = path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(key).digest('hex').slice(0, 8));
+    const dir = backupDirFor(file);
     fs.mkdirSync(dir, { recursive: true });
     const name = H.fileStamp() + path.extname(file);
     fs.copyFileSync(file, path.join(dir, name), fs.constants.COPYFILE_EXCL);
@@ -534,7 +537,7 @@ function main() {
     const keep = sessionOriginals.get(key);
     const all = fs.readdirSync(dir).sort();
     for (const old of all.slice(0, Math.max(0, all.length - KEEP_FILE_VERSIONS))) if (old !== keep) fs.rmSync(path.join(dir, old), { force: true });
-    return first;
+    return { first, name };
   }
   // In place (so links to the file stay joined), and flushed to disk before it counts as saved.
   function writeInPlace(file, buf) {
@@ -544,20 +547,23 @@ function main() {
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
   }
+  // Backs the file up, writes buf over it in place, and records the app's own write. Returns { mtime, backup }.
+  function replaceFile(id, file, buf) {
+    const backup = backUpBeforeWrite(file);
+    writeInPlace(file, buf);
+    return { mtime: store.markFileWritten(id), backup };
+  }
+
   // After the original changed on disk, a note's edits go to a copy beside it; later saves update that same copy
   // (while it is unchanged since the app wrote it). note id -> { file, mtime }.
   const conflictCopies = new Map();
   ipcMain.handle('files:savePdf', (_e, id, bytes, expectedMtime) => {
-    const n = fileNoteOfKind(id, 'pdf');
-    if (!ArrayBuffer.isView(bytes) || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the edited PDF is missing or larger than 100 MB, so nothing was written.');
-    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (buf.length < 8 || buf.toString('latin1', 0, 5) !== '%PDF-') throw new Error('the edited PDF came back damaged, so nothing was written.');
-    const file = n.filePath;
-    if (fs.existsSync(file) && mtimeOf(file) === expectedMtime) {
+    const file = fileNoteOfKind(id, 'pdf').filePath;
+    const buf = pdfBuffer(bytes);
+    if (stillAsOpened(file, expectedMtime)) {
       conflictCopies.delete(id);
-      const backup = backUpBeforeWrite(file);
-      writeInPlace(file, buf);
-      return { mtime: store.markFileWritten(id), backup };
+      const { mtime, backup } = replaceFile(id, file, buf);
+      return { mtime, backup: backup.first };
     }
     // Changed or removed on disk since it was opened: never write over that.
     const prev = conflictCopies.get(id);
@@ -569,6 +575,61 @@ function main() {
     const copy = convert.writeNew(path.dirname(file), path.basename(file, path.extname(file)) + ' (edited)', 'pdf', buf);
     conflictCopies.set(id, { file: copy, mtime: mtimeOf(copy) });
     return { savedAs: copy, newCopy: true };
+  });
+
+  // PDF bytes from the renderer: a byte array of at most MAX_PDF_BYTES that starts like a PDF, as a Buffer.
+  function pdfBuffer(bytes) {
+    if (!ArrayBuffer.isView(bytes) || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the PDF is missing or larger than 100 MB, so nothing was written.');
+    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (buf.length < 8 || buf.toString('latin1', 0, 5) !== '%PDF-') throw new Error('the PDF came back damaged, so nothing was written.');
+    return buf;
+  }
+  const stillAsOpened = (file, expectedMtime) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
+  const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Reload it, then try again.';
+
+  // Page changes (reorder, remove, add pages from another PDF, turn): bytes is the PDF pdf.js rebuilt in the renderer
+  // with the new page order, or null when only turning; rotations has one entry per page of the result. Written in
+  // place after a backup; returns the backup's name, for Undo.
+  ipcMain.handle('files:pdfApplyPages', async (_e, id, bytes, rotations, expectedMtime) => {
+    const file = fileNoteOfKind(id, 'pdf').filePath;
+    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
+    if (!Array.isArray(rotations) || !rotations.length || rotations.some((r) => ![0, 90, 180, 270].includes(r))) return { ok: false, error: 'the page turns were not valid.' };
+    try {
+      let buf = bytes === null ? fs.readFileSync(file) : pdfBuffer(bytes);
+      if (rotations.some((r) => r)) {
+        const res = await runWorker('pdf-rotate-worker.js', { bytes: buf, rotations }, 2 * 60 * 1000, 'Turning the pages took too long.');
+        if (!res.ok) return { ok: false, error: res.error };
+        buf = Buffer.from(res.bytes);
+      }
+      if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
+      const { mtime, backup } = replaceFile(id, file, buf);
+      return { ok: true, mtime, backup: backup.name };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  // Undo for page changes: the backup taken just before them goes back in place (after a backup of what is there).
+  // expectedMtime is the time the page change itself wrote, so an Undo never wipes out anything saved after it.
+  ipcMain.handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
+    const file = fileNoteOfKind(id, 'pdf').filePath;
+    const dir = backupDirFor(file);
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch (_) { /* no backups */ }
+    if (typeof name !== 'string' || !names.includes(name)) return { ok: false, error: 'that backup is gone.' };
+    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after the page change, so undoing it would lose that. Its earlier versions are in the backups folder.' };
+    try {
+      return Object.assign({ ok: true }, { mtime: replaceFile(id, file, pdfBuffer(fs.readFileSync(path.join(dir, name)))).mtime });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  // A PDF to take pages from: the person picks it; its bytes go to the renderer for thumbnails and for pdf.js.
+  ipcMain.handle('files:pdfPickPages', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (canceled || !filePaths.length) return { ok: false, canceled: true };
+    const file = filePaths[0];
+    if (fs.statSync(file).size > MAX_PDF_BYTES) return { ok: false, error: 'that PDF is larger than 100 MB.' };
+    return { ok: true, name: path.basename(file), bytes: fs.readFileSync(file) };
   });
   // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
   ipcMain.handle('files:docxBytes', (_e, id) => readDocxBuffer(fileNoteOfKind(id, 'docx').filePath));

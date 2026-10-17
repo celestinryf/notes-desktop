@@ -11,6 +11,26 @@
   lib.GlobalWorkerOptions.workerSrc = PKG + 'build/pdf.worker.min.mjs';
 
   const T = lib.AnnotationEditorType;
+  const LOAD_OPTIONS = {
+    isEvalSupported: false,
+    enableXfa: false,
+    cMapUrl: PKG + 'cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: PKG + 'standard_fonts/',
+    wasmUrl: PKG + 'wasm/',
+    iccUrl: PKG + 'iccs/',
+  };
+
+  // Draws page index (0-based) of document d into canvas, `width` CSS pixels wide, with any unsaved marks.
+  async function drawPage(d, index, canvas, width) {
+    const page = await d.getPage(index + 1);
+    const ratio = window.devicePixelRatio || 1;
+    const viewport = page.getViewport({ scale: (width / page.getViewport({ scale: 1 }).width) * ratio });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    canvas.style.width = Math.floor(viewport.width / ratio) + 'px';
+    await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
+  }
   const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
 
   // root holds a .pdf-viewport whose first child is the .pdfViewer element. hooks:
@@ -80,7 +100,25 @@
       if (hooks.onDirty) hooks.onDirty(v);
     }
 
+    // Other PDFs opened for their pages (adding pages from another PDF); closed with this one.
+    const others = new Set();
+    // bytes may be a view into a larger buffer (as IPC delivers it), which pdf.js's page extraction would read past,
+    // so a tight copy of its own is kept; another copy goes to getDocument, which takes over what it is given.
+    async function openOther(bytes) {
+      const own = new Uint8Array(bytes);
+      const t = lib.getDocument(Object.assign({ data: own.slice() }, LOAD_OPTIONS));
+      others.add(t);
+      const d = await t.promise;
+      return { pages: d.numPages, draw: (i, canvas, width) => drawPage(d, i, canvas, width), bytes: own };
+    }
+
+    function closeOthers() {
+      for (const t of others) t.destroy().catch(() => {});
+      others.clear();
+    }
+
     async function unload() {
+      closeOthers();
       viewer.setDocument(null);
       linkService.setDocument(null);
       const t = task;
@@ -97,16 +135,7 @@
       const my = ++seq;
       await unload();
       if (my !== seq) return false;
-      const t = lib.getDocument({
-        data: bytes,
-        isEvalSupported: false,
-        enableXfa: false,
-        cMapUrl: PKG + 'cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: PKG + 'standard_fonts/',
-        wasmUrl: PKG + 'wasm/',
-        iccUrl: PKG + 'iccs/',
-      });
+      const t = lib.getDocument(Object.assign({ data: bytes }, LOAD_OPTIONS));
       task = t;
       const d = await t.promise;
       if (my !== seq) return false;
@@ -178,6 +207,13 @@
       setMode,
       commit,
       save,
+      pageCount: () => (doc ? doc.numPages : 0),
+      drawPage: (i, canvas, width) => (doc ? drawPage(doc, i, canvas, width) : Promise.resolve()),
+      openOther,
+      closeOthers,
+      // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
+      // the kept pages use is written, so a removed page leaves nothing behind in the file.
+      extractPages: (pageInfos) => doc.extractPages(pageInfos),
       markSaved(hash) { if (doc) { savedHash = hash; refreshDirty(); } },
       isOpen: () => !!doc,
       isDirty: () => !!doc && currentHash() !== savedHash,
