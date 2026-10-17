@@ -526,12 +526,33 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .pdf-toolbar .tool-btn:disabled { opacity: 0.45; cursor: default; }
 .pdf-sep { width: 2px; align-self: stretch; margin: 2px 4px; background: var(--line-soft); }
 .pdf-grow { flex: 1; }
-.pdf-stage { position: relative; flex: 1; min-height: 0; }
+.pdf-body { display: flex; flex: 1; min-height: 0; }
+.pdf-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
+/* Picking the place for a new comment. */
+.pdf-editor.picking .pdfViewer .page, .pdf-editor.picking .pdfViewer .page * { cursor: crosshair !important; }
+/* The comments panel, beside the pages. */
+.pdf-comments { display: none; flex: 0 0 280px; max-width: 45%; flex-direction: column; min-height: 0; border-left: 2px solid var(--line-soft); background: var(--bg); }
+.pdf-editor.commenting .pdf-comments { display: flex; }
+.pdf-comments.is-working { opacity: 0.6; pointer-events: none; }
+.pdf-editor.rewriting .pdf-toolbar, .pdf-editor.rewriting .pdf-stage { opacity: 0.6; pointer-events: none; }
+.pdf-comments-bar { display: flex; align-items: center; gap: 6px; padding: 6px; border-bottom: 2px solid var(--line-soft); background: var(--bg-raised); }
+.pdf-comments-hint { margin: 0; padding: 0 8px; font-size: 12.5px; color: var(--fg-muted); }
+.pdf-comments-hint:not(:empty) { padding: 6px 8px; }
+.pdf-comments-list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+.pdf-comments-empty { margin: 4px; font-size: 13px; color: var(--fg-muted); }
+.pdf-comment { padding: 8px; border: 2px solid var(--line-soft); border-radius: 8px; cursor: pointer; }
+.pdf-comment.is-editing { cursor: default; }
+.pdf-comment.is-reply { margin-left: 16px; }
+.pdf-comment-meta { font-size: 11.5px; color: var(--fg-muted); }
+.pdf-comment-text { margin-top: 4px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pdf-comment-input { box-sizing: border-box; width: 100%; margin-top: 4px; resize: vertical; font: inherit; font-size: 13.5px; }
+.pdf-comment-acts { display: flex; justify-content: flex-end; gap: 4px; margin-top: 6px; }
+.pdf-comment-acts:empty { display: none; }
 .pdf-viewport { position: absolute; inset: 0; overflow: auto; background: #e9e4da; }
 /* The page organizer replaces the tool row and the pages while it is open. */
 .pdf-pages { display: none; flex: 1; flex-direction: column; min-height: 0; }
 .pdf-editor.organizing .pdf-pages { display: flex; }
-.pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-stage { display: none; }
+.pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-body { display: none; }
 .pdf-pages.is-working { opacity: 0.6; pointer-events: none; }
 .pdf-pages-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border-bottom: 2px solid var(--line-soft); background: var(--bg-raised); }
 .pdf-pages-title { font-size: 12.5px; color: var(--fg-muted); }

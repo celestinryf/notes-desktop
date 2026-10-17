@@ -59,7 +59,7 @@
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
     fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
-    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
+    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), pdfComments: $('#pdfComments'), pdfCommentsBtn: $('#pdfCommentsBtn'), pdfCommentsClose: $('#pdfCommentsClose'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     signDialog: $('#signDialog'), signForm: $('#signForm'), signPad: $('#signPad'), signRemember: $('#signRemember'), signClearBtn: $('#signClearBtn'),
     signForgetBtn: $('#signForgetBtn'), signCancelBtn: $('#signCancelBtn'), signPlaceBtn: $('#signPlaceBtn'), signName: $('#signName'), signTypeBtn: $('#signTypeBtn'), signStatus: $('#signStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
@@ -2560,6 +2560,7 @@
 
   function clearPdf() {
     closePdfPages();
+    if (pdfComments) pdfComments.stop();
     pdfShownKey = null;
     pdfSeq++;
     pdfNote = null;
@@ -2567,10 +2568,12 @@
     if (pdf) pdf.close();
   }
 
-  async function showPdf(note) {
+  // opts.keepView: the PDF on show, reopened after the app rewrote it (same page and zoom).
+  async function showPdf(note, opts) {
     const key = note.id + ':' + note.fileMtime;
     if (pdfShownKey === key) return;
     closePdfPages(); // its plan was for the PDF, or the version of it, shown before
+    if (pdfComments) pdfComments.stop(); // a comment being written was for that one too
     const ctl = pdfController();
     if (!ctl) { showBanner('The PDF viewer failed to load. Use "Open with…" for your PDF app.'); return; }
     pdfShownKey = key;
@@ -2579,7 +2582,10 @@
     try {
       const bytes = await api.files.pdfBytes(note.id);
       if (seq !== pdfSeq) return;
-      if (await ctl.open(bytes) && seq === pdfSeq) pdfNote = { id: note.id, fileMtime: note.fileMtime };
+      if (await ctl.open(bytes, opts) && seq === pdfSeq) {
+        pdfNote = { id: note.id, fileMtime: note.fileMtime };
+        if (pdfCommentsShown()) pdfComments.refresh();
+      }
     } catch (err) {
       if (seq !== pdfSeq) return;
       pdfShownKey = null;
@@ -2588,7 +2594,7 @@
   }
 
   const pdfDirty = () => !!(pdf && pdfNote && pdf.isDirty());
-  const pdfBusy = () => !!(pdf && pdfNote && pdf.hasPendingWork());
+  const pdfBusy = () => !!(pdf && pdfNote && (pdf.hasPendingWork() || (pdfComments && pdfComments.busy())));
 
   // Writes the PDF's edits into the file, whenever the app saves (leaving the note, hiding the window, quitting) and
   // on Save or Ctrl+S. opts.commit: finish a stroke or text box in progress first (not on a mere window blur, which
@@ -2671,10 +2677,25 @@
     if (state.current && state.current.id === target.id) state.current.fileMtime = mtime;
   }
 
-  // Shows the PDF again from the file, which the app has just rewritten.
-  function reloadPdf(target, mtime) {
+  // Shows the PDF again from the file, which the app has just rewritten. keepView: the pages are laid out as before
+  // (comments changed, not pages), so the same place is shown again.
+  function reloadPdf(target, mtime, keepView) {
     noteFileWritten(target, mtime);
-    if (state.current && state.current.id === target.id) showPdf(state.current);
+    if (state.current && state.current.id === target.id) showPdf(state.current, { keepView: !!keepView });
+  }
+
+  // While main rewrites the PDF, the pages and tools take no input: anything done meanwhile would be lost when the
+  // rewritten file is shown.
+  async function rewriting(promise) {
+    el.pdfEditor.classList.add('rewriting');
+    try { return await promise; } finally { el.pdfEditor.classList.remove('rewriting'); }
+  }
+
+  // Main rewrote the PDF (r: { mtime, backup }): show it again, and offer Undo, back to the backup taken just before.
+  // say: { done, undone } texts; keepView as for reloadPdf, for the change and its Undo.
+  function pdfRewritten(target, r, say, keepView) {
+    reloadPdf(target, r.mtime, keepView);
+    toast(say.done, { label: 'Undo', run: () => undoPdfChange(target.id, r.backup, r.mtime, say.undone, keepView) });
   }
 
   async function applyPdfPages(plan) {
@@ -2696,21 +2717,52 @@
       if (pages !== plan.rotations.length) { toast('Could not rearrange the pages: a PDF involved could not be read.'); return false; }
     }
     if (pdfNote !== target) return false;
-    const r = await callOk(api.files.pdfApplyPages(target.id, bytes, plan.rotations, target.fileMtime));
+    const r = await rewriting(callOk(api.files.pdfApplyPages(target.id, bytes, plan.rotations, target.fileMtime)));
     if (!r.ok) { toast('Could not change the pages: ' + r.error); return false; }
-    reloadPdf(target, r.mtime);
-    toast('Pages updated.', { label: 'Undo', run: () => undoPdfPages(target.id, r.backup, r.mtime) });
+    pdfRewritten(target, r, { done: 'Pages updated.', undone: 'The pages are back as they were.' }, false);
     return true;
   }
 
-  // Undo only while the file is exactly what the page change wrote (mtime): anything saved since would be lost.
-  async function undoPdfPages(id, backup, mtime) {
+  // Undo only while the file is exactly what the change wrote (mtime): anything saved since would be lost.
+  async function undoPdfChange(id, backup, mtime, undoneText, keepView) {
     if (!pdfNote || pdfNote.id !== id) { toast('Open that PDF again to undo.'); return; }
-    if (pdfDirty()) { toast('You have changed the PDF since, so the page change was not undone. Its earlier versions are in the backups folder.'); return; }
-    const r = await callOk(api.files.pdfRestore(id, backup, mtime));
+    if (pdfComments && pdfComments.busy()) { toast('Save or cancel the comment you are writing first, then undo.'); return; }
+    // Marks not yet saved are saved first: main then refuses the Undo, since the file is no longer what the change wrote.
+    const target = pdfNote;
+    if (!(await flushPdf({ commit: true }))) { toast('Your marks could not be saved, so nothing was undone.'); return; }
+    if (pdfNote !== target) return;
+    const r = await rewriting(callOk(api.files.pdfRestore(id, backup, mtime)));
     if (!r.ok) { toast('Could not undo: ' + r.error); return; }
-    reloadPdf(pdfNote, r.mtime);
-    toast('The pages are back as they were.');
+    reloadPdf(target, r.mtime, keepView);
+    toast(undoneText);
+  }
+
+  // ---- PDF comments: sticky notes, written into the file by main ---------------------------------------
+
+  let pdfComments = null;
+  const pdfCommentsShown = () => !!pdfComments && el.pdfEditor.classList.contains('commenting');
+
+  function showPdfComments(show) {
+    if (show && (!pdf || !pdfNote || !window.NotesPdfComments)) return;
+    if (show && !pdfComments) pdfComments = window.NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
+    el.pdfEditor.classList.toggle('commenting', show);
+    el.pdfCommentsBtn.classList.toggle('is-on', show);
+    if (!pdfComments) return;
+    if (show) pdfComments.refresh();
+    else pdfComments.stop();
+  }
+
+  // Marks not yet saved go into the file first, since main changes the file as it is on disk.
+  async function changePdfComments(ops) {
+    const target = pdfNote;
+    if (!target) { toast('The PDF is still opening. Try again in a moment.'); return false; }
+    if (!(await flushPdf({ commit: true }))) { toast('Your marks could not be saved, so the comment was not saved.'); return false; }
+    if (pdfNote !== target) { toast('That PDF changed meanwhile, so the comment was not saved.'); return false; }
+    const r = await rewriting(callOk(api.files.pdfComments(target.id, ops, target.fileMtime)));
+    if (!r.ok) { toast('Could not save the comment: ' + r.error); return false; }
+    const op = ops[0].op;
+    pdfRewritten(target, r, { done: op === 'add' ? 'Comment added.' : op === 'edit' ? 'Comment changed.' : 'Comment deleted.', undone: 'The comments are back as they were.' }, true);
+    return true;
   }
 
   // ---- PDF signature: drawn on a pad, placed with pdf.js's picture tool --------------------------------
@@ -2772,6 +2824,7 @@
     else if (act === 'fit') pdf.fitWidth();
     else if (act === 'pages') openPdfPages();
     else if (act === 'sign') openSignDialog();
+    else if (act === 'comments') showPdfComments(!pdfCommentsShown());
     else if (b === el.pdfSaveBtn) flushPdf({ commit: true, explicit: true });
   }
 
@@ -3489,6 +3542,7 @@
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
+    el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });
     el.signTypeBtn.addEventListener('click', () => {

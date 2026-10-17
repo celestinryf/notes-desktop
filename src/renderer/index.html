@@ -181,6 +181,7 @@
                   <button class="tool-btn" data-pdf-mode="draw" title="Draw freehand">Draw</button>
                   <button class="tool-btn" data-pdf-mode="picture" title="Add a picture from a file">Picture</button>
                   <button class="tool-btn" data-pdf-act="sign" title="Draw your signature and place it on the page">Sign</button>
+                  <button class="tool-btn" data-pdf-act="comments" id="pdfCommentsBtn" title="Read, add, change or delete comments">Comments</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
                   <button class="tool-btn" data-pdf-act="pages" title="Turn, move or remove pages, or add pages from another PDF">Pages</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
@@ -193,7 +194,18 @@
                   <span class="pdf-grow"></span>
                   <button class="btn btn-primary btn-small" id="pdfSaveBtn" title="Write your changes into the PDF (Ctrl+S)">Saved</button>
                 </div>
-                <div class="pdf-stage"><div class="pdf-viewport"><div class="pdfViewer"></div></div></div>
+                <div class="pdf-body">
+                  <div class="pdf-stage"><div class="pdf-viewport"><div class="pdfViewer"></div></div></div>
+                  <aside class="pdf-comments" id="pdfComments" aria-label="Comments">
+                    <div class="pdf-comments-bar">
+                      <button type="button" class="btn btn-primary btn-small" data-comments-act="add">Add comment</button>
+                      <span class="pdf-grow"></span>
+                      <button type="button" class="tool-btn" id="pdfCommentsClose" title="Close comments" aria-label="Close comments">✕</button>
+                    </div>
+                    <p class="pdf-comments-hint" role="status"></p>
+                    <div class="pdf-comments-list"></div>
+                  </aside>
+                </div>
                 <div class="pdf-pages" id="pdfPages" aria-label="Pages">
                   <div class="pdf-pages-bar">
                     <span class="pdf-pages-title">Turn, move or remove pages, or add pages from another PDF. Nothing changes until you apply.</span>
@@ -568,6 +580,7 @@
   <script src="vendor/pdf.bundle.js"></script>
   <script src="pdf-editor.js"></script>
   <script src="pdf-pages.js"></script>
+  <script src="pdf-comments.js"></script>
   <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>
