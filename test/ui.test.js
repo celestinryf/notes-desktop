@@ -506,7 +506,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   const mdPath = path.join(fileDir, 'External note.md');
   fs.writeFileSync(mdPath, '# From disk\n\nline one\n');
   const pdfPath = path.join(fileDir, 'paper.pdf');
-  fs.writeFileSync(pdfPath, '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+  fs.writeFileSync(pdfPath, '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
   await app.evaluate(({ dialog }, paths) => {
     dialog.showOpenDialog = async (_w, opts) => ({ canceled: false, filePaths: /Open files as notes/.test(opts.title) ? paths : [] });
   }, [mdPath, pdfPath]);
@@ -549,12 +549,12 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await sleep(600);
   assert.equal(fs.readFileSync(softPath, 'utf8'), 'first line\nsecond line\n', 'file untouched by opening it');
 
-  // PDF opens in a viewer frame, read-only.
+  // PDF opens in the app's PDF editor (pdf.js), with its pages drawn.
   await page.click('.note-card:has-text("paper.pdf")');
   await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
-  await waitForDom(() => !document.getElementById('pdfFrame').classList.contains('hidden') && /file:\/\//.test(document.getElementById('pdfFrame').getAttribute('src') || ''));
+  await waitForDom(() => !document.getElementById('pdfEditor').classList.contains('hidden') && !!document.querySelector('#pdfEditor .pdfViewer .page canvas'));
   assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true);
-  assert.match(await page.textContent('#fileBanner'), /read-only/);
+  assert.match(await page.textContent('#fileBanner'), /original is backed up/);
 
   // Agent files: discovery runs against the real home folder; it must create the folder and link at least the global CLAUDE.md.
   await page.keyboard.press('Control+,');

@@ -12,9 +12,10 @@
     "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",
     "test:ui": "node --test --test-timeout=25000 test/ui.test.js",
     "test:all": "npm test && npm run test:ui && npm run test:e2e",
-    "build": "npm run build:editor && npm run build:docx",
+    "build": "npm run build:editor && npm run build:docx && npm run build:pdf",
     "build:editor": "esbuild src/editor/index.js --bundle --format=iife --global-name=NotesEditor --target=chrome120 --minify --outfile=src/renderer/vendor/editor.bundle.js",
-    "build:docx": "esbuild src/docx-view/index.js --bundle --format=iife --global-name=DocxView --target=chrome120 --minify --outfile=src/renderer/vendor/docx.bundle.js"
+    "build:docx": "esbuild src/docx-view/index.js --bundle --format=iife --global-name=DocxView --target=chrome120 --minify --outfile=src/renderer/vendor/docx.bundle.js",
+    "build:pdf": "esbuild src/pdf-view/index.js --bundle --format=iife --global-name=PdfView --target=chrome120 --minify --outfile=src/renderer/vendor/pdf.bundle.js"
   },
   "license": "MIT",
   "devDependencies": {

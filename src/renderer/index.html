@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
+  <link rel="stylesheet" href="../../node_modules/pdfjs-dist/web/pdf_viewer.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -172,7 +173,25 @@
             <div class="editor-body">
               <div id="richEditor" class="rich-editor"></div>
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
-              <iframe id="pdfFrame" class="pdf-frame hidden" title="PDF"></iframe>
+              <div id="pdfEditor" class="pdf-editor hidden">
+                <div class="pdf-toolbar" role="toolbar" aria-label="PDF tools">
+                  <button class="tool-btn is-on" data-pdf-mode="select" title="Read: select text and follow links. To move or delete a mark, pick a tool first, then click the mark.">Read</button>
+                  <button class="tool-btn" data-pdf-mode="highlight" title="Highlight text: drag across it">Highlight</button>
+                  <button class="tool-btn" data-pdf-mode="text" title="Add a text box: click where it goes">Text</button>
+                  <button class="tool-btn" data-pdf-mode="draw" title="Draw freehand">Draw</button>
+                  <button class="tool-btn" data-pdf-mode="picture" title="Add a picture from a file">Picture</button>
+                  <span class="pdf-sep" aria-hidden="true"></span>
+                  <button class="tool-btn" data-pdf-act="undo" id="pdfUndoBtn" title="Undo" disabled>Undo</button>
+                  <button class="tool-btn" data-pdf-act="redo" id="pdfRedoBtn" title="Redo" disabled>Redo</button>
+                  <span class="pdf-sep" aria-hidden="true"></span>
+                  <button class="tool-btn" data-pdf-act="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+                  <button class="tool-btn" data-pdf-act="fit" id="pdfZoom" title="Fit to the width">100%</button>
+                  <button class="tool-btn" data-pdf-act="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+                  <span class="pdf-grow"></span>
+                  <button class="btn btn-primary btn-small" id="pdfSaveBtn" title="Write your changes into the PDF (Ctrl+S)">Saved</button>
+                </div>
+                <div class="pdf-stage"><div class="pdf-viewport"><div class="pdfViewer"></div></div></div>
+              </div>
               <iframe id="docxView" class="docx-view hidden" sandbox="allow-same-origin" title="Word document"></iframe>
             </div>
             <section class="related hidden" id="relatedPanel" aria-label="Related notes">
@@ -513,6 +532,8 @@
 
   <script src="vendor/editor.bundle.js"></script>
   <script src="vendor/docx.bundle.js"></script>
+  <script src="vendor/pdf.bundle.js"></script>
+  <script src="pdf-editor.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>
 </body>

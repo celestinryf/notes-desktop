@@ -382,8 +382,13 @@
     return 'file:///' + parts.map((s, i) => (i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s))).join('/').replace(/^\/+/, '') + '/';
   }
 
+  // A timestamp that is safe in a file name and sorts by time: 2026-10-16T21-04-05-123Z.
+  function fileStamp(date) {
+    return new Date(date === undefined ? Date.now() : date).toISOString().replace(/[:.]/g, '-');
+  }
+
   return {
-    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile, imageBaseFor,
+    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile, imageBaseFor, fileStamp,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
