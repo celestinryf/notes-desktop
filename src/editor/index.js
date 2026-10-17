@@ -1,7 +1,7 @@
 /* Rendered Markdown editor built on Tiptap. Bundled by esbuild into src/renderer/vendor/editor.bundle.js
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
-import { Editor, Extension, InputRule } from '@tiptap/core';
+import { Editor, Extension, InputRule, mergeAttributes } from '@tiptap/core';
 import { EditorState, TextSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
@@ -122,6 +122,38 @@ const DashCheckbox = Extension.create({
 
 export { fingerprint };
 
+// Where a picture is loaded from. Only the shown src changes; the Markdown keeps what was written.
+// A relative path is read from the opened file's folder (base, a file:/// URL ending in "/"), not from the app's.
+// A network path (//server/x, \\server\x, file://server/x, file:////server/x, with any whitespace tricks) is never
+// loaded: Windows would fetch it over SMB and send the login to whoever runs that server. The check runs on the URL
+// as the browser parses it, not on the raw text, since the parser drops whitespace and reads "\" as "/".
+const NO_BASE = 'file:///notes-app-no-base/';
+export function resolveImageSrc(src, base) {
+  const s = String(src || '');
+  if (/^\s*(data|https?|attachment|blob):/i.test(s)) return s; // cannot reach a share
+  let u;
+  try { u = new URL(s, base || NO_BASE); } catch (_) { return ''; }
+  if (u.protocol === 'file:' && ((u.hostname && u.hostname !== 'localhost') || u.pathname.startsWith('//'))) return '';
+  if (!base && !/^\s*[a-z][a-z0-9+.-]*:/i.test(s)) return s; // a relative path in a note with no file: as before
+  return u.href;
+}
+
+// options.imageBase(): the file:/// folder URL relative pictures resolve against, or null for none.
+// The written src travels in data-src, so copying a picture and pasting it back keeps the path as written.
+function pictures(imageBase) {
+  return Image.extend({
+    addAttributes() {
+      const parent = this.parent ? this.parent() : {};
+      return Object.assign({}, parent, { src: Object.assign({}, parent.src, { parseHTML: (el) => el.getAttribute('data-src') || el.getAttribute('src') }) });
+    },
+    renderHTML({ HTMLAttributes }) {
+      const written = HTMLAttributes.src;
+      const attrs = Object.assign({}, HTMLAttributes, { src: resolveImageSrc(written, imageBase ? imageBase() : null), 'data-src': written });
+      return ['img', mergeAttributes(this.options.HTMLAttributes, attrs)];
+    },
+  }).configure({ inline: true, allowBase64: true });
+}
+
 export function create(element, options) {
   options = options || {};
   let suppress = false;
@@ -139,7 +171,7 @@ export function create(element, options) {
       Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, protocols: ['note', 'attachment'], HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
       // Inline, as Markdown models images: tiptap-markdown's image serializer never closes a block, so a
       // block image followed by text would be glued onto one line and misparse on reload.
-      Image.configure({ inline: true, allowBase64: true }),
+      pictures(options.imageBase),
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,

@@ -372,8 +372,18 @@
     return { name: name || 'Book', level, pages };
   }
 
+  // The file:/// URL of the folder an opened file is in (ending in "/", every segment encoded), which its relative
+  // pictures are read from. null for a note with no file, or a file on a network share (never loaded, see the editor).
+  function imageBaseFor(note) {
+    const p = note && note.filePath ? String(note.filePath).replace(/\\/g, '/') : '';
+    if (!p || p.startsWith('//')) return null;
+    const parts = p.split('/');
+    parts.pop();
+    return 'file:///' + parts.map((s, i) => (i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s))).join('/').replace(/^\/+/, '') + '/';
+  }
+
   return {
-    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile,
+    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile, imageBaseFor,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
