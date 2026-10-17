@@ -1,7 +1,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session } = require('electron');
 const { Store } = require('./store');
 const { GitSync } = require('./gitSync');
 const windowInput = require('./window-input');
@@ -9,6 +9,7 @@ const { VaultManager } = require('./vaults');
 const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
+const convert = require('./convert');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
@@ -460,12 +461,14 @@ function main() {
 
   // ---- file-backed notes ---------------------------------------------------
 
+  const APP_ERROR_CODES = new Set(['EZIP', 'ETOOBIG', 'EENCODING']);
   async function linkPaths(paths, opts) {
     const linked = [];
     const failed = [];
     for (const p of paths) {
       try { linked.push(await store.linkFile(p, opts)); }
-      catch (err) { failed.push(path.basename(p) + ' (' + (err.code || err.message) + ')'); }
+      // The app's own errors explain themselves; a system error is shown by its code (ENOENT, EACCES).
+      catch (err) { failed.push(path.basename(p) + ' (' + (APP_ERROR_CODES.has(err.code) || !err.code ? err.message : err.code) + ')'); }
     }
     return { ok: linked.length > 0, linked: linked.map((n) => n.id), failed, firstId: linked.length ? linked[0].id : null };
   }
@@ -502,15 +505,13 @@ function main() {
   });
   ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
   // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
-  const MAX_DOCX_BYTES = 50 * 1024 * 1024;
   ipcMain.handle('files:docxBytes', (_e, id) => {
     const n = store.get(id);
     if (!n || !n.filePath || n.fileKind !== 'docx') throw new Error('Not a Word document.');
-    if (fs.statSync(n.filePath).size > MAX_DOCX_BYTES) throw new Error('This Word document is larger than 50 MB; use "Open with…" for it.');
-    return fs.readFileSync(n.filePath);
+    return readDocxBuffer(n.filePath);
   });
 
-  const { discoverAgentFiles } = require('./files');
+  const { discoverAgentFiles, readDocxBuffer } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
   ipcMain.handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);
@@ -896,13 +897,6 @@ function main() {
       return { ok: false, error: err.message };
     }
   });
-  const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  // A standalone HTML page for an exported note or book. extraCss styles book parts (contents, page breaks).
-  function htmlDocument(title, bodyHtml, extraCss) {
-    return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
-      '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
-      '<body>' + String(bodyHtml || '') + '</body></html>\n';
-  }
   ipcMain.handle('app:exportHtml', async (_e, id, bodyHtml) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
@@ -913,7 +907,7 @@ function main() {
       filters: [{ name: 'HTML', extensions: ['html'] }],
     });
     if (canceled || !filePath) return { ok: false, canceled: true };
-    fs.writeFileSync(filePath, htmlDocument(title, (note.title ? '<h1>' + escHtml(note.title) + '</h1>\n' : '') + String(bodyHtml || '')), 'utf8');
+    fs.writeFileSync(filePath, convert.htmlDocument(title, (note.title ? '<h1>' + convert.escHtml(note.title) + '</h1>\n' : '') + String(bodyHtml || '')), 'utf8');
     return { ok: true, filePath };
   });
 
@@ -921,29 +915,125 @@ function main() {
   // The renderer assembles the book (it owns the Markdown renderer); this saves or prints it.
   // data: { name, markdown, html }. format: md | html | pdf | print.
   const BOOK_CSS = '.book-toc{border:2px solid #2a1a12;border-radius:10px;padding:10px 18px;margin:0 0 32px}.book-toc h2{margin:.2em 0 .4em;font-size:1.1em}.book-page{margin-bottom:40px}.book-page>h2{border-bottom:2px dashed #c9b8a8;padding-bottom:6px}@media print{body{background:#fff;margin:0;max-width:none}.book-page{break-before:page}.book-page:first-of-type{break-before:auto}}';
-  // Renders the book in a hidden window with scripts off (the HTML is note content) and hands it to fn.
-  async function withBookWindow(doc, fn) {
-    const tmp = path.join(app.getPath('temp'), 'notes-book-' + process.pid + '-' + Date.now() + '.html');
-    let w = null;
+  // Renders an HTML page in a hidden window and hands the window to fn. Scripts are off unless opts.javascript.
+  // opts.isolated: the page comes from an opened file, so it runs in its own in-memory session that can load
+  // nothing but local files and data: URLs (no beacons, no remote pictures), and cannot navigate or open windows.
+  // opts.readDir: the one folder an isolated page may load files from (the original file's), besides the page itself
+  // and opts.allowFiles; it gives up after opts.timeoutMs.
+  async function withHiddenPage(doc, opts, fn) {
+    const tmp = path.join(app.getPath('temp'), 'notes-page-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.html');
+    let w = null, timer = null, contentsId = null;
     try {
       fs.writeFileSync(tmp, doc, 'utf8');
+      const webPreferences = { javascript: !!opts.javascript, sandbox: true, contextIsolation: true };
+      if (opts.isolated) webPreferences.session = isolatedSession();
       // Parented to the main window so the print dialog comes up in front of it.
-      w = new BrowserWindow({ show: false, parent: win || undefined, webPreferences: { javascript: false, sandbox: true, contextIsolation: true } });
-      await w.loadFile(tmp);
-      return await fn(w);
+      w = new BrowserWindow({ show: false, parent: win || undefined, webPreferences });
+      contentsId = w.webContents.id;
+      if (opts.isolated) {
+        isolatedAccess.set(contentsId, { page: tmp, files: opts.allowFiles || [], dir: opts.readDir || null });
+        w.webContents.on('will-navigate', (e) => e.preventDefault());
+        w.webContents.on('will-frame-navigate', (e) => { if (e.isMainFrame && e.url !== require('url').pathToFileURL(tmp).href) e.preventDefault(); });
+        w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      }
+      const work = (async () => { await w.loadFile(tmp); return fn(w); })();
+      if (!opts.timeoutMs) return await work;
+      return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to render')), opts.timeoutMs); })]);
     } finally {
+      clearTimeout(timer);
+      isolatedAccess.delete(contentsId);
       if (w && !w.isDestroyed()) w.destroy();
       try { fs.unlinkSync(tmp); } catch (_) { /* never written, or already gone */ }
     }
   }
+  // What each isolated page may load: data: URLs, its own page, the listed files, and files inside its folder.
+  // Never the network, and never a file: URL with a host, which Windows would fetch over SMB and so send the login.
+  const isolatedAccess = new Map(); // webContents id -> { page, files, dir }
+  let convertSession = null;
+  function isolatedSession() {
+    if (!convertSession) {
+      convertSession = session.fromPartition('notes-isolated-pages');
+      convertSession.webRequest.onBeforeRequest((d, cb) => cb({ cancel: !isolatedRequestAllowed(d) }));
+    }
+    return convertSession;
+  }
+  function isolatedRequestAllowed(d) {
+    if (/^data:/i.test(d.url)) return true;
+    const access = isolatedAccess.get(d.webContentsId);
+    if (!access || !/^file:\/\/\//i.test(d.url)) return false;
+    let file;
+    try { file = require('url').fileURLToPath(d.url); } catch (_) { return false; }
+    const same = (a) => path.resolve(a).toLowerCase() === path.resolve(file).toLowerCase();
+    if (same(access.page) || access.files.some(same)) return true;
+    // From the folder only what a page shows as part of itself; never a frame or an embedded document.
+    return ['image', 'stylesheet', 'font', 'media'].includes(d.resourceType) && !!access.dir && convert.isInside(file, access.dir);
+  }
+  const RENDER_TIMEOUT_MS = 2 * 60 * 1000;
+  const PDF_OPTIONS = { printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } };
+  // Relative links and pictures in a converted page resolve against the original file's folder.
+  // The CSP repeats the request filter inside the page (defence in depth: it also stops DNS prefetch and preconnect).
+  const ISOLATED_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src file: data:; style-src \'unsafe-inline\' file:; font-src file: data:; media-src file: data:">';
+  function withBase(doc, baseDir) {
+    const head = ISOLATED_CSP + '<meta http-equiv="x-dns-prefetch-control" content="off"><base href="' + convert.escHtml(require('url').pathToFileURL(baseDir + path.sep).href) + '">';
+    if (/<head(\s[^>]*)?>/i.test(doc)) return doc.replace(/<head(\s[^>]*)?>/i, (m) => m + head);
+    // No <head>: put one after the doctype (or <html>), so the page keeps standards mode.
+    const at = /^\s*(<!doctype[^>]*>)?\s*(<html(\s[^>]*)?>)?/i.exec(doc)[0].length;
+    return doc.slice(0, at) + '<head>' + head + '</head>' + doc.slice(at);
+  }
+
+  // Word to PDF: the document laid out by docx-preview, as the app shows it, then printed.
+  const DOCX_BUNDLE_PATH = path.join(__dirname, 'renderer', 'vendor', 'docx.bundle.js');
+  const DOCX_BUNDLE_URL = require('url').pathToFileURL(DOCX_BUNDLE_PATH).href;
+  const DOCX_PRINT_PAGE = '<!doctype html><html><head><meta charset="utf-8">'
+    + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src file:; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
+    + '<style>html, body { margin: 0; background: #fff; }</style><script src="' + DOCX_BUNDLE_URL + '"></script></head><body></body></html>';
+  // Runs in the hidden page. When Word recorded where its pages break, each rendered section is one page and is
+  // printed as one, headers and footers included. Otherwise the text flows across pages with the document's
+  // margins, and headers and footers (which would show only once) are left out.
+  function docxPrintScript(b64) {
+    return '(async () => {'
+      + 'const s = atob(' + JSON.stringify(b64) + '); const bytes = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);'
+      + 'await DocxView.renderAsync(bytes, document.body, document.head, { inWrapper: false, ignoreLastRenderedPageBreak: false, useBase64URL: true, renderAltChunks: false });'
+      + 'const secs = [...document.querySelectorAll("section.docx")]; if (!secs.length) return { flowed: false };'
+      + 'const st = secs[0].style; const W = st.width || "210mm", H = st.minHeight || "297mm";'
+      + 'const probe = document.createElement("div"); probe.style.height = H; document.body.append(probe); const hPx = probe.offsetHeight; probe.remove();'
+      + 'const fits = secs.every((x) => x.offsetHeight <= hPx + 1);'
+      + 'const css = document.createElement("style");'
+      + 'css.textContent = fits'
+      + ' ? "@page { size: " + W + " " + H + "; margin: 0 } section.docx { margin: 0 !important; box-shadow: none !important; height: " + H + "; overflow: hidden; break-after: page } section.docx:last-of-type { break-after: auto }"'
+      + ' : "@page { size: " + W + " " + H + "; margin: " + [st.paddingTop, st.paddingRight, st.paddingBottom, st.paddingLeft].map((v) => v || "1in").join(" ") + " } section.docx { margin: 0 !important; padding: 0 !important; width: auto !important; min-height: 0 !important; box-shadow: none !important; } section.docx > header, section.docx > footer { display: none !important }";'
+      + 'document.head.append(css); return { flowed: !fits }; })()';
+  }
+  const printers = {
+    html: (doc, baseDir) => withHiddenPage(withBase(doc, baseDir), { isolated: true, readDir: baseDir, timeoutMs: RENDER_TIMEOUT_MS }, (w) => w.webContents.printToPDF(PDF_OPTIONS)),
+    docx: (bytes) => withHiddenPage(DOCX_PRINT_PAGE, { isolated: true, javascript: true, allowFiles: [DOCX_BUNDLE_PATH], timeoutMs: RENDER_TIMEOUT_MS }, async (w) => {
+      const r = await w.webContents.executeJavaScript(docxPrintScript(bytes.toString('base64')));
+      const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+      return { pdf, warning: r && r.flowed ? 'This document does not record where its pages break, so its headers and footers were left out.' : '' };
+    }),
+  };
+  ipcMain.handle('files:convertOptions', (_e, id) => convert.options(store.get(id)));
+  // An opened file as Markdown, for the book reader and book export (Word pictures inlined, PDF text only).
+  ipcMain.handle('files:asMarkdown', async (_e, id) => {
+    const n = store.get(id);
+    if (!convert.sourceOf(n)) return { ok: false, error: 'this kind of file has no text to show' };
+    // The book reader and its exports load pictures, so a page made from a file keeps only its inlined ones; a picture
+    // on the web or a network share becomes its description.
+    try { return { ok: true, markdown: convert.inlinePicturesOnly((await convert.toMarkdown(n)).markdown) }; } catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('files:convert', async (_e, id, to) => {
+    try { return Object.assign({ ok: true }, await convert.convertFile(store.get(id), to, printers)); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
   ipcMain.handle('book:export', async (_e, format, data) => {
     data = data || {};
     const name = String(data.name || 'Book');
-    const doc = () => htmlDocument(name, String(data.html || ''), BOOK_CSS);
+    const doc = () => convert.htmlDocument(name, String(data.html || ''), BOOK_CSS);
     try {
       if (format === 'print') {
         if (process.env.NOTES_APP_DRY_PRINT) return { ok: true, dry: true };
-        return await withBookWindow(doc(), (w) => new Promise((resolve) => {
+        return await withHiddenPage(doc(), {}, (w) => new Promise((resolve) => {
           // Electron sometimes never calls back (no printer, a lost dialog); give up after 10 minutes so the
           // hidden window and its temp file are not kept forever.
           const timer = setTimeout(() => resolve({ ok: false, error: 'the print dialog did not answer' }), 10 * 60 * 1000);
@@ -961,7 +1051,7 @@ function main() {
       if (format === 'md') fs.writeFileSync(filePath, String(data.markdown || ''), 'utf8');
       else if (format === 'html') fs.writeFileSync(filePath, doc(), 'utf8');
       else {
-        const pdf = await withBookWindow(doc(), (w) => w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }));
+        const pdf = await withHiddenPage(doc(), {}, (w) => w.webContents.printToPDF(PDF_OPTIONS));
         fs.writeFileSync(filePath, pdf);
       }
       return { ok: true, filePath };
