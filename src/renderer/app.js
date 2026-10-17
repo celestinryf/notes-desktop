@@ -57,7 +57,7 @@
     newFolderBtn: $('#newFolderBtn'), folderTree: $('#folderTree'), folderSelect: $('#folderSelect'), folderMenu: $('#folderMenu'),
     navAll: document.querySelector('.nav-item[data-view="all"]'),
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
-    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
+    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'), docxEditor: $('#docxEditor'), docxSaveBtn: $('#docxSaveBtn'),
     fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
     fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), pdfComments: $('#pdfComments'), pdfCommentsBtn: $('#pdfCommentsBtn'), pdfCommentsClose: $('#pdfCommentsClose'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     signDialog: $('#signDialog'), signForm: $('#signForm'), signPad: $('#signPad'), signRemember: $('#signRemember'), signClearBtn: $('#signClearBtn'),
@@ -935,9 +935,10 @@
     if (tts.active) stopReadAloud();
     // Flush the outgoing note first, and again if keystrokes landed while the flush was in flight,
     // so nothing typed during the switch is dropped.
-    // A PDF's edits are not text, so state.dirty does not cover them. If they cannot be written, stay on the PDF:
+    // A PDF's or Word document's edits are not the note's text, so state.dirty does not cover them. If they cannot be
+    // written, stay on the document:
     // switching would close it and lose them.
-    if (!(await flushPdf({ commit: true })) && !window.confirm('Your changes to this PDF could not be saved (is it open in another app?). Leave it anyway and lose them?')) return;
+    if (!(await flushDocuments({ commit: true })) && !window.confirm('Your changes to this document could not be saved (is it open in another app?). Leave it anyway and lose them?')) return;
     let guard = 0;
     while (state.dirty && guard++ < 3) await flushSave();
     stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
@@ -2396,10 +2397,15 @@
   // overtaken by a newer one.
   let docxShownKey = null;
   let docxSeq = 0;
+  // docx: the editing controller; docxNote: the document on show and editable, { id, fileMtime } as loaded or saved;
+  // docxBanner: what the banner says about it (shown again when the same version is shown again).
+  let docx = null, docxNote = null, docxBanner = '';
   function clearDocx() {
     docxShownKey = null;
     docxSeq++;
-    el.docxView.classList.add('hidden');
+    docxNote = null;
+    if (docx) docx.close();
+    el.docxEditor.classList.add('hidden');
     el.docxView.removeAttribute('srcdoc');
   }
   // A fresh frame per document, so no styles from the last one linger. Only a load of this frame page counts: the
@@ -2439,23 +2445,99 @@
     else toast('This link goes to ' + href + '. Ctrl+click to open it.');
   }
 
+  function docxController() {
+    if (!docx && window.NotesDocxEditor) {
+      docx = window.NotesDocxEditor.create({
+        onDirty: (d) => { el.docxSaveBtn.textContent = d ? 'Save' : 'Saved'; },
+        say: toast,
+        onBlur: () => flushSave({ fromBlur: true }),
+        // Keys pressed in the document never reach this page: Ctrl+S saves, Escape hides the window as elsewhere.
+        onKey: (e) => {
+          const ctrl = e.ctrlKey || e.metaKey;
+          if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); flushDocx({ explicit: true }); }
+          else if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); flushSave().then(() => api.app.hide()); }
+        },
+      });
+    }
+    return docx;
+  }
+
+  function docxBannerFor(res) {
+    const fixed = res.readOnly ? ' ' + res.readOnly + (res.readOnly === 1 ? ' paragraph has' : ' paragraphs have') + ' pictures, links, tracked changes, page breaks or similar, and cannot be edited here; use "Open with…" for those.' : '';
+    if (res.editable) return 'Click into the text to edit it. Ctrl+B, Ctrl+I and Ctrl+U (or the buttons) set bold, italic and underline. Save (Ctrl+S) writes your changes into the document, and the original is backed up first.' + fixed;
+    return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
+  }
+
   async function showDocx(note) {
     const key = note.id + ':' + note.fileMtime;
-    if (docxShownKey === key) return;
+    if (docxShownKey === key) { if (docxBanner) showBanner(docxBanner); return; }
     docxShownKey = key;
+    docxNote = null;
+    docxBanner = '';
     const seq = ++docxSeq;
     try {
       const [doc, bytes] = await Promise.all([freshDocxFrame(), api.files.docxBytes(note.id)]);
       if (seq !== docxSeq) return;
       doc.addEventListener('click', onDocxLinkClick);
-      // altChunks are raw HTML inside the file: never show them. Images become data: URLs, which the frame allows.
-      await DocxView.renderAsync(bytes, doc.body, doc.body, { useBase64URL: true, renderAltChunks: false });
+      const ctl = docxController();
+      if (!ctl) throw new Error('the Word editor did not load.');
+      const res = await ctl.open(doc, bytes);
+      if (seq !== docxSeq || !res) return;
+      if (ctl.isEditable()) docxNote = { id: note.id, fileMtime: note.fileMtime };
+      el.docxEditor.classList.toggle('read-only', !ctl.isEditable());
+      docxBanner = docxBannerFor(res);
+      if (state.current && state.current.id === note.id) showBanner(docxBanner);
     } catch (err) {
       if (seq !== docxSeq) return;
       docxShownKey = null;
       el.docxView.removeAttribute('srcdoc');
       showBanner('Could not show this Word document: ' + ipcErrorText(err) + ' Use "Open with…" to open it in Word.');
     }
+  }
+
+  // Writes the document's edits into the file, like flushPdf for PDFs: one save at a time, each re-checking, so
+  // typing during a save is saved too. opts.explicit: say so when done. Resolves false while edits are unsaved.
+  const docxDirty = () => !!(docx && docxNote && docx.isDirty());
+  const flushDocx = oneAtATime(async (opts) => {
+    let explicit = !!opts.explicit;
+    for (let i = 0; i < 3; i++) {
+      if (!docxDirty()) return true;
+      if (!(await saveDocxNow(explicit))) return false;
+      explicit = false;
+    }
+    return !docxDirty();
+  });
+
+  async function saveDocxNow(explicit) {
+    const target = docxNote;
+    let c;
+    try { c = docx.save(); } catch (err) { toast('Could not save the document: ' + (err.message || err) + '. Your changes are still here; use Reload to start again from the file.'); return false; }
+    if (!c) return true;
+    try {
+      const r = await api.files.saveDocx(target.id, c.patches, target.fileMtime);
+      if (docxNote !== target) return true;
+      const inPlace = reportFileSaved(target, r, explicit, 'document');
+      if (inPlace) docxShownKey = target.id + ':' + r.mtime;
+      // The page now stands for the file as written; if it cannot be matched to it, the document is shown again.
+      const synced = docx.markSaved();
+      if (!synced.ok) {
+        docxShownKey = null;
+        if (state.current && state.current.id === target.id) showDocx(state.current);
+        toast(synced.lost ? 'Saved. The document is shown again from the file, so what you typed while it saved is not in it; please type that again.' : 'Saved. The document is shown again from the file.');
+      }
+      return true;
+    } catch (err) {
+      docx.saveFailed();
+      toast('Could not save the document: ' + ipcErrorText(err) + ' Your changes are still here.');
+      return false;
+    }
+  }
+
+  function onDocxToolbarClick(e) {
+    const b = e.target.closest('button');
+    if (!b || !docx || !docxNote) return;
+    if (b === el.docxSaveBtn) { flushDocx({ explicit: true }); return; }
+    if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
   }
 
   function renderFileRow(note) {
@@ -2479,8 +2561,8 @@
     } else if (note.fileKind === 'docx') {
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
-      el.docxView.classList.remove('hidden');
-      showBanner('Word document, shown as laid out in the file. It is read-only here for now; use "Open with…" to edit it in Word.');
+      el.docxEditor.classList.remove('hidden');
+      showBanner('Opening the Word document…');
       showDocx(note);
     } else if (note.fileKind === 'binary') {
       el.richEditor.classList.add('hidden');
@@ -2539,7 +2621,7 @@
   // original on the first save of a session. pdfNote is the PDF on show: { id, fileMtime } as it was loaded or saved.
 
   let pdf = null;
-  let pdfShownKey = null, pdfSeq = 0, pdfNote = null, pdfQueue = Promise.resolve(true);
+  let pdfShownKey = null, pdfSeq = 0, pdfNote = null;
 
   function pdfController() {
     if (!pdf && window.NotesPdfEditor) {
@@ -2600,11 +2682,7 @@
   // on Save or Ctrl+S. opts.commit: finish a stroke or text box in progress first (not on a mere window blur, which
   // would end the person's drawing); opts.explicit: say so when done. Saves run one at a time, and each re-checks,
   // so edits made during an earlier save are saved too. Resolves false while edits are still unsaved.
-  function flushPdf(opts) {
-    const run = pdfQueue.then(() => flushPdfNow(opts || {}));
-    pdfQueue = run.catch(() => false);
-    return run;
-  }
+  const flushPdf = oneAtATime((opts) => flushPdfNow(opts));
 
   async function flushPdfNow(opts) {
     let explicit = !!opts.explicit;
@@ -2624,20 +2702,45 @@
       const { bytes, hash } = await pdf.save();
       const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
       if (pdfNote === target) pdf.markSaved(hash);
-      if (r.savedAs) {
-        // The file changed on disk since it was opened: main never writes over that, so the edits went to a copy
-        // (the same copy on every later save, until the PDF is reloaded).
-        if (r.newCopy || explicit) toast('This PDF changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
-        return true;
-      }
-      noteFileWritten(target, r.mtime);
-      if (pdfNote === target) pdfShownKey = target.id + ':' + r.mtime;
-      if (explicit || r.backup) toast(r.backup ? 'Saved your changes into the PDF. The original is backed up in the app\'s backups folder (Settings > Open data folder).' : 'Saved your changes into the PDF.');
+      if (reportFileSaved(target, r, explicit, 'PDF') && pdfNote === target) pdfShownKey = target.id + ':' + r.mtime;
       return true;
     } catch (err) {
       toast('Could not save the PDF: ' + ipcErrorText(err) + ' Your changes are still here.');
       return false;
     }
+  }
+
+  // Runs fn(opts) for each call, one call at a time and in order (each waits for the one before). Used for saving a
+  // PDF's or a Word document's edits, which must never overlap.
+  function oneAtATime(fn) {
+    let queue = Promise.resolve(true);
+    return (opts) => {
+      const run = queue.then(() => fn(opts || {}));
+      queue = run.catch(() => false);
+      return run;
+    };
+  }
+
+  // Says how main saved an edited file (r: { mtime, backup } in place, or { savedAs, newCopy } into a copy beside it,
+  // when the file changed on disk since it was opened; later saves go to the same copy until it is reloaded).
+  // what: 'PDF' or 'document'. Returns true when the file itself was written.
+  function reportFileSaved(target, r, explicit, what) {
+    if (r.savedAs) {
+      if (r.newCopy || explicit) toast('This ' + what + ' changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
+      return false;
+    }
+    noteFileWritten(target, r.mtime);
+    if (explicit || r.backup) toast(r.backup ? 'Saved your changes into the ' + what + '. The original is backed up in the app\'s backups folder (Settings > Open data folder).' : 'Saved your changes into the ' + what + '.');
+    return true;
+  }
+
+  // Opened documents (PDF, Word) as one: unsaved edits, edits in progress, and saving them.
+  const documentDirty = () => pdfDirty() || docxDirty();
+  const documentBusy = () => pdfBusy() || docxDirty();
+  async function flushDocuments(opts) {
+    const pdfSaved = await flushPdf(opts);
+    const docxSaved = await flushDocx(opts);
+    return pdfSaved && docxSaved;
   }
 
   // ---- PDF pages: turn, move, remove, add from another PDF ----------------------------------------
@@ -2858,16 +2961,16 @@
   // While a file-backed note is open and untouched, pick up changes made by other programs.
   async function pollCurrentFile() {
     const note = state.current;
-    if (!note || !note.filePath || state.dirty || document.hidden || pdfBusy()) return; // PDF edits in progress: never reload under them
+    if (!note || !note.filePath || state.dirty || document.hidden || documentBusy()) return; // document edits in progress: never reload under them
     let res;
     try { res = await api.files.refresh(note.id); } catch (_) { return; }
-    if (pdfBusy()) return; // editing started during the check
+    if (documentBusy()) return; // editing started during the check
     if (state.currentId !== note.id) return;
     if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       // Re-check after the second round trip: the user may have switched notes or started typing meanwhile.
-      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || pdfBusy()) return; // a save that landed in the gap must not be overwritten
+      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return; // a save that landed in the gap must not be overwritten
       applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }
@@ -2899,10 +3002,11 @@
   async function reloadCurrentFile() {
     if (!state.current || !state.current.filePath) return;
     if (pdf && pdfNote) await pdf.commit(); // a stroke or text box in progress counts as an edit here
-    if ((state.dirty || pdfDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
+    if ((state.dirty || documentDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
     const id = state.currentId;
     state.dirty = false;
-    pdfShownKey = null; // a PDF is drawn again from the file even if it did not change, dropping its edits
+    pdfShownKey = null; // a PDF or Word document is shown again from the file even if it did not change, dropping its edits
+    docxShownKey = null;
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
     if (state.currentId !== id || !fresh) return;
@@ -3032,12 +3136,12 @@
   state.inflight = new Map(); // id -> promise of a write in progress, so a reselect can wait for it
 
   // Resolves true when the open note is saved (or had nothing to save), false when the write failed.
-  // Saves the open note: a PDF's edits, then the text. opts.fromBlur: the window only lost focus (see flushPdf).
+  // Saves the open note: a PDF's or Word document's edits, then the text. opts.fromBlur: the window only lost focus (see flushPdf).
   // Resolves false if anything is still unsaved.
   async function flushSave(opts) {
-    const pdfSaved = await flushPdf({ commit: !(opts && opts.fromBlur === true) });
+    const docsSaved = await flushDocuments({ commit: !(opts && opts.fromBlur === true) });
     const textSaved = await flushTextSave();
-    return pdfSaved && textSaved;
+    return docsSaved && textSaved;
   }
 
   async function flushTextSave() {
@@ -3127,7 +3231,7 @@
     const id = state.currentId;
     const title = H.deriveTitle(state.current);
     await flushSave();
-    if (pdfDirty() && !window.confirm('Your changes to this PDF could not be saved. Move it to the trash anyway and lose them?')) return;
+    if (documentDirty() && !window.confirm('Your changes to this document could not be saved. Move it to the trash anyway and lose them?')) return;
     await api.notes.trash(id);
     clearEditor();
     await refresh();
@@ -3456,7 +3560,12 @@
     if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
     const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
-    if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && pdfNote) { e.preventDefault(); flushPdf({ commit: true, explicit: true }); return; }
+    if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfNote || docxNote)) {
+      e.preventDefault();
+      if (pdfNote) flushPdf({ commit: true, explicit: true });
+      if (docxNote) flushDocx({ explicit: true });
+      return;
+    }
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
       if (el.pdfEditor.contains(document.activeElement)) return; // pdf.js ends the edit in progress; the window stays
@@ -3542,6 +3651,9 @@
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
+    const docxTools = el.docxEditor.querySelector('.docx-toolbar');
+    docxTools.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); }); // keep the text selection in the document
+    docxTools.addEventListener('click', onDocxToolbarClick);
     el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });

@@ -519,7 +519,10 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   background: var(--peach); color: var(--ink);
   font-size: 13px;
 }
-.docx-view { flex: 1 0 auto; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; background: #fff; }
+/* A Word document: a tool row (hidden when it cannot be edited) over the sandboxed frame showing it. */
+.docx-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.docx-editor.read-only .docx-toolbar { display: none; }
+.docx-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
 /* The PDF editor: a tool row over pdf.js's viewer, which must sit in an absolutely positioned, scrolling box. */
 .pdf-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
 .pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; border-bottom: 2px solid var(--line-soft); background: var(--bg-raised); }
