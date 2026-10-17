@@ -217,7 +217,19 @@
                   <div class="pdf-pages-grid"></div>
                 </div>
               </div>
-              <iframe id="docxView" class="docx-view hidden" sandbox="allow-same-origin" title="Word document"></iframe>
+              <div id="docxEditor" class="docx-editor hidden">
+                <div class="pdf-toolbar docx-toolbar" role="toolbar" aria-label="Word tools">
+                  <button class="tool-btn" data-docx-act="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+                  <button class="tool-btn" data-docx-act="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+                  <button class="tool-btn" data-docx-act="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+                  <span class="pdf-sep" aria-hidden="true"></span>
+                  <button class="tool-btn" data-docx-act="undo" title="Undo (Ctrl+Z)">Undo</button>
+                  <button class="tool-btn" data-docx-act="redo" title="Redo (Ctrl+Y)">Redo</button>
+                  <span class="pdf-grow"></span>
+                  <button class="btn btn-primary btn-small" id="docxSaveBtn" title="Write your changes into the document (Ctrl+S)">Saved</button>
+                </div>
+                <iframe id="docxView" class="docx-view" sandbox="allow-same-origin" title="Word document"></iframe>
+              </div>
             </div>
             <section class="related hidden" id="relatedPanel" aria-label="Related notes">
               <div class="related-group hidden" id="relatedOut"><h3>Links to</h3><ul></ul></div>
@@ -581,6 +593,7 @@
   <script src="pdf-editor.js"></script>
   <script src="pdf-pages.js"></script>
   <script src="pdf-comments.js"></script>
+  <script src="docx-editor.js"></script>
   <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>

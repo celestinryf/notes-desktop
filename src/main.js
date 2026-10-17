@@ -558,9 +558,9 @@ function main() {
   // After the original changed on disk, a note's edits go to a copy beside it; later saves update that same copy
   // (while it is unchanged since the app wrote it). note id -> { file, mtime }.
   const conflictCopies = new Map();
-  ipcMain.handle('files:savePdf', (_e, id, bytes, expectedMtime) => {
-    const file = fileNoteOfKind(id, 'pdf').filePath;
-    const buf = pdfBuffer(bytes);
+  // Writes edited bytes for the opened file of note id: in place after a backup while the file is as it was opened
+  // ({ mtime, backup: whether this was the session's first backup }), else into the copy ({ savedAs, newCopy }).
+  function saveEdits(id, file, buf, expectedMtime) {
     if (stillAsOpened(file, expectedMtime)) {
       conflictCopies.delete(id);
       const { mtime, backup } = replaceFile(id, file, buf);
@@ -573,10 +573,11 @@ function main() {
       prev.mtime = mtimeOf(prev.file);
       return { savedAs: prev.file, newCopy: false };
     }
-    const copy = convert.writeNew(path.dirname(file), path.basename(file, path.extname(file)) + ' (edited)', 'pdf', buf);
+    const copy = convert.writeNew(path.dirname(file), path.basename(file, path.extname(file)) + ' (edited)', path.extname(file).slice(1).toLowerCase(), buf);
     conflictCopies.set(id, { file: copy, mtime: mtimeOf(copy) });
     return { savedAs: copy, newCopy: true };
-  });
+  }
+  ipcMain.handle('files:savePdf', (_e, id, bytes, expectedMtime) => saveEdits(id, fileNoteOfKind(id, 'pdf').filePath, pdfBuffer(bytes), expectedMtime));
 
   // A signature the person chose to remember, kept as a PNG in the app's data folder (never anywhere else).
   const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
@@ -670,8 +671,38 @@ function main() {
     if (fs.statSync(file).size > MAX_PDF_BYTES) return { ok: false, error: 'that PDF is larger than 100 MB.' };
     return { ok: true, name: path.basename(file), bytes: fs.readFileSync(file) };
   });
-  // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
-  ipcMain.handle('files:docxBytes', (_e, id) => readDocxBuffer(fileNoteOfKind(id, 'docx').filePath));
+  // Word documents: the bytes to show and edit, and saving the edited paragraphs back. docxBases: note id ->
+  // { buf, mtime }: the .docx the shown version came from, which the renderer's edits are made on, and the file time
+  // the renderer knows that version by (a few are kept, for recent notes).
+  const docxBases = new Map();
+  const KEEP_DOCX_BASES = 4;
+  function rememberDocx(id, buf, mtime) {
+    docxBases.delete(id);
+    docxBases.set(id, { buf, mtime });
+    while (docxBases.size > KEEP_DOCX_BASES) docxBases.delete(docxBases.keys().next().value);
+  }
+  ipcMain.handle('files:docxBytes', async (_e, id) => {
+    const file = fileNoteOfKind(id, 'docx').filePath;
+    const mtime = mtimeOf(file);
+    const buf = await readDocxBuffer(file);
+    rememberDocx(id, buf, mtime);
+    return buf;
+  });
+  const MAX_DOCX_PATCH_CHARS = 50 * 1024 * 1024;
+  ipcMain.handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
+    const file = fileNoteOfKind(id, 'docx').filePath;
+    const base = docxBases.get(id);
+    // The edits were made on the version the renderer was shown; never apply them to another one.
+    if (!base || base.mtime !== expectedMtime) throw new Error('the document shown here is not the version Notes last read. Reload it, then make the change again.');
+    if (!Array.isArray(patches) || !patches.length || patches.reduce((n, p) => n + String((p && p.xml) || '').length + String((p && p.old) || '').length, 0) > MAX_DOCX_PATCH_CHARS) throw new Error('the changes could not be read, so nothing was written.');
+    const res = await runWorker('docx-edit-worker.js', { bytes: base.buf, patches }, 2 * 60 * 1000, 'Saving the document took too long.');
+    if (!res.ok) throw new Error(res.error);
+    const buf = Buffer.from(res.bytes);
+    const saved = saveEdits(id, file, buf, expectedMtime);
+    // Written in place: the renderer now knows the file by its new time. Into a copy: still by the old one.
+    rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
+    return saved;
+  });
 
   const { discoverAgentFiles, readDocxBuffer, mtimeOf, pathKey } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
