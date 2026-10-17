@@ -1306,7 +1306,7 @@
       pages: pages.map((p, i) => {
         const locked = !!(p.locked && !p.unlocked);
         const body = locked ? '' : bodies[i];
-        return { id: p.id, no: i + 1, title: H.deriveTitle(p) || 'Untitled', locked, body, html: locked ? '' : markdownToHtml(body) };
+        return { id: p.id, no: i + 1, title: H.deriveTitle(p) || 'Untitled', locked, body, html: locked ? '' : markdownToHtml(body, p) };
       }),
     };
   }
@@ -1686,11 +1686,12 @@
   function currentHtml() {
     const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
     if (live) return live.innerHTML;
-    return markdownToHtml(el.bodyInput.value);
+    return markdownToHtml(el.bodyInput.value, state.current);
   }
 
-  // Renders Markdown with the editor itself, off screen, so exports look like the rendered view.
-  function markdownToHtml(md) {
+  // Renders Markdown with the editor itself, off screen, so exports look like the rendered view. note: whose
+  // relative pictures these are (an opened file's are read from its folder).
+  function markdownToHtml(md, note) {
     if (!window.NotesEditor) return '<pre>' + escapeHtml(md) + '</pre>';
     const host = document.createElement('div');
     host.style.position = 'absolute'; host.style.left = '-99999px';
@@ -1698,7 +1699,7 @@
     try {
       let ed = null;
       try {
-        ed = window.NotesEditor.create(host, {});
+        ed = window.NotesEditor.create(host, { imageBase: () => H.imageBaseFor(note) });
         ed.setMarkdown(String(md || ''));
         return host.querySelector('.rich-editor-content').innerHTML;
       } finally { if (ed) ed.destroy(); }
@@ -2880,6 +2881,7 @@
     if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
     state.rich = window.NotesEditor.create(el.richEditor, {
       placeholder: 'Start writing… Type ## for a heading, - for a list, - [ ] for a checklist.',
+      imageBase: () => H.imageBaseFor(state.current),
       onUpdate: (md) => {
         if (state.sourceMode || !state.currentId) return;
         if (md === el.bodyInput.value) return;
