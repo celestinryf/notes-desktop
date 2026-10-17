@@ -192,6 +192,19 @@
       if (setMode(m, true)) await back;
     }
 
+    // Adds a picture (a signature) to the middle of the page on show, through pdf.js's picture tool, which stays on
+    // so the picture can be moved and resized at once. file: a File holding a PNG.
+    async function placePicture(file) {
+      if (!doc) return false;
+      if (mode !== 'picture') {
+        const switched = modeSwitched(T.STAMP);
+        if (!setMode('picture')) return false;
+        await switched;
+      }
+      eventBus.dispatch('switchannotationeditorparams', { source: null, type: lib.AnnotationEditorParamsType.CREATE, value: { bitmapFile: file } });
+      return true;
+    }
+
     // The PDF with its edits: { bytes, hash }, hash identifying exactly the edits in those bytes (pass it to
     // markSaved once they are on disk). null when nothing is open.
     async function save() {
@@ -206,6 +219,7 @@
       close,
       setMode,
       commit,
+      placePicture,
       save,
       pageCount: () => (doc ? doc.numPages : 0),
       drawPage: (i, canvas, width) => (doc ? drawPage(doc, i, canvas, width) : Promise.resolve()),

@@ -542,6 +542,11 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .pdf-page-num { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--fg-muted); }
 .pdf-page-acts { display: flex; gap: 2px; }
 .pdf-page-acts .tool-btn { padding: 2px 6px; }
+/* Always white, like paper, so the ink shows in either theme. */
+.sign-type { display: flex; gap: 6px; }
+.sign-type .input { flex: 1; }
+.sign-status:empty { display: none; }
+.sign-pad { display: block; width: 100%; max-width: 600px; aspect-ratio: 600 / 220; margin: 8px 0; border: 2px dashed var(--line-soft); border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; }
 .note-card-title .file-mark { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
 .app.is-dropping::after {
   content: 'Drop files to open them as notes';

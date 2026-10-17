@@ -180,6 +180,7 @@
                   <button class="tool-btn" data-pdf-mode="text" title="Add a text box: click where it goes">Text</button>
                   <button class="tool-btn" data-pdf-mode="draw" title="Draw freehand">Draw</button>
                   <button class="tool-btn" data-pdf-mode="picture" title="Add a picture from a file">Picture</button>
+                  <button class="tool-btn" data-pdf-act="sign" title="Draw your signature and place it on the page">Sign</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
                   <button class="tool-btn" data-pdf-act="pages" title="Turn, move or remove pages, or add pages from another PDF">Pages</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
@@ -473,6 +474,26 @@
         </div>
       </form>
     </dialog>
+    <dialog id="signDialog" class="dialog">
+      <form method="dialog" class="dialog-form" id="signForm">
+        <h2 class="dialog-title">Your signature</h2>
+        <p class="field-hint">Draw it with the mouse, a pen or a finger. It goes on the page as a picture you can move and resize.</p>
+        <canvas id="signPad" class="sign-pad" width="600" height="220" role="img" aria-label="Signature pad: draw with a mouse, pen or finger, or type your name below"></canvas>
+        <div class="sign-type">
+          <input id="signName" class="input" type="text" placeholder="Or type your name" autocomplete="name" aria-label="Or type your name" />
+          <button type="button" class="btn btn-small" id="signTypeBtn">Write it</button>
+        </div>
+        <label class="field-check"><input type="checkbox" id="signRemember" /><span>Remember this signature on this PC</span></label>
+        <p class="field-hint sign-status" id="signStatus" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small" id="signClearBtn">Clear</button>
+          <button type="button" class="btn btn-small hidden" id="signForgetBtn">Forget the saved signature</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="signCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="signPlaceBtn">Place</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="linkDialog" class="dialog dialog-small">
       <form method="dialog" class="dialog-form" id="linkForm">
         <h2 class="dialog-title">Link</h2>
@@ -547,6 +568,7 @@
   <script src="vendor/pdf.bundle.js"></script>
   <script src="pdf-editor.js"></script>
   <script src="pdf-pages.js"></script>
+  <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="app.js"></script>
 </body>

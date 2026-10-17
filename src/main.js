@@ -577,6 +577,23 @@ function main() {
     return { savedAs: copy, newCopy: true };
   });
 
+  // A signature the person chose to remember, kept as a PNG in the app's data folder (never anywhere else).
+  const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
+  const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+  ipcMain.handle('signature:get', () => (fs.existsSync(SIGNATURE_FILE) ? fs.readFileSync(SIGNATURE_FILE) : null));
+  const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  ipcMain.handle('signature:set', (_e, bytes) => {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_SIGNATURE_BYTES) return { ok: false, error: 'the signature picture is missing or too large.' };
+    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_MAGIC)) return { ok: false, error: 'the signature is not a PNG picture.' };
+    // Our own file, so a temp file and a rename: a crash never leaves half a signature.
+    const tmp = SIGNATURE_FILE + '.tmp';
+    fs.writeFileSync(tmp, buf);
+    fs.renameSync(tmp, SIGNATURE_FILE);
+    return { ok: true };
+  });
+  ipcMain.handle('signature:forget', () => { fs.rmSync(SIGNATURE_FILE, { force: true }); return { ok: true }; });
+
   // PDF bytes from the renderer: a byte array of at most MAX_PDF_BYTES that starts like a PDF, as a Buffer.
   function pdfBuffer(bytes) {
     if (!ArrayBuffer.isView(bytes) || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the PDF is missing or larger than 100 MB, so nothing was written.');
