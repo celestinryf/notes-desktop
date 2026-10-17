@@ -40,6 +40,7 @@
     "docx-preview": "^0.4.1",
     "mammoth": "^1.13.0",
     "markdown-it": "14.1.0",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.3.289",
     "tiptap-markdown": "^0.8.10",
     "turndown": "7.2.4",

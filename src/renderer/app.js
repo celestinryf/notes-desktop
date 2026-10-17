@@ -59,7 +59,7 @@
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
     fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
-    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
+    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
     vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
@@ -2557,6 +2557,7 @@
   }
 
   function clearPdf() {
+    closePdfPages();
     pdfShownKey = null;
     pdfSeq++;
     pdfNote = null;
@@ -2567,6 +2568,7 @@
   async function showPdf(note) {
     const key = note.id + ':' + note.fileMtime;
     if (pdfShownKey === key) return;
+    closePdfPages(); // its plan was for the PDF, or the version of it, shown before
     const ctl = pdfController();
     if (!ctl) { showBanner('The PDF viewer failed to load. Use "Open with…" for your PDF app.'); return; }
     pdfShownKey = key;
@@ -2620,15 +2622,93 @@
         if (r.newCopy || explicit) toast('This PDF changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
         return true;
       }
-      target.fileMtime = r.mtime;
+      noteFileWritten(target, r.mtime);
       if (pdfNote === target) pdfShownKey = target.id + ':' + r.mtime;
-      if (state.current && state.current.id === target.id) state.current.fileMtime = r.mtime;
       if (explicit || r.backup) toast(r.backup ? 'Saved your changes into the PDF. The original is backed up in the app\'s backups folder (Settings > Open data folder).' : 'Saved your changes into the PDF.');
       return true;
     } catch (err) {
       toast('Could not save the PDF: ' + ipcErrorText(err) + ' Your changes are still here.');
       return false;
     }
+  }
+
+  // ---- PDF pages: turn, move, remove, add from another PDF ----------------------------------------
+
+  // pdfPagesFor: the pdfNote the organizer's plan was made for. Applying it to anything else is refused.
+  let pdfPages = null, pdfPagesFor = null;
+
+  function openPdfPages() {
+    if (!pdf || !pdfNote || !window.NotesPdfPages) return;
+    if (!pdfPages) pdfPages = window.NotesPdfPages.create(el.pdfPages, pdf, { pickPdf: pickPdfForPages, apply: applyPdfPages, close: closePdfPages, say: toast });
+    pdfPagesFor = pdfNote;
+    el.pdfEditor.classList.add('organizing');
+    pdfPages.open();
+  }
+
+  function closePdfPages() {
+    pdfPagesFor = null;
+    el.pdfEditor.classList.remove('organizing');
+    if (pdf) pdf.closeOthers();
+  }
+
+  // An IPC call whose failure is reported as { ok: false, error } like its own refusals.
+  async function callOk(promise) {
+    try { return await promise; } catch (err) { return { ok: false, error: ipcErrorText(err) }; }
+  }
+
+  async function pickPdfForPages() {
+    const r = await callOk(api.files.pdfPickPages());
+    if (r.canceled) return null;
+    if (!r.ok) { toast('Could not add pages: ' + r.error); return null; }
+    return r;
+  }
+
+  // The app wrote the PDF itself: record the new time (so the poll does not reload it) on the note on show.
+  function noteFileWritten(target, mtime) {
+    target.fileMtime = mtime;
+    if (state.current && state.current.id === target.id) state.current.fileMtime = mtime;
+  }
+
+  // Shows the PDF again from the file, which the app has just rewritten.
+  function reloadPdf(target, mtime) {
+    noteFileWritten(target, mtime);
+    if (state.current && state.current.id === target.id) showPdf(state.current);
+  }
+
+  async function applyPdfPages(plan) {
+    const target = pdfNote;
+    if (!target || pdfPagesFor !== target) { closePdfPages(); toast('That PDF changed while the pages were open, so they were not changed.'); return false; }
+    if (!(await flushPdf({ commit: true }))) { toast('Your marks could not be saved, so the pages were not changed.'); return false; }
+    let bytes = null;
+    if (plan.pageInfos) {
+      // The pages come from the file as just saved, marks and form entries included: pdf.js would carry over drawn
+      // marks from the open document but not typed form values.
+      let saved;
+      try { saved = new Uint8Array(await api.files.pdfBytes(target.id)); } catch (err) { toast('Could not read the PDF: ' + ipcErrorText(err)); return false; }
+      const pageInfos = plan.pageInfos.map((info) => (info.document === null ? Object.assign({}, info, { document: saved }) : info));
+      try { bytes = await pdf.extractPages(pageInfos); } catch (err) { toast('Could not rearrange the pages: ' + (err.message || err)); return false; }
+      // pdf.js answers null, or silently leaves out a PDF it cannot read, instead of failing. Never write that, and
+      // never turn pages of the old order instead: the turns belong to the new one.
+      let pages = 0;
+      try { if (bytes) pages = (await pdf.openOther(bytes)).pages; } catch (_) { pages = 0; }
+      if (pages !== plan.rotations.length) { toast('Could not rearrange the pages: a PDF involved could not be read.'); return false; }
+    }
+    if (pdfNote !== target) return false;
+    const r = await callOk(api.files.pdfApplyPages(target.id, bytes, plan.rotations, target.fileMtime));
+    if (!r.ok) { toast('Could not change the pages: ' + r.error); return false; }
+    reloadPdf(target, r.mtime);
+    toast('Pages updated.', { label: 'Undo', run: () => undoPdfPages(target.id, r.backup, r.mtime) });
+    return true;
+  }
+
+  // Undo only while the file is exactly what the page change wrote (mtime): anything saved since would be lost.
+  async function undoPdfPages(id, backup, mtime) {
+    if (!pdfNote || pdfNote.id !== id) { toast('Open that PDF again to undo.'); return; }
+    if (pdfDirty()) { toast('You have changed the PDF since, so the page change was not undone. Its earlier versions are in the backups folder.'); return; }
+    const r = await callOk(api.files.pdfRestore(id, backup, mtime));
+    if (!r.ok) { toast('Could not undo: ' + r.error); return; }
+    reloadPdf(pdfNote, r.mtime);
+    toast('The pages are back as they were.');
   }
 
   function onPdfToolbarClick(e) {
@@ -2641,6 +2721,7 @@
     else if (act === 'zoom-in') pdf.zoomIn();
     else if (act === 'zoom-out') pdf.zoomOut();
     else if (act === 'fit') pdf.fitWidth();
+    else if (act === 'pages') openPdfPages();
     else if (b === el.pdfSaveBtn) flushPdf({ commit: true, explicit: true });
   }
 
