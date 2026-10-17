@@ -60,6 +60,8 @@
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
     fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
     fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
+    signDialog: $('#signDialog'), signForm: $('#signForm'), signPad: $('#signPad'), signRemember: $('#signRemember'), signClearBtn: $('#signClearBtn'),
+    signForgetBtn: $('#signForgetBtn'), signCancelBtn: $('#signCancelBtn'), signPlaceBtn: $('#signPlaceBtn'), signName: $('#signName'), signTypeBtn: $('#signTypeBtn'), signStatus: $('#signStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
     vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
@@ -2711,6 +2713,53 @@
     toast('The pages are back as they were.');
   }
 
+  // ---- PDF signature: drawn on a pad, placed with pdf.js's picture tool --------------------------------
+
+  // signFor: the PDF note (id) the signature is for. signBusy: opening or placing is under way (double clicks).
+  let signPad = null, signFor = null, signBusy = false;
+  const signSay = (text) => { el.signStatus.textContent = text; }; // inside the dialog: a toast would sit behind it
+
+  async function openSignDialog() {
+    if (!pdf || !pdfNote || !window.NotesSignPad || signBusy || el.signDialog.open) return;
+    signBusy = true;
+    try {
+      if (!signPad) signPad = window.NotesSignPad.create(el.signPad);
+      let saved = null;
+      try { saved = await api.signature.get(); } catch (_) { saved = null; }
+      if (!pdfNote) return;
+      signFor = pdfNote.id;
+      signSay('');
+      el.signName.value = '';
+      el.signDialog.showModal();
+      signPad.fit(); // after showModal, when the pad has its size
+      el.signRemember.checked = !!saved;
+      el.signForgetBtn.classList.toggle('hidden', !saved);
+      if (saved) await signPad.load(new Blob([saved], { type: 'image/png' })).catch(() => signPad.clear());
+    } finally {
+      signBusy = false;
+    }
+  }
+
+  async function placeSignature() {
+    if (signBusy) return;
+    signBusy = true;
+    try {
+      const blob = signPad && await signPad.toBlob();
+      if (!blob) { signSay('Draw your signature, or type your name and press Write it.'); return; }
+      el.signDialog.close();
+      // Ticked keeps this signature for next time. Unticked keeps nothing new (Forget deletes a saved one).
+      if (el.signRemember.checked) {
+        const kept = await callOk(api.signature.set(new Uint8Array(await blob.arrayBuffer())));
+        if (!kept.ok) toast('Could not remember the signature: ' + kept.error);
+      }
+      if (!pdf || !pdfNote || pdfNote.id !== signFor) { toast('The PDF changed while you signed, so the signature was not placed.'); return; }
+      if (await pdf.placePicture(new File([blob], 'signature.png', { type: 'image/png' }))) toast('Signature placed. Drag it where it goes, or drag a corner to resize it.');
+      else toast('This PDF does not allow changes.');
+    } finally {
+      signBusy = false;
+    }
+  }
+
   function onPdfToolbarClick(e) {
     const b = e.target.closest('button');
     if (!b || !pdf || !pdfNote) return;
@@ -2722,6 +2771,7 @@
     else if (act === 'zoom-out') pdf.zoomOut();
     else if (act === 'fit') pdf.fitWidth();
     else if (act === 'pages') openPdfPages();
+    else if (act === 'sign') openSignDialog();
     else if (b === el.pdfSaveBtn) flushPdf({ commit: true, explicit: true });
   }
 
@@ -3352,7 +3402,7 @@
   function onKeydown(e) {
     if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
+    const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && pdfNote) { e.preventDefault(); flushPdf({ commit: true, explicit: true }); return; }
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
@@ -3439,6 +3489,22 @@
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
+    el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
+    el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });
+    el.signTypeBtn.addEventListener('click', () => {
+      if (signPad && signPad.writeName(el.signName.value)) signSay('');
+      else signSay('Type your name first.');
+    });
+    el.signName.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.signTypeBtn.click(); } });
+    el.signCancelBtn.addEventListener('click', () => el.signDialog.close());
+    el.signForgetBtn.addEventListener('click', async () => {
+      const r = await callOk(api.signature.forget());
+      if (!r.ok) { signSay('Could not forget the signature: ' + r.error); return; }
+      el.signForgetBtn.classList.add('hidden');
+      el.signRemember.checked = false;
+      if (signPad) signPad.clear();
+      signSay('The saved signature is gone from this PC.');
+    });
     el.fileConvertBtn.addEventListener('click', () => { if (el.convertMenu.classList.contains('hidden')) openConvertMenu(); else closeConvertMenu(); });
     el.convertMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-to]'); if (b) convertCurrent(b.dataset.to); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });

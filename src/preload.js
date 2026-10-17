@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('notesApi', {
     counts: invoke('notes:counts'),
     related: invoke('notes:related'),
   },
+  signature: {
+    get: invoke('signature:get'),
+    set: invoke('signature:set'),
+    forget: invoke('signature:forget'),
+  },
   files: {
     openDialog: invoke('files:openDialog'),
     link: invoke('files:link'),
