@@ -503,15 +503,77 @@ function main() {
     if (!n || !n.filePath) return 'No file';
     return openSafely(n.filePath);
   });
-  ipcMain.handle('files:pdfUrl', (_e, id) => { const n = store.get(id); return n && n.filePath && n.fileKind === 'pdf' ? require('url').pathToFileURL(n.filePath).href : null; });
-  // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
-  ipcMain.handle('files:docxBytes', (_e, id) => {
+  // The opened file behind note id, which must be of the given kind (pdf, docx).
+  function fileNoteOfKind(id, kind) {
     const n = store.get(id);
-    if (!n || !n.filePath || n.fileKind !== 'docx') throw new Error('Not a Word document.');
-    return readDocxBuffer(n.filePath);
+    if (!n || !n.filePath || n.fileKind !== kind) throw new Error(kind === 'pdf' ? 'Not a PDF.' : 'Not a Word document.');
+    return n;
+  }
+
+  // PDFs: the bytes for the viewer, and saving the viewer's edits back into the file.
+  const MAX_PDF_BYTES = 100 * 1024 * 1024;
+  ipcMain.handle('files:pdfBytes', (_e, id) => {
+    const n = fileNoteOfKind(id, 'pdf');
+    if (fs.statSync(n.filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
+    return fs.readFileSync(n.filePath);
   });
 
-  const { discoverAgentFiles, readDocxBuffer } = require('./files');
+  // Before a PDF is overwritten, the file as it is now is copied into its own folder under backups\files. The newest
+  // KEEP_FILE_VERSIONS copies are kept, plus the copy made before the first save of this session (the original).
+  const FILE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'files');
+  const KEEP_FILE_VERSIONS = 10;
+  const sessionOriginals = new Map(); // pathKey -> name of that first copy
+  function backUpBeforeWrite(file) {
+    const key = pathKey(file);
+    const dir = path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(key).digest('hex').slice(0, 8));
+    fs.mkdirSync(dir, { recursive: true });
+    const name = H.fileStamp() + path.extname(file);
+    fs.copyFileSync(file, path.join(dir, name), fs.constants.COPYFILE_EXCL);
+    const first = !sessionOriginals.has(key);
+    if (first) sessionOriginals.set(key, name);
+    const keep = sessionOriginals.get(key);
+    const all = fs.readdirSync(dir).sort();
+    for (const old of all.slice(0, Math.max(0, all.length - KEEP_FILE_VERSIONS))) if (old !== keep) fs.rmSync(path.join(dir, old), { force: true });
+    return first;
+  }
+  // In place (so links to the file stay joined), and flushed to disk before it counts as saved.
+  function writeInPlace(file, buf) {
+    const fd = fs.openSync(file, 'w');
+    try {
+      for (let done = 0; done < buf.length;) done += fs.writeSync(fd, buf, done, buf.length - done, done);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+  }
+  // After the original changed on disk, a note's edits go to a copy beside it; later saves update that same copy
+  // (while it is unchanged since the app wrote it). note id -> { file, mtime }.
+  const conflictCopies = new Map();
+  ipcMain.handle('files:savePdf', (_e, id, bytes, expectedMtime) => {
+    const n = fileNoteOfKind(id, 'pdf');
+    if (!ArrayBuffer.isView(bytes) || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the edited PDF is missing or larger than 100 MB, so nothing was written.');
+    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (buf.length < 8 || buf.toString('latin1', 0, 5) !== '%PDF-') throw new Error('the edited PDF came back damaged, so nothing was written.');
+    const file = n.filePath;
+    if (fs.existsSync(file) && mtimeOf(file) === expectedMtime) {
+      conflictCopies.delete(id);
+      const backup = backUpBeforeWrite(file);
+      writeInPlace(file, buf);
+      return { mtime: store.markFileWritten(id), backup };
+    }
+    // Changed or removed on disk since it was opened: never write over that.
+    const prev = conflictCopies.get(id);
+    if (prev && fs.existsSync(prev.file) && mtimeOf(prev.file) === prev.mtime) {
+      writeInPlace(prev.file, buf);
+      prev.mtime = mtimeOf(prev.file);
+      return { savedAs: prev.file, newCopy: false };
+    }
+    const copy = convert.writeNew(path.dirname(file), path.basename(file, path.extname(file)) + ' (edited)', 'pdf', buf);
+    conflictCopies.set(id, { file: copy, mtime: mtimeOf(copy) });
+    return { savedAs: copy, newCopy: true };
+  });
+  // The bytes of an opened Word document, so the renderer can show it as laid out in the file.
+  ipcMain.handle('files:docxBytes', (_e, id) => readDocxBuffer(fileNoteOfKind(id, 'docx').filePath));
+
+  const { discoverAgentFiles, readDocxBuffer, mtimeOf, pathKey } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
   ipcMain.handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);
@@ -1122,7 +1184,7 @@ function main() {
   ipcMain.handle('attachments:saveRecording', (_e, bytes, ext) => {
     fs.mkdirSync(ATTACH_DIR, { recursive: true });
     const clean = /^[a-z0-9]{1,5}$/i.test(String(ext)) ? String(ext).toLowerCase() : 'webm';
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const stamp = H.fileStamp().slice(0, 19);
     let name = 'Recording ' + stamp + '.' + clean;
     for (let i = 2; fs.existsSync(path.join(ATTACH_DIR, name)); i++) name = 'Recording ' + stamp + ' ' + i + '.' + clean; // two in one second
     fs.writeFileSync(path.join(ATTACH_DIR, name), Buffer.from(bytes));
@@ -1190,7 +1252,8 @@ function main() {
     quitPrepared = true;
     // Let the renderer flush an in-flight edit, then finish any pending git commit, then quit for real.
     e.preventDefault();
-    const rendererFlushed = Promise.all([flushWindow(win, 800), stickies.flushAll((w) => flushWindow(w, 800))]);
+    // The main window may be writing a PDF's edits, which takes longer than a note.
+    const rendererFlushed = Promise.all([flushWindow(win, 5000), stickies.flushAll((w) => flushWindow(w, 800))]);
     // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
     // cannot keep the tray icon alive for a minute after Quit.
     rendererFlushed

@@ -343,7 +343,7 @@ class Store {
     if (this.backupSuspended) return; // the file on disk is the corrupt one we could not move aside
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
-    const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
+    const stamp = H.fileStamp(now);
     // A backup that cannot be written must never block the note save itself.
     try { fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json')); } catch (_) { return; }
     this.lastBackupAt = now;
@@ -1091,6 +1091,16 @@ class Store {
       fileKind: kind,
       fileMtime: mtime,
     });
+  }
+
+  // A file the app itself just wrote (a PDF saved with its edits): its new time is recorded so the next refresh
+  // does not take the app's own write for an outside change. Returns that time.
+  markFileWritten(id) {
+    const note = this.get(id);
+    if (!note || !note.filePath) return null;
+    const mtime = F.mtimeOf(note.filePath);
+    this._commit(() => { note.fileMtime = mtime; });
+    return mtime;
   }
 
   // Re-reads a file-backed note when the file changed on disk. Returns { changed, missing }.

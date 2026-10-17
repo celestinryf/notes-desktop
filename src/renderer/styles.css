@@ -519,7 +519,15 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   background: var(--peach); color: var(--ink);
   font-size: 13px;
 }
-.pdf-frame, .docx-view { flex: 1 0 auto; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; background: #fff; }
+.docx-view { flex: 1 0 auto; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; background: #fff; }
+/* The PDF editor: a tool row over pdf.js's viewer, which must sit in an absolutely positioned, scrolling box. */
+.pdf-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 2px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; border-bottom: 2px solid var(--line-soft); background: var(--bg-raised); }
+.pdf-toolbar .tool-btn:disabled { opacity: 0.45; cursor: default; }
+.pdf-sep { width: 2px; align-self: stretch; margin: 2px 4px; background: var(--line-soft); }
+.pdf-grow { flex: 1; }
+.pdf-stage { position: relative; flex: 1; min-height: 0; }
+.pdf-viewport { position: absolute; inset: 0; overflow: auto; background: #e9e4da; }
 .note-card-title .file-mark { font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
 .app.is-dropping::after {
   content: 'Drop files to open them as notes';

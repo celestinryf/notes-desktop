@@ -525,4 +525,4 @@ async function convertFile(note, to, print) {
   return { filePath: writeNew(dir, base, to, data), warning };
 }
 
-module.exports = { FORMATS, sourceOf, options, convertFile, toMarkdown, textToMarkdown, markdownBlocks, blocksToText, htmlDocument, escHtml, imageInfo, isInside, inlinePicturesOnly };
+module.exports = { FORMATS, sourceOf, options, convertFile, toMarkdown, textToMarkdown, markdownBlocks, blocksToText, htmlDocument, escHtml, imageInfo, isInside, inlinePicturesOnly, writeNew };

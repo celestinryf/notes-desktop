@@ -59,7 +59,7 @@
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
     fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
-    fileBanner: $('#fileBanner'), pdfFrame: $('#pdfFrame'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
+    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
     vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
     vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
@@ -910,6 +910,7 @@
 
   function clearEditor() {
     stashIfDirty();
+    clearPdf();
     state.currentId = null;
     state.current = null;
     state.dirty = false;
@@ -932,6 +933,9 @@
     if (tts.active) stopReadAloud();
     // Flush the outgoing note first, and again if keystrokes landed while the flush was in flight,
     // so nothing typed during the switch is dropped.
+    // A PDF's edits are not text, so state.dirty does not cover them. If they cannot be written, stay on the PDF:
+    // switching would close it and lose them.
+    if (!(await flushPdf({ commit: true })) && !window.confirm('Your changes to this PDF could not be saved (is it open in another app?). Leave it anyway and lose them?')) return;
     let guard = 0;
     while (state.dirty && guard++ < 3) await flushSave();
     stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
@@ -2423,10 +2427,16 @@
       if (target) target.scrollIntoView();
       return;
     }
+    externalLinkClick(e, href);
+  }
+
+  // A link inside a shown document (Word, PDF): a web link opens only on Ctrl+click, anything else never.
+  function externalLinkClick(e, href) {
     if (!/^https?:\/\//i.test(href)) return;
     if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
     else toast('This link goes to ' + href + '. Ctrl+click to open it.');
   }
+
   async function showDocx(note) {
     const key = note.id + ':' + note.fileMtime;
     if (docxShownKey === key) return;
@@ -2451,8 +2461,7 @@
     el.fileRow.classList.toggle('hidden', !isFile);
     el.fileBanner.classList.add('hidden');
     if (!(isFile && note.fileKind === 'docx')) clearDocx();
-    el.pdfFrame.classList.add('hidden');
-    el.pdfFrame.removeAttribute('src');
+    if (!(isFile && note.fileKind === 'pdf')) clearPdf();
     closeConvertMenu();
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || note.fileKind === 'docx'));
     if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
@@ -2462,9 +2471,9 @@
     if (note.fileKind === 'pdf') {
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
-      el.pdfFrame.classList.remove('hidden');
-      api.files.pdfUrl(note.id).then((url) => { if (url && state.currentId === note.id) el.pdfFrame.src = url; });
-      showBanner('PDF shown read-only. Use "Open with…" for your PDF app.');
+      el.pdfEditor.classList.remove('hidden');
+      showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
+      showPdf(note);
     } else if (note.fileKind === 'docx') {
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
@@ -2523,6 +2532,118 @@
     }
   }
 
+  // ---- PDF viewer and editor ------------------------------------------------------------------------
+  // pdf.js shows the PDF and holds the edits; saving writes them into the file through main, which backs up the
+  // original on the first save of a session. pdfNote is the PDF on show: { id, fileMtime } as it was loaded or saved.
+
+  let pdf = null;
+  let pdfShownKey = null, pdfSeq = 0, pdfNote = null, pdfQueue = Promise.resolve(true);
+
+  function pdfController() {
+    if (!pdf && window.NotesPdfEditor) {
+      pdf = window.NotesPdfEditor.create(el.pdfEditor, {
+        // Never disabled: a stroke or text box still in progress only counts once it is committed, which Save does.
+        onDirty: (d) => { el.pdfSaveBtn.textContent = d ? 'Save' : 'Saved'; },
+        onState: (s) => {
+          for (const b of el.pdfEditor.querySelectorAll('[data-pdf-mode]')) b.classList.toggle('is-on', b.dataset.pdfMode === s.mode);
+          el.pdfUndoBtn.disabled = !s.canUndo;
+          el.pdfRedoBtn.disabled = !s.canRedo;
+          el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + '%';
+        },
+        onLink: externalLinkClick,
+      });
+    }
+    return pdf;
+  }
+
+  function clearPdf() {
+    pdfShownKey = null;
+    pdfSeq++;
+    pdfNote = null;
+    el.pdfEditor.classList.add('hidden');
+    if (pdf) pdf.close();
+  }
+
+  async function showPdf(note) {
+    const key = note.id + ':' + note.fileMtime;
+    if (pdfShownKey === key) return;
+    const ctl = pdfController();
+    if (!ctl) { showBanner('The PDF viewer failed to load. Use "Open with…" for your PDF app.'); return; }
+    pdfShownKey = key;
+    const seq = ++pdfSeq;
+    pdfNote = null;
+    try {
+      const bytes = await api.files.pdfBytes(note.id);
+      if (seq !== pdfSeq) return;
+      if (await ctl.open(bytes) && seq === pdfSeq) pdfNote = { id: note.id, fileMtime: note.fileMtime };
+    } catch (err) {
+      if (seq !== pdfSeq) return;
+      pdfShownKey = null;
+      showBanner('Could not show this PDF: ' + ipcErrorText(err) + ' Use "Open with…" for your PDF app.');
+    }
+  }
+
+  const pdfDirty = () => !!(pdf && pdfNote && pdf.isDirty());
+  const pdfBusy = () => !!(pdf && pdfNote && pdf.hasPendingWork());
+
+  // Writes the PDF's edits into the file, whenever the app saves (leaving the note, hiding the window, quitting) and
+  // on Save or Ctrl+S. opts.commit: finish a stroke or text box in progress first (not on a mere window blur, which
+  // would end the person's drawing); opts.explicit: say so when done. Saves run one at a time, and each re-checks,
+  // so edits made during an earlier save are saved too. Resolves false while edits are still unsaved.
+  function flushPdf(opts) {
+    const run = pdfQueue.then(() => flushPdfNow(opts || {}));
+    pdfQueue = run.catch(() => false);
+    return run;
+  }
+
+  async function flushPdfNow(opts) {
+    let explicit = !!opts.explicit;
+    for (let i = 0; i < 3; i++) {
+      if (!pdf || !pdfNote) return true;
+      if (opts.commit !== false) await pdf.commit();
+      if (!pdfDirty()) return true;
+      if (!(await savePdfNow(explicit))) return false;
+      explicit = false;
+    }
+    return !pdfDirty();
+  }
+
+  async function savePdfNow(explicit) {
+    const target = pdfNote;
+    try {
+      const { bytes, hash } = await pdf.save();
+      const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
+      if (pdfNote === target) pdf.markSaved(hash);
+      if (r.savedAs) {
+        // The file changed on disk since it was opened: main never writes over that, so the edits went to a copy
+        // (the same copy on every later save, until the PDF is reloaded).
+        if (r.newCopy || explicit) toast('This PDF changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
+        return true;
+      }
+      target.fileMtime = r.mtime;
+      if (pdfNote === target) pdfShownKey = target.id + ':' + r.mtime;
+      if (state.current && state.current.id === target.id) state.current.fileMtime = r.mtime;
+      if (explicit || r.backup) toast(r.backup ? 'Saved your changes into the PDF. The original is backed up in the app\'s backups folder (Settings > Open data folder).' : 'Saved your changes into the PDF.');
+      return true;
+    } catch (err) {
+      toast('Could not save the PDF: ' + ipcErrorText(err) + ' Your changes are still here.');
+      return false;
+    }
+  }
+
+  function onPdfToolbarClick(e) {
+    const b = e.target.closest('button');
+    if (!b || !pdf || !pdfNote) return;
+    if (b.dataset.pdfMode) { if (!pdf.setMode(b.dataset.pdfMode)) toast('This PDF does not allow changes.'); return; }
+    const act = b.dataset.pdfAct;
+    if (act === 'undo') pdf.undo();
+    else if (act === 'redo') pdf.redo();
+    else if (act === 'zoom-in') pdf.zoomIn();
+    else if (act === 'zoom-out') pdf.zoomOut();
+    else if (act === 'fit') pdf.fitWidth();
+    else if (b === el.pdfSaveBtn) flushPdf({ commit: true, explicit: true });
+  }
+
   function showBanner(text) {
     el.fileBanner.textContent = text;
     el.fileBanner.classList.remove('hidden');
@@ -2553,15 +2674,16 @@
   // While a file-backed note is open and untouched, pick up changes made by other programs.
   async function pollCurrentFile() {
     const note = state.current;
-    if (!note || !note.filePath || state.dirty || document.hidden) return;
+    if (!note || !note.filePath || state.dirty || document.hidden || pdfBusy()) return; // PDF edits in progress: never reload under them
     let res;
     try { res = await api.files.refresh(note.id); } catch (_) { return; }
+    if (pdfBusy()) return; // editing started during the check
     if (state.currentId !== note.id) return;
     if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       // Re-check after the second round trip: the user may have switched notes or started typing meanwhile.
-      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh) return; // a save that landed in the gap must not be overwritten
+      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || pdfBusy()) return; // a save that landed in the gap must not be overwritten
       applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }
@@ -2592,9 +2714,11 @@
 
   async function reloadCurrentFile() {
     if (!state.current || !state.current.filePath) return;
-    if (state.dirty && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
+    if (pdf && pdfNote) await pdf.commit(); // a stroke or text box in progress counts as an edit here
+    if ((state.dirty || pdfDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
     const id = state.currentId;
     state.dirty = false;
+    pdfShownKey = null; // a PDF is drawn again from the file even if it did not change, dropping its edits
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
     if (state.currentId !== id || !fresh) return;
@@ -2724,7 +2848,15 @@
   state.inflight = new Map(); // id -> promise of a write in progress, so a reselect can wait for it
 
   // Resolves true when the open note is saved (or had nothing to save), false when the write failed.
-  async function flushSave() {
+  // Saves the open note: a PDF's edits, then the text. opts.fromBlur: the window only lost focus (see flushPdf).
+  // Resolves false if anything is still unsaved.
+  async function flushSave(opts) {
+    const pdfSaved = await flushPdf({ commit: !(opts && opts.fromBlur === true) });
+    const textSaved = await flushTextSave();
+    return pdfSaved && textSaved;
+  }
+
+  async function flushTextSave() {
     clearTimeout(state.saveTimer);
     if (!state.dirty || !state.currentId) return true;
     const id = state.currentId;
@@ -2811,6 +2943,7 @@
     const id = state.currentId;
     const title = H.deriveTitle(state.current);
     await flushSave();
+    if (pdfDirty() && !window.confirm('Your changes to this PDF could not be saved. Move it to the trash anyway and lose them?')) return;
     await api.notes.trash(id);
     clearEditor();
     await refresh();
@@ -3139,8 +3272,10 @@
     if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
     const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open;
+    if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && pdfNote) { e.preventDefault(); flushPdf({ commit: true, explicit: true }); return; }
     if (e.key === 'Escape') {
       if (inDialog) return; // dialog handles it
+      if (el.pdfEditor.contains(document.activeElement)) return; // pdf.js ends the edit in progress; the window stays
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
       if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.fileConvertBtn.focus(); return; }
@@ -3222,6 +3357,7 @@
     el.newNoteBtn.addEventListener('click', newNote);
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
+    el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
     el.fileConvertBtn.addEventListener('click', () => { if (el.convertMenu.classList.contains('hidden')) openConvertMenu(); else closeConvertMenu(); });
     el.convertMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-to]'); if (b) convertCurrent(b.dataset.to); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
@@ -3446,8 +3582,8 @@
     el.bodyInput.addEventListener('keydown', handleEditorKeydown);
 
     document.addEventListener('keydown', onKeydown);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave(); });
-    window.addEventListener('blur', flushSave);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave({ fromBlur: true }); });
+    window.addEventListener('blur', () => flushSave({ fromBlur: true }));
     window.addEventListener('beforeunload', flushSave);
 
     // Settings dialog
