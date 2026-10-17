@@ -5,6 +5,8 @@
   const api = window.notesApi;
   const H = window.NotesHelpers;
   const { isViewerOnlyFile, isPlainTextFile } = H;
+  // An opened file whose text is not Markdown: plain text, Word, PDF.
+  const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
   const $ = (sel) => document.querySelector(sel);
 
   const el = {
@@ -56,6 +58,7 @@
     navAll: document.querySelector('.nav-item[data-view="all"]'),
     openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
     fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'),
+    fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
     fileBanner: $('#fileBanner'), pdfFrame: $('#pdfFrame'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
     readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
     vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
@@ -1295,14 +1298,27 @@
     await flushSave();
     const folder = flattenTree(state.tree).find((f) => f.id === bookId);
     const pages = await api.notes.list({ folderId: bookId });
+    // One file at a time: a book of PDFs must not start a reader for every page at once.
+    const bodies = [];
+    for (const p of pages) bodies.push(p.locked && !p.unlocked ? '' : await pageMarkdown(p));
     return {
       name: folder ? folder.name : 'Book',
       pages: pages.map((p, i) => {
         const locked = !!(p.locked && !p.unlocked);
-        const body = locked ? '' : String(p.body || '');
+        const body = locked ? '' : bodies[i];
         return { id: p.id, no: i + 1, title: H.deriveTitle(p) || 'Untitled', locked, body, html: locked ? '' : markdownToHtml(body) };
       }),
     };
+  }
+
+  // A page as Markdown. An opened file that is not Markdown (plain text, Word, PDF) is converted the way "Convert
+  // to… Markdown" would, so its text is never read as Markdown by accident.
+  async function pageMarkdown(p) {
+    if (!isNonMarkdownFile(p)) return String(p.body || '');
+    try {
+      const r = await api.files.asMarkdown(p.id);
+      return r.ok ? r.markdown : '*Could not show this file: ' + r.error + '*';
+    } catch (err) { return '*Could not show this file: ' + ipcErrorText(err) + '*'; }
   }
 
   function bookMarkdown(b) {
@@ -2290,7 +2306,9 @@
     const selected = selectedTextForSpeech().trim();
     if (selected) return selected;
     const title = el.titleInput.value.trim();
-    const body = H.plainTextFromMarkdown(el.bodyInput.value);
+    // Only Markdown has marks to strip; a plain-text or Word file is read as the text it is.
+    const note = state.current;
+    const body = isNonMarkdownFile(note) ? el.bodyInput.value : H.plainTextFromMarkdown(el.bodyInput.value);
     return (title ? title + '.\n' : '') + body;
   }
 
@@ -2434,6 +2452,8 @@
     if (!(isFile && note.fileKind === 'docx')) clearDocx();
     el.pdfFrame.classList.add('hidden');
     el.pdfFrame.removeAttribute('src');
+    closeConvertMenu();
+    el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || note.fileKind === 'docx'));
     if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
     el.fileKind.textContent = (note.fileKind || 'file').toUpperCase();
     el.filePath.textContent = note.filePath;
@@ -2454,6 +2474,51 @@
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
       showBanner('This file type cannot be shown here. Use "Open with…" to open it in its own app.');
+    }
+  }
+
+  // ---- Convert to… (a copy in another format, written next to the file) ------------------------------
+
+  async function openConvertMenu() {
+    const note = state.current;
+    if (!note || !note.filePath) return;
+    let opts;
+    try { opts = await api.files.convertOptions(note.id); } catch (err) { toast('Could not convert: ' + ipcErrorText(err)); return; }
+    if (state.currentId !== note.id) return;
+    if (!opts.length) { toast('Notes cannot convert this kind of file.'); return; }
+    el.convertMenu.replaceChildren(...opts.map((o) => {
+      const b = document.createElement('button');
+      b.setAttribute('role', 'menuitem');
+      b.dataset.to = o.to;
+      b.append(o.label);
+      if (o.note) { const n = document.createElement('span'); n.className = 'menu-note'; n.textContent = o.note; b.append(n); }
+      return b;
+    }));
+    placePopover(el.convertMenu, el.fileConvertBtn);
+    el.convertMenu.querySelector('button').focus();
+  }
+
+  function closeConvertMenu() { el.convertMenu.classList.add('hidden'); }
+
+  let converting = false;
+  async function convertCurrent(to) {
+    closeConvertMenu();
+    const note = state.current;
+    if (!note || !note.filePath || converting) return;
+    converting = true;
+    el.fileConvertBtn.disabled = true;
+    try {
+      await flushSave(); // a text file converts what is on disk, so unsaved typing goes there first
+      toast('Converting…');
+      const r = await api.files.convert(note.id, to);
+      if (!r.ok) { toast('Could not convert: ' + r.error); return; }
+      const name = r.filePath.split(/[\\/]/).pop();
+      toast('Saved ' + name + ' next to the original.' + (r.warning ? ' ' + r.warning : ''), { label: 'Open', run: () => openFiles([r.filePath]) });
+    } catch (err) {
+      toast('Could not convert: ' + ipcErrorText(err));
+    } finally {
+      converting = false;
+      el.fileConvertBtn.disabled = false;
     }
   }
 
@@ -3076,6 +3141,7 @@
       if (inDialog) return; // dialog handles it
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
+      if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.fileConvertBtn.focus(); return; }
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) { e.preventDefault(); closeAllBookMenus(); return; }
@@ -3154,6 +3220,8 @@
     el.newNoteBtn.addEventListener('click', newNote);
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
+    el.fileConvertBtn.addEventListener('click', () => { if (el.convertMenu.classList.contains('hidden')) openConvertMenu(); else closeConvertMenu(); });
+    el.convertMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-to]'); if (b) convertCurrent(b.dataset.to); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
     el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
     el.agentFilesBtn.addEventListener('click', addAgentFiles);
@@ -3304,6 +3372,7 @@
       if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
       if ((!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) && !el.pageMenu.contains(e.target) && !el.bookMenu.contains(e.target) && !el.bookName.contains(e.target)) closeAllBookMenus();
       if (!el.shareMenu.classList.contains('hidden') && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
+      if (!el.convertMenu.classList.contains('hidden') && !el.convertMenu.contains(e.target) && !el.fileConvertBtn.contains(e.target)) closeConvertMenu();
       if (!el.lockMenu.classList.contains('hidden') && !el.lockMenu.contains(e.target) && !el.lockBtn.contains(e.target)) el.lockMenu.classList.add('hidden');
     });
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level

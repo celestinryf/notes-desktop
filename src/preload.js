@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('notesApi', {
     openExternal: invoke('files:openExternal'),
     pdfUrl: invoke('files:pdfUrl'),
     docxBytes: invoke('files:docxBytes'),
+    convertOptions: invoke('files:convertOptions'),
+    convert: invoke('files:convert'),
+    asMarkdown: invoke('files:asMarkdown'),
     // Drag-and-drop gives File objects; this turns them into real paths without exposing Node to the page.
     pathFor: (file) => { try { return webUtils.getPathForFile(file); } catch (_) { return null; } },
   },

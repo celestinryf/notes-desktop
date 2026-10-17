@@ -157,6 +157,7 @@
               <button class="tool-btn" id="fileRevealBtn" title="Show in Explorer">Reveal</button>
               <button class="tool-btn" id="fileOpenBtn" title="Open with the default app">Open with…</button>
               <button class="tool-btn" id="fileReloadBtn" title="Re-read from disk">Reload</button>
+              <button class="tool-btn" id="fileConvertBtn" title="Save a copy in another format, next to this file" aria-haspopup="menu">Convert to…</button>
             </div>
             <div class="file-banner hidden" id="fileBanner"></div>
             <form class="lock-screen hidden" id="lockScreen" aria-label="Locked note">
@@ -476,6 +477,7 @@
       <button role="menuitem" data-action="live-join">Join a live share…</button>
       <button role="menuitem" data-action="live-stop" id="shareLiveStop" class="danger">Stop live share</button>
     </div>
+    <div class="popover convert-menu hidden" id="convertMenu" role="menu" aria-label="Convert to"></div>
     <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
       <button role="menuitem" data-action="relock">Lock now</button>
       <button role="menuitem" data-action="remove" class="danger">Remove lock…</button>

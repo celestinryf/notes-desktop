@@ -267,6 +267,8 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 }
 .popover button:hover { background: var(--bg-sunken); }
 .popover button.danger:hover { background: var(--ember); color: var(--cream); }
+.convert-menu { max-width: 340px; }
+.convert-menu .menu-note { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 400; color: var(--fg-muted); white-space: normal; }
 
 .nav.tags { overflow-y: auto; flex: 1; min-height: 0; }
 .nav.tags .nav-item { font-weight: 400; }
@@ -406,6 +408,8 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .editor-column.align-center { margin: 0 auto; }
 .editor-column.align-right { margin: 0 0 0 auto; }
 .editor-column.full-width { max-width: none; }
+/* A PDF or Word document is a page of its own; it gets the whole pane, whatever the writing width is. */
+.editor-column.shows-document { max-width: none; margin: 0; }
 
 .title-input {
   padding: 18px 0 4px;

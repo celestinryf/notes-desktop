@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const zlib = require('zlib');
 
 const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'rst', 'adoc', 'org',
   'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'csv', 'tsv', 'log',
@@ -80,12 +81,62 @@ function detectEol(filePath) {
   } catch (_) { return '\n'; }
 }
 
+const MAX_DOCX_BYTES = 50 * 1024 * 1024;
+const MAX_ZIP_UNPACKED = 100 * 1024 * 1024; // what the viewer parses on the page's own thread
+const MAX_ZIP_ENTRIES = 20000;
+const inflateRaw = (buf, opts) => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
+const zipError = (msg) => Object.assign(new Error(msg), { code: 'EZIP' });
+const TOO_BIG_UNPACKED = 'This Word document unpacks to more than 100 MB, so Notes will not open it.';
+
+// A Word document is a zip. A crafted one can unpack to gigabytes from a few kilobytes and hang the app, and its
+// directory can lie about sizes, so every entry is really inflated here (on the thread pool, capped) before any
+// library is allowed to open it.
+async function assertSafeZip(buf) {
+  let eocd = -1;
+  for (let i = buf.length - 22, min = Math.max(0, buf.length - 22 - 65535); i >= min; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw zipError('This is not a valid Word document (no zip directory).');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  if (count === 0xffff || p === 0xffffffff) throw zipError('This Word document uses a zip format Notes does not open (zip64).');
+  if (count > MAX_ZIP_ENTRIES) throw zipError('This Word document has too many parts to open safely.');
+  let total = 0;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw zipError('This Word document is damaged (bad zip directory).');
+    const method = buf.readUInt16LE(p + 10);
+    const packed = buf.readUInt32LE(p + 20);
+    const local = buf.readUInt32LE(p + 42);
+    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw zipError('This Word document is damaged (bad zip entry).');
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    if (start + packed > buf.length) throw zipError('This Word document is damaged (truncated).');
+    if (method === 0) total += packed;
+    else if (method === 8) {
+      try { total += (await inflateRaw(buf.subarray(start, start + packed), { maxOutputLength: MAX_ZIP_UNPACKED - total + 1 })).length; }
+      catch (err) {
+        if (err.code === 'ERR_BUFFER_TOO_LARGE' || err instanceof RangeError) throw zipError(TOO_BIG_UNPACKED);
+        throw zipError('This Word document is damaged (' + err.message + ').');
+      }
+    } else throw zipError('This Word document uses a compression Notes does not open.');
+    if (total > MAX_ZIP_UNPACKED) throw zipError(TOO_BIG_UNPACKED);
+  }
+}
+
+// The bytes of a Word document, checked for size and for zip bombs. Everything that opens a .docx goes through here.
+async function readDocxBuffer(filePath) {
+  if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This Word document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
+  const buf = fs.readFileSync(filePath);
+  await assertSafeZip(buf);
+  return buf;
+}
+
 // The plain text of a Word document, kept as the note's body for search, the list snippet and links. The document
 // itself is shown from its own bytes (files:docxBytes), never from this text.
 async function readDocxText(filePath) {
   const mammoth = require('mammoth');
-  const result = await mammoth.extractRawText({ path: filePath });
   const stat = fs.statSync(filePath);
+  const result = await mammoth.extractRawText({ buffer: await readDocxBuffer(filePath) });
   return { body: String(result.value || '').replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
 }
 
@@ -163,4 +214,4 @@ function safeList(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocxBuffer, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
