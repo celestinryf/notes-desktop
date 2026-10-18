@@ -1449,11 +1449,17 @@ test('writing column: alignment and width settings move and size the block', asy
     paneLeft: document.querySelector('.editor-scroll').getBoundingClientRect().left, paneWidth: document.querySelector('.editor-scroll').clientWidth, maxWidth: cs.maxWidth };
   });
   const before = await col();
-  assert.match(before.cls, /align-left/);
-  assert.equal(before.maxWidth, '760px');
+  assert.match(before.cls, /align-center/);
+  assert.match(before.cls, /full-width/);
+  assert.equal(before.maxWidth, 'none');
+  assert.ok(Math.abs(before.width - before.paneWidth) < 2, 'fills the pane: ' + before.width + ' vs ' + before.paneWidth);
 
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
+  await page.uncheck('#editorFullWidthInput');
+  await waitFor('a width persisted', () => readNotes().settings.editorWidth === 760);
+  assert.equal((await col()).maxWidth, '760px');
   await page.click('#alignSeg button[data-align="center"]');
   await waitFor('center persisted', () => readNotes().settings.editorAlign === 'center');
   const centered = await col();
@@ -1476,9 +1482,8 @@ test('writing column: alignment and width settings move and size the block', asy
   assert.match((await col()).cls, /full-width/);
   assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
 
-  await page.uncheck('#editorFullWidthInput');
-  await page.click('#alignSeg button[data-align="left"]');
-  await waitFor('restored', () => readNotes().settings.editorAlign === 'left' && readNotes().settings.editorWidth > 0);
+  await page.click('#alignSeg button[data-align="center"]');
+  await waitFor('restored', () => readNotes().settings.editorAlign === 'center' && readNotes().settings.editorWidth === 0);
   await page.click('#closeSettingsBtn');
   await waitForDom(() => !document.getElementById('settingsDialog').open);
 });

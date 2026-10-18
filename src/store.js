@@ -24,8 +24,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   listWidth: H.PANE_LIMITS.listWidth.def,
   expandedFolders: [],      // folder ids whose children are shown in the sidebar
   editorMode: 'rendered',   // rendered | source
-  editorAlign: 'left',      // left | center | right: where the writing column sits in the editor pane
-  editorWidth: 760,         // max width of the writing column in px; 0 means full width
+  editorAlign: 'center',    // left | center | right: where the writing column sits in the editor pane
+  editorWidth: 0,           // max width of the writing column in px; 0 means full width
+  columnLayout: 2,          // 2: the defaults above; settings saved before had 760px, left, written out as if chosen
   gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
   gitRemote: '',            // optional remote URL to push to after each commit
   ttsVoice: '',             // speechSynthesis voice name; '' = system default
@@ -152,8 +153,14 @@ function sanitizeSettings(input) {
   s.listWidth = H.clampPane('listWidth', s.listWidth);
   s.expandedFolders = Array.isArray(s.expandedFolders) ? s.expandedFolders.filter((x) => typeof x === 'string').slice(0, 5000) : [];
   s.editorMode = s.editorMode === 'source' ? 'source' : 'rendered';
-  s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : 'left';
+  s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : DEFAULT_SETTINGS.editorAlign;
   s.editorWidth = clampEditorWidth(s.editorWidth);
+  // Every save wrote the old defaults (760px, left) whether or not they were picked, so those move to the new ones once.
+  if (src.columnLayout !== 2 && s.editorWidth === 760 && s.editorAlign === 'left') {
+    s.editorWidth = DEFAULT_SETTINGS.editorWidth;
+    s.editorAlign = DEFAULT_SETTINGS.editorAlign;
+  }
+  s.columnLayout = 2;
   s.gitEnabled = !!s.gitEnabled;
   s.gitRemote = typeof s.gitRemote === 'string' ? s.gitRemote.trim().slice(0, 500) : '';
   s.ttsVoice = typeof s.ttsVoice === 'string' ? s.ttsVoice.slice(0, 200) : '';
