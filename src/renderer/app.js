@@ -1072,8 +1072,8 @@
     titlesLoading = true;
     let gone = [];
     try {
-      const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => null)));
-      notes.forEach((n, i) => { if (n) tabs.titles.set(ids[i], H.deriveTitle(n)); else gone.push(ids[i]); });
+      const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => undefined))); // undefined: could not ask
+      notes.forEach((n, i) => { if (n) tabs.titles.set(ids[i], H.deriveTitle(n)); else if (n === null) gone.push(ids[i]); });
     } finally { titlesLoading = false; }
     // A note deleted while its tab was in the background: the tab goes.
     gone = gone.filter((id) => id !== state.currentId);
@@ -1112,8 +1112,9 @@
         left: { ids: openIds(), current: state.currentId },
         right: { ids: tabs.split ? tabs.peerIds.slice() : [], current: tabs.split ? tabs.peerCurrent : null },
       };
+      if (JSON.stringify(panes) === JSON.stringify(state.settings.panes)) return;
       updateSettings({ panes }).catch(() => {}); // only the layout; losing one write costs nothing
-    }, 400);
+    }, 1500);
   }
 
   // Runs tab work in the same queue as note switches, so a close and a switch never interleave their saves.
@@ -1231,6 +1232,8 @@
     f.title = 'Right side';
     f.src = 'index.html?pane=right';
     tabs.frame = f;
+    let loads = 0;
+    f.addEventListener('load', () => { if (++loads > 1 && tabs.frame === f) { dropFrame(); toast('The right side left its page, so it was closed.'); } });
     applyRatio();
     el.editorPane.classList.add('is-split');
     el.splitDivider.classList.remove('hidden');
@@ -1245,6 +1248,10 @@
     if (GUEST || !tabs.split) return;
     if (!(await flushPeer({ leave: true }))) return; // the right side kept an unsaved document open
     if (!tabs.split) return;
+    dropFrame();
+  }
+
+  function dropFrame() {
     tabs.frame.remove();
     tabs.frame = null;
     tabs.split = false;
@@ -1276,8 +1283,11 @@
     if (GUEST || !tabs.split || !tabs.peerReady) return true;
     const leave = !!(opts && opts.leave);
     // Leaving may wait for the person to answer a question about an unsaved document.
-    const reply = await askPeer({ type: 'flush', leave }, leave ? 10 * 60 * 1000 : 700);
-    return !reply || reply.ok !== false;
+    const reply = await askPeer({ type: 'flush', leave }, leave ? 10 * 60 * 1000 : 5000);
+    // Leaving needs a yes: no answer means the right side's work is not known to be written. A plain flush (hide,
+    // quit) must never hold the window, so it gives up after the time main allows anyway.
+    if (leave) return !!(reply && reply.ok);
+    return true;
   }
 
   // Moves a note that is open on the other side to this one: that side closes its tab (writing it) first.
@@ -1308,7 +1318,7 @@
         await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
         return;
       case 'changed':
-        await mainEvents.reloaded({ reason: 'pane' });
+        await onPeerWrite();
         return;
       case 'settings':
         applySettings(m.settings, { fromPeer: true });
@@ -1323,17 +1333,21 @@
         else if (mainEvents[m.name]) await mainEvents[m.name](m.arg);
         return;
       case 'flush': {
-        let ok = true;
+        let ok = false;
         try {
-          if (m.leave) ok = await inTurn(leaveNote);
-          else { await flushSave(); await retryPending(); }
-        } finally { toPeer({ type: 'reply', seq: m.seq, ok: ok !== false }); }
+          if (m.leave) ok = (await inTurn(leaveNote)) === true && !state.pending.size;
+          else { await flushSave(); await retryPending(); ok = true; }
+        } finally { toPeer({ type: 'reply', seq: m.seq, ok }); }
+        if (m.leave && !ok && state.pending.size) toast('Some text here could not be saved yet, so this side stays open. It is retried; try again in a moment.');
         return;
       }
       case 'release': {
         const i = tabs.ids.indexOf(m.id);
         if (i >= 0) await closeTab(i);
-        toPeer({ type: 'reply', seq: m.seq, ok: !tabs.ids.includes(m.id) });
+        // Text of that note kept for a retry lives here: the other side must not open the note over it.
+        const ok = !tabs.ids.includes(m.id) && !state.pending.has(m.id);
+        if (!ok && state.pending.has(m.id)) toast('That note has text that could not be saved yet; it stays here until it is.');
+        toPeer({ type: 'reply', seq: m.seq, ok });
         return;
       }
       case 'reply': { const wait = peerWaits.get(m.seq); if (wait) wait(m); return; }
@@ -1342,6 +1356,14 @@
       case 'drag': tabs.peerDrag = m.id || null; return;
       default: return;
     }
+  }
+
+  async function onPeerWrite() {
+    if (!GUEST) await refresh({ keepEditor: true }); // the right side has no list to keep current
+    tabs.titles.clear();
+    renderTabs();
+    const id = state.currentId;
+    if (id && !state.dirty && !(await api.notes.get(id)) && state.currentId === id) { clearEditor(); if (!GUEST) await refresh(); }
   }
 
   // Shortcuts pressed on the right side that belong to the list or the whole window.
@@ -4325,6 +4347,8 @@
     fromMain('relocked', async (ids) => {
       // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
       for (const id of ids) state.pending.delete(id);
+      for (const id of ids) tabs.titles.delete(id); // a tab title can be the first line of the unlocked text
+      renderTabs();
       if (readerOpen()) closeReader(); // it may show pages that were unlocked a moment ago
       if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
       refresh({ keepEditor: true });
@@ -4549,7 +4573,8 @@
       }
     });
     api.on.newNote(newNote);
-    api.on.flush(async () => { try { await flushSave(); await retryPending(); await flushPeer(); } finally { api.app.flushDone(); } });
+    // Both sides write at once; main stops waiting after its own limit (longer on quit, for PDF and Word saves).
+    api.on.flush(async () => { try { await Promise.all([flushSave().then(retryPending), flushPeer()]); } finally { api.app.flushDone(); } });
     fromMain('reloaded', async (info) => {
       const reason = info && info.reason;
       await refresh({ keepEditor: true });
