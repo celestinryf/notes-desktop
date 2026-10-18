@@ -77,6 +77,14 @@
 
     <!-- Editor -->
     <section class="editor-pane" id="editorPane" aria-label="Editor">
+      <div class="pane-main" id="paneMain">
+      <div class="tab-bar" id="tabBar">
+        <div class="tabs" id="tabList" role="tablist" aria-label="Open notes"></div>
+        <button class="tool-btn tab-add" id="tabAddBtn" title="New tab (Ctrl+T). Ctrl+click a note to open it in a new tab." aria-label="New tab">+</button>
+        <span class="spacer"></span>
+        <button class="tool-btn" id="splitViewBtn" title="Split: open a second side to the right">◫ Split</button>
+        <button class="tool-btn hidden" id="paneCloseBtn" title="Close this side and its tabs" aria-label="Close this side">✕ Close side</button>
+      </div>
       <div class="editor-empty" id="editorEmpty">
         <div class="editor-empty-card">
           <p class="editor-empty-title">Pick a note, or start a new one.</p>
@@ -276,6 +284,8 @@
           <span class="status-right" id="statusSaved">Saved</span>
         </div>
       </div>
+      </div>
+      <div class="split-divider hidden" id="splitDivider" title="Drag to resize. Double-click to make both sides equal."></div>
     </section>
 
     <!-- Settings dialog -->

@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   editorAlign: 'center',    // left | center | right: where the writing column sits in the editor pane
   editorWidth: 0,           // max width of the writing column in px; 0 means full width
   columnLayout: 2,          // 2: the defaults above; settings saved before had 760px, left, written out as if chosen
+  panes: null,              // open tabs on each side of the editor and the split; see sanitizePanes
   gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
   gitRemote: '',            // optional remote URL to push to after each commit
   ttsVoice: '',             // speechSynthesis voice name; '' = system default
@@ -136,6 +137,31 @@ function clampFontSize(n) {
   return Math.min(28, Math.max(12, Math.round(v)));
 }
 
+const TABS_MAX = 50;
+
+// The editor's tabs: { split, ratio (left side's share), active ('left' | 'right'), left, right }, each side
+// { ids: note ids in tab order, current: the id shown }. Unknown ids are dropped when a tab is opened.
+function sanitizePanes(raw) {
+  const p = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const side = (v) => {
+    const o = v && typeof v === 'object' ? v : {};
+    const ids = Array.isArray(o.ids) ? Array.from(new Set(o.ids.filter((x) => typeof x === 'string' && x && x.length <= 100))).slice(0, TABS_MAX) : [];
+    return { ids, current: ids.includes(o.current) ? o.current : null };
+  };
+  const left = side(p.left);
+  const right = side(p.right);
+  right.ids = right.ids.filter((id) => !left.ids.includes(id)); // a note is open on one side only
+  if (!right.ids.includes(right.current)) right.current = null;
+  const ratio = Number(p.ratio);
+  return {
+    split: !!p.split,
+    ratio: Number.isFinite(ratio) ? Math.min(0.8, Math.max(0.2, Math.round(ratio * 1000) / 1000)) : 0.5,
+    active: p.split && p.active === 'right' ? 'right' : 'left',
+    left,
+    right: p.split ? right : { ids: [], current: null },
+  };
+}
+
 function sanitizeSettings(input) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const s = Object.assign({}, DEFAULT_SETTINGS, src);
@@ -161,6 +187,7 @@ function sanitizeSettings(input) {
     s.editorAlign = DEFAULT_SETTINGS.editorAlign;
   }
   s.columnLayout = 2;
+  s.panes = s.panes == null ? null : sanitizePanes(s.panes);
   s.gitEnabled = !!s.gitEnabled;
   s.gitRemote = typeof s.gitRemote === 'string' ? s.gitRemote.trim().slice(0, 500) : '';
   s.ttsVoice = typeof s.ttsVoice === 'string' ? s.ttsVoice.slice(0, 200) : '';
