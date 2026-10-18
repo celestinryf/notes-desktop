@@ -394,7 +394,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .tool-btn:active { transform: scale(0.98); }
 .tool-btn.is-on { background: var(--accent); color: var(--accent-ink); border-color: var(--line); box-shadow: 2px 2px 0 var(--shadow); }
 .tool-danger:hover { background: var(--ember); color: var(--cream); border-color: var(--line); }
-/* The writing column scrolls as one block and can sit left, center, or right at a chosen width. */
+/* The writing column scrolls as one block and fills the pane, or sits left, center, or right at a chosen width. */
 .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .editor-column {
   --editor-col-width: 760px;
