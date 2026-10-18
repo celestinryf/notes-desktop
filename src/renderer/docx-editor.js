@@ -5,13 +5,19 @@
    page cannot be changed. Each editable paragraph is found again on the page through a bookmark added to a display
    copy of the document, and checked to show exactly the text the file holds. Saving compares what is shown now with
    what was first shown, character by character, and sends main the span of paragraphs from the first to the last
-   changed one in each chain (unchanged ones inside it are copied as they were). */
+   changed one in each chain (unchanged ones inside it are copied as they were).
+
+   A page break is shown as the end of a page: docx-preview ends the page after the paragraph holding it, and shows
+   the rest of that paragraph (if any) as the first paragraph of the next page. The break itself is not on the page,
+   so it cannot be deleted or moved off its page boundary: the page body (article) before it is marked "ends with a
+   page break", or the one after it "continues the paragraph before". */
 (function () {
   'use strict';
   const DV = window.DocxView;
   if (!DV || !DV.Ooxml || !DV.JSZip) return;
   const X = DV.Ooxml;
   const TAB_SHOWN = ' '; // docx-preview shows a tab as an em space
+  const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false }; // a page break, as a character of a paragraph's text
   // What the person may do in the text, by input type. Anything else (pasting with formatting, dragging text, lists,
   // links...) is refused or, for pasting, done as plain text.
   const ALLOWED = new Set(['insertText', 'insertReplacementText', 'insertCompositionText', 'insertParagraph', 'insertLineBreak',
@@ -31,6 +37,8 @@
     // every save and every opening, so an element an Undo brings back from before is not taken at its old word.
     let gen = 0;
     const SRC = 'data-notes-src';
+    // On the element showing the rest of a paragraph after its page break (the browser copies it when Enter splits it).
+    const REST = 'data-notes-rest';
     const map = {
       get(p) {
         const v = p.getAttribute(SRC);
@@ -77,7 +85,8 @@
           if (n.nodeType === 3) {
             const fmt = fmtOf(n.parentElement);
             // By UTF-16 code unit, as the file's text is read (an emoji counts as two, on both sides).
-            for (let k = 0; k < n.data.length; k++) out.push({ ch: n.data[k] === TAB_SHOWN ? '\t' : n.data[k], fmt, br: false });
+            // A form feed in the text is not a page break (those are not shown as text): it is not counted.
+            for (let k = 0; k < n.data.length; k++) if (n.data[k] !== X.PAGE_BREAK) out.push({ ch: n.data[k] === TAB_SHOWN ? '\t' : n.data[k], fmt, br: false });
           } else if (n.nodeType === 1) {
             if (n.tagName === 'BR') out.push({ ch: '\n', fmt: fmtOf(n.parentElement), br: true });
             else walk(n);
@@ -90,14 +99,14 @@
     }
     const textOf = (chars) => chars.map((c) => c.ch).join('');
 
-    // The editable paragraphs shown, in order: mapped ones, and ones the browser made by splitting (Enter).
-    function shownParagraphs() {
-      const list = [];
-      for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
-        for (const p of art.querySelectorAll('p')) if (!p.closest('[contenteditable="false"]')) list.push(p);
-      }
-      return list;
+    // The editable paragraphs shown, in order: mapped ones, and ones the browser made by splitting (Enter); by page
+    // body ([{ art, list }]) or all together.
+    function shownByPage() {
+      return [...doc.querySelectorAll('article[contenteditable="true"]')].map((art) => ({
+        art, list: [...art.querySelectorAll('p')].filter((p) => !p.closest('[contenteditable="false"]')),
+      }));
     }
+    const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
     // Which paragraph of the file each shown one belongs to: its own, or (made by Enter) the one before it.
     function sources(list) {
       const out = new Map();
@@ -151,15 +160,24 @@
     // Finds the editable paragraphs on the page, makes them (and only them) editable, and listens.
     function attach() {
       let editable = 0;
-      for (const para of scan.paragraphs) {
-        if (!para.editable) continue;
-        const mark = doc.getElementById(X.MARK + para.index);
+      const pages = [...doc.querySelectorAll('section.docx > article')];
+      const take = (id) => {
+        const mark = doc.getElementById(id);
         const p = mark && mark.closest('p');
         if (mark) mark.remove();
-        // A paragraph shown in pieces (over a page break), or not as the file has it, stays as it is.
-        if (!p || map.has(p) || textOf(charsOf(p)) !== para.text) continue;
+        return p;
+      };
+      for (const para of scan.paragraphs) {
+        if (!para.editable) continue;
+        const p = take(X.MARK + para.index);
+        const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
+        // A paragraph not shown as the file has it stays as it is.
+        const shown = p && !map.has(p) && shownAs(para, p, rest, pages);
+        if (!shown || textOf(shown.chars) !== para.text) continue;
         map.set(p, para.index);
-        baselines.set(para.index, { chars: charsOf(p).map((c) => c.fmt), empty: fmtOf(p) });
+        if (rest) { map.set(rest, para.index); rest.setAttribute(REST, ''); }
+        if (shown.mark) shown.mark();
+        baselines.set(para.index, { chars: shown.chars.map((c) => c.fmt), empty: fmtOf(p) });
         editable++;
       }
       // Paragraphs the page does not show as the file holds them are not edited, nor any change spanning them.
@@ -181,6 +199,18 @@
       doc.addEventListener('keydown', onKeydown, true);
       doc.defaultView.addEventListener('blur', () => { if (hooks.onBlur) hooks.onBlur(); });
       return { editable, readOnly };
+    }
+    // A paragraph as shown: { chars, mark } (mark records its page break on the page), or null when it is not shown
+    // whole. p: the element it starts in; rest: the one its text after a page break is in, if any.
+    function shownAs(para, p, rest, pages) {
+      if (!para.pageBreaks.length) return { chars: charsOf(p) };
+      if (para.pageBreaks.length > 1) return null; // docx-preview starts a new page at the first one only
+      const page = p.parentElement, k = pages.indexOf(page);
+      if (k < 0 || page.lastElementChild !== p) return null;
+      if (!rest) return { chars: [...charsOf(p), BREAK], mark: () => { page.dataset.notesEnd = ''; } };
+      const next = pages[k + 1];
+      if (!next || rest.parentElement !== next || next.firstElementChild !== rest || map.has(rest)) return null;
+      return { chars: [...charsOf(p), BREAK, ...charsOf(rest)], mark: () => { next.dataset.notesJoin = ''; } };
     }
     function fix(container, holders) {
       for (const el of container.children) {
@@ -266,7 +296,7 @@
       const lines = text.replace(/\r\n?/g, '\n').split('\n');
       lines.forEach((line, k) => {
         if (k) doc.execCommand('insertParagraph');
-        if (line) doc.execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN));
+        if (line) doc.execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/\f/g, ''));
       });
     }
     function onKeydown(e) {
@@ -300,7 +330,31 @@
       for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
         for (const n of art.childNodes) if (n.nodeType === 3 && n.data.trim()) throw new Error('some text is outside any paragraph');
       }
-      const pieces = list.map((p) => ({ el: p, source: src.get(p), chars: charsOf(p) }));
+      // One piece per paragraph to write, with the page breaks put back where the page shows them.
+      const pieces = [];
+      const lost = () => new Error('a page break could not be placed');
+      // A paragraph already holding a break gets no second one (the page shows only one per paragraph): the break
+      // becomes a paragraph of its own, as Ctrl+Enter makes in Word.
+      const endWithBreak = (last) => {
+        if (last.chars.includes(BREAK)) pieces.push({ els: [], source: last.source, chars: [BREAK] });
+        else last.chars.push(BREAK);
+      };
+      for (const { art, list: here } of shownByPage()) {
+        const join = 'notesJoin' in art.dataset, end = 'notesEnd' in art.dataset;
+        if ((join || end) && !here.length) throw lost();
+        here.forEach((p, k) => {
+          const chars = charsOf(p);
+          const prev = pieces[pieces.length - 1];
+          if (k === 0 && join && !prev) throw lost();
+          // The rest of the paragraph continues it. If another paragraph took its place (its rest deleted, then
+          // joined up), or the paragraph before already holds a break, the break ends the previous page's paragraph and
+          // this one stays a paragraph of its own.
+          if (k === 0 && join && p.hasAttribute(REST) && !prev.chars.includes(BREAK)) { prev.chars.push(BREAK, ...chars); prev.els.push(p); return; }
+          if (k === 0 && join) endWithBreak(prev);
+          pieces.push({ els: [p], source: src.get(p), chars });
+        });
+        if (end) endWithBreak(pieces[pieces.length - 1]);
+      }
       if (pieces.some((pc) => pc.source === undefined)) throw new Error('a paragraph could not be matched to the file');
       const bySource = new Map();
       for (const pc of pieces) { if (!bySource.has(pc.source)) bySource.set(pc.source, []); bySource.get(pc.source).push(pc); }
@@ -357,7 +411,7 @@
           for (const pc of g.pieces) {
             const para = next.paragraphs[ni];
             if (!para || !para.editable || para.text !== textOf(pc.chars)) return false;
-            nextMap.set(pc.el, ni);
+            for (const el of pc.els) nextMap.set(el, ni);
             nextBase.set(ni, { chars: pc.chars.map((c) => c.fmt), empty: (baselines.get(pc.source) || {}).empty || {} });
             ni++;
           }

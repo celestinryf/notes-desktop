@@ -2463,7 +2463,7 @@
   }
 
   function docxBannerFor(res) {
-    const fixed = res.readOnly ? ' ' + res.readOnly + (res.readOnly === 1 ? ' paragraph has' : ' paragraphs have') + ' pictures, links, tracked changes, page breaks or similar, and cannot be edited here; use "Open with…" for those.' : '';
+    const fixed = res.readOnly ? ' ' + res.readOnly + (res.readOnly === 1 ? ' paragraph has' : ' paragraphs have') + ' pictures, links, tracked changes or similar, and cannot be edited here; use "Open with…" for those.' : '';
     if (res.editable) return 'Click into the text to edit it. Ctrl+B, Ctrl+I and Ctrl+U (or the buttons) set bold, italic and underline. Save (Ctrl+S) writes your changes into the document, and the original is backed up first.' + fixed;
     return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
   }

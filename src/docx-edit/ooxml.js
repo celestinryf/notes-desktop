@@ -127,9 +127,20 @@ function checkRPr(node, W) {
   }
 }
 
-// A run: { kind: 'run', rPr (its XML, or ''), xml, text }, tabs as '\t' and line breaks as '\n'.
+// What a plain break element (no attribute but its type) stands for in the text: '\n' for a line break, '\f' for a
+// page break, or null for any other (a column break, or one with other attributes).
+const PAGE_BREAK = '\f';
+function breakChar(attrs, W) {
+  const m = new RegExp('^\\s*(?:' + W + ':type\\s*=\\s*"(textWrapping|page)"\\s*)?$').exec(attrs);
+  return m ? (m[1] === 'page' ? PAGE_BREAK : '\n') : null;
+}
+
+// A run: { kind: 'run', rPr (its XML, or ''), xml, text, pageBreaks }, tabs as '\t', line breaks as '\n' and page
+// breaks as '\f' (a character a document cannot hold as text). pageBreaks: [{ start, end, rPr }], where each page
+// break element is in xml, for the display copy.
 function readRun(xml, node, W) {
   let rPr = '', text = '';
+  const pageBreaks = [];
   for (const c of node.children) {
     if (!c.name) {
       if (c.type === 'text' && !xml.slice(c.start, c.end).trim()) continue;
@@ -147,16 +158,19 @@ function readRun(xml, node, W) {
         text += decodeText(xml.slice(t.start, t.end));
       }
     } else if (n === 'tab' && c.empty) text += '\t';
-    else if (n === 'br' && c.empty && /^\s*$/.test(c.attrs.replace(new RegExp('\\s' + W + ':type\\s*=\\s*"textWrapping"'), ''))) text += '\n';
-    else if (n === 'lastRenderedPageBreak') continue;
-    else readOnly(n === 'br' ? 'a page or column break' : reasonFor(c.name));
+    else if (n === 'br' && c.empty && breakChar(c.attrs, W)) {
+      const ch = breakChar(c.attrs, W);
+      text += ch;
+      if (ch === PAGE_BREAK) pageBreaks.push({ start: c.start, end: c.end, rPr });
+    } else if (n === 'lastRenderedPageBreak') continue;
+    else readOnly(n === 'br' ? 'a column break' : reasonFor(c.name));
   }
-  return { kind: 'run', rPr, xml: xml.slice(node.start, node.end), text };
+  return { kind: 'run', rPr, xml: xml.slice(node.start, node.end), text, pageBreaks };
 }
 
 // The editable model of the paragraph node, or throws ReadOnly.
 function readParagraph(xml, node, W) {
-  const p = { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], contentStart: node.openEnd };
+  const p = { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], pageBreaks: [], contentStart: node.openEnd };
   for (const c of node.children) {
     if (!c.name) {
       if (c.type === 'text' && !xml.slice(c.start, c.end).trim()) continue;
@@ -179,7 +193,11 @@ function readParagraph(xml, node, W) {
           p.pPrNoSect = xml.slice(c.start, k.start) + xml.slice(k.end, c.end);
         }
       }
-    } else if (n === 'r') p.items.push(readRun(xml, c, W));
+    } else if (n === 'r') {
+      const run = readRun(xml, c, W);
+      p.items.push(run);
+      p.pageBreaks.push(...run.pageBreaks);
+    }
     else if (n === 'proofErr') continue; // a spelling mark Word recomputes
     else if (n === 'bookmarkStart' || n === 'bookmarkEnd' || n === 'commentRangeStart' || n === 'commentRangeEnd') p.items.push({ kind: 'marker', xml: xml.slice(c.start, c.end) });
     else readOnly(reasonFor(c.name));
@@ -189,7 +207,7 @@ function readParagraph(xml, node, W) {
 
 /* All paragraphs of the document part, in order:
    { index, start, end, editable, reason, parentStart, openTag, selfClosing, pPr, pPrNoSect, hasSect, markRPr,
-     items, text, chain }
+     items, pageBreaks, text, chain }
    items: runs and markers (see readRun); text: the runs' text joined. chain: paragraphs with the same chain number
    are siblings next to each other with no section break, so text may move between them (joining or splitting).
    Returns { prefix, paragraphs } (prefix null when the part is not WordprocessingML). */
@@ -225,7 +243,7 @@ function scanDocument(xml) {
     let model = null;
     try {
       if (!para.placeOk) readOnly('a text box or content control');
-      model = para.selfClosing ? { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], contentStart: para.end } : readParagraph(xml, parseNodes(xml, para.start, para.end)[0], W);
+      model = para.selfClosing ? { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], pageBreaks: [], contentStart: para.end } : readParagraph(xml, parseNodes(xml, para.start, para.end)[0], W);
     } catch (err) {
       if (!(err instanceof ReadOnly)) throw err;
       para.editable = false;
@@ -297,12 +315,13 @@ function withFormatting(rPr, set, W) {
   return open + kids.map((k) => k.xml).join('') + close;
 }
 
-// The XML of a run with this text, tabs and line breaks as their own elements.
+// The XML of a run with this text, tabs, line breaks and page breaks as their own elements.
 function runXml(rPr, text, W) {
   let out = '<' + W + ':r>' + rPr;
-  for (const part of text.split(/([\t\n])/)) {
+  for (const part of text.split(/([\t\n\f])/)) {
     if (part === '\t') out += '<' + W + ':tab/>';
     else if (part === '\n') out += '<' + W + ':br/>';
+    else if (part === PAGE_BREAK) out += '<' + W + ':br ' + W + ':type="page"/>';
     else if (part) out += '<' + W + ':t xml:space="preserve">' + escapeText(part) + '</' + W + ':t>';
   }
   return out + '</' + W + ':r>';
@@ -470,15 +489,31 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   return out;
 }
 
-// A copy of xml for display only, with an empty bookmark named `${MARK}<index>` at the start of each editable
-// paragraph, so the shown paragraph can be found again (docx-preview shows a bookmark as <span id=name>).
+/* A copy of xml for display only, with an empty bookmark named `${MARK}<index>` at the start of each editable
+   paragraph, so the shown paragraph can be found again (docx-preview shows a bookmark as <span id=name>).
+   docx-preview starts a new page at a paragraph's first page break and shows the rest of the paragraph there as a
+   paragraph of its own, unless the break is the last thing in it. Where it will, a second bookmark
+   `${BREAK_MARK}<index>` right after the break marks where that rest begins. The break gets a run of its own there:
+   docx-preview moves the whole run holding a break to the next page, text before the break included. */
 const MARK = '_notesP';
+const BREAK_MARK = '_notesB';
+const bookmark = (W, id, name) => '<' + W + ':bookmarkStart ' + W + ':id="' + id + '" ' + W + ':name="' + name + '"/>';
+// Whether the paragraph's first page break is the last thing docx-preview sees in it (it skips spelling marks).
+function breakIsLast(xml, p, W) {
+  const e = (name) => W.replace(/\./g, '\\.') + ':' + name;
+  return new RegExp('^\\s*</' + e('r') + '>(?:\\s*<' + e('proofErr') + '\\b[^>]*/>)*\\s*</' + e('p') + '>$').test(xml.slice(p.pageBreaks[0].end, p.end));
+}
 function markForDisplay(xml, scan) {
   const W = scan.prefix;
   let out = xml;
   for (const p of [...scan.paragraphs].reverse()) {
     if (!p.editable) continue;
-    const mark = '<' + W + ':bookmarkStart ' + W + ':id="' + (900000000 + p.index) + '" ' + W + ':name="' + MARK + p.index + '"/>';
+    if (p.pageBreaks.length && !breakIsLast(xml, p, W)) {
+      const { start, end, rPr } = p.pageBreaks[0];
+      const cut = (between) => '</' + W + ':r>' + between + '<' + W + ':r>' + rPr;
+      out = out.slice(0, start) + cut('') + out.slice(start, end) + cut(bookmark(W, 910000000 + p.index, BREAK_MARK + p.index)) + out.slice(end);
+    }
+    const mark = bookmark(W, 900000000 + p.index, MARK + p.index);
     out = p.selfClosing
       ? out.slice(0, p.start) + '<' + W + ':p>' + mark + '</' + W + ':p>' + out.slice(p.end)
       : out.slice(0, p.contentStart) + mark + out.slice(p.contentStart);
@@ -545,4 +580,4 @@ function applyPatches(xml, patches) {
   return out;
 }
 
-module.exports = { MARK, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches };
+module.exports = { MARK, BREAK_MARK, PAGE_BREAK, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches };
