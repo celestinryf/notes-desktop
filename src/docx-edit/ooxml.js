@@ -135,12 +135,30 @@ function breakChar(attrs, W) {
   return m ? (m[1] === 'page' ? PAGE_BREAK : '\n') : null;
 }
 
-// A run: { kind: 'run', rPr (its XML, or ''), xml, text, pageBreaks }, tabs as '\t', line breaks as '\n' and page
-// breaks as '\f' (a character a document cannot hold as text). pageBreaks: [{ start, end, rPr }], where each page
-// break element is in xml, for the display copy.
+// A picture: one object replacement character in the text, written back as its <w:drawing> exactly as it was.
+// Only pictures (not charts, shapes or text boxes, which hold content of their own) are taken.
+const PICTURE = '\uFFFC';
+// A no-break space, as the browser writes some typed spaces.
+const NBSP = '\u00A0';
+// Whether text shown on the page is the file's text: the same, but for spaces the browser shows as no-break spaces.
+function sameShownText(fileText, shownText) {
+  if (fileText.length !== shownText.length) return false;
+  for (let k = 0; k < fileText.length; k++) if (fileText[k] !== shownText[k] && !(fileText[k] === ' ' && shownText[k] === NBSP)) return false;
+  return true;
+}
+const PICTURE_URI = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+function isPicture(drawingXml) {
+  return drawingXml.includes('uri="' + PICTURE_URI + '"') && !/<[\w.-]+:(?:txbxContent|p|tbl)[\s/>]/.test(drawingXml)
+    && (drawingXml.match(/<[\w.-]+:graphicData\b/g) || []).length === 1;
+}
+
+// A run: { kind: 'run', rPr (its XML, or ''), xml, text, pageBreaks, pictures }, tabs as '\t', line breaks as '\n',
+// page breaks as '\f' and pictures as '\uFFFC' (characters a document cannot hold as text). pageBreaks:
+// [{ start, end, rPr }], where each page break element is in xml, for the display copy. pictures: the XML of each
+// picture's <w:drawing>, in order.
 function readRun(xml, node, W) {
   let rPr = '', text = '';
-  const pageBreaks = [];
+  const pageBreaks = [], pictures = [];
   for (const c of node.children) {
     if (!c.name) {
       if (c.type === 'text' && !xml.slice(c.start, c.end).trim()) continue;
@@ -162,10 +180,13 @@ function readRun(xml, node, W) {
       const ch = breakChar(c.attrs, W);
       text += ch;
       if (ch === PAGE_BREAK) pageBreaks.push({ start: c.start, end: c.end, rPr });
+    } else if (n === 'drawing' && isPicture(xml.slice(c.start, c.end))) {
+      text += PICTURE;
+      pictures.push(xml.slice(c.start, c.end));
     } else if (n === 'lastRenderedPageBreak') continue;
-    else readOnly(n === 'br' ? 'a column break' : reasonFor(c.name));
+    else readOnly(n === 'br' ? 'a column break' : n === 'drawing' ? 'a chart, shape or text box' : reasonFor(c.name));
   }
-  return { kind: 'run', rPr, xml: xml.slice(node.start, node.end), text, pageBreaks };
+  return { kind: 'run', rPr, xml: xml.slice(node.start, node.end), text, pageBreaks, pictures };
 }
 
 // The editable model of the paragraph node, or throws ReadOnly.
@@ -315,13 +336,19 @@ function withFormatting(rPr, set, W) {
   return open + kids.map((k) => k.xml).join('') + close;
 }
 
-// The XML of a run with this text, tabs, line breaks and page breaks as their own elements.
-function runXml(rPr, text, W) {
+// The XML of a run with this text, tabs, line breaks, page breaks and pictures as their own elements. pictures: the
+// <w:drawing> XML for each picture character, in order.
+function runXml(rPr, text, W, pictures = []) {
   let out = '<' + W + ':r>' + rPr;
-  for (const part of text.split(/([\t\n\f])/)) {
+  let pic = 0;
+  for (const part of text.split(/([\t\n\f\uFFFC])/)) {
     if (part === '\t') out += '<' + W + ':tab/>';
     else if (part === '\n') out += '<' + W + ':br/>';
     else if (part === PAGE_BREAK) out += '<' + W + ':br ' + W + ':type="page"/>';
+    else if (part === PICTURE) {
+      if (typeof pictures[pic] !== 'string') throw new Error('a picture could not be placed');
+      out += pictures[pic++];
+    }
     else if (part) out += '<' + W + ':t xml:space="preserve">' + escapeText(part) + '</' + W + ':t>';
   }
   return out + '</' + W + ':r>';
@@ -372,8 +399,10 @@ function matchTokens(a, b, eq, limit = 2000) {
 const fmtKey = (f) => (f.b ? 'b' : '') + (f.i ? 'i' : '') + (f.u ? 'u' : '');
 
 /* The XML that replaces paragraphs first..last (indices into scan.paragraphs, one chain) given what is now shown:
-   pieces: [{ source: paragraph index, chars: [{ ch, fmt: { b, i, u } }] }] in order, each becoming one paragraph.
-   baselines: paragraph index -> { chars: [fmt per char of its text], empty: fmt } as first shown.
+   pieces: [{ source: paragraph index, chars: [{ ch, fmt: { b, i, u }, picture }] }] in order, each becoming one
+   paragraph; picture: which picture a picture character is (named as in baselines).
+   baselines: paragraph index -> { chars: [fmt per char of its text], pictures: [name per char, for pictures],
+   empty: fmt } as first shown. A picture is kept only where it has the same name; it is never added.
    A paragraph that came through unchanged is copied as it was; so is each untouched run of a changed one. */
 function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   const W = scan.prefix;
@@ -388,18 +417,38 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   for (const p of paras) {
     let pos = 0;
     firstToken.set(p.index, old.length);
+    const names = (baselines.get(p.index) || {}).pictures || [];
     for (const it of p.items) {
       if (it.kind === 'marker') { markerAt.push({ at: old.length, xml: it.xml, para: p.index }); continue; }
-      for (let c = 0; c < it.text.length; c++) old.push({ ch: it.text[c], para: p.index, pos: pos++, item: it, first: c === 0, last: c === it.text.length - 1 });
+      let pic = 0;
+      for (let c = 0; c < it.text.length; c++) {
+        const t = { ch: it.text[c], para: p.index, pos, item: it, first: c === 0, last: c === it.text.length - 1 };
+        if (t.ch === PICTURE) { t.picture = it.pictures[pic++]; t.name = names[pos]; }
+        old.push(t);
+        pos++;
+      }
     }
     old.push({ end: true, para: p.index });
   }
   const neu = [];
   for (const pc of pieces) {
-    for (const c of pc.chars) neu.push({ ch: c.ch, fmt: c.fmt, piece: pc });
+    for (const c of pc.chars) neu.push({ ch: c.ch, fmt: c.fmt, name: c.picture, piece: pc });
     neu.push({ end: true, piece: pc });
   }
-  const keep = matchTokens(old, neu, (x, y) => (x.end ? !!y.end : !y.end && x.ch === y.ch));
+  // The browser shows a space it would otherwise collapse (after a picture, at a line's end) as a no-break space; a
+  // no-break space shown where the file has a space is that space.
+  const same = (x, y) => (x.ch === y.ch || (x.ch === ' ' && y.ch === NBSP)) && (x.ch !== PICTURE || (x.name != null && x.name === y.name));
+  const keep = matchTokens(old, neu, (x, y) => (x.end ? !!y.end : !y.end && same(x, y)));
+  // Pictures are matched by name even where the diff gave up (too many changes): names are unique, and pictures
+  // cannot change order on the page, so this keeps the matches in order.
+  const used = new Set(keep.filter((o) => o >= 0));
+  const oldPicture = new Map();
+  old.forEach((t, o) => { if (t.ch === PICTURE && t.name != null && !used.has(o)) oldPicture.set(t.name, o); });
+  neu.forEach((t, j) => {
+    if (keep[j] >= 0 || t.ch !== PICTURE || !oldPicture.has(t.name)) return;
+    keep[j] = oldPicture.get(t.name);
+    oldPicture.delete(t.name);
+  });
 
   // Where each old token went in the new list (for the markers).
   const newIndexOf = new Array(old.length + 1).fill(-1);
@@ -429,7 +478,9 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
     for (let k = 0; k < pc.chars.length; k++, j++) {
       const o = keep[j];
       const t = o >= 0 ? old[o] : null;
-      chars.push({ ch: neu[j].ch, fmt: neu[j].fmt, from: t });
+      // A kept character is written as the file has it; a typed no-break space is a space (Notes has no way to type
+      // a real one: the browser makes them).
+      chars.push({ ch: t ? t.ch : neu[j].ch === NBSP ? ' ' : neu[j].ch, fmt: neu[j].fmt, from: t });
     }
     const endJ = j++; // the piece's end token
     // An added character takes the run (and the formatting as first shown) of the kept one before it, else after it.
@@ -479,7 +530,7 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
       if (whole) body += it.xml;
       else {
         const rPr = withFormatting(it ? it.rPr : src.markRPr, span[0].set, W);
-        body += runXml(rPr, span.map((c) => c.ch).join(''), W);
+        body += runXml(rPr, span.map((c) => c.ch).join(''), W, span.filter((c) => c.ch === PICTURE).map((c) => (c.from ? c.from.picture : null)));
       }
       k = e;
     }
@@ -538,15 +589,28 @@ function checkPatches(xml, scan, patches) {
     const nodes = parseNodes(p.xml, 0, p.xml.length);
     if (!nodes.length || nodes.some((n) => n.name !== W + ':p')) throw new Error('a change holds something other than paragraphs');
     // Each new paragraph must itself be one Notes could edit, with the properties of a paragraph it replaces.
+    // Pictures can be kept or removed, never added or changed: each one written must be one of the replaced
+    // paragraphs' pictures, byte for byte, and each of those is used at most once.
     const props = new Set([null]);
-    for (let i = first.index; i <= last.index; i++) { props.add(scan.paragraphs[i].pPr); props.add(scan.paragraphs[i].pPrNoSect); }
+    const pictures = new Map();
+    const picturesOf = (model) => model.items.flatMap((it) => it.pictures || []);
+    for (let i = first.index; i <= last.index; i++) {
+      const q = scan.paragraphs[i];
+      props.add(q.pPr);
+      props.add(q.pPrNoSect);
+      for (const x of picturesOf(q)) pictures.set(x, (pictures.get(x) || 0) + 1);
+    }
     for (const n of nodes) {
       let model;
-      try { model = n.empty ? { pPr: null } : readParagraph(p.xml, n, W); } catch (err) {
+      try { model = n.empty ? { pPr: null, items: [] } : readParagraph(p.xml, n, W); } catch (err) {
         if (err instanceof ReadOnly) throw new Error('a change holds ' + err.message);
         throw err;
       }
       if (!props.has(model.pPr)) throw new Error('a change alters paragraph properties');
+      for (const x of picturesOf(model)) {
+        if (!pictures.get(x)) throw new Error('a change adds or alters a picture');
+        pictures.set(x, pictures.get(x) - 1);
+      }
     }
   }
 }
@@ -580,4 +644,4 @@ function applyPatches(xml, patches) {
   return out;
 }
 
-module.exports = { MARK, BREAK_MARK, PAGE_BREAK, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches };
+module.exports = { MARK, BREAK_MARK, PAGE_BREAK, PICTURE, sameShownText, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches };

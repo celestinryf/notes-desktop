@@ -18,6 +18,13 @@
   const X = DV.Ooxml;
   const TAB_SHOWN = ' '; // docx-preview shows a tab as an em space
   const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false }; // a page break, as a character of a paragraph's text
+  const NOT_TEXT = new Set([X.PAGE_BREAK, X.PICTURE]);
+  // docx-preview shows a picture as a <div> (holding an <img>) inside the paragraph; nothing else in a paragraph
+  // Notes edits is a <div>. Each picture shown gets a name, so a save keeps each picture exactly where it is shown.
+  const PIC = 'data-notes-picture';
+  // On each line break that is text (the file's own, or typed with Shift+Enter), as opposed to one the browser adds
+  // to hold a line open.
+  const REAL_BR = 'data-notes-br';
   // What the person may do in the text, by input type. Anything else (pasting with formatting, dragging text, lists,
   // links...) is refused or, for pasting, done as plain text.
   const ALLOWED = new Set(['insertText', 'insertReplacementText', 'insertCompositionText', 'insertParagraph', 'insertLineBreak',
@@ -85,19 +92,37 @@
           if (n.nodeType === 3) {
             const fmt = fmtOf(n.parentElement);
             // By UTF-16 code unit, as the file's text is read (an emoji counts as two, on both sides).
-            // A form feed in the text is not a page break (those are not shown as text): it is not counted.
-            for (let k = 0; k < n.data.length; k++) if (n.data[k] !== X.PAGE_BREAK) out.push({ ch: n.data[k] === TAB_SHOWN ? '\t' : n.data[k], fmt, br: false });
+            // A form feed or object character in the text is not a page break or a picture (those are not shown as
+            // text): it is not counted.
+            for (let k = 0; k < n.data.length; k++) if (!NOT_TEXT.has(n.data[k])) out.push({ ch: n.data[k] === TAB_SHOWN ? '\t' : n.data[k], fmt, br: false });
           } else if (n.nodeType === 1) {
-            if (n.tagName === 'BR') out.push({ ch: '\n', fmt: fmtOf(n.parentElement), br: true });
+            if (n.tagName === 'BR') out.push({ ch: '\n', fmt: fmtOf(n.parentElement), br: true, real: n.hasAttribute(REAL_BR) });
+            else if (n.tagName === 'DIV') out.push({ ch: X.PICTURE, fmt: fmtOf(n.parentElement), br: false, picture: n.getAttribute(PIC) });
             else walk(n);
           }
         }
       };
       walk(p);
       if (out.length && out[out.length - 1].br) out.pop();
+      // Nor one the browser puts right before a picture to hold the line open (Enter or Shift+Enter before a picture):
+      // line breaks that are text (the file's own, or typed) are marked.
+      for (let k = out.length - 2; k >= 0; k--) if (out[k].br && !out[k].real && out[k + 1].ch === X.PICTURE) out.splice(k, 1);
       return out;
     }
     const textOf = (chars) => chars.map((c) => c.ch).join('');
+    // What a paragraph is compared with at the next save: per character its formatting and, for a picture, its name.
+    const baselineOf = (chars, empty) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
+
+    // Names the pictures shown in paragraph element p (the <div>s whose nearest <div> or <p> above is p) and makes
+    // each one a single block the caret steps over: it can be deleted, not edited inside.
+    let pictureSeq = 0;
+    function namePictures(p) {
+      for (const d of p.querySelectorAll('div')) {
+        if (d.parentElement.closest('div, p') !== p || d.hasAttribute(PIC)) continue;
+        d.setAttribute(PIC, String(++pictureSeq));
+        d.contentEditable = 'false';
+      }
+    }
 
     // The editable paragraphs shown, in order: mapped ones, and ones the browser made by splitting (Enter); by page
     // body ([{ art, list }]) or all together.
@@ -171,13 +196,18 @@
         if (!para.editable) continue;
         const p = take(X.MARK + para.index);
         const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
+        for (const el of [p, rest]) {
+          if (!el) continue;
+          namePictures(el);
+          for (const br of el.querySelectorAll('br')) br.setAttribute(REAL_BR, '');
+        }
         // A paragraph not shown as the file has it stays as it is.
         const shown = p && !map.has(p) && shownAs(para, p, rest, pages);
         if (!shown || textOf(shown.chars) !== para.text) continue;
         map.set(p, para.index);
         if (rest) { map.set(rest, para.index); rest.setAttribute(REST, ''); }
         if (shown.mark) shown.mark();
-        baselines.set(para.index, { chars: shown.chars.map((c) => c.fmt), empty: fmtOf(p) });
+        baselines.set(para.index, baselineOf(shown.chars, fmtOf(p)));
         editable++;
       }
       // Paragraphs the page does not show as the file holds them are not edited, nor any change spanning them.
@@ -282,9 +312,19 @@
       const ok = ranges.length ? ranges.every((r) => rangeAllowed(r)) : selectionAllowed();
       if (!ok) { e.preventDefault(); hooks.say('That part of the document cannot be changed here (a table, picture, link or similar is in the way).'); }
     }
-    function onInput() {
+    function onInput(e) {
       edits++;
       setDirty(true);
+      // The line break just typed is the last one before the caret.
+      if (e.inputType === 'insertLineBreak') {
+        const sel = doc.getSelection();
+        const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
+        if (p) {
+          const caret = sel.getRangeAt(0);
+          const typed = [...p.querySelectorAll('br')].filter((br) => caret.comparePoint(br, 0) <= 0).pop();
+          if (typed) typed.setAttribute(REAL_BR, '');
+        }
+      }
     }
     // Pasted text arrives as plain text: line breaks start new paragraphs, tabs stay tabs.
     function onPaste(e) {
@@ -296,7 +336,7 @@
       const lines = text.replace(/\r\n?/g, '\n').split('\n');
       lines.forEach((line, k) => {
         if (k) doc.execCommand('insertParagraph');
-        if (line) doc.execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/\f/g, ''));
+        if (line) doc.execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ''));
       });
     }
     function onKeydown(e) {
@@ -318,8 +358,9 @@
 
     // ---- Saving -------------------------------------------------------------------------------------------
 
-    const sameChars = (chars, base, text) => chars.length === base.chars.length && textOf(chars) === text
-      && chars.every((c, k) => !c.fmt.b === !base.chars[k].b && !c.fmt.i === !base.chars[k].i && !c.fmt.u === !base.chars[k].u);
+    const sameChars = (chars, base, text) => chars.length === base.chars.length && X.sameShownText(text, textOf(chars))
+      && chars.every((c, k) => !c.fmt.b === !base.chars[k].b && !c.fmt.i === !base.chars[k].i && !c.fmt.u === !base.chars[k].u
+        && (c.picture || null) === base.pictures[k]);
 
     // The changes to save: { patches, plan } (plan is for markSaved), or null when nothing changed. Throws when the
     // page holds something that cannot be saved.
@@ -356,6 +397,11 @@
         if (end) endWithBreak(pieces[pieces.length - 1]);
       }
       if (pieces.some((pc) => pc.source === undefined)) throw new Error('a paragraph could not be matched to the file');
+      // A picture deleted and saved, then brought back by Undo, is no longer in the file to copy from.
+      const known = new Set([...baselines.values()].flatMap((b) => b.pictures).filter(Boolean));
+      if (pieces.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture)))) {
+        throw new Error('a picture deleted in an earlier save cannot be brought back with Undo');
+      }
       const bySource = new Map();
       for (const pc of pieces) { if (!bySource.has(pc.source)) bySource.set(pc.source, []); bySource.get(pc.source).push(pc); }
       // Changed paragraphs, then per chain the span from the first to the last of them.
@@ -410,9 +456,9 @@
         if (g) {
           for (const pc of g.pieces) {
             const para = next.paragraphs[ni];
-            if (!para || !para.editable || para.text !== textOf(pc.chars)) return false;
+            if (!para || !para.editable || !X.sameShownText(para.text, textOf(pc.chars))) return false;
             for (const el of pc.els) nextMap.set(el, ni);
-            nextBase.set(ni, { chars: pc.chars.map((c) => c.fmt), empty: (baselines.get(pc.source) || {}).empty || {} });
+            nextBase.set(ni, baselineOf(pc.chars, (baselines.get(pc.source) || {}).empty || {}));
             ni++;
           }
           i = g.last + 1;
