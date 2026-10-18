@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const api = window.notesApi;
+  const api = withPeerNotice(window.notesApi);
   const H = window.NotesHelpers;
   const { isViewerOnlyFile, isPlainTextFile } = H;
   // An opened file whose text is not Markdown: plain text, Word, PDF.
@@ -37,6 +37,7 @@
     listTitle: $('#listTitle'), emptyTrashBtn: $('#emptyTrashBtn'),
     noteList: $('#noteList'), listEmpty: $('#listEmpty'),
     editorEmpty: $('#editorEmpty'), editor: $('#editor'),
+    editorPane: $('#editorPane'), paneMain: $('#paneMain'), tabBar: $('#tabBar'), tabList: $('#tabList'), tabAddBtn: $('#tabAddBtn'), splitViewBtn: $('#splitViewBtn'), paneCloseBtn: $('#paneCloseBtn'), splitDivider: $('#splitDivider'),
     toggleSidebarBtn: $('#toggleSidebarBtn'), toggleListBtn: $('#toggleListBtn'), hideListBtn: $('#hideListBtn'), pinBtn: $('#pinBtn'), sourceBtn: $('#sourceBtn'),
     editorColumn: $('#editorColumn'), richEditor: $('#richEditor'),
     linkDialog: $('#linkDialog'), linkForm: $('#linkForm'), linkInput: $('#linkInput'), linkRemoveBtn: $('#linkRemoveBtn'), linkCancelBtn: $('#linkCancelBtn'),
@@ -143,7 +144,7 @@
     return state.systemDark ? 'dark' : 'light';
   }
 
-  function applySettings(settings) {
+  function applySettings(settings, opts) {
     state.settings = settings;
     document.documentElement.dataset.theme = effectiveTheme();
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
@@ -152,6 +153,7 @@
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
+    if (opts && opts.fromPeer) return; // the other side's Ctrl+E is for the note it shows
     // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it; a
     // plain-text file always does.
     const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich || isPlainTextFile(state.current);
@@ -257,6 +259,7 @@
     const res = await api.settings.set(patch);
     applySettings(res.settings);
     applyInfo(res.info);
+    toPeer({ type: 'settings', settings: res.settings });
     return res;
   }
 
@@ -281,7 +284,7 @@
     if (state.view === 'folder' && !folderPath.length) {
       // The folder we were looking at is gone; fall back to all notes, and stop starting in it.
       state.view = 'all'; state.folderId = null;
-      if (state.settings.lastFolderId) updateSettings({ lastFolderId: null }).catch(() => {});
+      if (state.settings.lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {});
       el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all'));
       return refresh(opts);
     }
@@ -294,7 +297,13 @@
     if (state.current && (book.id || bookOf(state.current))) renderBookStrip(state.current);
     const inList = notes.some((n) => n.id === state.currentId);
     if (!inList && !opts.keepEditor) {
-      if (notes.length) await selectNote(notes[0].id);
+      const tabId = tabs.ids[tabs.at];
+      if (!state.currentId && tabId) await selectNote(tabId); // this side's tab, at start or after its note closed
+      else if (GUEST) { /* the right side has no list: it shows only the notes it is asked to */ }
+      else if (tabs.split && tabs.active === 'right') {
+        // The list leads the active side: a new view opens its first note there, unless that side shows one of its notes.
+        if (notes.length && !notes.some((n) => n.id === tabs.peerCurrent)) openNote(notes[0].id);
+      } else if (notes.length) await selectNote(notes[0].id);
       else clearEditor();
     } else if (inList) {
       const fresh = notes.find((n) => n.id === state.currentId);
@@ -358,15 +367,18 @@
       li.style.animationDelay = Math.min(i, 12) * 20 + 'ms';
       li.innerHTML = cardHtml(n, q);
       if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.querySelector('.note-card-title').prepend(no); }
-      li.addEventListener('click', () => selectNote(n.id));
+      // Ctrl+click or middle-click opens the note in a new tab.
+      li.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
+      li.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
       if (!n.trashedAt) {
         li.draggable = true;
         li.addEventListener('dragstart', (e) => {
           e.dataTransfer.setData('text/x-note-id', n.id);
           e.dataTransfer.effectAllowed = 'move';
           li.classList.add('is-dragging');
+          toPeer({ type: 'drag', id: n.id }); // it can be dropped on the right side's tabs
         });
-        li.addEventListener('dragend', () => li.classList.remove('is-dragging'));
+        li.addEventListener('dragend', () => { li.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
       }
       frag.append(li);
     });
@@ -394,6 +406,7 @@
   }
 
   function refreshCard(note) {
+    if (tabs.ids.includes(note.id)) { tabs.titles.set(note.id, H.deriveTitle(note)); renderActiveTabTitle(); }
     const li = el.noteList.querySelector('.note-card[data-id="' + note.id + '"]');
     if (!li) return;
     li.innerHTML = cardHtml(note, state.query);
@@ -408,7 +421,7 @@
     state.folderId = view === 'folder' ? arg : null;
     el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
     // Remember the folder so the app starts in it next time.
-    if ((state.settings.lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
+    if (!GUEST && (state.settings.lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
     await refresh(refreshOpts);
   }
 
@@ -908,9 +921,579 @@
     return parts.join(' · ');
   }
 
+  // ---- tabs and split view ---------------------------------------------------
+  // Each side of the editor pane has its own row of tabs, and selectNote shows a note in the side's current tab.
+  // The right side of a split is this page again in an iframe (?pane=right) that shows only the editor, so it has
+  // every editor feature. The two copies talk with postMessage. A note is open on one side only, so two editors
+  // never write the same note: asking for it on one side shows it where it already is.
+
+  const GUEST = new URLSearchParams(location.search).get('pane') === 'right';
+  const SIDE = GUEST ? 'right' : 'left';
+  const tabs = {
+    ids: [],            // note ids in tab order; null is an empty tab
+    at: 0,              // the tab on screen
+    titles: new Map(),  // id -> title shown on a tab that is not on screen
+    split: false,       // left side: the right side is open
+    active: 'left',     // left side: the side the list opens notes in (the one last clicked or typed in)
+    activeHere: false,  // right side: this side is the active one
+    ratio: 0.5,         // left side: its share of the width
+    frame: null,        // left side: the right side's iframe
+    peerReady: false,
+    queue: [],          // left side: messages for the right side sent before it was ready
+    peerIds: [],        // the other side's open notes
+    peerCurrent: null,
+    dragIndex: null,    // a tab of this side being dragged
+    peerDrag: null,     // a tab or note card being dragged on the other side
+  };
+
+  function withPeerNotice(raw) {
+    // Writes that change notes, folders or files. After one, the other side reloads its list and its note.
+    const WRITES = {
+      notes: ['create', 'update', 'togglePin', 'duplicate', 'splitIntoBook', 'undoSplit', 'trash', 'restore', 'destroy', 'emptyTrash'],
+      folders: ['create', 'rename', 'setBook', 'reorderPages', 'move', 'delete'],
+      lock: ['set', 'unlock', 'relock', 'remove'],
+      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'convert', 'asMarkdown'],
+      attachments: ['pick', 'addPaths', 'saveRecording'],
+      stickies: ['open', 'close', 'create', 'setColor', 'setOnTop'],
+      live: ['host', 'join', 'stop'],
+      vaults: ['add', 'clone', 'update', 'remove', 'sync', 'scan', 'initRepo'],
+      agentFiles: ['link'],
+      bot: ['importWorkspace'],
+      app: ['importMarkdown'],
+    };
+    if (!raw) return raw;
+    const out = {};
+    for (const ns of Object.keys(raw)) {
+      const writes = WRITES[ns];
+      if (!writes) { out[ns] = raw[ns]; continue; }
+      out[ns] = Object.assign({}, raw[ns]);
+      for (const name of writes) {
+        const fn = raw[ns][name];
+        if (typeof fn === 'function') out[ns][name] = (...args) => { const r = fn(...args); Promise.resolve(r).then(peerChanged, () => {}); return r; };
+      }
+    }
+    return out;
+  }
+
+  function peerWindow() { return GUEST ? window.parent : (tabs.frame && tabs.frame.contentWindow); }
+  function toPeer(msg) {
+    if (!GUEST && !tabs.split) return;
+    // Queue before touching the iframe's window: reading contentWindow while the iframe is still about:blank
+    // makes Electron run the preload there, and not again for the page, which then has no API.
+    if (!GUEST && !tabs.peerReady) { tabs.queue.push(msg); return; }
+    const w = peerWindow();
+    if (!w || w === window) return;
+    w.postMessage(Object.assign({ notesPane: true }, msg), '*');
+  }
+  function hasPeer() { return GUEST || tabs.split; }
+  function peerHas(id) { return !!id && hasPeer() && tabs.peerIds.includes(id); }
+  let peerChangedTimer = null;
+  function peerChanged() {
+    if (!hasPeer()) return;
+    clearTimeout(peerChangedTimer);
+    peerChangedTimer = setTimeout(() => toPeer({ type: 'changed' }), 250);
+  }
+
+  // Events from the main process reach the left side only; it hands them on to the right side.
+  const mainEvents = {};
+  function fromMain(name, handler) {
+    mainEvents[name] = handler;
+    api.on[name]((arg) => { handler(arg); if (tabs.split) toPeer({ type: 'event', name, arg }); });
+  }
+
+  function panesOf(settings) {
+    return (settings && settings.panes) || { split: false, ratio: 0.5, active: 'left', left: { ids: [], current: null }, right: { ids: [], current: null } };
+  }
+
+  function restoreTabs(settings) {
+    const panes = panesOf(settings);
+    const mine = panes[SIDE];
+    tabs.ids = mine.ids.slice();
+    tabs.at = Math.max(0, tabs.ids.indexOf(mine.current));
+    if (GUEST) { renderTabs(); return; }
+    tabs.ratio = panes.ratio;
+    tabs.active = panes.split ? panes.active : 'left';
+    // Until the right side has loaded and reported, its saved tabs stand for it (so a save meanwhile keeps them).
+    tabs.peerIds = panes.split ? panes.right.ids.slice() : [];
+    tabs.peerCurrent = panes.split ? panes.right.current : null;
+    renderTabs();
+  }
+
+  function openIds() { return tabs.ids.filter(Boolean); }
+
+  function tabTitle(id) {
+    if (!id) return 'New tab';
+    if (id === state.currentId && state.current) return H.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
+    return tabs.titles.get(id) || '…';
+  }
+
+  function renderTabs() {
+    const frag = document.createDocumentFragment();
+    tabs.ids.forEach((id, i) => {
+      const t = document.createElement('div');
+      const on = i === tabs.at;
+      t.className = 'tab' + (on ? ' is-active' : '');
+      t.setAttribute('role', 'tab');
+      t.setAttribute('aria-selected', String(on));
+      t.dataset.index = String(i);
+      t.draggable = true;
+      const title = tabTitle(id);
+      t.title = title + (id ? '\nCtrl+click a note in the list to open it in a new tab. Middle-click closes.' : '');
+      const label = document.createElement('span');
+      label.className = 'tab-title';
+      label.textContent = title;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'tab-close';
+      x.textContent = '✕';
+      x.title = 'Close tab (Ctrl+W)';
+      x.setAttribute('aria-label', 'Close ' + title);
+      t.append(label, x);
+      frag.append(t);
+    });
+    el.tabList.replaceChildren(frag);
+    const active = el.tabList.querySelector('.tab.is-active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
+    el.paneCloseBtn.classList.toggle('hidden', !GUEST);
+    const missing = openIds().filter((id) => id !== state.currentId && !tabs.titles.has(id));
+    if (missing.length) loadTabTitles(missing);
+  }
+
+  // Live title of the tab on screen while the title is typed.
+  function renderActiveTabTitle() {
+    const label = el.tabList.querySelector('.tab.is-active .tab-title');
+    if (label && state.current) label.textContent = tabTitle(state.currentId);
+  }
+
+  let titlesLoading = false;
+  async function loadTabTitles(ids) {
+    if (titlesLoading) return;
+    titlesLoading = true;
+    let gone = [];
+    try {
+      const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => undefined))); // undefined: could not ask
+      notes.forEach((n, i) => { if (n) tabs.titles.set(ids[i], H.deriveTitle(n)); else if (n === null) gone.push(ids[i]); });
+    } finally { titlesLoading = false; }
+    // A note deleted while its tab was in the background: the tab goes.
+    gone = gone.filter((id) => id !== state.currentId);
+    for (const id of gone) { const i = tabs.ids.indexOf(id); if (i >= 0) removeTabAt(i); }
+    if (gone.length) tabsChanged(); else renderTabs();
+  }
+
+  function removeTabAt(i) {
+    tabs.ids.splice(i, 1);
+    if (i < tabs.at || tabs.at >= tabs.ids.length) tabs.at = Math.max(0, tabs.at - 1);
+  }
+
+  // Puts the note just shown into a tab: its own tab if it has one, a new tab if asked, or the current tab.
+  function placeInTab(id, newTab) {
+    const i = tabs.ids.indexOf(id);
+    if (i >= 0) tabs.at = i;
+    else if (!tabs.ids.length) { tabs.ids = [id]; tabs.at = 0; }
+    else if (newTab && tabs.ids[tabs.at] !== null) { tabs.ids.splice(tabs.at + 1, 0, id); tabs.at += 1; }
+    else tabs.ids[tabs.at] = id;
+    tabsChanged();
+  }
+
+  function tabsChanged() {
+    renderTabs();
+    toPeer({ type: 'tabs', ids: openIds(), current: state.currentId });
+    if (!GUEST) saveLayoutSoon();
+  }
+
+  let layoutTimer = null;
+  function saveLayoutSoon() {
+    if (GUEST) return;
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => {
+      const panes = {
+        split: tabs.split, ratio: tabs.ratio, active: tabs.active,
+        left: { ids: openIds(), current: state.currentId },
+        right: { ids: tabs.split ? tabs.peerIds.slice() : [], current: tabs.split ? tabs.peerCurrent : null },
+      };
+      if (JSON.stringify(panes) === JSON.stringify(state.settings.panes)) return;
+      updateSettings({ panes }).catch(() => {}); // only the layout; losing one write costs nothing
+    }, 1500);
+  }
+
+  // Runs tab work in the same queue as note switches, so a close and a switch never interleave their saves.
+  function inTurn(fn) {
+    const run = state.selecting.then(fn).catch((err) => console.error('tab change failed', err));
+    state.selecting = run;
+    return run;
+  }
+
+  // Writes what is open (or asks to leave it) before the tab changes. False when the person chose to stay.
+  async function leaveNote() {
+    if (tts.active) stopReadAloud();
+    // A PDF's or Word document's edits are not the note's text, so state.dirty does not cover them. If they cannot
+    // be written, stay on the document: switching would close it and lose them.
+    if (!(await flushDocuments({ commit: true })) && !window.confirm('Your changes to this document could not be saved (is it open in another app?). Leave it anyway and lose them?')) return false;
+    // Flush again if keystrokes landed while the flush was in flight, so nothing typed during the switch is dropped.
+    let guard = 0;
+    while (state.dirty && guard++ < 3) await flushSave();
+    stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
+    return true;
+  }
+
+  function showTab(i) {
+    return inTurn(async () => {
+      if (i < 0 || i >= tabs.ids.length) return;
+      const id = tabs.ids[i];
+      if (id) { await selectNoteNow(id); return; }
+      if (i === tabs.at && !state.currentId) return;
+      if (!(await leaveNote())) return;
+      blankEditor();
+      tabs.at = i;
+      tabsChanged();
+    });
+  }
+
+  function newEmptyTab() {
+    return inTurn(async () => {
+      if (tabs.ids[tabs.at] === null && !state.currentId) return; // already on an empty tab
+      if (!(await leaveNote())) return;
+      blankEditor();
+      const at = tabs.ids.length ? tabs.at + 1 : 0;
+      tabs.ids.splice(at, 0, null);
+      tabs.at = at;
+      tabsChanged();
+    });
+  }
+
+  function closeTab(i) {
+    return inTurn(async () => {
+      if (i < 0 || i >= tabs.ids.length) return;
+      if (i !== tabs.at) { removeTabAt(i); tabsChanged(); return; }
+      if (tabs.ids.length > 1) {
+        const j = i + 1 < tabs.ids.length ? i + 1 : i - 1;
+        const nextId = tabs.ids[j];
+        if (nextId) {
+          await selectNoteNow(nextId);
+          if (state.currentId !== nextId) return; // the switch was refused; the tab stays
+        } else {
+          if (!(await leaveNote())) return;
+          blankEditor();
+        }
+        tabs.at = j;
+        removeTabAt(i);
+        tabsChanged();
+        return;
+      }
+      if (!(await leaveNote())) return;
+      blankEditor();
+      tabs.ids = [];
+      tabs.at = 0;
+      tabsChanged();
+      if (GUEST) toPeer({ type: 'close' }); // the right side's last tab closes the split
+    });
+  }
+
+  function cycleTab(step) {
+    if (tabs.ids.length < 2) return;
+    showTab((tabs.at + step + tabs.ids.length) % tabs.ids.length);
+  }
+
+  // Opens a note from outside the editor (the list, a new note, a reminder, a sticky): in the active side.
+  function openNote(id, opts) {
+    opts = opts || {};
+    if (!GUEST && tabs.split && !tabs.ids.includes(id) && (peerHas(id) || tabs.active === 'right')) {
+      toPeer({ type: 'open', id, newTab: !!opts.newTab, focus: opts.focus || null });
+      if (opts.focus) tabs.frame.focus();
+      return Promise.resolve();
+    }
+    return selectNote(id, opts);
+  }
+
+  // ---- the split ----
+
+  function setActiveSide(side) {
+    if (GUEST || tabs.active === side) return;
+    tabs.active = side;
+    el.paneMain.classList.toggle('is-active-side', tabs.split && side === 'left');
+    toPeer({ type: 'active', on: side === 'right' });
+    saveLayoutSoon();
+  }
+
+  function applyRatio() {
+    el.editorPane.style.setProperty('--peer-w', Math.round((1 - tabs.ratio) * 1000) / 10 + '%');
+  }
+
+  function openSplit(restoring) {
+    if (GUEST || tabs.split) return;
+    tabs.split = true;
+    tabs.peerReady = false;
+    tabs.queue = [];
+    if (!restoring) { tabs.peerIds = []; tabs.peerCurrent = null; }
+    const f = document.createElement('iframe');
+    f.className = 'pane-peer';
+    f.id = 'panePeer';
+    f.title = 'Right side';
+    f.src = 'index.html?pane=right';
+    tabs.frame = f;
+    let loads = 0;
+    f.addEventListener('load', () => { if (++loads > 1 && tabs.frame === f) { dropFrame(); toast('The right side left its page, so it was closed.'); } });
+    applyRatio();
+    el.editorPane.classList.add('is-split');
+    el.splitDivider.classList.remove('hidden');
+    el.editorPane.append(f);
+    if (!restoring) tabs.active = 'right'; // a new split is where the next note from the list goes
+    el.paneMain.classList.toggle('is-active-side', tabs.active === 'left');
+    renderTabs();
+    if (!restoring) saveLayoutSoon();
+  }
+
+  async function closeSplit() {
+    if (GUEST || !tabs.split) return;
+    if (!(await flushPeer({ leave: true }))) return; // the right side kept an unsaved document open
+    if (!tabs.split) return;
+    dropFrame();
+  }
+
+  function dropFrame() {
+    tabs.frame.remove();
+    tabs.frame = null;
+    tabs.split = false;
+    tabs.peerReady = false;
+    tabs.queue = [];
+    tabs.peerIds = [];
+    tabs.peerCurrent = null;
+    tabs.peerDrag = null;
+    el.editorPane.classList.remove('is-split');
+    el.splitDivider.classList.add('hidden');
+    tabs.active = 'left';
+    el.paneMain.classList.remove('is-active-side');
+    renderTabs();
+    saveLayoutSoon();
+  }
+
+  // Asks the right side to write what it has. leave: also its documents, asking the person if they cannot be.
+  let flushSeq = 0;
+  const peerWaits = new Map();
+  function askPeer(msg, ms) {
+    const seq = ++flushSeq;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { peerWaits.delete(seq); resolve(null); }, ms);
+      peerWaits.set(seq, (reply) => { clearTimeout(timer); peerWaits.delete(seq); resolve(reply); });
+      toPeer(Object.assign({ seq }, msg));
+    });
+  }
+  async function flushPeer(opts) {
+    if (GUEST || !tabs.split || !tabs.peerReady) return true;
+    const leave = !!(opts && opts.leave);
+    // Leaving may wait for the person to answer a question about an unsaved document.
+    const reply = await askPeer({ type: 'flush', leave }, leave ? 10 * 60 * 1000 : 5000);
+    // Leaving needs a yes: no answer means the right side's work is not known to be written. A plain flush (hide,
+    // quit) must never hold the window, so it gives up after the time main allows anyway.
+    if (leave) return !!(reply && reply.ok);
+    return true;
+  }
+
+  // Moves a note that is open on the other side to this one: that side closes its tab (writing it) first.
+  async function takeFromPeer(id) {
+    if (!peerHas(id)) return true;
+    const reply = await askPeer({ type: 'release', id }, 10 * 60 * 1000);
+    return !!(reply && reply.ok);
+  }
+
+  async function onPeerMessage(m) {
+    switch (m.type) {
+      case 'hello': {
+        tabs.peerReady = true;
+        const queued = tabs.queue;
+        tabs.queue = [];
+        toPeer({ type: 'active', on: tabs.active === 'right' });
+        toPeer({ type: 'tabs', ids: openIds(), current: state.currentId });
+        queued.forEach(toPeer);
+        return;
+      }
+      case 'tabs':
+        tabs.peerIds = Array.isArray(m.ids) ? m.ids : [];
+        tabs.peerCurrent = m.current || null;
+        saveLayoutSoon();
+        return;
+      case 'open':
+        if (!GUEST && m.focus) { setActiveSide('left'); window.focus(); }
+        await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
+        return;
+      case 'changed':
+        await onPeerWrite();
+        return;
+      case 'settings':
+        applySettings(m.settings, { fromPeer: true });
+        return;
+      case 'focus': setActiveSide('right'); return;
+      case 'active':
+        tabs.activeHere = !!m.on;
+        el.paneMain.classList.toggle('is-active-side', tabs.activeHere);
+        return;
+      case 'event':
+        if (m.name === 'editCommand') runEditCommand(m.arg);
+        else if (mainEvents[m.name]) await mainEvents[m.name](m.arg);
+        return;
+      case 'flush': {
+        let ok = false;
+        try {
+          if (m.leave) ok = (await inTurn(leaveNote)) === true && !state.pending.size;
+          else { await flushSave(); await retryPending(); ok = true; }
+        } finally { toPeer({ type: 'reply', seq: m.seq, ok }); }
+        if (m.leave && !ok && state.pending.size) toast('Some text here could not be saved yet, so this side stays open. It is retried; try again in a moment.');
+        return;
+      }
+      case 'release': {
+        const i = tabs.ids.indexOf(m.id);
+        if (i >= 0) await closeTab(i);
+        // Text of that note kept for a retry lives here: the other side must not open the note over it.
+        const ok = !tabs.ids.includes(m.id) && !state.pending.has(m.id);
+        if (!ok && state.pending.has(m.id)) toast('That note has text that could not be saved yet; it stays here until it is.');
+        toPeer({ type: 'reply', seq: m.seq, ok });
+        return;
+      }
+      case 'reply': { const wait = peerWaits.get(m.seq); if (wait) wait(m); return; }
+      case 'command': runSideCommand(m.name); return;
+      case 'close': await closeSplit(); return;
+      case 'drag': tabs.peerDrag = m.id || null; return;
+      default: return;
+    }
+  }
+
+  async function onPeerWrite() {
+    if (!GUEST) await refresh({ keepEditor: true }); // the right side has no list to keep current
+    tabs.titles.clear();
+    renderTabs();
+    const id = state.currentId;
+    if (id && !state.dirty && !(await api.notes.get(id)) && state.currentId === id) { clearEditor(); if (!GUEST) await refresh(); }
+  }
+
+  // Shortcuts pressed on the right side that belong to the list or the whole window.
+  function runSideCommand(name) {
+    if (GUEST) return;
+    if (name === 'newNote') newNote();
+    else if (name === 'search') showList().then(() => { el.searchInput.focus(); el.searchInput.select(); });
+    else if (name === 'openFiles') openFiles();
+    else if (name === 'settings') openSettings();
+    else if (name === 'newFolder') startCreateFolder(state.view === 'folder' ? state.folderId : null);
+  }
+
+  function runEditCommand(cmd) {
+    if (!GUEST && tabs.frame && document.activeElement === tabs.frame) { toPeer({ type: 'event', name: 'editCommand', arg: cmd }); return; }
+    if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run();
+    else document.execCommand(cmd === 'redo' ? 'redo' : 'undo');
+  }
+
+  // Dropping a tab or a note card on a tab bar: reorder this side's tabs, or open the note here.
+  function dropIndex(e) {
+    const t = e.target.closest('.tab');
+    return t ? Number(t.dataset.index) : tabs.ids.length;
+  }
+  function onTabDrop(e) {
+    el.tabBar.classList.remove('is-drop-target');
+    const at = dropIndex(e);
+    if (tabs.dragIndex !== null) {
+      e.preventDefault();
+      const from = tabs.dragIndex;
+      tabs.dragIndex = null;
+      if (at === from || at === from + 1) return;
+      const moving = tabs.ids[from];
+      const shown = tabs.ids[tabs.at];
+      const wasShown = from === tabs.at;
+      tabs.ids.splice(from, 1);
+      const to = at > from ? at - 1 : at;
+      tabs.ids.splice(to, 0, moving);
+      tabs.at = wasShown ? to : tabs.ids.indexOf(shown);
+      tabsChanged();
+      return;
+    }
+    const id = e.dataTransfer.getData('text/x-note-id') || tabs.peerDrag;
+    tabs.peerDrag = null;
+    if (!id) return;
+    e.preventDefault();
+    (async () => {
+      if (!(await takeFromPeer(id))) return;
+      if (!GUEST) setActiveSide('left'); else toPeer({ type: 'focus' });
+      await selectNote(id, { newTab: true, focus: 'body' });
+    })();
+  }
+
+  function bindTabs() {
+    el.tabList.addEventListener('click', (e) => {
+      const t = e.target.closest('.tab');
+      if (!t) return;
+      const i = Number(t.dataset.index);
+      if (e.target.closest('.tab-close')) closeTab(i); else showTab(i);
+    });
+    el.tabList.addEventListener('auxclick', (e) => { const t = e.target.closest('.tab'); if (t && e.button === 1) { e.preventDefault(); closeTab(Number(t.dataset.index)); } });
+    el.tabList.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // no autoscroll on middle-click
+    el.tabList.addEventListener('dragstart', (e) => {
+      const t = e.target.closest('.tab');
+      if (!t) return;
+      tabs.dragIndex = Number(t.dataset.index);
+      e.dataTransfer.setData('text/x-notes-tab', t.dataset.index);
+      e.dataTransfer.effectAllowed = 'move';
+      toPeer({ type: 'drag', id: tabs.ids[tabs.dragIndex] || null });
+    });
+    el.tabList.addEventListener('dragend', () => { tabs.dragIndex = null; toPeer({ type: 'drag', id: null }); });
+    el.tabBar.addEventListener('dragover', (e) => {
+      if (tabs.dragIndex === null && !tabs.peerDrag && !e.dataTransfer.types.includes('text/x-note-id')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.tabBar.classList.add('is-drop-target');
+    });
+    el.tabBar.addEventListener('dragleave', (e) => { if (!el.tabBar.contains(e.relatedTarget)) el.tabBar.classList.remove('is-drop-target'); });
+    el.tabBar.addEventListener('drop', onTabDrop);
+    el.tabAddBtn.addEventListener('click', newEmptyTab);
+    el.splitViewBtn.addEventListener('click', () => openSplit(false));
+    el.paneCloseBtn.addEventListener('click', () => toPeer({ type: 'close' }));
+    window.addEventListener('message', (e) => {
+      const m = e.data;
+      if (!m || m.notesPane !== true || !e.source || e.source !== peerWindow()) return;
+      onPeerMessage(m).catch((err) => console.error('split view message failed', err));
+    });
+    if (GUEST) {
+      const claim = () => { if (!tabs.activeHere) toPeer({ type: 'focus' }); };
+      document.addEventListener('focusin', claim);
+      document.addEventListener('pointerdown', claim, true);
+      return;
+    }
+    el.paneMain.addEventListener('focusin', () => setActiveSide('left'));
+    el.paneMain.addEventListener('pointerdown', () => setActiveSide('left'), true);
+    // Drag the divider to share the width; double-click shares it equally.
+    el.splitDivider.addEventListener('pointerdown', (e) => {
+      if (!tabs.split) return;
+      e.preventDefault();
+      el.splitDivider.setPointerCapture(e.pointerId);
+      el.splitDivider.classList.add('is-dragging');
+      el.editorPane.classList.add('is-resizing');
+      const move = (ev) => {
+        const r = el.editorPane.getBoundingClientRect();
+        tabs.ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - r.left) / r.width));
+        applyRatio();
+      };
+      const up = () => {
+        el.splitDivider.removeEventListener('pointermove', move);
+        el.splitDivider.removeEventListener('pointerup', up);
+        el.splitDivider.removeEventListener('pointercancel', up);
+        el.splitDivider.classList.remove('is-dragging');
+        el.editorPane.classList.remove('is-resizing');
+        saveLayoutSoon();
+      };
+      el.splitDivider.addEventListener('pointermove', move);
+      el.splitDivider.addEventListener('pointerup', up);
+      el.splitDivider.addEventListener('pointercancel', up);
+    });
+    el.splitDivider.addEventListener('dblclick', () => { tabs.ratio = 0.5; applyRatio(); saveLayoutSoon(); });
+  }
+
   // ---- editor --------------------------------------------------------------
 
+  // The note in the current tab is gone (trashed, deleted, split into a book): the tab is left empty.
   function clearEditor() {
+    blankEditor();
+    if (tabs.ids.length) { tabs.ids[tabs.at] = null; tabsChanged(); }
+  }
+
+  function blankEditor() {
     stashIfDirty();
     clearPdf();
     state.currentId = null;
@@ -924,28 +1507,27 @@
 
   // Selections run one at a time: two quick switches must not interleave their loads and flushes.
   state.selecting = Promise.resolve();
-  function selectNote(id) {
-    const run = state.selecting.then(() => selectNoteNow(id)).catch((err) => console.error('selectNote failed', err));
+  // opts: { newTab, focus: 'title' | 'body' }. Shows the note in this side's current tab (see placeInTab).
+  function selectNote(id, opts) {
+    const run = state.selecting.then(() => selectNoteNow(id, opts)).catch((err) => console.error('selectNote failed', err));
     state.selecting = run;
     return run;
   }
 
-  async function selectNoteNow(id) {
-    if (state.currentId === id && state.current) return;
-    if (tts.active) stopReadAloud();
-    // Flush the outgoing note first, and again if keystrokes landed while the flush was in flight,
-    // so nothing typed during the switch is dropped.
-    // A PDF's or Word document's edits are not the note's text, so state.dirty does not cover them. If they cannot be
-    // written, stay on the document:
-    // switching would close it and lose them.
-    if (!(await flushDocuments({ commit: true })) && !window.confirm('Your changes to this document could not be saved (is it open in another app?). Leave it anyway and lose them?')) return;
-    let guard = 0;
-    while (state.dirty && guard++ < 3) await flushSave();
-    stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
+  async function selectNoteNow(id, opts) {
+    opts = opts || {};
+    // Open on the other side of the split: show it there, never in two editors at once.
+    if (peerHas(id)) { toPeer({ type: 'open', id, focus: opts.focus || 'body' }); return; }
+    if (state.currentId === id && state.current) { focusAfterOpen(opts.focus); return; }
+    if (!(await leaveNote())) return;
     if (state.inflight.has(id)) await state.inflight.get(id); // a write for the incoming note is still landing
     // Read the incoming note only now, after every write that could change it has settled.
     const note = await api.notes.get(id);
-    if (!note) return;
+    if (!note) {
+      const gone = tabs.ids.indexOf(id);
+      if (gone >= 0 && id !== state.currentId) { removeTabAt(gone); tabsChanged(); }
+      return;
+    }
     // Keystrokes that arrived during that read belong to the outgoing note: save or stash them too.
     if (state.dirty) { await flushSave(); stashIfDirty(); }
     state.currentId = note.id;
@@ -1018,6 +1600,13 @@
     updateStatus(note);
     if (hasPending) { state.dirty = true; setSaved('Save failed'); scheduleRetry(); }
     else setSaved('Saved');
+    placeInTab(note.id, opts.newTab);
+    focusAfterOpen(opts.focus);
+  }
+
+  function focusAfterOpen(where) {
+    if (where === 'title') el.titleInput.focus();
+    else if (where === 'body') focusBody();
   }
 
   function updateStatus(note) {
@@ -1730,6 +2319,11 @@
       else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
       else if (action === 'pdf') {
         if (find.open) closeFind();
+        if (GUEST) {
+          const r = await api.book.export('pdf', Object.assign(exportOfCurrent(), { dialogTitle: 'Save as PDF' }));
+          if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error);
+          return;
+        }
         const chosen = await api.app.pdfPath(note.id);
         if (!chosen.ok) { if (!chosen.canceled) toast('Could not save PDF: ' + chosen.error); return; }
         // The page is what prints: it must still show this very note, unlocked, with nothing unsaved.
@@ -2154,9 +2748,15 @@
   async function printNote() {
     if (!state.current) return;
     await flushSave();
-    const r = await api.app.print();
+    const r = GUEST ? await api.book.export('print', exportOfCurrent()) : await api.app.print();
     if (!r.ok) toast('Could not print: ' + (r.error || 'unknown error'));
     else if (r.dry) toast('Print: dry run');
+  }
+
+  // The open note as a page of its own, for the export window (title, then the rendered body).
+  function exportOfCurrent() {
+    const title = H.deriveTitle(state.current);
+    return { name: title, html: (state.current.title ? '<h1>' + escapeHtml(state.current.title) + '</h1>' : '') + currentHtml() };
   }
 
   // ---- desktop stickies ------------------------------------------------------
@@ -2952,7 +3552,7 @@
         const fresh = await api.notes.get(res.firstId);
         if (fresh && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id)
           && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
-      } else await selectNote(res.firstId);
+      } else await openNote(res.firstId);
     }
     const failed = res.failed.length ? ' Could not open: ' + res.failed.join(', ') : '';
     toast((res.linked.length ? 'Opened ' + res.linked.length + (res.linked.length === 1 ? ' file' : ' files') : 'Nothing opened') + failed);
@@ -3211,8 +3811,7 @@
     state.query = '';
     el.searchInput.value = '';
     await refresh({ keepEditor: true });
-    await selectNote(note.id);
-    el.titleInput.focus();
+    await openNote(note.id, { newTab: true, focus: 'title' });
   }
 
   async function togglePin() {
@@ -3587,8 +4186,16 @@
       return;
     }
     if (inDialog) return;
+    if (GUEST && ctrl && !e.altKey) {
+      const k = e.key.toLowerCase();
+      const cmd = e.shiftKey ? (k === 'n' ? 'newFolder' : null) : ({ n: 'newNote', f: 'search', o: 'openFiles', ',': 'settings' })[k];
+      if (cmd) { e.preventDefault(); toPeer({ type: 'command', name: cmd }); return; }
+    }
+    if (ctrl && !e.altKey && e.key === 'Tab') { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
     if (ctrl && !e.shiftKey && !e.altKey) {
       switch (e.key.toLowerCase()) {
+        case 't': e.preventDefault(); newEmptyTab(); return;
+        case 'w': e.preventDefault(); closeTab(tabs.at); return;
         case 'n': e.preventDefault(); newNote(); return;
         case 'o': e.preventDefault(); openFiles(); return;
         case 'l': e.preventDefault(); onLockButton(); return;
@@ -3681,7 +4288,7 @@
     el.vaultDestBtn.addEventListener('click', async () => { const d = await api.vaults.pickFolder(); if (d) el.vaultDestInput.value = d; });
     el.vaultCancelBtn.addEventListener('click', () => el.vaultDialog.close());
     el.vaultForm.addEventListener('submit', (e) => { e.preventDefault(); submitClone(); });
-    api.on.vaultStatus(({ id, status }) => {
+    fromMain('vaultStatus', ({ id, status }) => {
       const before = state.vaultStatus[id] || {};
       state.vaultStatus[id] = status;
       if (status.lastError && status.lastError !== before.lastError) toast('Vault: ' + status.lastError);
@@ -3727,7 +4334,7 @@
     el.liveCancelBtn.addEventListener('click', () => el.liveDialog.close());
     el.liveCopyBtn.addEventListener('click', async () => { await api.app.copy({ text: el.liveLinkInput.value }); toast('Link copied'); });
     el.liveDialog.addEventListener('close', () => focusBody());
-    api.on.liveStatus(({ id, status }) => {
+    fromMain('liveStatus', ({ id, status }) => {
       if (status && status.ended) { delete state.liveStatus[id]; if (state.current && state.current.id === id) { refreshCurrentMeta(); toast('The host ended the live share. Your copy of the note stays.'); } return; }
       if (status) state.liveStatus[id] = status; else delete state.liveStatus[id];
       if (state.current && state.current.id === id) { if (!status && state.current.live) refreshCurrentMeta(); else renderLiveRow(state.current); }
@@ -3737,9 +4344,11 @@
     el.lockCancelBtn.addEventListener('click', () => el.lockDialog.close());
     el.lockDialog.addEventListener('close', () => focusBody());
     el.lockScreen.addEventListener('submit', (e) => { e.preventDefault(); unlockFromScreen(); });
-    api.on.relocked(async (ids) => {
+    fromMain('relocked', async (ids) => {
       // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
       for (const id of ids) state.pending.delete(id);
+      for (const id of ids) tabs.titles.delete(id); // a tab title can be the first line of the unlocked text
+      renderTabs();
       if (readerOpen()) closeReader(); // it may show pages that were unlocked a moment ago
       if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
       refresh({ keepEditor: true });
@@ -3751,9 +4360,9 @@
     el.remindDialog.addEventListener('close', () => focusBody());
     api.on.notice((text) => toast(String(text)));
     // Undo/Redo from the right-click menu: the rich editor has its own history; the textarea uses the native one.
-    api.on.editCommand((cmd) => { if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run(); else document.execCommand(cmd === 'redo' ? 'redo' : 'undo'); });
+    api.on.editCommand(runEditCommand);
     api.on.reminderFired(({ id, title }) => {
-      toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await selectNoteNow(id); } });
+      toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await openNote(id, { focus: 'body' }); } });
       refresh({ keepEditor: true }).then(() => { if (state.currentId === id) refreshCurrentMeta(); });
     });
     el.shareBtn.addEventListener('click', () => { if (el.shareMenu.classList.contains('hidden')) openShareMenu(); else closeShareMenu(); });
@@ -3781,8 +4390,8 @@
       if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); runFind(!e.shiftKey); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
     });
-    api.on.stickiesChanged(() => { refreshCurrentMeta(); });
-    api.on.openNote(async (id) => { await setView('all'); await selectNoteNow(id); });
+    fromMain('stickiesChanged', () => { refreshCurrentMeta(); });
+    api.on.openNote(async (id) => { await setView('all'); await openNote(id, { focus: 'body' }); });
     el.botBtn.addEventListener('click', () => toggleBot());
     el.botCloseBtn.addEventListener('click', () => toggleBot(false));
     el.botRunBtn.addEventListener('click', runBot);
@@ -3876,7 +4485,7 @@
     el.gitRemoteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemote(); } });
     el.gitCommitBtn.addEventListener('click', async () => { await flushSave(); const r = await api.git.commit(); toast(r.ok ? (r.nothingToCommit ? 'Nothing new to commit' : 'Committed') : 'Commit failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
     el.gitPushBtn.addEventListener('click', async () => { const r = await api.git.push(); toast(r.ok ? 'Pushed' : 'Push failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
-    api.on.gitStatus((s) => renderGitStatus(s));
+    fromMain('gitStatus', (s) => renderGitStatus(s));
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
     el.splitBtn.addEventListener('click', openSplitDialog);
@@ -3887,6 +4496,7 @@
     el.destroyBtn.addEventListener('click', destroyCurrent);
 
     el.titleInput.addEventListener('input', scheduleSave);
+    el.titleInput.addEventListener('input', renderActiveTabTitle);
     el.tagsInput.addEventListener('input', scheduleSave);
     el.bodyInput.addEventListener('input', scheduleSave);
     el.titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); focusBody(); } });
@@ -3963,16 +4573,20 @@
       }
     });
     api.on.newNote(newNote);
-    api.on.flush(async () => { try { await flushSave(); await retryPending(); } finally { api.app.flushDone(); } });
-    api.on.reloaded(async (info) => {
+    // Both sides write at once; main stops waiting after its own limit (longer on quit, for PDF and Word saves).
+    api.on.flush(async () => { try { await Promise.all([flushSave().then(retryPending), flushPeer()]); } finally { api.app.flushDone(); } });
+    fromMain('reloaded', async (info) => {
       const reason = info && info.reason;
       await refresh({ keepEditor: true });
+      tabs.titles.clear(); // titles of notes in other tabs may have changed too
+      renderTabs();
       // The store may now hold a newer body for the open note (a pull, a rescan, the bot). Show it, unless
       // the user is mid-edit; in that case leave their text and tell them.
       if (state.currentId) {
         const wanted = state.currentId;
         const fresh = await api.notes.get(wanted);
         if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
+        if (!fresh && wanted === state.currentId && !state.dirty) { clearEditor(); if (!GUEST) await refresh(); return; }
         if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
         // A PDF or Word file is shown from the file, so a new version of it (same text or not) is shown too.
         if (fresh && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
@@ -3987,8 +4601,8 @@
       }
       if (reason === 'recovered') toast('Your notes file is readable again; saving resumed.');
     });
-    api.on.settingsChanged((s) => applySettings(s));
-    api.on.systemTheme((t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
+    fromMain('settingsChanged', (s) => applySettings(s));
+    fromMain('systemTheme', (t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
 
     // Keep "x min ago" labels honest.
@@ -3997,13 +4611,19 @@
 
   async function init() {
     const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
+    if (GUEST) document.body.classList.add('pane-guest');
     createRichEditor();
     applySettings(settings);
     applyInfo(info);
+    restoreTabs(settings);
     bind();
+    bindTabs();
     // Start in the folder the list showed last time, if it still exists (refresh falls back to all notes).
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();
+    if (GUEST) { toPeer({ type: 'hello' }); return; }
+    if (!state.currentId && state.notes.length) await selectNote(state.notes[0].id); // a saved tab's note is gone
+    if (panesOf(settings).split) openSplit(true);
     if (state.current) focusBody();
     // Tell main we can receive events now; it replays 'app:shown' if the window is already on screen.
     api.app.rendererReady().catch(() => {});

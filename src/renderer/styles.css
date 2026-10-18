@@ -363,7 +363,28 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .mark { background: var(--peach); color: var(--ink); border-radius: 3px; padding: 0 2px; }
 
 /* ---- editor ---------------------------------------------------------- */
-.editor-pane { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.editor-pane { display: flex; flex-direction: row; min-width: 0; background: var(--bg); }
+/* One side of the editor pane: its tabs above the note. A split adds a divider and the right side (an iframe). */
+.pane-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.split-divider { flex: none; width: 6px; cursor: col-resize; background: var(--line-soft); touch-action: none; }
+.split-divider:hover, .split-divider.is-dragging { background: var(--accent); }
+.pane-peer { flex: 0 0 var(--peer-w, 50%); min-width: 0; border: none; background: var(--bg); }
+.editor-pane.is-resizing .pane-peer { pointer-events: none; } /* the drag would be lost to the iframe */
+.tab-bar { flex: none; display: flex; align-items: flex-end; gap: 4px; padding: 6px 8px 0; border-bottom: 1.5px solid var(--line-soft); }
+.tab-bar > .tool-btn { margin-bottom: 4px; }
+.editor-pane.is-split .pane-main.is-active-side .tab-bar, body.pane-guest .pane-main.is-active-side .tab-bar { box-shadow: inset 0 -2px 0 var(--accent); }
+.tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.tab { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 70px; max-width: 200px; padding: 5px 4px 5px 12px; border: 1.5px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; color: var(--fg-muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; user-select: none; }
+.tab:hover { background: var(--bg-sunken); }
+.tab.is-active { background: var(--bg-sunken); color: var(--fg); border-color: var(--line-soft); font-weight: 600; }
+.tab.is-drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tab-close { flex: none; width: 18px; height: 18px; padding: 0; border: none; border-radius: 5px; background: transparent; color: inherit; font-size: 12px; line-height: 18px; opacity: 0.55; }
+.tab-close:hover { opacity: 1; background: var(--line-soft); }
+.tab-bar.is-drop-target { background: var(--bg-sunken); }
+/* The right side of a split is this page again, showing only the editor. */
+body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
+body.pane-guest .sidebar, body.pane-guest .list-pane, body.pane-guest #toggleSidebarBtn, body.pane-guest #toggleListBtn, body.pane-guest #botBtn { display: none !important; }
 .editor-empty { flex: 1; display: grid; place-items: center; padding: 24px; }
 .editor-empty-card {
   max-width: 420px;
@@ -685,9 +706,9 @@ button.book-name:hover { border-color: var(--line); background: var(--bg); }
 
 /* Print: the note only */
 @media print {
-  .sidebar, .list-pane, .editor-toolbar, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .sidebar, .list-pane, .editor-toolbar, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; } /* one column: the hidden panes' grid columns would push the note right */
-  html, body, .app, .editor-pane, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
+  html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; }
   .rich-editor-content, #bodyInput { font-size: 12pt; }
   #bodyInput { border: none; height: auto !important; overflow: visible !important; }

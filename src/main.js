@@ -137,6 +137,8 @@ function main() {
         nodeIntegration: false,
         sandbox: true,
         spellcheck: true,
+        // The split view's right side is this page again in an iframe, and needs the preload there too.
+        nodeIntegrationInSubFrames: true,
       },
     }, safeBounds(store.settings.window)));
 
@@ -1236,7 +1238,7 @@ function main() {
       const ext = { md: 'md', html: 'html', pdf: 'pdf' }[format];
       if (!ext) return { ok: false, error: 'Unknown format' };
       const { canceled, filePath } = await dialog.showSaveDialog(win, {
-        title: 'Export book',
+        title: data.dialogTitle ? String(data.dialogTitle).slice(0, 100) : 'Export book',
         defaultPath: path.join(app.getPath('documents'), H.safeFilename(name) + '.' + ext),
         filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
       });

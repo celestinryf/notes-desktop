@@ -8,7 +8,12 @@ const on = (channel) => (handler) => {
   return () => ipcRenderer.removeListener(channel, wrapped);
 };
 
-contextBridge.exposeInMainWorld('notesApi', {
+// The split view loads the main page again in an iframe (?pane=right). Only the page itself and that copy get the
+// API, never a document, picture or PDF shown in a frame of its own.
+const isOurPage = window.top === window || (location.protocol === 'file:' && /\/renderer\/index\.html$/.test(location.pathname) &&
+  new URLSearchParams(location.search).get('pane') === 'right');
+
+if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
   notes: {
     list: invoke('notes:list'),
     get: invoke('notes:get'),
