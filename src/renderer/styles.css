@@ -384,7 +384,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .tab-bar.is-drop-target { background: var(--bg-sunken); }
 /* The right side of a split is this page again, showing only the editor. */
 body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
-body.pane-guest .sidebar, body.pane-guest .list-pane, body.pane-guest #toggleSidebarBtn, body.pane-guest #toggleListBtn, body.pane-guest #botBtn { display: none !important; }
+body.pane-guest .sidebar, body.pane-guest .list-pane, body.pane-guest #toggleSidebarBtn, body.pane-guest #toggleListBtn, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
 .editor-empty { flex: 1; display: grid; place-items: center; padding: 24px; }
 .editor-empty-card {
   max-width: 420px;
