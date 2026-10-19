@@ -8,6 +8,22 @@
   // An opened file whose text is not Markdown: plain text, Word, PDF.
   const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
   const $ = (sel) => document.querySelector(sel);
+  const I = (name) => window.NotesIcons.svg(name);
+
+  // A button's words live in its .lbl span when it has one, so its icon and shortcut hint survive a relabel.
+  function setLabel(btn, text) {
+    const l = btn.querySelector('.lbl');
+    if (l) l.textContent = text; else btn.textContent = text;
+  }
+  function setIcon(btn, name) {
+    if (btn.dataset.icon === name) return;
+    btn.dataset.icon = name;
+    window.NotesIcons.hydrate(btn.parentElement);
+  }
+  function setPressed(btn, on) {
+    btn.classList.toggle('is-on', !!on);
+    btn.setAttribute('aria-pressed', String(!!on));
+  }
 
   const el = {
     app: $('#app'),
@@ -74,6 +90,9 @@
     attachBtn: $('#attachBtn'), recordBtn: $('#recordBtn'), historyBtn: $('#historyBtn'), linkNoteSelect: $('#linkNoteSelect'),
     historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
+    moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
+    inlineMenu: $('#inlineMenu'),
+    activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
   };
 
   const state = {
@@ -119,20 +138,28 @@
   }
 
   let toastTimer = null;
+  let toastMs = 0;
+  // Hovering a toast holds it, so a slow reader (or an Undo just out of reach) does not lose it.
+  el.toast.addEventListener('mouseenter', () => clearTimeout(toastTimer));
+  el.toast.addEventListener('mouseleave', () => { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, Math.min(toastMs, 3000)); });
   function toast(message, action) {
     clearTimeout(toastTimer);
     el.toast.innerHTML = '';
-    el.toast.append(document.createTextNode(message));
+    const text = document.createElement('span');
+    text.textContent = message;
+    el.toast.append(text);
     if (action) {
       const b = document.createElement('button');
-      b.className = 'btn btn-small';
-      b.style.marginLeft = '10px';
+      b.type = 'button';
       b.textContent = action.label;
       b.addEventListener('click', () => { hideToast(); action.run(); });
       el.toast.append(b);
     }
     el.toast.classList.remove('hidden');
-    toastTimer = setTimeout(hideToast, action ? 6000 : 2200);
+    // Long enough to read: about a quarter second a word, 3 to 8 seconds; an undo offer gets the full 8.
+    const words = String(message).split(/\s+/).length;
+    toastMs = action ? 8000 : Math.min(8000, Math.max(3000, words * 250));
+    toastTimer = setTimeout(hideToast, toastMs);
   }
   function hideToast() { el.toast.classList.add('hidden'); }
 
@@ -147,8 +174,9 @@
   function applySettings(settings, opts) {
     state.settings = settings;
     document.documentElement.dataset.theme = effectiveTheme();
+    syncTitleBar();
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
-    el.app.classList.toggle('sidebar-collapsed', !!settings.sidebarCollapsed);
+    applySidebar();
     syncListCollapsed();
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
@@ -161,6 +189,26 @@
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
 
+  // The window draws its own caption buttons (minimise, maximise, close) over the top-right corner. Paint them in
+  // the colour of what is under them, and tell the CSS how wide they are so nothing hides beneath them.
+  function syncTitleBar() {
+    if (GUEST) return;
+    const css = getComputedStyle(document.documentElement);
+    const underTabs = hasPeer() || !el.tabBar.classList.contains('hidden') || readerOpen();
+    const color = css.getPropertyValue(underTabs ? '--base' : '--paper').trim();
+    const symbol = css.getPropertyValue('--fg').trim();
+    const wco = navigator.windowControlsOverlay;
+    const rect = wco && wco.visible ? wco.getTitlebarAreaRect() : null;
+    const w = rect ? Math.max(0, Math.round(window.innerWidth - rect.x - rect.width)) : 0;
+    const key = color + symbol + w + hasPeer();
+    if (key === titleBarKey) return;
+    titleBarKey = key;
+    if (api.app.titleBar) api.app.titleBar({ color, symbol }).catch(() => {});
+    document.documentElement.style.setProperty('--caption-w', w + 'px');
+    if (hasPeer()) toPeer({ type: 'caption', w });
+  }
+  let titleBarKey = '';
+
   function applyEditorLayout(settings) {
     el.editorColumn.classList.remove('align-left', 'align-center', 'align-right');
     el.editorColumn.classList.add('align-' + settings.editorAlign);
@@ -170,6 +218,30 @@
 
   // ---- resizable panes -----------------------------------------------------
 
+  // A narrow window gives the room to the note: below NARROW_W the sidebar steps aside. That is layout, not a
+  // setting: the saved choice is untouched, the sidebar toggle (Ctrl+\) still shows it, and a wide window brings it back.
+  const NARROW_W = 1000;
+  let sidebarPeek = false; // shown on request while the window is narrow
+  const isNarrow = () => window.innerWidth < NARROW_W;
+  function sidebarHidden() {
+    return !!(state.settings && state.settings.sidebarCollapsed) || (isNarrow() && !sidebarPeek);
+  }
+  function applySidebar() {
+    el.app.classList.toggle('sidebar-collapsed', sidebarHidden());
+    el.toggleSidebarBtn.classList.toggle('is-on', !sidebarHidden());
+  }
+  function showSidebar() {
+    if (!sidebarHidden()) return;
+    sidebarPeek = isNarrow();
+    if (state.settings.sidebarCollapsed) updateSettings({ sidebarCollapsed: false });
+    else { applySidebar(); applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); }
+  }
+  function toggleSidebar() {
+    if (sidebarHidden()) { showSidebar(); return; }
+    if (isNarrow() && sidebarPeek) { sidebarPeek = false; applySidebar(); return; } // back to the narrow layout
+    updateSettings({ sidebarCollapsed: true });
+  }
+
   function paneBudget() {
     // Space the two left panes may share while the editor keeps its minimum width.
     return Math.max(0, window.innerWidth - H.EDITOR_MIN);
@@ -178,7 +250,7 @@
   function fitPaneWidths(sidebar, list) {
     sidebar = H.clampPane('sidebarWidth', sidebar);
     list = H.clampPane('listWidth', list);
-    const sidebarShown = state.settings && state.settings.sidebarCollapsed ? 0 : sidebar;
+    const sidebarShown = sidebarHidden() ? 0 : sidebar;
     const over = sidebarShown + list - paneBudget();
     if (over > 0) {
       // Shrink the list first, then the sidebar, never below their minimums.
@@ -316,6 +388,7 @@
     el.countPinned.textContent = c.pinned;
     el.countTrash.textContent = c.trash;
     el.countReminders.textContent = c.reminders;
+    for (const b of [el.countPinned, el.countTrash, el.countReminders]) b.classList.toggle('is-zero', b.textContent === '0');
     el.countReminders.classList.toggle('is-overdue', !!c.overdue);
   }
 
@@ -343,6 +416,7 @@
     const q = state.query;
     el.noteList.innerHTML = '';
     el.listEmpty.classList.toggle('hidden', state.notes.length > 0);
+    if (!state.notes.length) renderListEmpty();
     el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
     const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', reminders: 'Reminders', tag: '#' + state.tag };
     el.listTitle.innerHTML = '';
@@ -385,10 +459,22 @@
     el.noteList.append(frag);
   }
 
+  function renderListEmpty() {
+    const [title, sub] = state.query ? ['No matches', 'Nothing in this list has "' + state.query + '". Ctrl+P searches everything.']
+      : state.view === 'trash' ? ['Trash is empty', 'Notes you delete wait here until you empty the trash.']
+      : state.view === 'pinned' ? ['Nothing pinned', 'Pin a note (Ctrl+D) to keep it at the top.']
+      : state.view === 'reminders' ? ['No reminders', 'Set one from a note\u2019s More menu, or press Ctrl+Shift+M.']
+      : state.view === 'tag' ? ['No notes with this tag', '']
+      : state.view === 'folder' ? ['This folder is empty', 'Press Ctrl+N to write a note here.']
+      : ['No notes yet', 'Press Ctrl+N to write your first note.'];
+    el.listEmpty.querySelector('.empty-title').textContent = title;
+    el.listEmpty.querySelector('.empty-sub').textContent = sub;
+  }
+
   function reminderMark(n) {
     if (!n.remindAt || n.trashedAt) return '';
     const overdue = n.remindAt <= Date.now();
-    return '<span class="remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">⏰ ' + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
+    return '<span class="remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
   // One renderer for a card's contents, used by the full list render and by single-card refreshes, so the
@@ -396,13 +482,19 @@
   function cardHtml(n, q) {
     const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
     const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
-    const marks = (n.pinned ? '<span class="pin" title="Pinned">★</span>' : '')
-      + (n.sticky ? '<span class="pin sticky-mark" title="On the desktop as a sticky">📌</span>' : '')
-      + (n.locked ? '<span class="lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + (n.unlocked ? '🔓' : '🔒') + '</span>' : '')
-      + (n.live ? '<span class="live-mark" title="Live share (' + n.live.role + ')">LIVE</span>' : '');
+    const marks = (n.pinned ? '<span class="mark pin" title="Pinned">' + I('star') + '</span>' : '')
+      + (n.sticky ? '<span class="mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
+      + (n.locked ? '<span class="mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
+      + (n.live ? '<span class="mark live-mark" title="Live share (' + n.live.role + ')">' + I('radio') + '</span>' : '');
     const snippet = n.locked && !n.unlocked ? '<div class="note-card-snippet is-locked">Locked note</div>' : '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>';
     return '<div class="note-card-title">' + marks + highlight(H.deriveTitle(n), q) + fileMark + '</div>' + snippet +
-      '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + reminderMark(n) + tags + '</div>';
+      '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + whereMark(n) + reminderMark(n) + tags + '</div>';
+  }
+
+  function whereMark(n) {
+    if (!n.folderId || (state.view === 'folder' && !state.query)) return '';
+    const f = flattenTree(state.tree).find((x) => x.id === n.folderId);
+    return f ? '<span class="where">' + I(f.book ? 'book-open' : 'folder') + escapeHtml(f.name) + '</span>' : '';
   }
 
   function refreshCard(note) {
@@ -509,7 +601,7 @@
 
       const chevron = document.createElement('button');
       chevron.className = 'folder-chevron' + (node.children.length ? (open.has(node.id) ? ' is-open' : '') : ' is-leaf');
-      chevron.textContent = '▶';
+      chevron.innerHTML = I('chevron-right');
       chevron.title = open.has(node.id) ? 'Collapse' : 'Expand';
       chevron.setAttribute('aria-label', chevron.title);
       chevron.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(node.id, !open.has(node.id)); });
@@ -517,13 +609,13 @@
 
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.textContent = node.book ? '📖' : '▰';
+      icon.innerHTML = I(node.book ? 'book-open' : 'folder');
       row.append(icon);
       if (node.isVaultRoot) {
         const st = state.vaultStatus[node.vaultId] || {};
         const badge = document.createElement('span');
         badge.className = 'vault-badge' + (st.syncing ? ' is-syncing' : '') + (st.lastError || st.conflict ? ' is-error' : '');
-        badge.textContent = st.isRepo ? '⟳' : '⌂';
+        badge.innerHTML = I(st.isRepo ? 'refresh-cw' : 'folder-open');
         badge.title = st.isRepo ? ('git' + (st.remote ? ' · ' + st.remote : ' · no remote') + (st.lastError ? '\n' + st.lastError : '')) : 'Folder vault (no git)';
         row.append(badge);
       }
@@ -542,7 +634,7 @@
         row.append(count);
         const menu = document.createElement('button');
         menu.className = 'folder-menu-btn';
-        menu.textContent = '⋯';
+        menu.innerHTML = I('ellipsis');
         menu.title = 'Folder actions';
         menu.setAttribute('aria-label', 'Folder actions for ' + node.name);
         menu.addEventListener('click', (e) => { e.stopPropagation(); openFolderMenu(node.id, menu); });
@@ -570,7 +662,7 @@
       row.style.setProperty('--depth', depth);
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.textContent = editing.book ? '📖' : '▰';
+      icon.innerHTML = I(editing.book ? 'book-open' : 'folder');
       row.append(document.createElement('span'), icon);
       row.firstChild.className = 'folder-chevron is-leaf';
       row.append(folderInput('', (value) => commitFolderEdit(value)));
@@ -612,7 +704,7 @@
 
   function startCreateFolder(parentId, asBook) {
     closeFolderMenu();
-    if (state.settings.sidebarCollapsed) updateSettings({ sidebarCollapsed: false }); // the name field lives there
+    showSidebar(); // the name field lives there
     state.editingFolder = { mode: 'create', parentId: parentId || null, book: !!asBook };
     if (parentId) {
       const set = expandedSet();
@@ -730,10 +822,14 @@
     none.value = '';
     none.textContent = 'No folder';
     sel.append(none);
+    // Each folder by its full path ("Work / Project Atlas"), so the closed box reads as a breadcrumb.
+    const path = [];
     for (const node of flattenTree(state.tree)) {
+      path.length = node.depth;
+      path.push(node.name);
       const opt = document.createElement('option');
       opt.value = node.id;
-      opt.textContent = '  '.repeat(node.depth) + (node.depth ? '└ ' : '') + node.name;
+      opt.textContent = path.join(' / ');
       sel.append(opt);
     }
     sel.value = current;
@@ -751,16 +847,17 @@
     placePopover(menu, anchor, ev);
   }
 
-  // Shows a popover menu at the pointer (right-click) or under its anchor, kept inside the window.
+  // Shows a popover menu at the pointer (right-click) or under its anchor, kept inside the window. Under an anchor
+  // it lines up with the anchor's right edge when the anchor sits in the right half, and opens upward if it must.
   function placePopover(menu, anchor, ev) {
     menu.classList.remove('hidden');
     const rect = anchor.getBoundingClientRect();
-    let x = ev ? ev.clientX : rect.left;
-    let y = ev ? ev.clientY : rect.bottom + 4;
     menu.style.left = '0px'; menu.style.top = '0px';
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let x = ev ? ev.clientX : (rect.left > window.innerWidth / 2 ? rect.right - mw : rect.left);
+    let y = ev ? ev.clientY : rect.bottom + 4;
     if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
-    if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
+    if (y + mh > window.innerHeight - 8) y = ev ? window.innerHeight - mh - 8 : rect.top - mh - 4;
     menu.style.left = Math.max(8, x) + 'px';
     menu.style.top = Math.max(8, y) + 'px';
     const first = menu.querySelector('button:not(.hidden):not(:disabled)');
@@ -1045,7 +1142,7 @@
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'tab-close';
-      x.textContent = '✕';
+      x.innerHTML = I('x');
       x.title = 'Close tab (Ctrl+W)';
       x.setAttribute('aria-label', 'Close ' + title);
       t.append(label, x);
@@ -1057,6 +1154,7 @@
     // One tab showing a note, and no split: no bar. A blank editor keeps it (its + is the way to a tab then), and a
     // split keeps both bars, for Close side and the active side's mark.
     el.tabBar.classList.toggle('hidden', !hasPeer() && tabs.ids.length <= 1 && !!state.currentId);
+    syncTitleBar();
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
     el.paneCloseBtn.classList.toggle('hidden', !GUEST);
     const missing = openIds().filter((id) => id !== state.currentId && !tabs.titles.has(id));
@@ -1326,6 +1424,9 @@
       case 'settings':
         applySettings(m.settings, { fromPeer: true });
         return;
+      case 'caption':
+        if (GUEST) document.documentElement.style.setProperty('--caption-w', (Number(m.w) || 0) + 'px');
+        return;
       case 'focus': setActiveSide('right'); return;
       case 'active':
         tabs.activeHere = !!m.on;
@@ -1354,7 +1455,7 @@
         return;
       }
       case 'reply': { const wait = peerWaits.get(m.seq); if (wait) wait(m); return; }
-      case 'command': runSideCommand(m.name); return;
+      case 'command': runSideCommand(m.name, m); return;
       case 'close': await closeSplit(); return;
       case 'drag': tabs.peerDrag = m.id || null; return;
       default: return;
@@ -1370,9 +1471,9 @@
   }
 
   // Shortcuts pressed on the right side that belong to the list or the whole window.
-  function runSideCommand(name) {
+  function runSideCommand(name, m) {
     if (GUEST) return;
-    if (name === 'newNote') newNote();
+    if (name === 'newNote') newNote({ title: m && typeof m.title === 'string' ? m.title : '' });
     else if (name === 'search') showList().then(() => { el.searchInput.focus(); el.searchInput.select(); });
     else if (name === 'openFiles') openFiles();
     else if (name === 'settings') openSettings();
@@ -1593,8 +1694,7 @@
     el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
-    el.pinBtn.textContent = note.pinned ? '★' : '☆';
-    el.pinBtn.classList.toggle('is-on', note.pinned);
+    renderPinButton(note.pinned);
     el.folderSelect.disabled = inTrash;
     renderFolderSelect();
     el.editorEmpty.classList.add('hidden');
@@ -1962,6 +2062,7 @@
       '<div class="book-page-head"><span class="no">' + p.no + '</span><h2>' + escapeHtml(p.title) + '</h2><button class="tool-btn" data-edit="' + p.id + '">Edit</button></div>' +
       (p.locked ? '<p class="book-page-locked">This page is locked. Open it to unlock.</p>' : '<div class="rich-editor-content">' + p.html + '</div>') + '</article>').join('');
     el.bookReader.classList.remove('hidden');
+    syncTitleBar();
     el.bookReaderScroll.scrollTop = 0;
     el.bookReaderCloseBtn.focus();
   }
@@ -1971,6 +2072,7 @@
     reader.bookId = null;
     el.bookReader.classList.add('hidden');
     el.bookReaderBody.innerHTML = '';
+    syncTitleBar();
   }
 
   function readerOpen() { return !el.bookReader.classList.contains('hidden'); }
@@ -1994,7 +2096,7 @@
         const li = document.createElement('li');
         const b = document.createElement('button');
         b.type = 'button';
-        b.textContent = (it.locked ? '🔒 ' : '') + it.title;
+        b.innerHTML = (it.locked ? I('lock') : '') + escapeHtml(it.title);
         if (it.sharedTags && it.sharedTags.length) { const t = document.createElement('span'); t.className = 'tags'; t.textContent = it.sharedTags.map((x) => '#' + x).join(' '); b.append(t); }
         if (it.missing) { b.classList.add('is-missing'); b.disabled = true; b.title = 'This link points at a note that no longer exists.'; }
         else { b.title = it.trashed ? 'In the trash' : 'Open'; b.addEventListener('click', () => followLink('note://' + it.id)); }
@@ -2095,7 +2197,8 @@
     el.lockScreenError.textContent = '';
     el.lockScreenPassword.value = '';
     el.lockBtn.classList.toggle('is-on', locked);
-    el.lockBtn.textContent = !locked ? '🔒 Lock' : (open ? '🔓 Unlocked' : '🔒 Locked');
+    setLabel(el.lockBtn, !locked ? 'Lock' : (open ? 'Unlocked' : 'Locked'));
+    setIcon(el.lockBtn, locked && open ? 'lock-open' : 'lock');
     el.lockBtn.title = !locked ? 'Lock this note with a password (Ctrl+L)' : (open ? 'Unlocked for now: lock again or remove the lock (Ctrl+L)' : 'Locked. Enter the password below to read it (Ctrl+L)');
     if (locked && !open) {
       el.richEditor.classList.add('hidden');
@@ -2112,8 +2215,7 @@
     if (!note || note.trashedAt || note.filePath) return;
     if (!note.locked) { openLockDialog('set'); return; }
     if (!note.unlocked) { el.lockScreenPassword.focus(); return; }
-    placePopover(el.lockMenu, el.lockBtn);
-    el.lockMenu.querySelector('button').focus();
+    placePopover(el.lockMenu, el.moreMenu.contains(el.lockBtn) ? el.moreBtn : el.lockBtn);
   }
 
   function openLockDialog(mode) {
@@ -2208,7 +2310,7 @@
     const on = !!(note && note.remindAt);
     el.remindBtn.classList.toggle('hidden', !note || !!note.trashedAt);
     el.remindBtn.classList.toggle('is-on', on);
-    el.remindBtn.textContent = on ? '⏰ ' + H.formatWhen(note.remindAt) : '⏰ Remind';
+    setLabel(el.remindBtn, on ? 'Reminder: ' + H.formatWhen(note.remindAt) : 'Remind me…');
     el.remindBtn.title = on ? 'Reminder set for ' + H.formatWhen(note.remindAt) + ' (Ctrl+Shift+M to change)' : 'Remind me about this note (Ctrl+Shift+M)';
   }
 
@@ -2255,26 +2357,19 @@
 
   // ---- sharing -----------------------------------------------------------------
 
-  function placePopover(menu, anchor) {
-    menu.classList.remove('hidden');
-    const rect = anchor.getBoundingClientRect();
-    let x = rect.left, y = rect.bottom + 4;
-    menu.style.left = '0px'; menu.style.top = '0px';
-    const mw = menu.offsetWidth, mh = menu.offsetHeight;
-    if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
-    if (y + mh > window.innerHeight - 8) y = rect.top - mh - 4;
-    menu.style.left = Math.max(8, x) + 'px';
-    menu.style.top = Math.max(8, y) + 'px';
+  // Which share actions apply to the open note; the share menu and the command palette both use it.
+  function syncShareMenu() {
+    const n = state.current;
+    if (!n) return;
+    el.shareReveal.classList.toggle('hidden', !n.filePath);
+    el.shareLiveHost.classList.toggle('hidden', !!n.live || !!n.locked || !!n.filePath);
+    el.shareLiveStop.classList.toggle('hidden', !n.live);
   }
 
   function openShareMenu() {
     if (!state.current || state.current.trashedAt) return;
-    el.shareReveal.classList.toggle('hidden', !state.current.filePath);
-    el.shareLiveHost.classList.toggle('hidden', !!state.current.live || !!state.current.locked || !!state.current.filePath);
-    el.shareLiveStop.classList.toggle('hidden', !state.current.live);
+    syncShareMenu();
     placePopover(el.shareMenu, el.shareBtn);
-    const first = el.shareMenu.querySelector('button:not(.hidden)');
-    if (first) first.focus();
   }
 
   function closeShareMenu() {
@@ -2415,7 +2510,8 @@
       stream.getTracks().forEach((t) => t.stop());
       clearInterval(rec.timer);
       el.recordBtn.classList.remove('is-recording');
-      el.recordBtn.textContent = '🎙 Record';
+      setLabel(el.recordBtn, 'Record a voice memo');
+      setActivity('record', null);
       const seconds = Math.max(1, Math.round((Date.now() - rec.startedAt) / 1000));
       rec.recorder = null;
       const blob = new Blob(rec.chunks, { type: 'audio/webm' });
@@ -2440,7 +2536,12 @@
     };
     recorder.start(250);
     el.recordBtn.classList.add('is-recording');
-    const tick = () => { const s = Math.round((Date.now() - rec.startedAt) / 1000); el.recordBtn.textContent = '⏹ ' + String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+    const tick = () => {
+      const s = Math.round((Date.now() - rec.startedAt) / 1000);
+      const clock = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+      setLabel(el.recordBtn, 'Stop recording (' + clock + ')');
+      setActivity('record', { text: 'Recording ' + clock, icon: 'audio-lines', stop: toggleRecording, stopLabel: 'Stop recording (Ctrl+Shift+G)' });
+    };
     tick(); rec.timer = setInterval(tick, 500);
   }
 
@@ -2767,7 +2868,7 @@
   function renderStickyButton(note) {
     const on = !!(note && note.sticky);
     el.stickyBtn.classList.toggle('is-on', on);
-    el.stickyBtn.textContent = on ? '📌 Stuck' : '📌 Stick';
+    setLabel(el.stickyBtn, on ? 'Take off the desktop' : 'Stick to the desktop');
     el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
     // A sticky shows rendered Markdown, so neither a PDF/Word file nor a plain-text file can become one (one that
     // already is can still be removed).
@@ -2786,7 +2887,7 @@
         toast('Removed from the desktop. The note is kept.');
       } else {
         await api.stickies.open(note.id);
-        toast('On the desktop. Drag its top bar to move it; ✕ on it removes it, Esc just hides it (tray → Stickies brings it back).');
+        toast('On the desktop. Drag its top bar to move it; its close button removes it, Esc just hides it (tray → Stickies brings it back).');
       }
     } catch (err) {
       toast('Could not change the sticky: ' + (err.message || err));
@@ -2931,8 +3032,9 @@
 
   function setReadAloudState(active) {
     tts.active = active;
-    el.readAloudBtn.textContent = active ? '⏹ Stop' : '🔊 Read';
+    setLabel(el.readAloudBtn, active ? 'Stop reading' : 'Read aloud');
     el.readAloudBtn.classList.toggle('is-on', active);
+    setActivity('read', active ? { text: 'Reading aloud', icon: 'volume-2', stop: stopReadAloud, stopLabel: 'Stop reading (Ctrl+Shift+R)' } : null);
   }
 
   function stopReadAloud() {
@@ -3798,7 +3900,9 @@
     return true;
   }
 
-  async function newNote() {
+  // opts.title starts the note with that title (the palette's "New note ..."). A click handler passes an event: ignored.
+  async function newNote(opts) {
+    const title = opts && typeof opts.title === 'string' ? opts.title.trim() : '';
     await flushSave();
     if (state.view === 'trash') {
       state.view = 'all';
@@ -3808,13 +3912,20 @@
     if (state.view === 'tag' && state.tag) data.tags = [state.tag];
     if (state.view === 'pinned') data.pinned = true;
     if (state.view === 'folder' && state.folderId) data.folderId = state.folderId;
+    if (title) data.title = title;
     let note;
     try { note = await api.notes.create(data); }
     catch (err) { toast('Could not create a note: ' + (err.message || err)); return; }
     state.query = '';
     el.searchInput.value = '';
     await refresh({ keepEditor: true });
-    await openNote(note.id, { newTab: true, focus: 'title' });
+    await openNote(note.id, { newTab: true, focus: title ? 'body' : 'title' });
+  }
+
+  function renderPinButton(on) {
+    setPressed(el.pinBtn, on);
+    el.pinBtn.title = on ? 'Unpin (Ctrl+D)' : 'Pin to the top (Ctrl+D)';
+    el.pinBtn.setAttribute('aria-label', on ? 'Unpin note' : 'Pin note');
   }
 
   async function togglePin() {
@@ -3822,8 +3933,7 @@
     await flushSave();
     const updated = await api.notes.togglePin(state.currentId);
     state.current = updated;
-    el.pinBtn.textContent = updated.pinned ? '★' : '☆';
-    el.pinBtn.classList.toggle('is-on', updated.pinned);
+    renderPinButton(updated.pinned);
     await refresh({ keepEditor: true });
     toast(updated.pinned ? 'Pinned' : 'Unpinned');
   }
@@ -3903,8 +4013,10 @@
   function createRichEditor() {
     if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
     state.rich = window.NotesEditor.create(el.richEditor, {
-      placeholder: 'Start writing… Type ## for a heading, - for a list, - [ ] for a checklist.',
+      placeholder: 'Start writing. Type / for headings, lists and tables, or [[ to link a note.',
       imageBase: () => H.imageBaseFor(state.current),
+      onTrigger: (t) => showInlineMenu(t),
+      onTriggerKey: (e) => inlineMenuKey(e),
       onUpdate: (md) => {
         if (state.sourceMode || !state.currentId) return;
         if (md === el.bodyInput.value) return;
@@ -3919,11 +4031,145 @@
     });
   }
 
+  // ---- the inline menu: "/" for blocks, "[[" for a link to a note ------------------------------------
+  // The editor reports the trigger (what was typed, and where); this draws the choices under it. Escape closes it
+  // until the trigger starts again somewhere else.
+
+  const SLASH = [
+    { kind: 'h1', title: 'Heading 1', icon: 'type', keys: '# ', words: 'title big' },
+    { kind: 'h2', title: 'Heading 2', icon: 'type', keys: '## ', words: 'subtitle section' },
+    { kind: 'h3', title: 'Heading 3', icon: 'type', keys: '### ', words: 'small heading' },
+    { kind: 'text', title: 'Text', icon: 'file-text', keys: '', words: 'paragraph plain normal' },
+    { kind: 'checklist', title: 'Checklist', icon: 'check', keys: '- [ ] ', words: 'todo task checkbox' },
+    { kind: 'bullets', title: 'Bulleted list', icon: 'list', keys: '- ', words: 'unordered bullet' },
+    { kind: 'numbers', title: 'Numbered list', icon: 'list', keys: '1. ', words: 'ordered' },
+    { kind: 'quote', title: 'Quote', icon: 'message-square', keys: '> ', words: 'blockquote citation' },
+    { kind: 'code', title: 'Code block', icon: 'code-xml', keys: '```', words: 'snippet pre monospace' },
+    { kind: 'table', title: 'Table', icon: 'layout-grid', keys: '', words: 'grid rows columns' },
+    { kind: 'divider', title: 'Divider', icon: 'minus', keys: '---', words: 'rule line separator hr' },
+    { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
+    { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
+  ];
+  const inline = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
+
+  async function showInlineMenu(t) {
+    const seq = ++inline.seq;
+    if (!t || state.sourceMode || !state.rich) { if (!t) inline.dismissedAt = null; hideInlineMenu(); return; }
+    if (inline.dismissedAt === t.kind + ':' + t.from) { hideInlineMenu(); return; }
+    let items;
+    if (t.kind === 'slash') {
+      items = SLASH.map((b) => ({ b, s: H.fuzzyScore(t.query, b.title + ' ' + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
+      if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
+    } else {
+      if (!inline.notes || !inline.trigger || inline.trigger.kind !== 'link') inline.notes = await api.notes.list({ sort: 'updated' });
+      if (seq !== inline.seq) return; // typing moved on while the notes loaded
+      const q = t.query.trim();
+      const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
+      const scored = q ? notes.map((n) => ({ n, s: H.fuzzyScore(q, H.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
+      items = scored.slice(0, 8).map((n) => ({ id: n.id, title: H.deriveTitle(n), icon: n.locked ? 'lock' : 'notebook-text', keys: H.relativeTime(n.updatedAt), note: n }));
+      if (q) items.push({ id: 'new', title: 'New note "' + H.truncate(q, 40) + '"', icon: 'square-pen', keys: '', create: q });
+    }
+    inline.trigger = t;
+    inline.items = items;
+    inline.active = 0;
+    if (!items.length) { hideInlineMenu(); return; }
+    renderInlineMenu();
+  }
+
+  function renderInlineMenu() {
+    const menu = el.inlineMenu;
+    menu.innerHTML = '';
+    inline.items.forEach((it, i) => {
+      const b = document.createElement('div');
+      b.className = 'inline-item' + (i === inline.active ? ' is-active' : '');
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', String(i === inline.active));
+      b.innerHTML = I(it.icon) + '<span class="lbl"></span>' + (it.keys ? '<span class="keys' + (inline.trigger.kind === 'slash' ? ' md' : '') + '"></span>' : '');
+      b.querySelector('.lbl').textContent = it.title;
+      if (it.keys) b.querySelector('.keys').textContent = it.keys;
+      // mousedown, not click: the editor must keep focus, or blurring it would close the menu first.
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); chooseInline(i); });
+      b.addEventListener('mousemove', () => { if (inline.active !== i) { inline.active = i; paintInline(); } });
+      menu.append(b);
+    });
+    menu.classList.remove('hidden');
+    const r = inline.trigger.rect;
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let x = Math.min(r.left, window.innerWidth - mw - 8);
+    let y = r.bottom + 6;
+    if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 6);
+    menu.style.left = Math.max(8, x) + 'px';
+    menu.style.top = y + 'px';
+  }
+
+  function paintInline() {
+    [...el.inlineMenu.children].forEach((c, i) => { c.classList.toggle('is-active', i === inline.active); c.setAttribute('aria-selected', String(i === inline.active)); if (i === inline.active) c.scrollIntoView({ block: 'nearest' }); });
+  }
+
+  function hideInlineMenu() {
+    el.inlineMenu.classList.add('hidden');
+    inline.trigger = null;
+    inline.items = [];
+  }
+
+  // Keys while the menu is open. Returns true when the menu used the key.
+  function inlineMenuKey(e) {
+    if (e.isComposing || e.keyCode === 229) return false;
+    if (!inline.trigger || el.inlineMenu.classList.contains('hidden')) return false;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = inline.items.length;
+      inline.active = (inline.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+      paintInline();
+      return true;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); chooseInline(inline.active); return true; }
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); // Escape closes the menu, not the window
+      inline.dismissedAt = inline.trigger.kind + ':' + inline.trigger.from;
+      hideInlineMenu();
+      return true;
+    }
+    return false;
+  }
+
+  async function chooseInline(i) {
+    const it = inline.items[i];
+    const t = inline.trigger;
+    if (!it || !t || !state.rich) return;
+    const range = { from: t.from, to: t.to };
+    hideInlineMenu();
+    if (t.kind === 'slash') {
+      if (it.kind === 'date') { state.rich.insertTextAt(range, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return; }
+      if (it.kind === 'link') { state.rich.insertTextAt(range, '[['); return; } // reopens as the note picker
+      state.rich.insertBlock(range, it.kind);
+      return;
+    }
+    if (it.create) {
+      const noteId = state.currentId;
+      let created;
+      try { created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null }); }
+      catch (err) { toast('Could not create the note: ' + (err.message || err)); return; }
+      if (state.currentId !== noteId) return; // moved to another note meanwhile; the new note still exists
+      const typed = '[[' + t.query;
+      const at = state.rich.textAt(range) === typed ? range : null;
+      if (at) state.rich.insertLinkAt(at, it.create, 'note://' + created.id);
+      else { const r = state.rich.selectionRange(); state.rich.insertLinkAt({ from: r.to, to: r.to }, it.create, 'note://' + created.id); }
+      inline.notes = null;
+      refresh({ keepEditor: true });
+      toast('Created "' + H.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
+      return;
+    }
+    state.rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
+  }
+
   function applyEditorMode(source) {
     state.sourceMode = !!source;
+    if (source) hideInlineMenu();
     if (find.open) { clearFindHighlights(); setTimeout(() => { if (find.open) runFind(true, true); }, 0); }
-    el.sourceBtn.classList.toggle('is-on', state.sourceMode);
-    el.sourceBtn.textContent = state.sourceMode ? 'Rendered' : 'Source';
+    setPressed(el.sourceBtn, state.sourceMode);
+    setLabel(el.sourceBtn, state.sourceMode ? 'Rendered' : 'Source');
+    el.sourceBtn.setAttribute('aria-label', state.sourceMode ? 'Back to the rendered view' : 'Show Markdown source');
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
     const viewerOnly = isViewerOnlyFile(state.current) || lockedNow();
     el.bodyInput.classList.toggle('hidden', !state.sourceMode || viewerOnly);
@@ -4095,6 +4341,30 @@
     el.ttsRateInput.value = s.ttsRate;
     el.ttsRateValue.textContent = Number(s.ttsRate).toFixed(1) + '×';
     refreshGitStatus();
+    el.settingsScroll.scrollTop = 0;
+    markSettingsSection();
+  }
+
+  // The settings nav: a link jumps to its section, and the section in view is the one marked.
+  function markSettingsSection() {
+    const top = el.settingsScroll.getBoundingClientRect().top;
+    const sections = [...el.settingsScroll.querySelectorAll('.settings-section')];
+    let current = sections[0];
+    for (const sec of sections) if (sec.getBoundingClientRect().top - top < 80) current = sec;
+    // At the bottom, the last section is the one being read even if it is short.
+    if (el.settingsScroll.scrollTop + el.settingsScroll.clientHeight >= el.settingsScroll.scrollHeight - 4) current = sections[sections.length - 1];
+    el.settingsNav.querySelectorAll('a').forEach((a) => a.classList.toggle('is-active', current && a.getAttribute('href') === '#' + current.id));
+  }
+
+  function bindSettingsNav() {
+    el.settingsNav.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      e.preventDefault();
+      const sec = el.settingsScroll.querySelector(a.getAttribute('href'));
+      if (sec) sec.scrollIntoView({ block: 'start' });
+    });
+    el.settingsScroll.addEventListener('scroll', markSettingsSection, { passive: true });
   }
 
   function syncAlignSeg(value) {
@@ -4156,12 +4426,140 @@
     }
   }
 
+  // ---- the More menu --------------------------------------------------------
+
+  function openMoreMenu() {
+    if (!state.current) return;
+    placePopover(el.moreMenu, el.moreBtn);
+    el.moreBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeMoreMenu() {
+    el.moreMenu.classList.add('hidden');
+    el.moreBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  // Arrow keys, Home and End move through any open menu; Tab leaves it.
+  function bindMenuKeys() {
+    document.addEventListener('keydown', (e) => {
+      const menu = e.target.closest && e.target.closest('.popover[role="menu"]');
+      if (!menu || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      const items = [...menu.querySelectorAll('button')].filter((b) => b.offsetParent && !b.disabled);
+      if (!items.length) return;
+      e.preventDefault();
+      const i = items.indexOf(document.activeElement);
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next].focus();
+    }, true);
+  }
+
+  // ---- what is running: recording, reading aloud --------------------------------------------
+  // A long-running mode must stay visible and stoppable while its menu is closed.
+
+  const activities = new Map(); // key -> { chip, a }
+  function setActivity(key, a) {
+    const had = activities.get(key);
+    if (!a) { if (had) { had.chip.remove(); activities.delete(key); } return; }
+    if (had) {
+      had.a = a;
+      had.chip.querySelector('.activity-text').textContent = a.text;
+      had.chip.title = a.stopLabel;
+      return;
+    }
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'activity-chip';
+    chip.title = a.stopLabel;
+    chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I('x');
+    chip.querySelector('.activity-text').textContent = a.text;
+    const entry = { chip, a };
+    chip.addEventListener('click', () => entry.a.stop());
+    activities.set(key, entry);
+    el.activityBar.append(chip);
+  }
+
+  // ---- the command palette (Ctrl+P) -----------------------------------------------------------
+  // Every command in the app, plus every note. Items backed by a button use the button itself, so a command is
+  // offered exactly when its button would be usable, under the same name, and does exactly what the button does.
+
+  let palette = null;
+  function openPalette(query) {
+    if (!palette) palette = window.NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
+    closeMoreMenu(); closeShareMenu();
+    palette.open(query);
+  }
+
+  const buttonWords = (b) => ((b.querySelector('.lbl') || {}).textContent || b.getAttribute('aria-label') || b.textContent || '').trim();
+  const shortcutIn = (b) => ((b.querySelector('.keys') || {}).textContent || (/\((Ctrl[^)]*|F\d+|Esc)\)/.exec(b.title || '') || [])[1] || '').trim();
+  // Usable: not hidden by the app, not disabled, not removed by the page's own CSS (the right side hides some).
+  const usable = (b) => !!b && !b.disabled && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none';
+
+  function commandList() {
+    const noteOpen = !!state.current && !el.editor.classList.contains('hidden');
+    const fromButton = (b, group, extra) => Object.assign({ id: b.id, group, title: buttonWords(b), icon: b.dataset.icon, keys: shortcutIn(b), ok: usable(b) && (group !== 'This note' || noteOpen), run: () => b.click() }, extra);
+    const cmd = (id, group, title, icon, keys, run, ok, keywords) => ({ id, group, title, icon, keys, run, ok: ok === undefined ? true : ok, keywords });
+    // On the right side of a split, these run on the left side (which has the sidebar and list), as their keys do.
+    const side = (name, fn) => (GUEST ? () => toPeer({ type: 'command', name }) : fn);
+    if (noteOpen) syncShareMenu();
+    const list = [
+      cmd('new-note', 'Create', 'New note', 'square-pen', 'Ctrl+N', side('newNote', newNote)),
+      cmd('open-file', 'Create', 'Open a file as a note…', 'folder-open', 'Ctrl+O', side('openFiles', () => openFiles()), true, 'markdown pdf word docx txt'),
+      cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
+      cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
+      fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
+      fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
+      cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+Shift+F', () => openFind(), noteOpen),
+      cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, noteOpen),
+      ...[...el.moreMenu.querySelectorAll('.menu-item')].map((b) => fromButton(b, 'This note')),
+      fromButton(el.restoreBtn, 'This note'),
+      fromButton(el.destroyBtn, 'This note'),
+      ...[...el.shareMenu.querySelectorAll('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: b.textContent.trim(), icon: 'share-2', keys: '', ok: noteOpen && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action) })),
+      cmd('sidebar', 'View', state.settings && sidebarHidden() ? 'Show the sidebar' : 'Hide the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST),
+      cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
+      cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(state.settings && state.settings.sidebarCollapsed && state.settings.listCollapsed), 'zen distraction free writing'),
+      cmd('width', 'View', state.settings && state.settings.editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: state.settings.editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
+      fromButton(el.splitViewBtn, 'View', { title: 'Split view: open a second side', ok: usable(el.splitViewBtn) }),
+      cmd('new-tab', 'View', 'New tab', 'plus', 'Ctrl+T', newEmptyTab),
+      cmd('close-tab', 'View', 'Close this tab', 'x', 'Ctrl+W', () => closeTab(tabs.at), tabs.ids.length > 0),
+      cmd('theme', 'View', effectiveTheme() === 'dark' ? 'Switch to light' : 'Switch to dark', 'sun-moon', 'Ctrl+Shift+L', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }), true, 'theme dark light mode'),
+      ...['all', 'pinned', 'reminders', 'trash'].map((v) => cmd('go-' + v, 'Go to', { all: 'All notes', pinned: 'Pinned', reminders: 'Reminders', trash: 'Trash' }[v], { all: 'notebook-text', pinned: 'star', reminders: 'bell', trash: 'trash-2' }[v], '', () => setView(v), !GUEST)),
+      ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
+      ...[...el.tagList.querySelectorAll('.nav-item')].map((b) => cmd('tag-' + b.firstChild.textContent, 'Go to', 'Tag: #' + b.firstChild.textContent, 'hash', '', () => b.click(), !GUEST)),
+      cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font'),
+      cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
+      cmd('export-all', 'App', 'Export all notes…', 'download', '', () => el.exportAllBtn.click(), !GUEST, 'backup json'),
+      cmd('data-folder', 'App', 'Open the data folder', 'folder-open', '', () => el.dataFolderBtn.click(), !GUEST),
+      cmd('hide', 'App', 'Hide Notes', 'x', 'Esc', () => flushSave().then(() => api.app.hide())),
+    ];
+    return list.filter((c) => c.ok && c.title);
+  }
+
+  async function paletteItems(query) {
+    const commands = commandList();
+    const commandsOnly = /^\s*>/.test(query);
+    let notes = null;
+    if (!commandsOnly) {
+      const all = await api.notes.list({ sort: 'updated' });
+      const folders = new Map(flattenTree(state.tree).map((f) => [f.id, f.name]));
+      notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
+        id: 'note-' + n.id, group: 'Notes', title: H.deriveTitle(n), icon: n.filePath ? 'file-text' : n.locked ? 'lock' : n.pinned ? 'star' : 'notebook-text',
+        hint: (n.folderId && folders.get(n.folderId)) || H.relativeTime(n.updatedAt),
+        matches: (q) => !n.locked && H.matchesQuery(n, q),
+        run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody()),
+      }));
+    }
+    const out = window.NotesPalette.rank(query, commands, notes);
+    const title = query.replace(/^\s*>\s*/, '').trim();
+    if (title && !commandsOnly) out.push({ id: 'create', group: 'Create', title: 'New note "' + H.truncate(title, 60) + '"', icon: 'square-pen', keys: '', run: () => (GUEST ? toPeer({ type: 'command', name: 'newNote', title }) : newNote({ title })) });
+    return out;
+  }
+
   // ---- global keyboard -----------------------------------------------------
 
   function onKeydown(e) {
     if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
+    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfNote || docxNote)) {
       e.preventDefault();
       if (pdfNote) flushPdf({ commit: true, explicit: true });
@@ -4172,6 +4570,7 @@
       if (inDialog) return; // dialog handles it
       if (el.pdfEditor.contains(document.activeElement)) return; // pdf.js ends the edit in progress; the window stays
       if (find.open) { e.preventDefault(); closeFind(); return; }
+      if (!el.moreMenu.classList.contains('hidden')) { e.preventDefault(); closeMoreMenu(); el.moreBtn.focus(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
       if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.fileConvertBtn.focus(); return; }
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
@@ -4205,10 +4604,11 @@
         case 'h': e.preventDefault(); if (!find.open) openFind(); toggleReplace(true); return;
         case 'f': e.preventDefault(); showList().then(() => { el.searchInput.focus(); el.searchInput.select(); }); return;
         case 'e': e.preventDefault(); if (state.current) toggleSource(); return;
-        case 'p': e.preventDefault(); togglePin(); return;
+        case 'p': e.preventDefault(); openPalette(); return;
+        case 'd': e.preventDefault(); togglePin(); return;
         case 's': e.preventDefault(); flushSave().then((ok) => toast(ok ? 'Saved' : 'Save failed, will retry')); return;
         case ',': e.preventDefault(); openSettings(); return;
-        case '\\': e.preventDefault(); updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }); return;
+        case '\\': e.preventDefault(); toggleSidebar(); return;
         // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
         case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
         // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
@@ -4258,6 +4658,13 @@
 
   function bind() {
     el.newNoteBtn.addEventListener('click', newNote);
+    el.emptyNewNoteBtn.addEventListener('click', newNote);
+    el.paletteBtn.addEventListener('click', () => openPalette());
+    el.moreBtn.addEventListener('click', () => { if (el.moreMenu.classList.contains('hidden')) openMoreMenu(); else closeMoreMenu(); });
+    // Every item does its job and closes the menu; the item's own click handler runs first.
+    el.moreMenu.addEventListener('click', (e) => { if (e.target.closest('.menu-item')) closeMoreMenu(); });
+    bindMenuKeys();
+    bindSettingsNav();
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
@@ -4421,7 +4828,7 @@
     el.navItems.forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     el.themeBtn.addEventListener('click', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }));
     el.settingsBtn.addEventListener('click', openSettings);
-    el.toggleSidebarBtn.addEventListener('click', () => updateSettings({ sidebarCollapsed: !state.settings.sidebarCollapsed }));
+    el.toggleSidebarBtn.addEventListener('click', toggleSidebar);
     el.toggleListBtn.addEventListener('click', toggleList);
     el.hideListBtn.addEventListener('click', toggleList);
     setupResizer(el.sidebarResizer, 'sidebarWidth');
@@ -4435,11 +4842,17 @@
       if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
       if ((!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) && !el.pageMenu.contains(e.target) && !el.bookMenu.contains(e.target) && !el.bookName.contains(e.target)) closeAllBookMenus();
       if (!el.shareMenu.classList.contains('hidden') && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
+      if (!el.moreMenu.classList.contains('hidden') && !el.moreMenu.contains(e.target) && !el.moreBtn.contains(e.target)) closeMoreMenu();
       if (!el.convertMenu.classList.contains('hidden') && !el.convertMenu.contains(e.target) && !el.fileConvertBtn.contains(e.target)) closeConvertMenu();
       if (!el.lockMenu.classList.contains('hidden') && !el.lockMenu.contains(e.target) && !el.lockBtn.contains(e.target)) el.lockMenu.classList.add('hidden');
     });
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
-    window.addEventListener('resize', () => { if (state.settings) applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); });
+    window.addEventListener('resize', () => {
+      if (!state.settings) return;
+      if (!isNarrow()) sidebarPeek = false;
+      applySidebar();
+      applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth);
+    });
 
     el.searchInput.addEventListener('input', () => {
       clearTimeout(searchTimer);
@@ -4613,6 +5026,8 @@
   }
 
   async function init() {
+    window.NotesIcons.hydrate(document);
+    if (navigator.windowControlsOverlay) navigator.windowControlsOverlay.addEventListener('geometrychange', syncTitleBar);
     const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
     if (GUEST) document.body.classList.add('pane-guest');
     createRichEditor();

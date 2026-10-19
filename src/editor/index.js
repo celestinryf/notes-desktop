@@ -2,7 +2,7 @@
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
 import { Editor, Extension, InputRule, mergeAttributes } from '@tiptap/core';
-import { EditorState, TextSelection } from '@tiptap/pm/state';
+import { EditorState, TextSelection, Plugin, PluginKey } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
@@ -120,6 +120,69 @@ const DashCheckbox = Extension.create({
   },
 });
 
+// Inline triggers: "/" at the start of a word (the block menu) and "[[" (link to a note). The editor only notices
+// them and reports where they are; the app draws the menu. While a trigger is open the app gets first say on keys
+// (arrows, Enter, Tab, Escape), so they drive the menu instead of moving the caret.
+// Not in code blocks or inline code, and never with a selection.
+export function detectTrigger(state) {
+  const sel = state.selection;
+  if (!sel.empty) return null;
+  const $p = sel.$from;
+  const parent = $p.parent;
+  if (!parent.isTextblock || parent.type.spec.code) return null;
+  if ($p.marks().some((m) => m.type.spec.code)) return null;
+  const before = parent.textBetween(0, $p.parentOffset, undefined, '￼');
+  let m = /(?:^|\s)\/((?:[\p{L}\p{N}]{1,20}(?: [\p{L}\p{N}]{0,12})?)?)$/u.exec(before);
+  if (m) { const q = m[1] || ''; return { kind: 'slash', query: q, from: $p.pos - q.length - 1, to: $p.pos }; }
+  m = /\[\[([^[\]\n￼]{0,60})$/.exec(before);
+  if (m) return { kind: 'link', query: m[1], from: $p.pos - m[1].length - 2, to: $p.pos };
+  return null;
+}
+
+function triggers(options) {
+  return Extension.create({
+    name: 'notesTriggers',
+    addProseMirrorPlugins() {
+      let lastKey = null;
+      return [new Plugin({
+        key: new PluginKey('notesTriggers'),
+        view: () => ({
+          update: (view) => {
+            const t = view.hasFocus() || lastKey ? detectTrigger(view.state) : null;
+            const key = t ? t.kind + ':' + t.from + ':' + t.query : null;
+            if (key === lastKey) return;
+            lastKey = key;
+            if (!options.onTrigger) return;
+            if (!t) { options.onTrigger(null); return; }
+            const at = view.coordsAtPos(t.from);
+            options.onTrigger(Object.assign(t, { rect: { left: at.left, top: at.top, bottom: at.bottom } }));
+          },
+          destroy: () => { if (lastKey && options.onTrigger) options.onTrigger(null); lastKey = null; },
+        }),
+        props: {
+          handleKeyDown: (_view, e) => (lastKey && options.onTriggerKey ? !!options.onTriggerKey(e) : false),
+          handleDOMEvents: { blur: () => { if (lastKey && options.onTrigger) { lastKey = null; options.onTrigger(null); } return false; } },
+        },
+      })];
+    },
+  });
+}
+
+// The blocks the "/" menu can make. Each replaces the typed "/query" with that block at the caret.
+const BLOCKS = {
+  h1: (c) => c.setNode('heading', { level: 1 }),
+  h2: (c) => c.setNode('heading', { level: 2 }),
+  h3: (c) => c.setNode('heading', { level: 3 }),
+  text: (c) => c.setParagraph(),
+  bullets: (c) => c.toggleBulletList(),
+  numbers: (c) => c.toggleOrderedList(),
+  checklist: (c) => c.toggleTaskList(),
+  quote: (c) => c.toggleBlockquote(),
+  code: (c) => c.toggleCodeBlock(),
+  divider: (c) => c.setHorizontalRule(),
+  table: (c) => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }),
+};
+
 export { fingerprint };
 
 // Where a picture is loaded from. Only the shown src changes; the Markdown keeps what was written.
@@ -183,6 +246,7 @@ export function create(element, options) {
       // read as HTML tags and the angle-bracket text dropped. Pasted text arrives as text.
       Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: false, transformCopiedText: true }),
       NotesKeys,
+      triggers(options),
     ],
     content: options.content || '',
     autofocus: false,
@@ -274,6 +338,19 @@ export function create(element, options) {
     // Inserts a link at the caret (or over the selection), as Markdown would: [text](href).
     insertLink: (text, href) => editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run(),
     hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
+    // The "/" menu: replace the typed trigger (range) with a block. Returns false for an unknown block.
+    insertBlock: (range, kind) => {
+      const make = BLOCKS[kind];
+      if (!make) return false;
+      return make(editor.chain().focus().deleteRange(range)).run();
+    },
+    blockKinds: () => Object.keys(BLOCKS),
+    textAt: (range) => { try { return editor.state.doc.textBetween(range.from, range.to, undefined, '\ufffc'); } catch (_) { return null; } },
+    // Plain text at the trigger (the "/" menu's date), as if typed.
+    insertTextAt: (range, text) => editor.chain().focus().deleteRange(range).insertContent(text).run(),
+    // "[[": replace the typed trigger with a link to a note.
+    insertLinkAt: (range, text, href) => editor.chain().focus().deleteRange(range)
+      .insertContent([{ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }, { type: 'text', text: ' ' }]).run(),
     destroy: () => editor.destroy(),
   };
 }

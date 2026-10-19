@@ -12,28 +12,30 @@
 <body>
   <div id="app" class="app">
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
+    <aside class="app-sidebar" id="sidebar">
+      <div class="brand drag-region">
         <span class="brand-mark" aria-hidden="true"></span>
         <h1 class="brand-name">Notes</h1>
       </div>
 
-      <button class="btn btn-primary btn-block" id="newNoteBtn" title="New note (Ctrl+N)">
-        <span class="plus" aria-hidden="true">+</span> New note
-      </button>
-      <button class="btn btn-block btn-small" id="openFileBtn" title="Open files as notes (Ctrl+O). Markdown, text, LaTeX, PDF, Word, and more.">Open file…</button>
+      <div class="sidebar-actions">
+        <button class="btn btn-primary" id="newNoteBtn" data-icon="square-pen" title="New note (Ctrl+N)"><span>New note</span></button>
+        <button class="search-trigger" id="paletteBtn" data-icon="search" title="Find a note or run any command (Ctrl+P)"><span class="lbl">Find anything</span><span class="keys">Ctrl P</span></button>
+      </div>
 
       <nav class="nav" aria-label="Views">
-        <button class="nav-item is-active" data-view="all"><span>All notes</span><span class="count" id="countAll">0</span></button>
-        <button class="nav-item" data-view="pinned"><span>Pinned</span><span class="count" id="countPinned">0</span></button>
-        <button class="nav-item" data-view="reminders"><span>Reminders</span><span class="count" id="countReminders">0</span></button>
-        <button class="nav-item" data-view="trash"><span>Trash</span><span class="count" id="countTrash">0</span></button>
+        <button class="nav-item is-active" data-view="all" data-icon="notebook-text"><span>All notes</span><span class="count" id="countAll">0</span></button>
+        <button class="nav-item" data-view="pinned" data-icon="star"><span>Pinned</span><span class="count" id="countPinned">0</span></button>
+        <button class="nav-item" data-view="reminders" data-icon="bell"><span>Reminders</span><span class="count" id="countReminders">0</span></button>
+        <button class="nav-item" data-view="trash" data-icon="trash-2"><span>Trash</span><span class="count" id="countTrash">0</span></button>
       </nav>
 
       <div class="nav-heading nav-heading-row">
         <span>Folders</span>
-        <button class="mini-btn" id="newBookBtn" title="New book: a folder whose notes are pages" aria-label="New book">📖</button>
-        <button class="mini-btn" id="newFolderBtn" title="New folder (Ctrl+Shift+N)" aria-label="New folder">+</button>
+        <span class="nav-heading-tools">
+          <button class="mini-btn" id="newBookBtn" data-icon="book-plus" title="New book: a folder whose notes are pages" aria-label="New book"></button>
+          <button class="mini-btn" id="newFolderBtn" data-icon="folder-plus" title="New folder (Ctrl+Shift+N)" aria-label="New folder"></button>
+        </span>
       </div>
       <nav class="nav folders" id="folderTree" aria-label="Folders"></nav>
 
@@ -41,30 +43,32 @@
       <nav class="nav tags" id="tagList" aria-label="Tags"></nav>
 
       <div class="sidebar-foot">
-        <button class="icon-btn" id="themeBtn" title="Toggle theme (Ctrl+Shift+L)" aria-label="Toggle theme">◐</button>
-        <button class="icon-btn" id="settingsBtn" title="Settings (Ctrl+,)" aria-label="Settings">⚙</button>
-        <span class="hotkey-hint" id="hotkeyHint" title="Global hotkey"></span>
+        <button class="foot-btn" id="openFileBtn" data-icon="folder-open" title="Open files as notes (Ctrl+O). Markdown, text, LaTeX, PDF, Word, and more."><span>Open file…</span></button>
+        <span class="spacer"></span>
+        <button class="icon-btn" id="themeBtn" data-icon="sun-moon" title="Switch light and dark (Ctrl+Shift+L)" aria-label="Switch light and dark"></button>
+        <button class="icon-btn" id="settingsBtn" data-icon="settings" title="Settings (Ctrl+,)" aria-label="Settings"></button>
       </div>
+      <p class="hotkey-hint hidden">Bring Notes back from anywhere with <span id="hotkeyHint"></span></p>
       <div class="resizer" id="sidebarResizer" title="Drag to resize. Double-click to reset."></div>
     </aside>
 
     <!-- Note list -->
     <section class="list-pane" aria-label="Note list">
-      <div class="list-head">
-        <div class="search-wrap">
-          <input id="searchInput" class="search" type="search" placeholder="Search notes…  (Ctrl+F)" autocomplete="off" spellcheck="false" />
-        </div>
-        <select id="sortSelect" class="select" title="Sort notes" aria-label="Sort notes">
-          <option value="updated">Last edited</option>
-          <option value="created">Newest</option>
-          <option value="title">Title</option>
-        </select>
+      <div class="list-head drag-region">
+        <label class="search-wrap" data-icon="search">
+          <input id="searchInput" class="search" type="search" placeholder="Filter this list" aria-label="Filter this list (Ctrl+F)" title="Filter this list (Ctrl+F)" autocomplete="off" spellcheck="false" />
+        </label>
+        <button class="tool-btn icon-only" id="hideListBtn" data-icon="chevron-left" title="Hide the note list (Ctrl+Shift+\)" aria-label="Hide note list"></button>
       </div>
       <div class="list-title-row">
         <h2 class="list-title" id="listTitle">All notes</h2>
         <div class="list-title-actions">
           <button class="btn btn-small btn-danger hidden" id="emptyTrashBtn">Empty trash</button>
-          <button class="tool-btn" id="hideListBtn" title="Hide the note list (Ctrl+Shift+\)" aria-label="Hide note list">⟨</button>
+          <select id="sortSelect" class="select select-quiet" title="Sort notes" aria-label="Sort notes">
+            <option value="updated">Last edited</option>
+            <option value="created">Newest</option>
+            <option value="title">Title</option>
+          </select>
         </div>
       </div>
       <ul class="note-list" id="noteList" role="listbox" aria-label="Notes"></ul>
@@ -78,60 +82,78 @@
     <!-- Editor -->
     <section class="editor-pane" id="editorPane" aria-label="Editor">
       <div class="pane-main" id="paneMain">
-      <div class="tab-bar" id="tabBar">
+      <div class="tab-bar drag-region" id="tabBar">
         <div class="tabs" id="tabList" role="tablist" aria-label="Open notes"></div>
-        <button class="tool-btn tab-add" id="tabAddBtn" title="New tab (Ctrl+T). Ctrl+click a note to open it in a new tab." aria-label="New tab">+</button>
+        <button class="tool-btn icon-only tab-add" id="tabAddBtn" data-icon="plus" title="New tab (Ctrl+T). Ctrl+click a note to open it in a new tab." aria-label="New tab"></button>
         <span class="spacer"></span>
-        <button class="tool-btn hidden" id="paneCloseBtn" title="Close this side and its tabs" aria-label="Close this side">✕ Close side</button>
+        <button class="tool-btn hidden" id="paneCloseBtn" data-icon="x" title="Close this side and its tabs" aria-label="Close this side"><span>Close side</span></button>
       </div>
       <div class="editor-empty" id="editorEmpty">
-        <div class="editor-empty-card">
-          <p class="editor-empty-title">Pick a note, or start a new one.</p>
-          <ul class="shortcut-list">
-            <li><kbd>Ctrl</kbd>+<kbd>N</kbd> New note</li>
-            <li><kbd>Ctrl</kbd>+<kbd>F</kbd> Search</li>
-            <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Show Markdown source</li>
-            <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Pin</li>
-            <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Del</kbd> Move to trash</li>
-            <li><kbd>Esc</kbd> Hide window</li>
-          </ul>
-          <p class="editor-empty-sub">Bring Notes back any time with <span id="hotkeyHint2"></span>.</p>
+        <div class="drag-strip drag-region" aria-hidden="true"></div>
+        <div class="editor-empty-inner">
+          <p class="editor-empty-title">Nothing open</p>
+          <p class="editor-empty-sub">Pick a note from the list, or start a new one.</p>
+          <button class="btn btn-primary" id="emptyNewNoteBtn" data-icon="square-pen"><span>New note</span></button>
+          <dl class="shortcut-list">
+            <div><dt>Find a note or command</dt><dd><kbd>Ctrl</kbd><kbd>P</kbd></dd></div>
+            <div><dt>New note</dt><dd><kbd>Ctrl</kbd><kbd>N</kbd></dd></div>
+            <div><dt>Filter the list</dt><dd><kbd>Ctrl</kbd><kbd>F</kbd></dd></div>
+            <div><dt>Hide Notes</dt><dd><kbd>Esc</kbd></dd></div>
+          </dl>
+          <p class="editor-empty-foot">Bring Notes back from anywhere with <span id="hotkeyHint2"></span>.</p>
         </div>
       </div>
 
       <div class="editor hidden" id="editor">
-        <div class="editor-toolbar">
+        <div class="editor-toolbar drag-region" role="toolbar" aria-label="Note">
           <div class="toolbar-left">
-            <button class="tool-btn" id="toggleSidebarBtn" title="Toggle sidebar (Ctrl+\)" aria-label="Toggle sidebar">☰</button>
-            <button class="tool-btn" id="toggleListBtn" title="Show or hide the note list (Ctrl+Shift+\)" aria-label="Toggle note list">▤</button>
-            <button class="tool-btn" id="splitViewBtn" title="Split: open a second side to the right">◫ Split</button>
-            <button class="tool-btn" id="pinBtn" title="Pin (Ctrl+P)" aria-label="Pin note">☆</button>
-            <button class="tool-btn" id="sourceBtn" title="Show Markdown source (Ctrl+E)" aria-label="Toggle Markdown source">Source</button>
-            <select id="folderSelect" class="folder-select" title="Move this note to a folder" aria-label="Folder"></select>
-            <button class="tool-btn" id="readAloudBtn" title="Read aloud: the selection, or the whole note (Ctrl+Shift+R)" aria-label="Read aloud">🔊 Read</button>
-            <button class="tool-btn" id="dictateBtn" title="Dictate with Windows speech recognition (Ctrl+Shift+D)" aria-label="Dictate">🎤 Dictate</button>
-            <button class="tool-btn" id="lockBtn" title="Lock this note with a password (Ctrl+L)" aria-label="Lock">🔒 Lock</button>
-            <button class="tool-btn" id="remindBtn" title="Remind me about this note (Ctrl+Shift+M)" aria-label="Reminder">⏰ Remind</button>
-            <button class="tool-btn" id="attachBtn" title="Attach files to this note (Ctrl+Shift+O)" aria-label="Attach">📎 Attach</button>
-            <button class="tool-btn" id="recordBtn" title="Record a voice memo into this note (Ctrl+Shift+G)" aria-label="Record">🎙 Record</button>
-            <button class="tool-btn" id="historyBtn" title="Earlier versions of this note (Ctrl+Shift+H)" aria-label="History">🕘 History</button>
-            <button class="tool-btn" id="printBtn" title="Print this note (Ctrl+Shift+P)" aria-label="Print">🖨 Print</button>
-            <button class="tool-btn" id="stickyBtn" title="Put this note on the desktop as a sticky (Ctrl+Shift+T)" aria-label="Sticky">📌 Stick</button>
-            <button class="tool-btn" id="botBtn" title="Ask Claude Code to work on your notes (Ctrl+Shift+A)" aria-label="Bot">🤖 Bot</button>
+            <button class="tool-btn icon-only" id="toggleSidebarBtn" data-icon="panel-left" title="Show or hide the sidebar (Ctrl+\)" aria-label="Show or hide the sidebar"></button>
+            <button class="tool-btn icon-only" id="toggleListBtn" data-icon="list" title="Show or hide the note list (Ctrl+Shift+\)" aria-label="Show or hide the note list"></button>
+            <span class="toolbar-sep" aria-hidden="true"></span>
+            <label class="crumb" data-icon="folder" title="Move this note to a folder">
+              <select id="folderSelect" class="folder-select" aria-label="Folder"></select>
+            </label>
           </div>
           <div class="toolbar-right">
-            <button class="tool-btn" id="shareBtn" title="Share: copy, email, PDF, HTML (Ctrl+Shift+S)" aria-haspopup="menu">Share ▾</button>
-            <button class="tool-btn" id="exportBtn" title="Export as Markdown">Export</button>
-            <button class="tool-btn" id="duplicateBtn" title="Duplicate note">Duplicate</button>
-            <button class="tool-btn" id="splitBtn" title="Split this note into a book, one page per heading">📖 Split</button>
-            <button class="tool-btn" id="restoreBtn" title="Restore from trash">Restore</button>
-            <button class="tool-btn tool-danger" id="deleteBtn" title="Move to trash (Ctrl+Shift+Del)">Trash</button>
-            <button class="tool-btn tool-danger" id="destroyBtn" title="Delete forever">Delete forever</button>
+            <button class="tool-btn" id="restoreBtn" data-icon="rotate-ccw" title="Restore from trash"><span>Restore</span></button>
+            <button class="tool-btn tool-danger" id="destroyBtn" data-icon="trash-2" title="Delete forever"><span>Delete forever</span></button>
+            <button class="tool-btn" id="sourceBtn" data-icon="code-xml" title="Show Markdown source (Ctrl+E)" aria-label="Show Markdown source" aria-pressed="false"><span class="lbl">Source</span></button>
+            <button class="tool-btn icon-only" id="pinBtn" data-icon="star" title="Pin to the top (Ctrl+D)" aria-label="Pin note" aria-pressed="false"></button>
+            <button class="tool-btn icon-only" id="splitViewBtn" data-icon="columns-2" title="Split view: open a second side to the right" aria-label="Split view"></button>
+            <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-haspopup="menu"><span>Share</span></button>
+            <button class="tool-btn icon-only" id="moreBtn" data-icon="ellipsis" title="More actions for this note" aria-label="More actions" aria-haspopup="menu" aria-expanded="false"></button>
+          </div>
+        </div>
+        <!-- Everything a note can do that is not needed every minute. Each item is also in the command palette (Ctrl+P). -->
+        <div class="popover menu hidden" id="moreMenu" role="menu" aria-label="More actions">
+          <div class="menu-group" role="group" aria-label="This note">
+            <button role="menuitem" class="menu-item" id="remindBtn" data-icon="alarm-clock"><span class="lbl">Remind me…</span><span class="keys">Ctrl+Shift+M</span></button>
+            <button role="menuitem" class="menu-item" id="lockBtn" data-icon="lock"><span class="lbl">Lock</span><span class="keys">Ctrl+L</span></button>
+            <button role="menuitem" class="menu-item" id="historyBtn" data-icon="history"><span class="lbl">Earlier versions…</span><span class="keys">Ctrl+Shift+H</span></button>
+            <button role="menuitem" class="menu-item" id="duplicateBtn" data-icon="copy"><span class="lbl">Duplicate</span></button>
+            <button role="menuitem" class="menu-item" id="splitBtn" data-icon="book-plus"><span class="lbl">Split into a book…</span></button>
+          </div>
+          <div class="menu-group" role="group" aria-label="Add">
+            <button role="menuitem" class="menu-item" id="attachBtn" data-icon="paperclip"><span class="lbl">Attach files…</span><span class="keys">Ctrl+Shift+O</span></button>
+            <button role="menuitem" class="menu-item" id="recordBtn" data-icon="audio-lines"><span class="lbl">Record a voice memo</span><span class="keys">Ctrl+Shift+G</span></button>
+            <button role="menuitem" class="menu-item" id="dictateBtn" data-icon="mic"><span class="lbl">Dictate</span><span class="keys">Ctrl+Shift+D</span></button>
+          </div>
+          <div class="menu-group" role="group" aria-label="Out">
+            <button role="menuitem" class="menu-item" id="readAloudBtn" data-icon="volume-2"><span class="lbl">Read aloud</span><span class="keys">Ctrl+Shift+R</span></button>
+            <button role="menuitem" class="menu-item" id="stickyBtn" data-icon="sticky-note"><span class="lbl">Stick to the desktop</span><span class="keys">Ctrl+Shift+T</span></button>
+            <button role="menuitem" class="menu-item" id="printBtn" data-icon="printer"><span class="lbl">Print…</span><span class="keys">Ctrl+Shift+P</span></button>
+            <button role="menuitem" class="menu-item" id="exportBtn" data-icon="download"><span class="lbl">Export as Markdown…</span></button>
+          </div>
+          <div class="menu-group" role="group" aria-label="Assistant">
+            <button role="menuitem" class="menu-item" id="botBtn" data-icon="bot"><span class="lbl">Ask Claude Code</span><span class="keys">Ctrl+Shift+A</span></button>
+          </div>
+          <div class="menu-group" role="group" aria-label="Remove">
+            <button role="menuitem" class="menu-item danger" id="deleteBtn" data-icon="trash-2"><span class="lbl">Move to trash</span><span class="keys">Ctrl+Shift+Del</span></button>
           </div>
         </div>
 
         <section class="book-reader hidden" id="bookReader" aria-label="Whole book">
-          <div class="book-reader-bar">
+          <div class="book-reader-bar drag-region">
             <span class="book-reader-title" id="bookReaderTitle"></span>
             <span class="spacer"></span>
             <button class="tool-btn" id="bookReaderPdfBtn" title="Save the book as a PDF">PDF…</button>
@@ -147,13 +169,13 @@
           <div class="editor-column align-center full-width" id="editorColumn">
             <nav class="book-strip hidden" id="bookStrip" aria-label="Pages of this book">
               <button class="book-name" id="bookName" title="Book: read it all, export, rename" aria-haspopup="menu"></button>
-              <button class="tool-btn" id="bookPrevBtn" title="Previous page (Ctrl+PageUp)" aria-label="Previous page">‹</button>
+              <button class="tool-btn icon-only" id="bookPrevBtn" data-icon="chevron-left" title="Previous page (Ctrl+PageUp)" aria-label="Previous page"></button>
               <div class="book-tabs" id="bookTabs" role="tablist"></div>
-              <button class="tool-btn" id="bookNextBtn" title="Next page (Ctrl+PageDown)" aria-label="Next page">›</button>
-              <button class="tool-btn" id="bookAddBtn" title="Add a page at the end">+ Page</button>
+              <button class="tool-btn icon-only" id="bookNextBtn" data-icon="chevron-right" title="Next page (Ctrl+PageDown)" aria-label="Next page"></button>
+              <button class="tool-btn" id="bookAddBtn" data-icon="plus" title="Add a page at the end"><span>Page</span></button>
             </nav>
-            <input id="titleInput" class="title-input" type="text" placeholder="Title" autocomplete="off" spellcheck="true" />
-            <input id="tagsInput" class="tags-input" type="text" placeholder="Tags, comma separated" autocomplete="off" spellcheck="false" />
+            <input id="titleInput" class="title-input" type="text" placeholder="Untitled" aria-label="Title" autocomplete="off" spellcheck="true" />
+            <input id="tagsInput" class="tags-input" type="text" placeholder="Add tags, separated by commas" aria-label="Tags" autocomplete="off" spellcheck="false" />
             <div class="live-row hidden" id="liveRow">
               <span class="live-dot" aria-hidden="true"></span>
               <span id="liveText"></span>
@@ -171,7 +193,7 @@
             <div class="file-banner hidden" id="fileBanner"></div>
             <form class="lock-screen hidden" id="lockScreen" aria-label="Locked note">
               <div class="lock-screen-card">
-                <div class="lock-screen-icon" aria-hidden="true">🔒</div>
+                <div class="lock-screen-icon" data-icon="lock" aria-hidden="true"></div>
                 <p class="lock-screen-title">This note is locked</p>
                 <input id="lockScreenPassword" class="input" type="password" placeholder="Password" autocomplete="current-password" />
                 <button type="submit" class="btn btn-primary btn-small" id="lockScreenBtn">Unlock</button>
@@ -196,9 +218,9 @@
                   <button class="tool-btn" data-pdf-act="undo" id="pdfUndoBtn" title="Undo" disabled>Undo</button>
                   <button class="tool-btn" data-pdf-act="redo" id="pdfRedoBtn" title="Redo" disabled>Redo</button>
                   <span class="pdf-sep" aria-hidden="true"></span>
-                  <button class="tool-btn" data-pdf-act="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+                  <button class="tool-btn icon-only" data-pdf-act="zoom-out" data-icon="minus" title="Zoom out" aria-label="Zoom out"></button>
                   <button class="tool-btn" data-pdf-act="fit" id="pdfZoom" title="Fit to the width">100%</button>
-                  <button class="tool-btn" data-pdf-act="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+                  <button class="tool-btn icon-only" data-pdf-act="zoom-in" data-icon="plus" title="Zoom in" aria-label="Zoom in"></button>
                   <span class="pdf-grow"></span>
                   <button class="btn btn-primary btn-small" id="pdfSaveBtn" title="Write your changes into the PDF (Ctrl+S)">Saved</button>
                 </div>
@@ -208,7 +230,7 @@
                     <div class="pdf-comments-bar">
                       <button type="button" class="btn btn-primary btn-small" data-comments-act="add">Add comment</button>
                       <span class="pdf-grow"></span>
-                      <button type="button" class="tool-btn" id="pdfCommentsClose" title="Close comments" aria-label="Close comments">✕</button>
+                      <button type="button" class="tool-btn icon-only" id="pdfCommentsClose" data-icon="x" title="Close comments" aria-label="Close comments"></button>
                     </div>
                     <p class="pdf-comments-hint" role="status"></p>
                     <div class="pdf-comments-list"></div>
@@ -248,12 +270,12 @@
         </div>
 
         <div class="find-bar hidden" id="findBar" role="search" aria-label="Find in note">
-          <input id="findInput" class="input find-input" type="text" placeholder="Find in this note…  (Enter / Shift+Enter or F3 step, Esc closes)" autocomplete="off" spellcheck="false" />
+          <input id="findInput" class="input find-input" type="text" placeholder="Find in this note" title="Enter or F3: next. Shift+Enter: previous. Esc: close." autocomplete="off" spellcheck="false" />
           <span class="find-count" id="findCount"></span>
-          <button class="tool-btn" id="findPrevBtn" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button>
-          <button class="tool-btn" id="findNextBtn" title="Next (Enter)" aria-label="Next match">↓</button>
-          <button class="tool-btn" id="findReplaceToggle" title="Replace (Ctrl+H)" aria-label="Show replace" aria-pressed="false">⇄</button>
-          <button class="tool-btn" id="findCloseBtn" title="Close (Esc)" aria-label="Close find">✕</button>
+          <button class="tool-btn icon-only" id="findPrevBtn" data-icon="arrow-up" title="Previous (Shift+Enter)" aria-label="Previous match"></button>
+          <button class="tool-btn icon-only" id="findNextBtn" data-icon="arrow-down" title="Next (Enter)" aria-label="Next match"></button>
+          <button class="tool-btn icon-only" id="findReplaceToggle" data-icon="replace" title="Replace (Ctrl+H)" aria-label="Show replace" aria-pressed="false"></button>
+          <button class="tool-btn icon-only" id="findCloseBtn" data-icon="x" title="Close (Esc)" aria-label="Close find"></button>
           <div class="replace-row hidden" id="replaceRow">
             <input id="replaceInput" class="input find-input" type="text" placeholder="Replace with…" autocomplete="off" spellcheck="false" />
             <button class="tool-btn" id="replaceOneBtn" title="Replace the current match and move on">Replace</button>
@@ -266,8 +288,8 @@
             <span class="bot-scope" id="botScope"></span>
             <span class="spacer"></span>
             <label class="field-check bot-allow"><input type="checkbox" id="botAllowEdits" checked /><span>Allow edits</span></label>
-            <button class="tool-btn" id="botTerminalBtn" title="Open an interactive Claude Code terminal in this notes folder">Open terminal</button>
-            <button class="tool-btn" id="botCloseBtn" title="Close (Ctrl+Shift+A)">✕</button>
+            <button class="tool-btn" id="botTerminalBtn" data-icon="terminal" title="Open an interactive Claude Code terminal in this notes folder"><span>Open terminal</span></button>
+            <button class="tool-btn icon-only" id="botCloseBtn" data-icon="x" title="Close (Ctrl+Shift+A)" aria-label="Close the Claude Code panel"></button>
           </div>
           <div class="bot-row">
             <textarea id="botPrompt" class="bot-prompt" rows="2" placeholder="What should Claude do with your notes? e.g. “Summarise this note into five bullets at the top”, “Create a weekly review note from everything tagged work”. Ctrl+Enter runs."></textarea>
@@ -285,113 +307,136 @@
         </div>
       </div>
       </div>
+      <div class="activity" id="activityBar" role="status" aria-label="Running"></div>
       <div class="split-divider hidden" id="splitDivider" title="Drag to resize. Double-click to make both sides equal."></div>
     </section>
 
     <!-- Settings dialog -->
-    <dialog id="settingsDialog" class="dialog">
-      <form method="dialog" class="dialog-form" id="settingsForm">
-        <h2 class="dialog-title">Settings</h2>
+    <dialog id="settingsDialog" class="modal dialog-settings" aria-labelledby="settingsTitle">
+      <form method="dialog" class="settings-layout" id="settingsForm">
+        <nav class="settings-nav" id="settingsNav" aria-label="Settings sections">
+          <h2 class="dialog-title" id="settingsTitle">Settings</h2>
+          <a href="#set-general" data-icon="settings">General</a>
+          <a href="#set-writing" data-icon="pencil">Writing</a>
+          <a href="#set-speech" data-icon="volume-2">Speech</a>
+          <a href="#set-history" data-icon="history">History</a>
+          <a href="#set-vaults" data-icon="folder-open">Vaults</a>
+          <a href="#set-agent" data-icon="bot">Agent files</a>
+          <a href="#set-data" data-icon="download">Your data</a>
+        </nav>
+        <div class="settings-body">
+          <div class="settings-scroll" id="settingsScroll" tabindex="-1" autofocus>
+            <section class="settings-section" id="set-general">
+              <h3>General</h3>
+              <label class="field">
+                <span class="field-label">Global hotkey</span>
+                <input id="hotkeyInput" class="input" type="text" placeholder="Ctrl+Alt+N" autocomplete="off" spellcheck="false" />
+                <span class="field-help">Click here and press the combination you want (Ctrl, Alt, or Win plus a key). It shows and hides Notes from anywhere.</span>
+                <span class="field-error" id="hotkeyError"></span>
+              </label>
+              <label class="field">
+                <span class="field-label">Theme</span>
+                <select id="themeSelect" class="select">
+                  <option value="system">Follow Windows</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+              <label class="field field-check">
+                <input id="openAtLoginInput" type="checkbox" />
+                <span>Start Notes when I sign in, so the hotkey always works</span>
+              </label>
+              <label class="field field-check">
+                <input id="alwaysOnTopInput" type="checkbox" />
+                <span>Keep the window above other windows</span>
+              </label>
+            </section>
 
-        <label class="field">
-          <span class="field-label">Global hotkey</span>
-          <input id="hotkeyInput" class="input" type="text" placeholder="Ctrl+Alt+N" autocomplete="off" spellcheck="false" />
-          <span class="field-help">Click here and press the combination you want (Ctrl, Alt, or Win plus a key). It toggles the window from anywhere.</span>
-          <span class="field-error" id="hotkeyError"></span>
-        </label>
+            <section class="settings-section" id="set-writing">
+              <h3>Writing</h3>
+              <label class="field">
+                <span class="field-label">Text size <span id="fontSizeValue"></span></span>
+                <input id="fontSizeInput" type="range" min="12" max="28" step="1" />
+              </label>
+              <div class="field">
+                <span class="field-label">Column width <span id="editorWidthValue"></span></span>
+                <label class="field-check"><input id="editorFullWidthInput" type="checkbox" /><span>Use the full width of the pane</span></label>
+                <input id="editorWidthInput" type="range" min="480" max="1600" step="20" aria-label="Column width" />
+                <span class="field-help">A narrower column is easier to read: about 65 to 75 characters a line is the comfortable range.</span>
+              </div>
+              <div class="field">
+                <span class="field-label">Column position</span>
+                <div class="segmented" id="alignSeg" role="radiogroup" aria-label="Column position">
+                  <button type="button" data-align="left" role="radio">Left</button>
+                  <button type="button" data-align="center" role="radio">Center</button>
+                  <button type="button" data-align="right" role="radio">Right</button>
+                </div>
+                <span class="field-help">Where the column sits when it is narrower than the pane.</span>
+              </div>
+            </section>
 
-        <label class="field">
-          <span class="field-label">Theme</span>
-          <select id="themeSelect" class="select">
-            <option value="system">Follow system</option>
-            <option value="light">Light (cream)</option>
-            <option value="dark">Dark (ink)</option>
-          </select>
-        </label>
+            <section class="settings-section" id="set-speech">
+              <h3>Speech</h3>
+              <label class="field">
+                <span class="field-label">Read-aloud voice</span>
+                <select id="ttsVoiceSelect" class="select"><option value="">System default</option></select>
+              </label>
+              <label class="field">
+                <span class="field-label">Read-aloud speed <span id="ttsRateValue"></span></span>
+                <input id="ttsRateInput" type="range" min="0.5" max="2" step="0.1" />
+              </label>
+              <p class="field-help">Dictation uses Windows speech recognition (the same as Win+H): choose Dictate in a note's More menu, or press Ctrl+Shift+D with the cursor in a note, then speak. The first time, Windows may ask to turn on online speech recognition.</p>
+            </section>
 
-        <label class="field">
-          <span class="field-label">Editor font size <span id="fontSizeValue"></span></span>
-          <input id="fontSizeInput" type="range" min="12" max="28" step="1" />
-        </label>
+            <section class="settings-section" id="set-history">
+              <h3>History</h3>
+              <div class="field">
+                <label class="field-check"><input id="gitEnabledInput" type="checkbox" /><span>Keep every change in a git history in the data folder</span></label>
+                <input id="gitRemoteInput" class="input" type="text" placeholder="Optional remote to push to, e.g. git@github.com:you/notes-backup.git" aria-label="Git remote" autocomplete="off" spellcheck="false" />
+                <span class="field-help" id="gitStatus"></span>
+                <div class="dialog-actions">
+                  <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
+                  <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
+                </div>
+              </div>
+            </section>
 
-        <div class="field">
-          <span class="field-label">Writing column</span>
-          <div class="segmented" id="alignSeg" role="radiogroup" aria-label="Column position">
-            <button type="button" data-align="left" role="radio">Left</button>
-            <button type="button" data-align="center" role="radio">Center</button>
-            <button type="button" data-align="right" role="radio">Right</button>
+            <section class="settings-section" id="set-vaults">
+              <h3>Vaults</h3>
+              <p class="field-help">A vault is a folder on this computer whose Markdown files are notes. If it is a git repository with a remote, changes are committed, pulled and pushed automatically, so the same notes follow you to other computers.</p>
+              <div id="vaultList" class="vault-list"></div>
+              <div class="dialog-actions">
+                <button type="button" class="btn btn-small" id="vaultAddFolderBtn">Add a folder</button>
+                <button type="button" class="btn btn-small" id="vaultCloneBtn">Clone a repository…</button>
+              </div>
+            </section>
+
+            <section class="settings-section" id="set-agent">
+              <h3>Agent files</h3>
+              <p class="field-help">Links your CLAUDE.md, AGENTS.md, Claude commands, output styles and memory notes as editable notes in an "Agent files" folder. Edits write straight to the real files.</p>
+              <div class="dialog-actions"><button type="button" class="btn btn-small" id="agentFilesBtn">Add my agent files</button><span class="field-help" id="agentFilesStatus"></span></div>
+            </section>
+
+            <section class="settings-section" id="set-data">
+              <h3>Your data</h3>
+              <div class="dialog-actions">
+                <button type="button" class="btn btn-small" id="importBtn">Import .md files</button>
+                <button type="button" class="btn btn-small" id="exportAllBtn">Export all</button>
+                <button type="button" class="btn btn-small" id="dataFolderBtn">Open the data folder</button>
+              </div>
+              <p class="dialog-foot" id="settingsInfo"></p>
+            </section>
           </div>
-          <span class="field-help">Where the title and text block sits inside the editor pane, when it is narrower than the pane.</span>
-        </div>
-
-        <div class="field">
-          <span class="field-label">Column width <span id="editorWidthValue"></span></span>
-          <input id="editorWidthInput" type="range" min="480" max="1600" step="20" />
-          <label class="field-check"><input id="editorFullWidthInput" type="checkbox" /><span>Use the full width of the pane</span></label>
-        </div>
-
-        <label class="field field-check">
-          <input id="openAtLoginInput" type="checkbox" />
-          <span>Start Notes when I log in (so the hotkey always works)</span>
-        </label>
-
-        <label class="field field-check">
-          <input id="alwaysOnTopInput" type="checkbox" />
-          <span>Keep the window above other windows</span>
-        </label>
-
-        <div class="field">
-          <span class="field-label">Git history</span>
-          <label class="field-check"><input id="gitEnabledInput" type="checkbox" /><span>Commit every change to a git repo in the data folder</span></label>
-          <input id="gitRemoteInput" class="input" type="text" placeholder="Optional remote to push to, e.g. git@github.com:you/notes-backup.git" autocomplete="off" spellcheck="false" />
-          <span class="field-help" id="gitStatus"></span>
-          <div class="dialog-actions">
-            <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
-            <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
+          <div class="settings-actions">
+            <span class="field-help">Changes apply as you make them.</span>
+            <span class="spacer"></span>
+            <button type="submit" class="btn btn-primary" id="closeSettingsBtn">Done</button>
           </div>
         </div>
-
-        <div class="field">
-          <span class="field-label">Vaults (folders and git repos as notes)</span>
-          <span class="field-help">A vault is a folder on this computer whose Markdown files are notes. If it is a git repository with a remote, changes are committed, pulled, and pushed automatically, so the same notes follow you across devices.</span>
-          <div id="vaultList" class="vault-list"></div>
-          <div class="dialog-actions">
-            <button type="button" class="btn btn-small" id="vaultAddFolderBtn">Add a folder</button>
-            <button type="button" class="btn btn-small" id="vaultCloneBtn">Clone a repository…</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <span class="field-label">Speech</span>
-          <label class="field">
-            <span class="field-help">Read-aloud voice</span>
-            <select id="ttsVoiceSelect" class="select"><option value="">System default</option></select>
-          </label>
-          <label class="field">
-            <span class="field-help">Read-aloud speed <span id="ttsRateValue"></span></span>
-            <input id="ttsRateInput" type="range" min="0.5" max="2" step="0.1" />
-          </label>
-          <span class="field-help">Dictation uses Windows speech recognition (the same as pressing Win+H): click Dictate or press Ctrl+Shift+D with the cursor in a note, then speak. The first use may ask Windows to enable online speech recognition.</span>
-        </div>
-
-        <div class="field">
-          <span class="field-label">Agent files</span>
-          <span class="field-help">Links your CLAUDE.md, AGENTS.md, Claude commands, output styles, and memory notes as editable notes in an "Agent files" folder. Edits write straight to the real files.</span>
-          <div class="dialog-actions"><button type="button" class="btn btn-small" id="agentFilesBtn">Add my agent files</button><span class="field-help" id="agentFilesStatus"></span></div>
-        </div>
-
-        <div class="dialog-actions">
-          <button type="button" class="btn btn-small" id="importBtn">Import .md files</button>
-          <button type="button" class="btn btn-small" id="exportAllBtn">Export all</button>
-          <button type="button" class="btn btn-small" id="dataFolderBtn">Data folder</button>
-          <span class="spacer"></span>
-          <button type="submit" class="btn btn-primary btn-small" id="closeSettingsBtn">Done</button>
-        </div>
-        <p class="dialog-foot" id="settingsInfo"></p>
       </form>
     </dialog>
 
-    <dialog id="vaultDialog" class="dialog">
+    <dialog id="vaultDialog" class="modal">
       <form method="dialog" class="dialog-form" id="vaultForm">
         <h2 class="dialog-title" id="vaultDialogTitle">Clone a repository</h2>
         <label class="field">
@@ -416,7 +461,7 @@
       </form>
     </dialog>
 
-    <dialog id="historyDialog" class="dialog dialog-wide">
+    <dialog id="historyDialog" class="modal dialog-wide">
       <form method="dialog" class="dialog-form" id="historyForm">
         <h2 class="dialog-title">Earlier versions</h2>
         <p class="field-hint" id="historyHint">Every saved change is kept in the local history. Pick a version to preview it; Restore puts that text back into the note (the current text stays in history too).</p>
@@ -432,7 +477,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="liveDialog" class="dialog dialog-small">
+    <dialog id="liveDialog" class="modal dialog-small">
       <form method="dialog" class="dialog-form" id="liveForm">
         <h2 class="dialog-title" id="liveDialogTitle">Live share</h2>
         <p class="field-hint" id="liveDialogHint"></p>
@@ -449,7 +494,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="lockDialog" class="dialog dialog-small">
+    <dialog id="lockDialog" class="modal dialog-small">
       <form method="dialog" class="dialog-form" id="lockForm">
         <h2 class="dialog-title" id="lockDialogTitle">Lock note</h2>
         <p class="field-hint" id="lockDialogHint">The text is encrypted with this password. There is no recovery: if you forget it, the note stays locked.</p>
@@ -469,7 +514,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="remindDialog" class="dialog dialog-small">
+    <dialog id="remindDialog" class="modal dialog-small">
       <form method="dialog" class="dialog-form" id="remindForm">
         <h2 class="dialog-title">Remind me</h2>
         <div class="quick-picks" id="remindQuick">
@@ -491,7 +536,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="splitDialog" class="dialog dialog-small">
+    <dialog id="splitDialog" class="modal dialog-small">
       <form method="dialog" class="dialog-form" id="splitForm">
         <h2 class="dialog-title">Split into a book</h2>
         <p class="split-lead" id="splitLead"></p>
@@ -508,7 +553,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="signDialog" class="dialog">
+    <dialog id="signDialog" class="modal">
       <form method="dialog" class="dialog-form" id="signForm">
         <h2 class="dialog-title">Your signature</h2>
         <p class="field-hint">Draw it with the mouse, a pen or a finger. It goes on the page as a picture you can move and resize.</p>
@@ -528,7 +573,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="linkDialog" class="dialog dialog-small">
+    <dialog id="linkDialog" class="modal dialog-small">
       <form method="dialog" class="dialog-form" id="linkForm">
         <h2 class="dialog-title">Link</h2>
         <label class="field">
@@ -549,21 +594,35 @@
     </dialog>
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
-    <div class="popover hidden" id="shareMenu" role="menu" aria-label="Share">
-      <button role="menuitem" data-action="copy-md">Copy as Markdown</button>
-      <button role="menuitem" data-action="copy-html">Copy as rich text</button>
-      <button role="menuitem" data-action="copy-text">Copy as plain text</button>
-      <button role="menuitem" data-action="copy-note-link">Copy link to this note</button>
-      <button role="menuitem" data-action="email">Email…</button>
-      <button role="menuitem" data-action="pdf">Save as PDF…</button>
-      <button role="menuitem" data-action="html">Save as HTML…</button>
-      <button role="menuitem" data-action="md">Save as Markdown…</button>
-      <button role="menuitem" data-action="reveal" id="shareReveal">Show file in Explorer</button>
-      <button role="menuitem" data-action="live-host" id="shareLiveHost">Live share this note…</button>
-      <button role="menuitem" data-action="live-join">Join a live share…</button>
-      <button role="menuitem" data-action="live-stop" id="shareLiveStop" class="danger">Stop live share</button>
+    <dialog class="palette" id="palette" aria-label="Search and commands">
+      <div class="palette-field" data-icon="search">
+        <input id="paletteInput" class="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="paletteList" aria-autocomplete="list" placeholder="Find a note, or type a command" autocomplete="off" spellcheck="false" />
+      </div>
+      <ul class="palette-list" id="paletteList" role="listbox" aria-label="Results"></ul>
+      <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd> new tab</span><span><kbd>&gt;</kbd> commands only</span><span class="spacer"></span><span><kbd>Esc</kbd> close</span></div>
+    </dialog>
+    <div class="popover menu hidden" id="shareMenu" role="menu" aria-label="Share">
+      <div class="menu-group" role="group" aria-label="Copy">
+        <button role="menuitem" class="menu-item" data-action="copy-md" data-icon="copy"><span class="lbl">Copy as Markdown</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-html" data-icon="copy"><span class="lbl">Copy as rich text</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-text" data-icon="copy"><span class="lbl">Copy as plain text</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-note-link" data-icon="link"><span class="lbl">Copy link to this note</span></button>
+      </div>
+      <div class="menu-group" role="group" aria-label="Send and save">
+        <button role="menuitem" class="menu-item" data-action="email" data-icon="share-2"><span class="lbl">Email…</span></button>
+        <button role="menuitem" class="menu-item" data-action="pdf" data-icon="file-output"><span class="lbl">Save as PDF…</span></button>
+        <button role="menuitem" class="menu-item" data-action="html" data-icon="file-output"><span class="lbl">Save as HTML…</span></button>
+        <button role="menuitem" class="menu-item" data-action="md" data-icon="download"><span class="lbl">Save as Markdown…</span></button>
+        <button role="menuitem" class="menu-item" data-action="reveal" id="shareReveal" data-icon="folder-open"><span class="lbl">Show file in Explorer</span></button>
+      </div>
+      <div class="menu-group" role="group" aria-label="Live share">
+        <button role="menuitem" class="menu-item" data-action="live-host" id="shareLiveHost" data-icon="radio"><span class="lbl">Live share this note…</span></button>
+        <button role="menuitem" class="menu-item" data-action="live-join" data-icon="radio"><span class="lbl">Join a live share…</span></button>
+        <button role="menuitem" class="menu-item danger" data-action="live-stop" id="shareLiveStop" data-icon="x"><span class="lbl">Stop live share</span></button>
+      </div>
     </div>
     <div class="popover convert-menu hidden" id="convertMenu" role="menu" aria-label="Convert to"></div>
+    <div class="popover inline-menu hidden" id="inlineMenu" role="listbox" aria-label="Insert"></div>
     <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
       <button role="menuitem" data-action="relock">Lock now</button>
       <button role="menuitem" data-action="remove" class="danger">Remove lock…</button>
@@ -606,6 +665,8 @@
   <script src="docx-editor.js"></script>
   <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>
+  <script src="icons.js"></script>
+  <script src="palette.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

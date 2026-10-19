@@ -36,12 +36,19 @@
 
   function snippet(note, max) {
     max = max || 100;
-    const body = String((note && note.body) || '');
+    // The opening of the note is all a snippet shows: never strip a whole long note for it.
+    const body = String((note && note.body) || '').slice(0, Math.max(600, max * 8));
     const title = String((note && note.title) || '').trim();
     const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     // Skip the first line when it is what the title came from.
-    const start = !title && lines.length ? 1 : 0;
-    const text = lines.slice(start).join(' ').replace(/[#*_`>\-\[\]]+/g, ' ').replace(/\s+/g, ' ').trim();
+    // (Not a code fence: skipping its opening line would leave the closing one as text.)
+    const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
+    // A run of list items reads as a list ("Oat milk, Lemons, Rice"), not as one run-on phrase.
+    const kept = lines.slice(start);
+    const isItem = (l) => /^([-*+]|\d+[.)])\s/.test(l);
+    const listed = kept.map((l, i) => (isItem(l) && isItem(kept[i + 1] || '') && !/[.,;:!?]$/.test(l) ? l + ',' : l));
+    // The same Markdown stripping as read-aloud, so "## Goals" + "Ship it" reads "Goals. Ship it", not "Goals Ship it".
+    const text = plainTextFromMarkdown(listed.join('\n')).replace(/\bcode block omitted\.\s*/g, '').replace(/\s+/g, ' ').trim();
     return truncate(text, max);
   }
 
@@ -241,7 +248,7 @@
     s = s.replace(/`([^`\n]+)`/g, '$1');
     s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + '. ' : '');
     s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
-    s = s.replace(/^\s{0,3}#{1,6}\s+(.*)$/gm, '$1.');
+    s = s.replace(/^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*$/gm, (_, h) => (/[.!?:;]$/.test(h) ? h : h + '.'));
     s = s.replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, '');
     s = s.replace(/^\s*[-*+]\s+/gm, '');
     s = s.replace(/^\s*\d+[.)]\s+/gm, '');
@@ -387,7 +394,36 @@
     return new Date(date === undefined ? Date.now() : date).toISOString().replace(/[:.]/g, '-');
   }
 
+  // How well a typed query matches a label, for the command palette: 0 is no match, higher is better.
+  // An exact prefix beats everything, then the query whole at a word start ("trash" in "Move to trash"), then the
+  // query spread over the label, where each character must continue the previous match or start a word: "nn" and
+  // "new n" find "New note", "sv" finds "Split view", but "plan" does not find "Open a file as a note".
+  function fuzzyScore(query, text) {
+    const q = String(query || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const t = String(text || '').toLowerCase();
+    if (!q) return 1;
+    if (t.startsWith(q)) return 1000 - t.length;
+    const wordStart = (i) => i === 0 || /[\s\-_/.(#:"'“]/.test(t[i - 1]);
+    for (let at = t.indexOf(q); at > 0; at = t.indexOf(q, at + 1)) {
+      if (wordStart(at)) return 700 - at - t.length / 10;
+    }
+    let score = 0, ti = 0, run = 0;
+    for (const ch of q) {
+      if (ch === ' ') { run = 0; continue; }
+      let found = -1;
+      for (let i = t.indexOf(ch, ti); i >= 0; i = t.indexOf(ch, i + 1)) {
+        if ((i === ti && ti > 0 && run > 0) || wordStart(i)) { found = i; break; }
+      }
+      if (found < 0) return 0;
+      run = found === ti && run > 0 ? run + 1 : 1;
+      score += 10 + (wordStart(found) ? 25 : 0) + run * 8;
+      ti = found + 1;
+    }
+    return Math.max(1, score - t.length / 20);
+  }
+
   return {
+    fuzzyScore,
     splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile, imageBaseFor, fileStamp,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,

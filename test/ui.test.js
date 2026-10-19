@@ -72,6 +72,14 @@ test.beforeEach(async () => {
   await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }).catch(() => {});
 });
 
+// Per-note actions that are not on the toolbar live in the More menu: open it first when the button is in there.
+async function clickTool(sel) {
+  const inMenu = await page.evaluate((s) => { const b = document.querySelector(s); return !!(b && b.closest('#moreMenu')); }, sel);
+  if (inMenu && await page.evaluate(() => document.getElementById('moreMenu').classList.contains('hidden'))) await page.click('#moreBtn');
+  await page.click(sel);
+}
+const toolLabel = (sel) => page.evaluate((s) => document.querySelector(s + ' .lbl').textContent, sel);
+
 async function useSourceMode(on) {
   const isSource = async () => page.evaluate(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   if ((await isSource()) === on) return;
@@ -228,7 +236,7 @@ test('pin button, pinned view, and pinned-first ordering', async () => {
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
   await page.click('#pinBtn');
   await waitFor('Alpha pinned', () => findNote('Alpha').pinned);
-  assert.equal(await page.textContent('#pinBtn'), '★');
+  assert.equal(await page.getAttribute('#pinBtn', 'aria-pressed'), 'true');
   await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent.includes('Alpha'));
   await page.click('.nav-item[data-view="pinned"]');
   await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
@@ -254,7 +262,7 @@ test('tags filter in the sidebar', async () => {
 test('duplicate creates a copy and selects it', async () => {
   await page.click('.note-card:has-text("Gamma")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma');
-  await page.click('#duplicateBtn');
+  await clickTool('#duplicateBtn');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const copy = findNote('Gamma (copy)');
   assert.equal(copy.body, 'pure text');
@@ -731,7 +739,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await useSourceMode(true);
   await page.fill('#bodyInput', '- [ ] buy milk\n');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === '- [ ] buy milk\n');
-  assert.equal(await page.textContent('#stickyBtn'), '📌 Stick');
+  assert.equal(await toolLabel('#stickyBtn'), 'Stick to the desktop');
 
   const stickyPromise = app.waitForEvent('window', { timeout: 15000 });
   await page.keyboard.press('Control+Shift+t');
@@ -924,7 +932,7 @@ test('reminders: set from the dialog, shown on the card and in the Reminders vie
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const id = findNote('Gamma (copy)').id;
-  assert.equal(await page.textContent('#remindBtn'), '⏰ Remind');
+  assert.equal(await toolLabel('#remindBtn'), 'Remind me…');
   const before = Date.now();
   await page.keyboard.press('Control+Shift+m');
   await page.waitForSelector('#remindDialog[open]');
@@ -1031,14 +1039,14 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.click('#lockSubmitBtn');
   await waitFor('locked on disk', () => { const n = findNote('Gamma (copy)'); return n.lock && n.lock.ct && n.body === ''; });
   assert.ok(!fs.readFileSync(notesFile, 'utf8').includes('flamingo'), 'no plaintext in notes.json');
-  await waitForDom(() => document.getElementById('lockBtn').textContent === '🔓 Unlocked');
+  await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Unlocked');
   assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 4242-flamingo', 'still readable right after locking');
   // Editing while unlocked re-encrypts.
   await page.fill('#bodyInput', 'the launch code is 9999-pelican');
   await sleep(900);
   await waitFor('edit encrypted', () => !fs.readFileSync(notesFile, 'utf8').includes('pelican') && findNote('Gamma (copy)').body === '');
   // Lock now from the lock menu.
-  await page.click('#lockBtn');
+  await clickTool('#lockBtn');
   await page.waitForSelector('#lockMenu:not(.hidden)');
   await page.click('#lockMenu [data-action="relock"]');
   await page.waitForSelector('#lockScreen:not(.hidden)');
@@ -1074,14 +1082,14 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.fill('#lockScreenPassword', 'pw-one');
   await page.keyboard.press('Enter');
   await waitForDom(() => document.getElementById('lockScreen').classList.contains('hidden'));
-  await page.click('#lockBtn');
+  await clickTool('#lockBtn');
   await page.waitForSelector('#lockMenu:not(.hidden)');
   await page.click('#lockMenu [data-action="remove"]');
   await page.waitForSelector('#lockDialog[open]');
   await page.fill('#lockPassword', 'pw-one');
   await page.click('#lockSubmitBtn');
   await waitFor('lock removed', () => { const n = findNote('Gamma (copy)'); return !n.lock && n.body === 'the launch code is 9999-pelican'; });
-  await waitForDom(() => document.getElementById('lockBtn').textContent === '🔒 Lock');
+  await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Lock');
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
   void id;
@@ -1273,7 +1281,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await page.keyboard.press('Control+Shift+g');
   await waitForDom(() => document.getElementById('recordBtn').classList.contains('is-recording'), 8000);
   await sleep(1200);
-  await page.click('#recordBtn');
+  await clickTool('#recordBtn');
   await waitFor('recording saved', () => fs.existsSync(path.join(dataDir, 'attachments')) && fs.readdirSync(path.join(dataDir, 'attachments')).some((f) => /^Recording .*\.webm$/.test(f) && fs.statSync(path.join(dataDir, 'attachments', f)).size > 0), 15000);
   await waitFor('memo linked', () => /🎙 Voice memo \d\d:\d\d\]\(attachment:\/\/Recording/.test(findNote('Gamma (copy)').body));
   // Note link: pick another note in the link dialog, then Ctrl+click jumps to it.
@@ -1410,12 +1418,12 @@ test('speech: read aloud speaks the note and stops; dictation hands off to Windo
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const voices = await page.evaluate(() => (window.speechSynthesis ? window.speechSynthesis.getVoices().length : -1));
   assert.ok(voices >= 0, 'speechSynthesis exists');
-  await page.click('#readAloudBtn');
+  await clickTool('#readAloudBtn');
   await waitForDom(() => document.getElementById('readAloudBtn').classList.contains('is-on'));
   if (voices > 0) {
     await waitForDom(() => window.speechSynthesis.speaking || window.speechSynthesis.pending, 5000);
   }
-  await page.click('#readAloudBtn');
+  await clickTool('#readAloudBtn');
   await waitForDom(() => !document.getElementById('readAloudBtn').classList.contains('is-on'));
   assert.equal(await page.evaluate(() => window.speechSynthesis.speaking), false);
   await page.keyboard.press('Control+Shift+r');
@@ -1528,7 +1536,7 @@ test('Alt+Arrow moves between notes', async () => {
 test('trash with undo, restore, delete forever, empty trash', async () => {
   await page.click('.note-card:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
-  await page.click('#deleteBtn');
+  await clickTool('#deleteBtn');
   await waitFor('trashed', () => findNote('Gamma (copy)').trashedAt);
   await page.click('#toast button:has-text("Undo")');
   await waitFor('undo restored', () => !findNote('Gamma (copy)').trashedAt);
@@ -1547,7 +1555,7 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
 
   await page.click('.nav-item[data-view="all"]');
   await page.click('.note-card:has-text("Gamma (copy)")');
-  await page.click('#deleteBtn');
+  await clickTool('#deleteBtn');
   await page.click('.nav-item[data-view="trash"]');
   await page.click('.note-card:has-text("Gamma (copy)")');
   await page.click('#destroyBtn');
@@ -1555,7 +1563,7 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
 
   await page.click('.nav-item[data-view="all"]');
   await page.click('.note-card:has-text("Beta")');
-  await page.click('#deleteBtn');
+  await clickTool('#deleteBtn');
   await page.click('.nav-item[data-view="trash"]');
   await page.waitForSelector('#emptyTrashBtn:not(.hidden)');
   await page.click('#emptyTrashBtn');
@@ -1613,7 +1621,7 @@ test('export note, export all, and import through stubbed dialogs', async () => 
 
   await page.click('.note-card:has-text("Alpha")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
-  await page.click('#exportBtn');
+  await clickTool('#exportBtn');
   await waitFor('note exported', () => fs.existsSync(outMd));
   assert.equal(fs.readFileSync(outMd, 'utf8'), '# Alpha\n\nfirst body\n');
 
