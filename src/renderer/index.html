@@ -202,6 +202,7 @@
             <div class="editor-body">
               <div id="richEditor" class="rich-editor"></div>
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
+              <div id="codeHost" class="code-host"></div>
               <div id="pdfEditor" class="pdf-editor hidden">
                 <div class="pdf-toolbar" role="toolbar" aria-label="PDF tools">
                   <button class="tool-btn is-on" data-pdf-mode="select" title="Read: select text and follow links. To move or delete a mark, pick a tool first, then click the mark.">Read</button>
@@ -303,6 +304,7 @@
           <span id="statusChars">0 characters</span>
           <span class="dot">·</span>
           <span id="statusUpdated"></span>
+          <span class="status-code hidden" id="statusCode"></span>
           <span class="status-right" id="statusSaved">Saved</span>
         </div>
       </div>
@@ -671,6 +673,7 @@
   <script src="vendor/editor.bundle.js"></script>
   <script src="vendor/docx.bundle.js"></script>
   <script src="vendor/pdf.bundle.js"></script>
+  <script src="vendor/code.bundle.js"></script>
   <script src="pdf-editor.js"></script>
   <script src="pdf-pages.js"></script>
   <script src="pdf-comments.js"></script>

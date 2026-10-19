@@ -529,7 +529,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.equal(mdNote.body, '# From disk\n\nline one\n');
   await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
   assert.equal(await page.$eval('#fileRow', (r) => !r.classList.contains('hidden')), true);
-  assert.equal(await page.textContent('#fileKind'), 'TEXT');
+  assert.equal(await page.textContent('#fileKind'), 'Markdown');
 
   // Edit in the app: the file on disk changes, in place.
   const inoBefore = fs.statSync(mdPath).ino;

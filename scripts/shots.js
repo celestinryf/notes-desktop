@@ -59,9 +59,9 @@ async function sampleWordNote(dir) {
   return { id: 'n-word', title: 'Trail report.docx', body: '', tags: [], folderId: null, filePath: file, fileKind: 'docx', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 1000 };
 }
 
-// A LaTeX file and the file note that opens it, as plain text.
-function sampleTexNote(dir) {
-  const body = String.raw`\documentclass{article}
+// Text files, and the file notes that open them in the code editor.
+const SAMPLE_FILES = {
+  tex: ['trail.tex', String.raw`\documentclass{article}
 \usepackage{amsmath}
 \title{Trail notes}
 
@@ -73,11 +73,21 @@ The climb gains $\Delta h = 640\,\text{m}$ over the first loop.
 % Check against the park map.
 
 \end{document}
-`;
-  const file = path.join(dir, 'trail.tex');
+`],
+  js: ['trail.js', `// Elevation gain over the first loop, in metres.
+const loop = { name: 'North loop', gain: 640, open: true };
+
+export function describe(trail) {
+  return trail.name + ': ' + trail.gain + ' m' + (trail.open ? '' : ' (closed)');
+}
+`],
+};
+function sampleFileNote(dir, kind) {
+  const [name, body] = SAMPLE_FILES[kind];
+  const file = path.join(dir, name);
   fs.writeFileSync(file, body);
   const now = Date.now();
-  return { id: 'n-tex', title: 'trail.tex', body, tags: [], folderId: null, filePath: file, fileKind: 'text', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 2000 };
+  return { id: 'n-' + kind, title: name, body, tags: [], folderId: null, filePath: file, fileKind: 'text', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 2000 };
 }
 
 function seed(now) {
@@ -176,7 +186,13 @@ const SCENES = {
   'tree-view': { about: 'The note list as folders with their notes, and the open note headings under it', settings: { listMode: 'tree' }, run: openNote('Q4 planning') },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
-  tex: { about: 'A LaTeX file open as text', tex: true, run: openNote('trail.tex') },
+  tex: { about: 'A LaTeX file open in the code editor', file: 'tex', run: openNote('trail.tex') },
+  'tex-small': { about: 'The code editor in a small window', file: 'tex', size: { width: 820, height: 560 }, run: openNote('trail.tex') },
+  'tex-focus': { about: 'The code editor focused: caret, active line and number', file: 'tex', run: steps(openNote('trail.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=8'); await page.keyboard.press('End'); await sleep(300); }) },
+  'code-js': { about: 'A JavaScript file in the code editor', file: 'js', run: openNote('trail.js') },
+  dropdown: { about: 'A select open: the note list sort', run: async (page) => { await page.click('#sortSelect'); await sleep(400); } },
+  'dropdown-keys': { about: 'A select open, moved through with the keyboard', run: async (page) => { await page.click('#sortSelect'); await sleep(300); await page.keyboard.press('ArrowDown'); await sleep(300); } },
+  'dropdown-folder': { about: 'The folder select over a note title, open', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#folderSelect'); await sleep(400); }) },
   small: { about: 'A small window (820x560) with a note open', size: { width: 820, height: 560 }, run: openNote('Q4 planning') },
 };
 
@@ -188,7 +204,7 @@ async function shoot(theme, name, opts) {
   Object.assign(data.settings, SCENES[name].settings || {});
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
-  if (SCENES[name].tex) data.notes.push(sampleTexNote(dataDir));
+  if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),

@@ -61,8 +61,8 @@
     gitEnabledInput: $('#gitEnabledInput'), gitRemoteInput: $('#gitRemoteInput'), gitStatus: $('#gitStatus'), gitCommitBtn: $('#gitCommitBtn'), gitPushBtn: $('#gitPushBtn'),
     exportBtn: $('#exportBtn'), duplicateBtn: $('#duplicateBtn'), restoreBtn: $('#restoreBtn'),
     deleteBtn: $('#deleteBtn'), destroyBtn: $('#destroyBtn'),
-    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'),
-    statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'),
+    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'), codeHost: $('#codeHost'),
+    statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'), statusCode: $('#statusCode'),
     settingsDialog: $('#settingsDialog'), settingsForm: $('#settingsForm'),
     hotkeyInput: $('#hotkeyInput'), hotkeyError: $('#hotkeyError'), themeSelect: $('#themeSelect'),
     fontSizeInput: $('#fontSizeInput'), fontSizeValue: $('#fontSizeValue'),
@@ -572,7 +572,7 @@
   // pin, sticky, lock and reminder marks never disappear after a save.
   function cardHtml(n, q) {
     const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
-    const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml((n.fileKind || 'file').toUpperCase()) + '</span>' : '';
+    const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
     const marks = (n.pinned ? '<span class="mark pin" title="Pinned">' + I('star') + '</span>' : '')
       + (n.sticky ? '<span class="mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
       + (n.locked ? '<span class="mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
@@ -934,9 +934,9 @@
         else if (!fence && /^\s{0,3}#{1,6}\s+\S/.test(line) && ++count === i) break;
         at += line.length + 1;
       }
-      el.bodyInput.focus();
-      el.bodyInput.setSelectionRange(at, at);
-      scrollTextareaToSelection(at);
+      src.focus();
+      src.setSelectionRange(at, at);
+      src.reveal(at);
       return;
     }
     const h = el.richEditor.querySelectorAll('.rich-editor-content :is(h1, h2, h3, h4, h5, h6)')[i];
@@ -1886,6 +1886,7 @@
   function runEditCommand(cmd) {
     if (!GUEST && tabs.frame && document.activeElement === tabs.frame) { toPeer({ type: 'event', name: 'editCommand', arg: cmd }); return; }
     if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run();
+    else if (codeOn && code.contains(document.activeElement)) code[cmd === 'redo' ? 'redo' : 'undo']();
     else document.execCommand(cmd === 'redo' ? 'redo' : 'undo');
   }
 
@@ -2076,6 +2077,7 @@
     el.sourceBtn.classList.toggle('hidden', plainFile || fileReadOnly); // nothing to switch between
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
+    showCode(note, inTrash || fileReadOnly);
     renderLockState(note);
     if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
     renderFileRow(note);
@@ -2678,7 +2680,7 @@
     const keepTyping = state.dirty && updated.unlocked;
     if (!keepTyping) {
       state.dirty = false;
-      el.bodyInput.value = updated.body;
+      src.reload(updated.body);
       if (state.rich) {
         state.currentLossless = state.rich.setMarkdown(updated.body);
         // Same rule as opening a note: text the rendered view would rewrite opens as source.
@@ -2860,7 +2862,7 @@
   function insertLinkIntoNote(text, href) {
     if (!state.current || lockedNow()) return;
     if (state.sourceMode || !state.rich) {
-      const ta = el.bodyInput;
+      const ta = src;
       if (ta.readOnly) return;
       const at = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
       const end = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : at;
@@ -2997,7 +2999,7 @@
     if (!v || !note) return;
     el.historyDialog.close();
     if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile(note)) { toast('This note cannot take the restored text right now.'); return; }
-    el.bodyInput.value = v.body;
+    src.value = v.body;
     if (state.rich) {
       let lossless = state.rich.setMarkdown(v.body);
       if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false; // a real file gets the strict test
@@ -3024,8 +3026,8 @@
     find.open = true;
     el.findBar.classList.remove('hidden');
     const sel = String(window.getSelection && window.getSelection().toString() || '').trim();
-    if (!sel && document.activeElement === el.bodyInput) {
-      const t = el.bodyInput.value.slice(el.bodyInput.selectionStart, el.bodyInput.selectionEnd).trim();
+    if (!sel && src.hasFocus()) {
+      const t = src.value.slice(src.selectionStart, src.selectionEnd).trim();
       if (t) el.findInput.value = t;
     } else if (sel && sel.length < 200) el.findInput.value = sel;
     el.findInput.focus();
@@ -3052,7 +3054,7 @@
       if (!find.sourceHits.length) { runFind(true, true); return; }
       find.active = Math.min(Math.max(wanted, 0), find.sourceHits.length - 1);
       const at = find.sourceHits[find.active];
-      const ta = el.bodyInput;
+      const ta = src;
       if (ta.readOnly) return;
       if (!isQueryText(ta.value.slice(at, at + q.length), q)) { showActiveMatch(); return; }
       ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
@@ -3084,9 +3086,9 @@
     if (state.sourceMode) {
       const at = find.sourceHits[find.active];
       if (at === undefined) return;
-      if (document.activeElement !== el.replaceInput) el.bodyInput.focus(); // Enter in the replace box keeps replacing
-      el.bodyInput.setSelectionRange(at, at + q.length);
-      scrollTextareaToSelection(at);
+      if (document.activeElement !== el.replaceInput) src.focus(); // Enter in the replace box keeps replacing
+      src.setSelectionRange(at, at + q.length);
+      src.reveal(at);
       el.findCount.textContent = (find.active + 1) + '/' + find.sourceHits.length;
       return;
     }
@@ -3102,7 +3104,7 @@
     if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
     let n = 0;
     if (state.sourceMode) {
-      const ta = el.bodyInput;
+      const ta = src;
       if (ta.readOnly) return;
       const hits = findOffsets(ta.value, q);
       n = hits.length;
@@ -3194,7 +3196,7 @@
       if (fresh || !sameQuery || !find.sourceHits.length) {
         find.sourceHits = findOffsets(el.bodyInput.value, q);
         // Start from the caret so Enter finds the next match after where the person is.
-        const caret = el.bodyInput.selectionStart || 0;
+        const caret = src.selectionStart || 0;
         const idx = find.sourceHits.findIndex((h) => h >= caret);
         find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) : -1; // past the last match wraps to the first
       } else if (find.sourceHits.length) {
@@ -3205,9 +3207,9 @@
         const at = find.sourceHits[find.active];
         // A textarea shows its selection only while focused, so stepping (Enter, F3) moves focus to the
         // text and keeps it there; F3 / Shift+F3 keep stepping from the text, Esc closes the bar.
-        if (!fresh) el.bodyInput.focus();
-        el.bodyInput.setSelectionRange(at, at + q.length);
-        scrollTextareaToSelection(at);
+        if (!fresh) src.focus();
+        src.setSelectionRange(at, at + q.length);
+        src.reveal(at);
       }
       el.findCount.textContent = n ? (find.active + 1) + '/' + n : 'No matches';
       el.findCount.classList.toggle('is-none', !n);
@@ -3410,7 +3412,7 @@
 
   function selectedTextForSpeech() {
     if (state.sourceMode) {
-      const ta = el.bodyInput;
+      const ta = src;
       if (ta.selectionStart !== ta.selectionEnd) return ta.value.slice(ta.selectionStart, ta.selectionEnd);
       return '';
     }
@@ -3741,6 +3743,14 @@
     if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
   }
 
+  // A file's badge, in the list and over the note: a text file's language as it is written (LaTeX, Python,
+  // Markdown, Plain text), or the kind of any other file as the acronym it is (PDF, DOCX).
+  function fileBadge(note) {
+    if (note.fileKind !== 'text') return (note.fileKind || 'file').toUpperCase();
+    if (!isPlainTextFile(note)) return 'Markdown';
+    return window.NotesCode ? window.NotesCode.languageFor(H.extOf(note.filePath)).name : 'Plain text';
+  }
+
   function renderFileRow(note) {
     const isFile = !!(note && note.filePath);
     el.fileRow.classList.toggle('hidden', !isFile);
@@ -3753,7 +3763,7 @@
     el.editorColumn.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     el.editor.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
-    el.fileKind.textContent = (note.fileKind || 'file').toUpperCase();
+    el.fileKind.textContent = fileBadge(note);
     el.filePath.textContent = note.filePath;
     el.filePath.title = note.filePath;
     if (note.fileKind === 'pdf') {
@@ -4189,7 +4199,7 @@
     // Replacing the editor text while clean means any stashed older patch is obsolete: it must never be
     // retried over the text we are now showing.
     if (!state.dirty) state.pending.delete(fresh.id);
-    el.bodyInput.value = fresh.body;
+    src.reload(fresh.body);
     // A PDF or Word file is shown by its own viewer: show the new version of the file there.
     if (isViewerOnlyFile(fresh)) { renderFileRow(fresh); updateStatus(fresh); return; }
     if (state.rich && !isPlainTextFile(fresh)) {
@@ -4703,7 +4713,7 @@
   }
 
   function focusBody() {
-    if (state.sourceMode || !state.rich) el.bodyInput.focus();
+    if (state.sourceMode || !state.rich) src.focus();
     else state.rich.focus();
   }
 
@@ -4713,13 +4723,12 @@
   }
 
   function bodyHasFocus() {
-    const a = document.activeElement;
-    return a === el.bodyInput || el.richEditor.contains(a);
+    return src.hasFocus() || el.richEditor.contains(document.activeElement);
   }
 
   function autoGrow() {
     const ta = el.bodyInput;
-    if (ta.classList.contains('hidden')) return;
+    if (ta.classList.contains('hidden') || ta.classList.contains('uses-code')) return;
     ta.style.height = 'auto';
     ta.style.height = Math.max(320, ta.scrollHeight + 2) + 'px';
   }
@@ -4756,6 +4765,65 @@
     el.linkInput.focus();
     el.linkInput.select();
   }
+
+  // ---- the code editor ----------------------------------------------------
+  // An opened text file that is not Markdown (.txt, LaTeX, code, config) is edited in CodeMirror (src/code/index.js),
+  // shown in the textarea's place. The textarea still holds the text: saving, the title and the counts read it there,
+  // and the person's edits in the code editor are copied into it as they happen (with the textarea's input event).
+
+  let code = null;      // the code editor, made when a file first needs it
+  let codeOn = false;   // it is showing the open note's text
+
+  function codeEditor() {
+    if (!code) {
+      code = window.NotesCode.create({
+        parent: el.codeHost,
+        onChange: (text) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
+        onSelection: renderCodePosition,
+        // While the find bar is open, Enter steps between matches, as it does in the textarea.
+        onEnter: (shift) => { if (!find.open) return false; runFind(!shift); return true; },
+      });
+    }
+    return code;
+  }
+
+  // Shows the note's text in the code editor when it is a plain-text file (and the editor is built), else in the
+  // textarea. A new note starts a new undo history.
+  function showCode(note, readOnly) {
+    codeOn = !!window.NotesCode && isPlainTextFile(note);
+    el.bodyInput.classList.toggle('uses-code', codeOn);
+    if (codeOn) {
+      codeEditor().load(el.bodyInput.value, { ext: H.extOf(note.filePath), readOnly, placeholder: 'Plain text.', label: H.deriveTitle(note) });
+    } else if (code) code.load('', {}); // nothing of the last file is kept around
+    renderCodePosition();
+  }
+
+  // The status line: where the caret is, for the code editor only (the file row's badge names the language).
+  function renderCodePosition() {
+    el.statusCode.classList.toggle('hidden', !codeOn);
+    if (!codeOn) return;
+    const at = code.position();
+    el.statusCode.textContent = 'Ln ' + at.line + ', Col ' + at.col;
+  }
+
+  // The source text and its selection, in whichever of the textarea and the code editor is showing it. Code that
+  // changes the text, moves the selection or focuses it goes through here, so the two never disagree.
+  const src = {
+    get value() { return el.bodyInput.value; },
+    set value(text) { el.bodyInput.value = text; if (codeOn) code.setValue(el.bodyInput.value); },
+    // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
+    reload(text) { el.bodyInput.value = text; if (codeOn) code.setValue(el.bodyInput.value, { history: false }); },
+    get readOnly() { return el.bodyInput.readOnly; },
+    get selectionStart() { return codeOn ? code.selectionStart : el.bodyInput.selectionStart; },
+    get selectionEnd() { return codeOn ? code.selectionEnd : el.bodyInput.selectionEnd; },
+    setSelectionRange(from, to) { if (codeOn) code.setSelectionRange(from, to); else el.bodyInput.setSelectionRange(from, to); },
+    focus() { if (codeOn) code.focus(); else el.bodyInput.focus(); },
+    hasFocus() { return codeOn ? code.hasFocus() : document.activeElement === el.bodyInput; },
+    // Scrolls a position into view (a find match, a heading).
+    reveal(at) { if (codeOn) code.reveal(at); else scrollTextareaToSelection(at); },
+    // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
+    dispatchEvent(event) { return el.bodyInput.dispatchEvent(event); },
+  };
 
   // ---- editor text helpers -------------------------------------------------
 
@@ -5129,7 +5197,7 @@
         case 'i': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
           if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('[', '](url)'); }
-          else if (bodyHasFocus()) { e.preventDefault(); openLinkDialog(); }
+          else if (bodyHasFocus() && !codeOn) { e.preventDefault(); openLinkDialog(); }
           return;
         default: break;
       }
