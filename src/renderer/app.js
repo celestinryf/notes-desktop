@@ -178,7 +178,6 @@
     document.documentElement.dataset.theme = theme;
     applyColorScheme(theme);
     syncTitleBar();
-    if (wc) wc.setTheme(theme);
   }
 
   // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.js); the
@@ -3615,8 +3614,11 @@
           clearWordCraft();
           showBanner('WordCraft could not open this document: ' + err + '. Use "Open with…" to open it in Word.');
         },
+        // Word documents are always edited in the dark: dark chrome and a dark page, whatever Notes' own theme (the
+        // user's choice, 2026-10-19). The page's darkness is only how WordCraft shows it; the file is unchanged.
+        theme: 'dark',
+        darkPage: true,
         // The build is there but did not start: Word documents use the simple editor until Notes restarts.
-        theme: effectiveTheme(),
         onUnavailable: () => {
           wordcraftDown = true;
           clearWordCraft();
