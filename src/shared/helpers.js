@@ -328,6 +328,15 @@
   // Images (fileKind 'image'), shown by the image viewer.
   const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
   const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+  // Spreadsheets (fileKind 'sheet') open in GridCraft and presentations (fileKind 'deck') in DeckCraft, the user's
+  // forks of ArtCraft's Rust office apps, as Word documents open in WordCraft. Excel's zip formats are saved where
+  // they are; the others GridCraft saves as an .xlsx beside them (as WordCraft does with .odt), and the note moves to it.
+  // (.csv and .tsv stay text files: Notes shows them as a table itself.)
+  const SHEET_EXT = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods']);
+  const SHEET_TO_XLSX_EXT = new Set(['xls', 'xlsb', 'ods']);
+  const DECK_EXT = new Set(['pptx', 'potx', 'ppsx']);
+  // The Craft app that shows each kind of file.
+  const CRAFT_OF = { docx: 'wordcraft', sheet: 'gridcraft', deck: 'deckcraft' };
 
   // A comma- or tab-separated file: shown as a table, edited as text (Ctrl+E).
   function isTableFile(note) {
@@ -451,7 +460,7 @@
   return {
     fuzzyScore,
     splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
-    WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME,
+    WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, DECK_EXT, CRAFT_OF,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
