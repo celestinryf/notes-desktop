@@ -17,16 +17,19 @@ const DEFAULT_SETTINGS = Object.freeze({
   openAtLogin: true,
   alwaysOnTop: false,
   sort: 'updated',          // updated | created | title
-  sidebarCollapsed: false,
+  sidebarCollapsed: false,   // hidden: it floats in when the pointer reaches the window's left edge (Zen's compact mode)
   listCollapsed: false,      // note list hidden (only while a note is open)
+  listMode: 'list',          // list | tree: the middle pane as a list of notes, or as folders with their notes
   lastFolderId: null,       // folder the list showed last, restored at start
   sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
   listWidth: H.PANE_LIMITS.listWidth.def,
-  expandedFolders: [],      // folder ids whose children are shown in the sidebar
+  expandedFolders: [],      // the sidebar's one open folder path (ids, outermost first)
+  treeExpanded: [],         // folder ids open in the middle pane's folder view
+  tagsCollapsed: false,     // the sidebar's Tags section folded away
   editorMode: 'rendered',   // rendered | source
   editorAlign: 'center',    // left | center | right: where the writing column sits in the editor pane
-  editorWidth: 0,           // max width of the writing column in px; 0 means full width
-  columnLayout: 2,          // 2: the defaults above; settings saved before had 760px, left, written out as if chosen
+  editorWidth: 760,         // max width of the writing column in px; 0 means full width
+  columnLayout: 3,          // which one-time column migrations have run (see sanitizeSettings)
   panes: null,              // open tabs on each side of the editor and the split; see sanitizePanes
   gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
   gitRemote: '',            // optional remote URL to push to after each commit
@@ -173,6 +176,9 @@ function sanitizeSettings(input) {
   s.alwaysOnTop = !!s.alwaysOnTop;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
   s.listCollapsed = !!s.listCollapsed;
+  s.listMode = s.listMode === 'tree' ? 'tree' : 'list';
+  s.treeExpanded = Array.isArray(s.treeExpanded) ? s.treeExpanded.filter((x) => typeof x === 'string').slice(0, 5000) : [];
+  s.tagsCollapsed = !!s.tagsCollapsed;
   s.lastFolderId = typeof s.lastFolderId === 'string' && s.lastFolderId ? s.lastFolderId : null;
   s.zoomLevel = Number.isFinite(Number(s.zoomLevel)) ? Math.max(-3, Math.min(5, Math.round(Number(s.zoomLevel) * 2) / 2)) : 0;
   s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
@@ -181,12 +187,13 @@ function sanitizeSettings(input) {
   s.editorMode = s.editorMode === 'source' ? 'source' : 'rendered';
   s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : DEFAULT_SETTINGS.editorAlign;
   s.editorWidth = clampEditorWidth(s.editorWidth);
-  // Every save wrote the old defaults (760px, left) whether or not they were picked, so those move to the new ones once.
-  if (src.columnLayout !== 2 && s.editorWidth === 760 && s.editorAlign === 'left') {
-    s.editorWidth = DEFAULT_SETTINGS.editorWidth;
-    s.editorAlign = DEFAULT_SETTINGS.editorAlign;
-  }
-  s.columnLayout = 2;
+  // One-time moves, each marked by columnLayout so a later choice is never undone:
+  // 2: every save wrote the old defaults (760px, left) whether or not they were picked; those became full width, centred.
+  // 3: full width became a readable 760px column (user, 2026-10-18); full width stays a choice in Settings.
+  const layout = Number(src.columnLayout) || 0;
+  if (layout < 2 && s.editorWidth === 760 && s.editorAlign === 'left') s.editorAlign = DEFAULT_SETTINGS.editorAlign;
+  if (layout < 3 && s.editorWidth === 0) s.editorWidth = DEFAULT_SETTINGS.editorWidth;
+  s.columnLayout = 3;
   s.panes = s.panes == null ? null : sanitizePanes(s.panes);
   s.gitEnabled = !!s.gitEnabled;
   s.gitRemote = typeof s.gitRemote === 'string' ? s.gitRemote.trim().slice(0, 500) : '';
@@ -316,6 +323,7 @@ class Store {
     this.settings = sanitizeSettings(raw && raw.settings);
     const ids = new Set(this.folders.map((f) => f.id));
     this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
+    this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
     // Recovered from a backup: write it back now, so a quit without further edits does not start empty next time.
     if (this.recoveredFromBackup && !this.saveBlocked) {
       try { this.save(); } catch (_) { /* a later save will persist it; memory is correct */ }
@@ -792,7 +800,7 @@ class Store {
       notes: this.notes.map((n) => Object.assign({}, n, { tags: n.tags.slice() })),
       folders: this.folders.map((f) => Object.assign({}, f)),
       vaults: this.vaults.map((v) => Object.assign({}, v)),
-      settings: Object.assign({}, this.settings, { expandedFolders: this.settings.expandedFolders.slice() }),
+      settings: Object.assign({}, this.settings, { expandedFolders: this.settings.expandedFolders.slice(), treeExpanded: this.settings.treeExpanded.slice() }),
     };
     try {
       const result = mutate();
@@ -859,6 +867,7 @@ class Store {
       this.folders = this.folders.filter((f) => f.vaultId !== id);
       this.vaults = this.vaults.filter((x) => x.id !== id);
       this.settings.expandedFolders = this.settings.expandedFolders.filter((fid) => this.folders.some((f) => f.id === fid));
+      this.settings.treeExpanded = this.settings.treeExpanded.filter((fid) => this.folders.some((f) => f.id === fid));
       return true;
     });
   }
@@ -1182,6 +1191,28 @@ class Store {
   }
 
   // Nested tree; count is the number of live notes directly in the folder (what the folder view lists).
+  // Every live note, lightly: what the folder trees draw (no bodies). Grouped by folder, in the list's sort
+  // order, books in page order.
+  noteOutline(sort) {
+    const by = new Map();
+    for (const n of this.notes) {
+      if (n.trashedAt) continue;
+      const k = n.folderId || '';
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(n);
+    }
+    const out = {};
+    for (const [k, list] of by) {
+      const f = k ? this.getFolder(k) : null;
+      const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
+      out[k] = ordered.map((n) => {
+        const p = this.publicNote(n);
+        return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!n.lock, fileKind: n.fileKind || null, live: !!n.live, updatedAt: n.updatedAt };
+      });
+    }
+    return out;
+  }
+
   folderTree() {
     const direct = new Map();
     for (const n of this.notes) {
@@ -1320,6 +1351,7 @@ class Store {
       for (const c of this.folders) if (c.parentId === id) { c.parentId = parent; movedFolders++; }
       this.folders = this.folders.filter((x) => x.id !== id);
       this.settings.expandedFolders = this.settings.expandedFolders.filter((x) => x !== id);
+      this.settings.treeExpanded = this.settings.treeExpanded.filter((x) => x !== id);
       return { movedNotes, movedFolders, parentId: parent };
     });
   }

@@ -363,6 +363,7 @@ function main() {
 
   const pub = (n) => store.publicNote(n);
   ipcMain.handle('notes:list', (_e, opts) => store.list(opts).map(pub));
+  ipcMain.handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   ipcMain.handle('notes:get', (_e, id) => pub(store.get(id)));
   ipcMain.handle('notes:create', (_e, data) => {
     data = Object.assign({}, data || {});

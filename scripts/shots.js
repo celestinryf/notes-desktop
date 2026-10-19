@@ -8,6 +8,9 @@
    npm run shots -- --list               the scene names
    npm run shots -- --eval metrics.js    also evaluate a script in each scene and save its result as <scene>-<theme>.json
                                          (for example the ui-audit skill's scripts/ui-metrics.js)
+   npm run shots -- --screen             also capture the window from the real screen as <scene>-<theme>-screen.png:
+                                         it includes the caption buttons Windows draws. The window comes to the front
+                                         for a moment, so do not use it while someone is typing.
 
    Each PNG is named <scene>-<theme>.png. Open them with the Read tool to look at them.
    A run first deletes the .png and .json files already in the output folder, so what is there is this run's. */
@@ -16,13 +19,14 @@ const os = require('os');
 const path = require('path');
 const { _electron: electron } = require('playwright-core');
 const { tmpDir } = require('../test/helpers/tmp');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 60 * 60 * 1000;
 
 function parseArgs(argv) {
-  const out = { scenes: null, themes: ['light', 'dark'], size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null };
+  const out = { scenes: null, themes: ['light', 'dark'], size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null, screen: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(a + ' needs a value'); return v; };
@@ -31,6 +35,7 @@ function parseArgs(argv) {
     else if (a === '--size') { const m = /^(\d+)x(\d+)$/.exec(next()); if (!m) throw new Error('--size wants WIDTHxHEIGHT'); out.size = { width: +m[1], height: +m[2] }; }
     else if (a === '--out') out.out = path.resolve(next());
     else if (a === '--list') out.list = true;
+    else if (a === '--screen') out.screen = true;
     else if (a === '--eval') { out.eval = path.resolve(next()); if (!fs.existsSync(out.eval)) throw new Error('No such file: ' + out.eval); }
     else throw new Error('Unknown argument ' + a);
   }
@@ -88,9 +93,19 @@ function seed(now) {
   return { schemaVersion: 1, settings: { hotkey: 'Control+Alt+Shift+F7', openAtLogin: false, gitEnabled: false }, folders, vaults: [], notes };
 }
 
+// Opens a note by title: from the list or the folder view when it is on screen, else through the palette.
 const openNote = (title) => async (page) => {
-  await page.locator('.note-card', { hasText: title }).first().click();
-  await sleep(400);
+  if ((await page.inputValue('#titleInput').catch(() => '')) === title && await page.isVisible('#titleInput')) return;
+  const row = page.locator('.note-card, .note-tree .tree-note', { hasText: title }).first();
+  if (await row.count() && await row.isVisible()) await row.click();
+  else {
+    await page.keyboard.press('Control+p');
+    await sleep(250);
+    await page.keyboard.type(title);
+    await sleep(400);
+    await page.keyboard.press('Enter');
+  }
+  await sleep(500);
 };
 // Puts the caret at the end of the open note's text and types there.
 const typeAtEnd = (text, newLine) => async (page) => {
@@ -122,6 +137,8 @@ const SCENES = {
   slash: { about: 'The "/" block menu in a note', run: steps(openNote('Ideas for the garden'), typeAtEnd('/', true)) },
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
+  'tree-view': { about: 'The note list as folders with their notes, and the open note headings under it', settings: { listMode: 'tree' }, run: openNote('Q4 planning') },
+  'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
   small: { about: 'A small window (820x560) with a note open', size: { width: 820, height: 560 }, run: openNote('Q4 planning') },
 };
 
@@ -130,6 +147,7 @@ async function shoot(theme, name, opts) {
   const dataDir = tmpDir('notes-shots-');
   const data = seed(Date.now());
   data.settings.theme = theme;
+  Object.assign(data.settings, SCENES[name].settings || {});
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
@@ -151,6 +169,20 @@ async function shoot(theme, name, opts) {
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);
     await page.screenshot({ path: file });
+    if (opts.screen) {
+      // Bring the window to the front, read its rectangle in physical pixels, and copy that part of the screen.
+      const r = await app.evaluate(({ BrowserWindow, screen }) => {
+        const w = BrowserWindow.getAllWindows()[0];
+        w.setAlwaysOnTop(true, 'screen-saver');
+        w.showInactive();
+        const b = w.getBounds();
+        const sf = screen.getDisplayMatching(b).scaleFactor;
+        return { x: Math.round(b.x * sf), y: Math.round(b.y * sf), width: Math.round(b.width * sf), height: Math.round(b.height * sf) };
+      });
+      await sleep(600);
+      execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'screen-capture.ps1'),
+        '-X', String(r.x), '-Y', String(r.y), '-Width', String(r.width), '-Height', String(r.height), '-Out', file.replace(/[.]png$/, '-screen.png')], { stdio: 'ignore' });
+    }
     if (opts.eval) {
       // Evaluated through the debugger, so the page's CSP (no eval) does not apply.
       const result = await page.evaluate(fs.readFileSync(opts.eval, 'utf8'));
@@ -158,7 +190,13 @@ async function shoot(theme, name, opts) {
     }
     return file;
   } finally {
+    // Wait for Electron to be gone before removing its data folder: Windows keeps files of a live process locked,
+    // and a folder that could not be removed would be left in %TEMP%.
+    const proc = app.process();
+    const gone = new Promise((resolve) => { if (proc.exitCode !== null) resolve(); else proc.once('exit', resolve); });
     await app.evaluate(({ app: a }) => a.exit(0)).catch(() => {});
+    await Promise.race([gone, sleep(10000)]);
+    try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) { /* the exit cleanup tries again */ }
   }
 }
 

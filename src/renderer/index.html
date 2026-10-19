@@ -13,9 +13,11 @@
   <div id="app" class="app">
     <!-- Sidebar -->
     <aside class="app-sidebar" id="sidebar">
-      <div class="brand drag-region">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <h1 class="brand-name">Notes</h1>
+      <div class="sidebar-top drag-region" id="sidebarTop">
+        <div class="bar-toggles" id="barToggles">
+          <button class="tool-btn icon-only" id="toggleSidebarBtn" data-icon="panel-left" title="Hide the sidebar (Ctrl+\). Point at the window's left edge to bring it back." aria-label="Hide or show the sidebar"></button>
+          <button class="tool-btn icon-only" id="toggleListBtn" data-icon="list" title="Show or hide the note list (Ctrl+Shift+\)" aria-label="Show or hide the note list"></button>
+        </div>
       </div>
 
       <div class="sidebar-actions">
@@ -37,9 +39,9 @@
           <button class="mini-btn" id="newFolderBtn" data-icon="folder-plus" title="New folder (Ctrl+Shift+N)" aria-label="New folder"></button>
         </span>
       </div>
-      <nav class="nav folders" id="folderTree" aria-label="Folders"></nav>
+      <nav class="nav folders tree" id="folderTree" role="tree" aria-label="Folders"></nav>
 
-      <div class="nav-heading">Tags</div>
+      <button type="button" class="nav-heading nav-fold" id="tagsFold" aria-expanded="true" aria-controls="tagList" data-icon="chevron-down"><span>Tags</span></button>
       <nav class="nav tags" id="tagList" aria-label="Tags"></nav>
 
       <div class="sidebar-foot">
@@ -52,10 +54,12 @@
       <div class="resizer" id="sidebarResizer" title="Drag to resize. Double-click to reset."></div>
     </aside>
 
+    <div class="sidebar-edge" id="sidebarEdge" aria-hidden="true"></div>
+
     <!-- Note list -->
     <section class="list-pane" aria-label="Note list">
       <div class="list-head drag-region">
-        <label class="search-wrap" data-icon="search">
+        <label class="search-wrap" data-icon="list-filter">
           <input id="searchInput" class="search" type="search" placeholder="Filter this list" aria-label="Filter this list (Ctrl+F)" title="Filter this list (Ctrl+F)" autocomplete="off" spellcheck="false" />
         </label>
         <button class="tool-btn icon-only" id="hideListBtn" data-icon="chevron-left" title="Hide the note list (Ctrl+Shift+\)" aria-label="Hide note list"></button>
@@ -72,6 +76,7 @@
         </div>
       </div>
       <ul class="note-list" id="noteList" role="listbox" aria-label="Notes"></ul>
+      <div class="note-tree tree hidden" id="noteTree" role="tree" aria-label="Folders and notes"></div>
       <div class="empty hidden" id="listEmpty">
         <p class="empty-title">Nothing here yet</p>
         <p class="empty-sub">Press <kbd>Ctrl</kbd> + <kbd>N</kbd> to write your first note.</p>
@@ -82,14 +87,22 @@
     <!-- Editor -->
     <section class="editor-pane" id="editorPane" aria-label="Editor">
       <div class="pane-main" id="paneMain">
-      <div class="tab-bar drag-region" id="tabBar">
+      <div class="tab-bar drag-region" id="tabBar" role="toolbar" aria-label="Tabs and note actions">
         <div class="tabs" id="tabList" role="tablist" aria-label="Open notes"></div>
         <button class="tool-btn icon-only tab-add" id="tabAddBtn" data-icon="plus" title="New tab (Ctrl+T). Ctrl+click a note to open it in a new tab." aria-label="New tab"></button>
         <span class="spacer"></span>
+        <div class="note-actions" id="noteActions">
+          <button class="tool-btn" id="restoreBtn" data-icon="rotate-ccw" title="Restore from trash"><span>Restore</span></button>
+          <button class="tool-btn tool-danger" id="destroyBtn" data-icon="trash-2" title="Delete forever"><span>Delete forever</span></button>
+          <button class="tool-btn" id="sourceBtn" data-icon="code-xml" title="Show Markdown source (Ctrl+E)" aria-label="Show Markdown source" aria-pressed="false"><span class="lbl">Source</span></button>
+          <button class="tool-btn icon-only" id="pinBtn" data-icon="star" title="Pin this note to the top of your lists (Ctrl+D)" aria-label="Pin this note" aria-pressed="false"></button>
+          <button class="tool-btn icon-only" id="splitViewBtn" data-icon="columns-2" title="Split view: open a second side to the right" aria-label="Split view"></button>
+          <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-haspopup="menu"><span>Share</span></button>
+          <button class="tool-btn icon-only" id="moreBtn" data-icon="ellipsis" title="More actions for this note" aria-label="More actions" aria-haspopup="menu" aria-expanded="false"></button>
+        </div>
         <button class="tool-btn hidden" id="paneCloseBtn" data-icon="x" title="Close this side and its tabs" aria-label="Close this side"><span>Close side</span></button>
       </div>
       <div class="editor-empty" id="editorEmpty">
-        <div class="drag-strip drag-region" aria-hidden="true"></div>
         <div class="editor-empty-inner">
           <p class="editor-empty-title">Nothing open</p>
           <p class="editor-empty-sub">Pick a note from the list, or start a new one.</p>
@@ -105,25 +118,6 @@
       </div>
 
       <div class="editor hidden" id="editor">
-        <div class="editor-toolbar drag-region" role="toolbar" aria-label="Note">
-          <div class="toolbar-left">
-            <button class="tool-btn icon-only" id="toggleSidebarBtn" data-icon="panel-left" title="Show or hide the sidebar (Ctrl+\)" aria-label="Show or hide the sidebar"></button>
-            <button class="tool-btn icon-only" id="toggleListBtn" data-icon="list" title="Show or hide the note list (Ctrl+Shift+\)" aria-label="Show or hide the note list"></button>
-            <span class="toolbar-sep" aria-hidden="true"></span>
-            <label class="crumb" data-icon="folder" title="Move this note to a folder">
-              <select id="folderSelect" class="folder-select" aria-label="Folder"></select>
-            </label>
-          </div>
-          <div class="toolbar-right">
-            <button class="tool-btn" id="restoreBtn" data-icon="rotate-ccw" title="Restore from trash"><span>Restore</span></button>
-            <button class="tool-btn tool-danger" id="destroyBtn" data-icon="trash-2" title="Delete forever"><span>Delete forever</span></button>
-            <button class="tool-btn" id="sourceBtn" data-icon="code-xml" title="Show Markdown source (Ctrl+E)" aria-label="Show Markdown source" aria-pressed="false"><span class="lbl">Source</span></button>
-            <button class="tool-btn icon-only" id="pinBtn" data-icon="star" title="Pin to the top (Ctrl+D)" aria-label="Pin note" aria-pressed="false"></button>
-            <button class="tool-btn icon-only" id="splitViewBtn" data-icon="columns-2" title="Split view: open a second side to the right" aria-label="Split view"></button>
-            <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-haspopup="menu"><span>Share</span></button>
-            <button class="tool-btn icon-only" id="moreBtn" data-icon="ellipsis" title="More actions for this note" aria-label="More actions" aria-haspopup="menu" aria-expanded="false"></button>
-          </div>
-        </div>
         <!-- Everything a note can do that is not needed every minute. Each item is also in the command palette (Ctrl+P). -->
         <div class="popover menu hidden" id="moreMenu" role="menu" aria-label="More actions">
           <div class="menu-group" role="group" aria-label="This note">
@@ -166,7 +160,7 @@
           </div>
         </section>
         <div class="editor-scroll">
-          <div class="editor-column align-center full-width" id="editorColumn">
+          <div class="editor-column align-center" id="editorColumn">
             <nav class="book-strip hidden" id="bookStrip" aria-label="Pages of this book">
               <button class="book-name" id="bookName" title="Book: read it all, export, rename" aria-haspopup="menu"></button>
               <button class="tool-btn icon-only" id="bookPrevBtn" data-icon="chevron-left" title="Previous page (Ctrl+PageUp)" aria-label="Previous page"></button>
@@ -174,6 +168,11 @@
               <button class="tool-btn icon-only" id="bookNextBtn" data-icon="chevron-right" title="Next page (Ctrl+PageDown)" aria-label="Next page"></button>
               <button class="tool-btn" id="bookAddBtn" data-icon="plus" title="Add a page at the end"><span>Page</span></button>
             </nav>
+            <div class="note-path">
+              <label class="crumb" data-icon="folder" title="Move this note to a folder">
+                <select id="folderSelect" class="folder-select" aria-label="Folder"></select>
+              </label>
+            </div>
             <input id="titleInput" class="title-input" type="text" placeholder="Untitled" aria-label="Title" autocomplete="off" spellcheck="true" />
             <input id="tagsInput" class="tags-input" type="text" placeholder="Add tags, separated by commas" aria-label="Tags" autocomplete="off" spellcheck="false" />
             <div class="live-row hidden" id="liveRow">
@@ -274,7 +273,7 @@
           <span class="find-count" id="findCount"></span>
           <button class="tool-btn icon-only" id="findPrevBtn" data-icon="arrow-up" title="Previous (Shift+Enter)" aria-label="Previous match"></button>
           <button class="tool-btn icon-only" id="findNextBtn" data-icon="arrow-down" title="Next (Enter)" aria-label="Next match"></button>
-          <button class="tool-btn icon-only" id="findReplaceToggle" data-icon="replace" title="Replace (Ctrl+H)" aria-label="Show replace" aria-pressed="false"></button>
+          <button class="tool-btn icon-only" id="findReplaceToggle" data-icon="arrow-right-left" title="Replace (Ctrl+H)" aria-label="Show replace" aria-pressed="false"></button>
           <button class="tool-btn icon-only" id="findCloseBtn" data-icon="x" title="Close (Esc)" aria-label="Close find"></button>
           <div class="replace-row hidden" id="replaceRow">
             <input id="replaceInput" class="input find-input" type="text" placeholder="Replace with…" autocomplete="off" spellcheck="false" />
@@ -341,6 +340,18 @@
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                 </select>
+              </label>
+              <div class="field">
+                <span class="field-label">Note list</span>
+                <div class="segmented" id="listModeSeg" role="radiogroup" aria-label="Note list">
+                  <button type="button" data-mode="list" role="radio">List</button>
+                  <button type="button" data-mode="tree" role="radio">Folders</button>
+                </div>
+                <span class="field-help">List: the notes in the view, in the order you sort by. Folders: your folders with their notes inside, and the open note's headings under it. Pinned, Reminders, Trash, tags and searches are always a list.</span>
+              </div>
+              <label class="field field-check">
+                <input id="sidebarFloatInput" type="checkbox" />
+                <span>Hide the sidebar. Point at the window's left edge to bring it in (Ctrl+\ does the same).</span>
               </label>
               <label class="field field-check">
                 <input id="openAtLoginInput" type="checkbox" />
@@ -603,21 +614,21 @@
     </dialog>
     <div class="popover menu hidden" id="shareMenu" role="menu" aria-label="Share">
       <div class="menu-group" role="group" aria-label="Copy">
-        <button role="menuitem" class="menu-item" data-action="copy-md" data-icon="copy"><span class="lbl">Copy as Markdown</span></button>
-        <button role="menuitem" class="menu-item" data-action="copy-html" data-icon="copy"><span class="lbl">Copy as rich text</span></button>
-        <button role="menuitem" class="menu-item" data-action="copy-text" data-icon="copy"><span class="lbl">Copy as plain text</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-md" data-icon="hash"><span class="lbl">Copy as Markdown</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-html" data-icon="type"><span class="lbl">Copy as rich text</span></button>
+        <button role="menuitem" class="menu-item" data-action="copy-text" data-icon="file-text"><span class="lbl">Copy as plain text</span></button>
         <button role="menuitem" class="menu-item" data-action="copy-note-link" data-icon="link"><span class="lbl">Copy link to this note</span></button>
       </div>
       <div class="menu-group" role="group" aria-label="Send and save">
-        <button role="menuitem" class="menu-item" data-action="email" data-icon="share-2"><span class="lbl">Email…</span></button>
-        <button role="menuitem" class="menu-item" data-action="pdf" data-icon="file-output"><span class="lbl">Save as PDF…</span></button>
-        <button role="menuitem" class="menu-item" data-action="html" data-icon="file-output"><span class="lbl">Save as HTML…</span></button>
+        <button role="menuitem" class="menu-item" data-action="email" data-icon="mail"><span class="lbl">Email…</span></button>
+        <button role="menuitem" class="menu-item" data-action="pdf" data-icon="printer"><span class="lbl">Save as PDF…</span></button>
+        <button role="menuitem" class="menu-item" data-action="html" data-icon="code-xml"><span class="lbl">Save as HTML…</span></button>
         <button role="menuitem" class="menu-item" data-action="md" data-icon="download"><span class="lbl">Save as Markdown…</span></button>
         <button role="menuitem" class="menu-item" data-action="reveal" id="shareReveal" data-icon="folder-open"><span class="lbl">Show file in Explorer</span></button>
       </div>
       <div class="menu-group" role="group" aria-label="Live share">
         <button role="menuitem" class="menu-item" data-action="live-host" id="shareLiveHost" data-icon="radio"><span class="lbl">Live share this note…</span></button>
-        <button role="menuitem" class="menu-item" data-action="live-join" data-icon="radio"><span class="lbl">Join a live share…</span></button>
+        <button role="menuitem" class="menu-item" data-action="live-join" data-icon="link"><span class="lbl">Join a live share…</span></button>
         <button role="menuitem" class="menu-item danger" data-action="live-stop" id="shareLiveStop" data-icon="x"><span class="lbl">Stop live share</span></button>
       </div>
     </div>

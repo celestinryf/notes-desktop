@@ -35,7 +35,7 @@ const rendererErrors = [];
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
 
 test.before(async () => {
-  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light' }, notes: [] }));
+  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3 }, notes: [] }));
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
