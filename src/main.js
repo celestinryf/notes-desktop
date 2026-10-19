@@ -20,7 +20,11 @@ const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
-const THEME_BG = { light: '#fbf1e4', dark: '#1b120d' };
+// The editor's paper colour (styles.css --paper), shown before the page paints; the page repaints the caption
+// buttons to match whatever sits under them (app:titleBar).
+const THEME_BG = { light: '#fffaf3', dark: '#211710' };
+const THEME_FG = { light: '#2a1a12', dark: '#f6eadb' };
+const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');
 app.setAppUserModelId('com.celestinryf.notes');
@@ -130,6 +134,9 @@ function main() {
       title: 'Notes',
       icon: iconImage(),
       backgroundColor: THEME_BG[effectiveTheme()],
+      // Our own top band instead of Windows' white title bar; Windows still draws the caption buttons.
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { color: THEME_BG[effectiveTheme()], symbolColor: THEME_FG[effectiveTheme()], height: TITLE_BAR_H },
       alwaysOnTop: store.settings.alwaysOnTop,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
@@ -1009,6 +1016,11 @@ function main() {
 
   ipcMain.handle('app:info', () => info());
   ipcMain.handle('app:hide', () => hideWindow());
+  ipcMain.handle('app:titleBar', (e, colors) => {
+    const ok = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+    if (!win || win.isDestroyed() || e.sender !== win.webContents || !colors || !ok(colors.color) || !ok(colors.symbol)) return false;
+    try { win.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbol, height: TITLE_BAR_H }); return true; } catch (_) { return false; }
+  });
   ipcMain.handle('app:print', (e) => new Promise((resolve) => {
     if (process.env.NOTES_APP_DRY_PRINT === '1') return resolve({ ok: true, dry: true });
     try { e.sender.print({ printBackground: true }, (ok, reason) => resolve({ ok, error: ok ? null : (reason || 'print failed') })); }

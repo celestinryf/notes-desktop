@@ -8,6 +8,7 @@
     title: $('#stickyTitle'), colors: $('#stickyColors'), topBtn: $('#stickyTopBtn'), openBtn: $('#stickyOpenBtn'),
     closeBtn: $('#stickyCloseBtn'), editor: $('#stickyEditor'), missing: $('#stickyMissing'), status: $('#stickyStatus'),
   };
+  window.NotesIcons.hydrate(document);
   const id = new URLSearchParams(location.search).get('id');
   const COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
   const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches, settings: null };

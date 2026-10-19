@@ -42,12 +42,12 @@
       c.style.transform = 'rotate(' + turn + 'deg) scale(' + scale + ')';
     }
 
-    function button(act, k, text, title) {
+    function button(act, k, icon, title) {
       const b = document.createElement('button');
-      b.className = 'tool-btn';
+      b.className = 'tool-btn icon-only';
       b.dataset.act = act;
       b.dataset.k = k;
-      b.textContent = text;
+      b.innerHTML = window.NotesIcons.svg(icon);
       b.title = title;
       b.setAttribute('aria-label', title);
       return b;
@@ -71,11 +71,11 @@
         const acts = document.createElement('div');
         acts.className = 'pdf-page-acts';
         acts.append(
-          button('left', k, '◀', 'Move earlier'),
-          button('turn-left', k, '↺', 'Turn left'),
-          button('turn-right', k, '↻', 'Turn right'),
-          button('remove', k, '✕', 'Remove this page'),
-          button('right', k, '▶', 'Move later'),
+          button('left', k, 'chevron-left', 'Move earlier'),
+          button('turn-left', k, 'rotate-ccw', 'Turn left'),
+          button('turn-right', k, 'rotate-cw', 'Turn right'),
+          button('remove', k, 'x', 'Remove this page'),
+          button('right', k, 'chevron-right', 'Move later'),
         );
         card.append(box, cap, acts);
         return card;

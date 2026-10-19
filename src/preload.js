@@ -148,6 +148,7 @@ if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
     exportAll: invoke('app:exportAll'),
     importMarkdown: invoke('app:importMarkdown'),
     historyVersions: invoke('history:versions'),
+    titleBar: invoke('app:titleBar'),
   },
   on: {
     shown: on('app:shown'),
