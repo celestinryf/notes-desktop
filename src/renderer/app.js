@@ -91,7 +91,7 @@
     historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
     moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
-    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'), gridcraftFrame: $('#gridcraftFrame'), deckcraftFrame: $('#deckcraftFrame'),
+    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'), gridcraftFrame: $('#gridcraftFrame'),
     sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
     tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
     activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
@@ -3664,17 +3664,13 @@
   }
 
   // ---- Documents in the Craft apps ---------------------------------------------------------------
-  // WordCraft (Word documents), GridCraft (spreadsheets) and DeckCraft (presentations): the user's forks of ArtCraft's
-  // Rust office apps, built to WebAssembly and shown in a frame each (craft-frame.js, one protocol for all three).
-  // One controller per app. Its note is the document on show, { id, fileMtime, name } as read or last saved.
+  // WordCraft (Word documents) and GridCraft (spreadsheets): the user's forks of ArtCraft's Rust office apps, built to
+  // WebAssembly and shown in a frame each (craft-frame.js, one protocol for both). One controller per app. Its note
+  // is the document on show, { id, fileMtime, name } as read or last saved.
   const CRAFT_UI = {
     wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
     gridcraft: { label: 'GridCraft', what: 'spreadsheet', frame: () => el.gridcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'Excel', without: 'spreadsheets cannot be shown for now.' },
-    deckcraft: { label: 'DeckCraft', what: 'presentation', frame: () => el.deckcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'PowerPoint', without: 'presentations cannot be shown for now.' },
   };
-  // DeckCraft is early in its development, so Notes never writes over a presentation (main.js, files:saveCraft).
-  const DECK_BANNER = 'DeckCraft is new, so Notes never writes over this file: what you save in it is written as a new file beside this one.';
-  const craftBanner = (key) => (key === 'deckcraft' ? DECK_BANNER : '');
   function craftViewer(key) {
     const ui = CRAFT_UI[key];
     const frame = () => ui.frame();
@@ -3689,7 +3685,7 @@
           url: key + '://app/index.html?host',
           onSave: saveFromFrame,
           onDirty: (d) => { if (note && state.currentId === note.id) setSaved(d ? 'Edited' : 'Saved'); },
-          onOpened: () => { frame().classList.remove('is-opening'); if (note && state.currentId === note.id) showBanner(craftBanner(key)); },
+          onOpened: () => { frame().classList.remove('is-opening'); if (note && state.currentId === note.id) showBanner(''); },
           onOpenFailed: (err) => {
             clear();
             showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
@@ -3803,10 +3799,10 @@
     for (const c of Object.values(crafts)) ok = (await c.flush()) && ok;
     return ok;
   }
-  // A spreadsheet or presentation: its Craft app, or nothing but a banner (Notes has no editor of its own for them).
+  // A spreadsheet: GridCraft, or nothing but a banner (Notes has no editor of its own for it).
   function showCraftOnly(n) {
     const key = H.CRAFT_OF[n.fileKind];
-    if (crafts[key].usable()) { showBanner(craftBanner(key)); crafts[key].show(n); return; }
+    if (crafts[key].usable()) { showBanner(''); crafts[key].show(n); return; }
     showBanner('Notes shows .' + H.extOf(n.filePath) + ' files in ' + CRAFT_UI[key].label + ', which is not available right now. Use "Open with…" to open it in ' + CRAFT_UI[key].openWith + '.');
   }
 
@@ -3891,7 +3887,7 @@
   // A file's badge, in the list and over the note: a text file's language as it is written (LaTeX, Python,
   // Markdown, Plain text), or the kind of any other file as the acronym it is (PDF, DOCX).
   function fileBadge(note) {
-    if (['docx', 'sheet', 'deck', 'image'].includes(note.fileKind)) return H.extOf(note.filePath).toUpperCase();
+    if (['docx', 'sheet', 'image'].includes(note.fileKind)) return H.extOf(note.filePath).toUpperCase();
     if (note.fileKind !== 'text') return (note.fileKind || 'file').toUpperCase();
     if (!isPlainTextFile(note)) return 'Markdown';
     if (H.isTableFile(note)) return H.extOf(note.filePath).toUpperCase();
@@ -3929,7 +3925,7 @@
       el.docxEditor.classList.toggle('hidden', useWordCraft());
       showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
-    } else if (note.fileKind === 'sheet' || note.fileKind === 'deck') {
+    } else if (note.fileKind === 'sheet') {
       showCraftOnly(note);
     } else if (note.fileKind === 'image') {
       showBanner('');

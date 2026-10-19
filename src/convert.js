@@ -33,9 +33,9 @@ function sourceOf(note) {
   if (note.fileKind === 'pdf') return 'pdf';
   // Word's zip formats convert here; an .odt, .rtf or .doc is converted by WordCraft's own Save As instead.
   if (note.fileKind === 'docx') return OOXML_EXT.has(extOf(note.filePath)) ? 'docx' : null;
-  // Spreadsheets, presentations, and the files Notes cannot show (an e-book, an Outlook message, a zip): their text,
-  // read by MarkItDown when it is installed.
-  if (note.fileKind === 'sheet' || note.fileKind === 'deck' || note.fileKind === 'binary') {
+  // Spreadsheets, and the files Notes cannot show (an e-book, an Outlook message, a zip): their text, read by
+  // MarkItDown when it is installed.
+  if (note.fileKind === 'sheet' || note.fileKind === 'binary') {
     return markitdown.available() && markitdown.reads(extOf(note.filePath)) ? 'office' : null;
   }
   if (note.fileKind !== 'text') return null;

@@ -348,7 +348,7 @@ function main() {
     stickies.broadcast('settings:changed', store.getSettings());
   }
 
-  let craftsReady = {}; // which Craft apps' builds are there: { wordcraft, gridcraft, deckcraft }
+  let craftsReady = {}; // which Craft apps' builds are there: { wordcraft, gridcraft }
   function info() {
     return {
       version: app.getVersion(),
@@ -499,7 +499,7 @@ function main() {
       title: 'Open files as notes',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', ...H.WORD_EXT, ...H.SHEET_EXT, ...H.DECK_EXT, ...H.IMAGE_EXT, 'csv', 'tsv', 'json', 'yaml', 'yml', 'log'] },
+        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', ...H.WORD_EXT, ...H.SHEET_EXT, ...H.IMAGE_EXT, 'csv', 'tsv', 'json', 'yaml', 'yml', 'log'] },
         { name: 'All files', extensions: ['*'] },
       ],
     });
@@ -524,10 +524,10 @@ function main() {
     if (!n || !n.filePath) return 'No file';
     return openSafely(n.filePath);
   });
-  // The opened file behind note id, which must be of the given kind (pdf, docx, sheet, deck, image).
+  // The opened file behind note id, which must be of the given kind (pdf, docx, sheet, image).
   function fileNoteOfKind(id, kind) {
     const n = store.get(id);
-    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.', deck: 'Not a presentation.' }[kind] || 'Not a Word document.');
+    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' }[kind] || 'Not a Word document.');
     return n;
   }
 
@@ -707,25 +707,20 @@ function main() {
     rememberDocx(id, buf, mtime);
     return buf;
   });
-  // A spreadsheet's or presentation's bytes, for GridCraft or DeckCraft.
-  ipcMain.handle('files:documentBytes', (_e, id) => {
-    const n = store.get(id);
-    if (!n || !n.filePath || !['sheet', 'deck'].includes(n.fileKind)) throw new Error('Not a spreadsheet or presentation.');
-    return readDocumentBuffer(n.filePath);
-  });
+  // A spreadsheet's bytes, for GridCraft.
+  ipcMain.handle('files:documentBytes', (_e, id) => readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath));
   // The Craft apps' saves of a file note, by the note's kind:
-  // - Under the document's own name: over the note's file (after a backup, or into the "(edited)" copy if it changed on
-  //   disk since it was read). Not from DeckCraft: it is early in its development (2026-10-19), so what it saves is
-  //   written beside the file, never over it, until its saved files have been checked the way WordCraft's were.
+  // - Under the document's own name, in a format the app writes (own): over the note's file (after a backup, or into
+  //   the "(edited)" copy if it changed on disk since it was read). In another format (an .xlsm, an .ods): into one
+  //   copy beside the file, never over it.
   // - A format the app reads but saves as its own zip format (WordCraft: .odt, .rtf and the old .doc become .docx;
-  //   GridCraft: .xls, .xlsb and .ods become .xlsx): its Save is <name>.<that>, written beside the original, never over
-  //   anything, and the note moves to it; the original stays as it was.
+  //   GridCraft: .xlsm, .xls, .xlsb and .ods become .xlsx): its Save is <name>.<that>, written beside the original,
+  //   never over anything, and the note moves to it; the original stays as it was.
   // - Anything else (Save As PDF, another name): a new file beside it, never over anything.
   // own: the formats saved in place. to/from: the format the app saves the others as, and which they are.
   const CRAFT_SAVES = {
     docx: { app: 'WordCraft', own: new Set([...H.OOXML_EXT, 'odt', 'rtf']), to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
     sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'xlsx', 'ods', 'csv', 'tsv', 'txt', 'json', 'html', 'png'] },
-    deck: { app: 'DeckCraft', own: new Set(), to: null, from: new Set(), exports: ['pdf', 'pptx', 'potx', 'ppsx', 'png', 'jpg', 'jpeg', 'txt', 'md', 'html'] },
   };
   // Whether bytes are what their extension says, for the formats this can be told of: the Office and OpenDocument
   // formats are zips, RTF starts {\rtf. (WordCraft writes no .doc and GridCraft no .xls: such a save never goes
@@ -737,9 +732,9 @@ function main() {
     return false;
   };
   const assertLooksLike = (ext, buf) => { if (checkable(ext) && !looksLike(ext, buf)) throw new Error('that is not a .' + ext + ' file, so nothing was written.'); };
-  // A save that may not go over the note's file (a presentation; a format the app does not write) goes into one
-  // copy beside it, "<name> (from <app>).<ext>", written again on each save in this run: a stable place, so the
-  // document counts as saved and the folder does not fill with numbered copies.
+  // A save that may not go over the note's file (a format the app does not write) goes into one copy beside it,
+  // "<name> (from <app>).<ext>", written again on each save in this run: a stable place, so the document counts as
+  // saved and the folder does not fill with numbered copies.
   const sideCopies = new Map(); // note id -> the copy's path
   function sideCopy(id, dir, stem, ext, app, buf) {
     const prev = sideCopies.get(id);

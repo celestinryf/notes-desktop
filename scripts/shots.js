@@ -129,10 +129,10 @@ function samplePng(w, h) {
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// A spreadsheet or presentation from scripts/fixtures (small files made once with openpyxl and python-pptx, since
-// Notes has no writer of its own for them) and the file note that opens it.
+// A spreadsheet from scripts/fixtures (a small file made once with openpyxl, since
+// Notes has no writer of its own for it) and the file note that opens it.
 function sampleOfficeNote(dir, kind) {
-  const name = { sheet: 'Trail readings.xlsx', deck: 'Trail talk.pptx' }[kind];
+  const name = { sheet: 'Trail readings.xlsx' }[kind];
   const file = path.join(dir, name);
   fs.copyFileSync(path.join(ROOT, 'scripts', 'fixtures', name), file);
   const now = Date.now();
@@ -256,7 +256,6 @@ const SCENES = {
     light: { background: '#f2f5f7', text: '#1b2530', accent: '#2b6cb0' }, dark: { background: '#141a21', text: '#e3e9ef', accent: '#5b9bd5' } } }, run: openNote('Q4 planning') },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
   sheet: { about: 'A spreadsheet open in GridCraft (needs its web build)', office: 'sheet', run: steps(openNote('Trail readings.xlsx'), async () => { await sleep(8000); }) },
-  deck: { about: 'A presentation open in DeckCraft (needs its web build)', office: 'deck', run: steps(openNote('Trail talk.pptx'), async () => { await sleep(8000); }) },
   'sheet-nobuild': { about: 'A spreadsheet with no GridCraft build: the banner and "Open with…"', office: 'sheet', env: { NOTES_APP_NO_GRIDCRAFT: '1' }, run: openNote('Trail readings.xlsx') },
   tex: { about: 'A LaTeX file open in the code editor', file: 'tex', run: openNote('trail.tex') },
   'tex-small': { about: 'The code editor in a small window', file: 'tex', size: { width: 820, height: 560 }, run: openNote('trail.tex') },
