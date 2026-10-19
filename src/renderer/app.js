@@ -1054,6 +1054,8 @@
     el.tabList.replaceChildren(frag);
     const active = el.tabList.querySelector('.tab.is-active');
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // One tab and no split: no bar. A split keeps its bars, for Close side and the active side's mark.
+    el.tabBar.classList.toggle('hidden', !hasPeer() && tabs.ids.length <= 1);
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
     el.paneCloseBtn.classList.toggle('hidden', !GUEST);
     const missing = openIds().filter((id) => id !== state.currentId && !tabs.titles.has(id));
