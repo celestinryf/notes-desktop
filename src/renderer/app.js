@@ -259,7 +259,8 @@
     if (fromKeyboard) {
       peekReturn = document.activeElement;
       const target = el.sidebar.querySelector('.nav-item.is-active, .folder-row.is-active') || el.newNoteBtn;
-      setTimeout(() => target.focus(), 0);
+      // Not over a name field the same call just opened (Ctrl+Shift+N): moving focus would cancel it.
+      setTimeout(() => { if (!state.editingFolder && !el.sidebar.contains(document.activeElement)) target.focus(); }, 0);
     }
   }
   let peekReturn = null;
@@ -282,8 +283,9 @@
   // The toggle and Ctrl+\: dock or hide. In a window too narrow to dock it, it floats in and out instead.
   function toggleSidebar() {
     if (GUEST) { toPeer({ type: 'command', name: 'toggleSidebar' }); return; }
+    // Too narrow to dock: the toggle floats it in and out, and the saved choice stays as it is.
+    if (isNarrow()) { if (sidebarPeek) unpeekSidebar(); else peekSidebar('sticky'); return; }
     const collapsed = !!state.settings.sidebarCollapsed;
-    if (!collapsed && isNarrow()) { if (sidebarPeek) unpeekSidebar(); else peekSidebar('sticky'); return; }
     sidebarPeek = null;
     updateSettings({ sidebarCollapsed: !collapsed });
   }
