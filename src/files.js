@@ -13,14 +13,18 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 // Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
-const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME } = require('./shared/helpers');
+const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, DECK_EXT } = require('./shared/helpers');
+const markitdown = require('./markitdown');
 
-// Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'image' | 'binary'. Text is decided by
-// extension, then by sniffing for NUL bytes.
+// Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
+// 'deck' (a presentation, for DeckCraft) | 'image' | 'binary'. Text is decided by extension, then by sniffing for
+// NUL bytes.
 function kindOf(filePath) {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
   if (WORD_EXT.has(ext)) return 'docx';
+  if (SHEET_EXT.has(ext)) return 'sheet';
+  if (DECK_EXT.has(ext)) return 'deck';
   if (IMAGE_EXT.has(ext)) return 'image';
   if (TEXT_EXT.has(ext)) return 'text';
   try {
@@ -127,15 +131,16 @@ async function assertSafeZip(buf, want) {
   return parts;
 }
 
-// Word documents that are zips (Word's own formats, and ODT), so the zip guard runs on them.
-const isZipWord = (filePath) => OOXML_EXT.has(extOf(filePath)) || extOf(filePath) === 'odt';
+// Documents that are zips (the Office formats and the OpenDocument ones), so the zip guard runs on them.
+const ZIP_DOC_EXT = new Set([...OOXML_EXT, 'odt', 'xlsx', 'xlsm', 'ods', ...DECK_EXT]);
+const isZipDocument = (filePath) => ZIP_DOC_EXT.has(extOf(filePath));
 
-// The bytes of a Word document, checked for size and (for the zip formats) for zip bombs. Everything that opens a Word
-// document goes through here.
-async function readDocxBuffer(filePath) {
-  if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This Word document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
+// The bytes of a Word document, spreadsheet or presentation, checked for size and (for the zip formats) for zip bombs.
+// Everything that opens one goes through here.
+async function readDocumentBuffer(filePath) {
+  if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
   const buf = fs.readFileSync(filePath);
-  if (isZipWord(filePath)) await assertSafeZip(buf);
+  if (isZipDocument(filePath)) await assertSafeZip(buf);
   return buf;
 }
 
@@ -149,14 +154,38 @@ async function readDocxText(filePath) {
   let body = '';
   if (OOXML_EXT.has(ext)) {
     const mammoth = require('mammoth');
-    body = String((await mammoth.extractRawText({ buffer: await readDocxBuffer(filePath) })).value || '');
+    body = String((await mammoth.extractRawText({ buffer: await readDocumentBuffer(filePath) })).value || '');
   } else if (ext === 'odt') {
-    const parts = await assertSafeZip(await readDocxBuffer(filePath), ['content.xml']);
+    const parts = await assertSafeZip(await readDocumentBuffer(filePath), ['content.xml']);
     body = parts['content.xml'] ? odtText(parts['content.xml'].toString('utf8')) : '';
   } else if (ext === 'rtf') {
-    body = rtfText(await readDocxBuffer(filePath));
+    body = rtfText(await readDocumentBuffer(filePath));
   }
   return { body: body.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
+}
+
+// The text of a spreadsheet or presentation, kept as the note's body for search, the list snippet and the bot (the
+// file itself is shown by GridCraft or DeckCraft from its own bytes). MarkItDown reads it when it is installed;
+// otherwise, or when it cannot read the file, there is no text and the file still opens.
+async function readOfficeText(filePath) {
+  const stat = fs.statSync(filePath);
+  let body = '';
+  if (markitdown.available()) {
+    try { body = (await markitdown.toMarkdown(filePath)).markdown; }
+    catch (err) { console.warn('[files] no text for ' + filePath + ': ' + err.message); }
+  }
+  return { body, mtime: stat.mtimeMs, size: stat.size };
+}
+
+// The kinds of file note that carry the file's text as their body.
+const TEXTED_KINDS = new Set(['text', 'docx', 'sheet', 'deck']);
+// The body a file note of this kind keeps, with the file's time: { body, mtime }. Other kinds (a PDF, an image, a
+// binary) keep none.
+async function readNoteText(kind, filePath) {
+  if (kind === 'text') return readText(filePath);
+  if (kind === 'docx') return readDocxText(filePath);
+  if (kind === 'sheet' || kind === 'deck') return readOfficeText(filePath);
+  return { body: '', mtime: mtimeOf(filePath) };
 }
 
 const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -301,4 +330,4 @@ function safeList(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocxBuffer, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

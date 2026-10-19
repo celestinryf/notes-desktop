@@ -244,7 +244,7 @@ function sanitizeNote(raw, now) {
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
     // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
     filePath: typeof raw.filePath === 'string' && raw.filePath ? raw.filePath : null,
-    fileKind: ['text', 'pdf', 'docx', 'image', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
+    fileKind: ['text', 'pdf', 'docx', 'sheet', 'deck', 'image', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
     fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
@@ -1126,10 +1126,8 @@ class Store {
     }
     let kind = F.kindOf(abs);
     let body = '', mtime = F.mtimeOf(abs);
-    if (kind === 'text') {
-      try { ({ body, mtime } = F.readText(abs)); }
-      catch (err) { if (err.code === 'EENCODING') { kind = 'binary'; body = ''; } else throw err; }
-    } else if (kind === 'docx') ({ body, mtime } = await F.readDocxText(abs));
+    try { ({ body, mtime } = await F.readNoteText(kind, abs)); }
+    catch (err) { if (kind === 'text' && err.code === 'EENCODING') { kind = 'binary'; body = ''; } else throw err; }
     return this.create({
       title: opts.title || path.basename(abs),
       body,
@@ -1159,14 +1157,13 @@ class Store {
     // A file linked before Notes knew its kind (an image kept as "binary", an .rtf kept as plain text) moves to the
     // kind its extension now names, and is read again as that.
     const known = F.kindOf(note.filePath);
-    const rekind = (known === 'docx' || known === 'image') && known !== note.fileKind;
+    const rekind = ['docx', 'sheet', 'deck', 'image'].includes(known) && known !== note.fileKind;
     const mtime = F.mtimeOf(note.filePath);
     if (mtime === note.fileMtime && !rekind) return { changed: false, missing: false };
     const kind = rekind ? known : note.fileKind;
     let body = rekind ? '' : note.body;
-    if (kind === 'text') body = F.readText(note.filePath).body;
-    else if (kind === 'docx') body = (await F.readDocxText(note.filePath)).body;
-    // A PDF, Word file or image is shown from the file itself, so any new version is a change, even with the same text.
+    if (F.TEXTED_KINDS.has(kind)) body = (await F.readNoteText(kind, note.filePath)).body;
+    // A PDF, Office file or image is shown from the file itself, so any new version is a change, even with the same text.
     const changed = rekind || body !== note.body || kind !== 'text';
     // Cache update only: the file changed, the note's own edit time is not touched.
     this._commit(() => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });

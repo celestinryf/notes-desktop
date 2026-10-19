@@ -47,8 +47,8 @@ test.before(async () => {
       // Must never reach the agent: runs bill the Claude subscription, not API credits.
       ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
       NOTES_APP_DRY_TERMINAL: '1',
-      // Word documents use Notes' own editor here, which these tests drive, even where WordCraft is built.
-      NOTES_APP_NO_WORDCRAFT: '1',
+      // Word documents use Notes' own editor here, which these tests drive, even where the Craft apps are built.
+      NOTES_APP_NO_CRAFTS: '1',
     }),
   });
   page = await app.firstWindow();

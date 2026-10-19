@@ -9,8 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 const { runWorker } = require('./run-worker');
-const { extOf, readText, readDocxBuffer, readDocxText } = require('./files');
+const { extOf, readText, readDocumentBuffer, readDocxText } = require('./files');
 const { OOXML_EXT } = require('./shared/helpers');
+const markitdown = require('./markitdown');
 
 const FORMATS = {
   md: 'Markdown (.md)',
@@ -26,12 +27,17 @@ const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const PDF_TIMEOUT_MS = 2 * 60 * 1000;
 
-// What the file is, for conversion: md | txt | code | html | docx | pdf, or null when it cannot be converted.
+// What the file is, for conversion: md | txt | code | html | docx | pdf | office, or null when it cannot be converted.
 function sourceOf(note) {
   if (!note || !note.filePath) return null;
   if (note.fileKind === 'pdf') return 'pdf';
   // Word's zip formats convert here; an .odt, .rtf or .doc is converted by WordCraft's own Save As instead.
   if (note.fileKind === 'docx') return OOXML_EXT.has(extOf(note.filePath)) ? 'docx' : null;
+  // Spreadsheets, presentations, and the files Notes cannot show (an e-book, an Outlook message, a zip): their text,
+  // read by MarkItDown when it is installed.
+  if (note.fileKind === 'sheet' || note.fileKind === 'deck' || note.fileKind === 'binary') {
+    return markitdown.available() && markitdown.reads(extOf(note.filePath)) ? 'office' : null;
+  }
   if (note.fileKind !== 'text') return null;
   const ext = extOf(note.filePath);
   if (MARKDOWN_EXT.has(ext)) return 'md';
@@ -42,6 +48,7 @@ function sourceOf(note) {
 const DOCX_KEEPS = 'Keeps headings, lists, bold and italic, links, tables and pictures; fonts, colours, page layout, headers, footers and comments are left out.';
 // What each direction loses, said before the person picks it. '' means nothing of note is lost.
 const PDF_TEXT_ONLY = 'Text only: the PDF\'s layout, pictures and fonts are left out. A scanned PDF has no text to convert.';
+const OFFICE_TEXT = 'The text, headings, lists and tables as MarkItDown reads them; layout, pictures, charts, formulas and formatting are left out.';
 const LOSS = {
   md: { txt: 'Formatting marks are removed; a link keeps its address in brackets.', docx: 'Keeps headings, lists, bold and italic, links, code, quotes, tables and pictures on this PC; pictures from the web are left out.', pdf: 'Pictures from the web are left out.' },
   txt: {},
@@ -49,6 +56,7 @@ const LOSS = {
   html: { md: 'Keeps the page\'s text, headings, lists, links, tables and pictures; its styling and scripts are left out.', txt: 'Text only.', docx: 'Keeps the page\'s text, headings, lists, links and tables; its styling, scripts and pictures from the web are left out.', pdf: 'Scripts do not run and pictures from the web are left out.' },
   docx: { md: DOCX_KEEPS.replace('pictures;', 'pictures (saved in a folder beside it);'), html: DOCX_KEEPS, txt: 'Text only: all formatting and pictures are left out.', pdf: 'Laid out as Notes shows it, which is close to Word but not exact: lines and pages can break in different places.' },
   pdf: { md: PDF_TEXT_ONLY, txt: 'Text only. A scanned PDF has no text to convert.', html: PDF_TEXT_ONLY, docx: PDF_TEXT_ONLY },
+  office: { md: OFFICE_TEXT, txt: 'Text only, as MarkItDown reads it: layout, pictures, charts, formulas and formatting are left out.', html: OFFICE_TEXT, docx: OFFICE_TEXT, pdf: OFFICE_TEXT },
 };
 
 // The formats this note can be converted to, with what each one loses.
@@ -126,7 +134,7 @@ function tablesForMarkdown(html) {
 
 async function docxToHtml(filePath, convertImage) {
   const mammoth = require('mammoth');
-  const res = await mammoth.convertToHtml({ buffer: await readDocxBuffer(filePath) }, mammothOptions(convertImage));
+  const res = await mammoth.convertToHtml({ buffer: await readDocumentBuffer(filePath) }, mammothOptions(convertImage));
   return res.value;
 }
 
@@ -151,6 +159,7 @@ async function toMarkdown(note, imagesDir) {
   const src = sourceOf(note);
   const file = note.filePath;
   if (src === 'pdf') return pdfToMarkdown(file);
+  if (src === 'office') return markitdown.toMarkdown(file);
   if (src === 'docx') {
     let n = 0;
     const html = await docxToHtml(file, imagesDir ? async (image) => {
@@ -491,7 +500,7 @@ async function convertFile(note, to, print) {
 
   // Direct routes, which keep more than going through Markdown.
   if (src === 'docx' && to === 'pdf') {
-    const out = await print.docx(await readDocxBuffer(file));
+    const out = await print.docx(await readDocumentBuffer(file));
     return { filePath: writeNew(dir, base, 'pdf', out.pdf), warning: out.warning || '' };
   }
   if (src === 'docx' && to === 'html') return { filePath: writeNew(dir, base, 'html', htmlDocument(title, await docxToHtml(file), PRINT_CSS)), warning: '' };
