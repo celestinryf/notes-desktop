@@ -173,10 +173,16 @@
     return state.systemDark ? 'dark' : 'light';
   }
 
+  function applyTheme() {
+    const theme = effectiveTheme();
+    document.documentElement.dataset.theme = theme;
+    syncTitleBar();
+    if (wc) wc.setTheme(theme);
+  }
+
   function applySettings(settings, opts) {
     state.settings = settings;
-    document.documentElement.dataset.theme = effectiveTheme();
-    syncTitleBar();
+    applyTheme();
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
     applySidebar();
     el.tagList.classList.toggle('hidden', !!settings.tagsCollapsed);
@@ -3593,6 +3599,7 @@
           showBanner('WordCraft could not open this document: ' + err + '. Use "Open with…" to open it in Word.');
         },
         // The build is there but did not start: Word documents use the simple editor until Notes restarts.
+        theme: effectiveTheme(),
         onUnavailable: () => {
           wordcraftDown = true;
           clearWordCraft();
@@ -5532,8 +5539,8 @@
       if (reason === 'recovered') toast('Your notes file is readable again; saving resumed.');
     });
     fromMain('settingsChanged', (s) => applySettings(s));
-    fromMain('systemTheme', (t) => { state.systemDark = t === 'dark'; document.documentElement.dataset.theme = effectiveTheme(); });
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; document.documentElement.dataset.theme = effectiveTheme(); });
+    fromMain('systemTheme', (t) => { state.systemDark = t === 'dark'; applyTheme(); });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; applyTheme(); });
 
     // Keep "x min ago" labels honest.
     setInterval(() => { if (!document.hidden) { renderList(); if (state.current) updateStatus(state.current); } }, 60000);
