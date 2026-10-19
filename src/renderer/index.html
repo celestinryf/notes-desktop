@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:; frame-src 'self' file: wordcraft:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http:; frame-src 'self' file: wordcraft:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
@@ -203,6 +203,7 @@
               <div id="richEditor" class="rich-editor"></div>
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
               <div id="codeHost" class="code-host"></div>
+              <div id="csvView" class="csv-view hidden" tabindex="0" role="region" aria-label="The file as a table"></div>
               <div id="pdfEditor" class="pdf-editor hidden">
                 <div class="pdf-toolbar" role="toolbar" aria-label="PDF tools">
                   <button class="tool-btn is-on" data-pdf-mode="select" title="Read: select text and follow links. To move or delete a mark, pick a tool first, then click the mark.">Read</button>
@@ -261,6 +262,9 @@
                 </div>
                 <iframe id="docxView" class="docx-view" sandbox="allow-same-origin" title="Word document"></iframe>
               </div>
+              <figure id="imageViewer" class="image-viewer hidden">
+                <img id="imageView" alt="" tabindex="0" role="button" aria-pressed="false">
+              </figure>
             </div>
             <section class="related hidden" id="relatedPanel" aria-label="Related notes">
               <div class="related-group hidden" id="relatedOut"><h3>Links to</h3><ul></ul></div>
@@ -679,6 +683,7 @@
   <script src="pdf-comments.js"></script>
   <script src="docx-editor.js"></script>
   <script src="wordcraft-frame.js"></script>
+  <script src="csv-view.js"></script>
   <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>
   <script src="../shared/themes.js"></script>

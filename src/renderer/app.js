@@ -61,7 +61,7 @@
     gitEnabledInput: $('#gitEnabledInput'), gitRemoteInput: $('#gitRemoteInput'), gitStatus: $('#gitStatus'), gitCommitBtn: $('#gitCommitBtn'), gitPushBtn: $('#gitPushBtn'),
     exportBtn: $('#exportBtn'), duplicateBtn: $('#duplicateBtn'), restoreBtn: $('#restoreBtn'),
     deleteBtn: $('#deleteBtn'), destroyBtn: $('#destroyBtn'),
-    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'), codeHost: $('#codeHost'),
+    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'), codeHost: $('#codeHost'), csvView: $('#csvView'), imageViewer: $('#imageViewer'), imageView: $('#imageView'),
     statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'), statusCode: $('#statusCode'),
     settingsDialog: $('#settingsDialog'), settingsForm: $('#settingsForm'),
     hotkeyInput: $('#hotkeyInput'), hotkeyError: $('#hotkeyError'), themeSelect: $('#themeSelect'),
@@ -206,6 +206,7 @@
     if (opts && opts.fromPeer) return; // the other side's Ctrl+E is for the note it shows
     // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it; a
     // plain-text file always does.
+    if (H.isTableFile(state.current)) return; // a CSV keeps its own view (table or text) whatever the Markdown setting
     const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich || isPlainTextFile(state.current);
     const wantSource = settings.editorMode === 'source' || forcedSource;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
@@ -2077,7 +2078,8 @@
     state.lossyOverride = null;
     el.bodyInput.placeholder = plainFile ? 'Plain text.' : 'Markdown source. Ctrl+E switches back to the rendered view.';
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
-    const wantSource = plainFile || state.settings.editorMode === 'source' || !lossless || !state.rich;
+    // A CSV opens as its table; other plain files as their text; Markdown by the setting (or as source when lossy).
+    const wantSource = H.isTableFile(note) ? false : (plainFile || state.settings.editorMode === 'source' || !lossless || !state.rich);
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (markdown && !lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
@@ -2088,12 +2090,13 @@
     autoGrow();
     const inTrash = !!note.trashedAt;
     const fileReadOnly = isViewerOnlyFile(note);
-    el.sourceBtn.classList.toggle('hidden', plainFile || fileReadOnly); // nothing to switch between
+    el.sourceBtn.classList.toggle('hidden', (plainFile && !H.isTableFile(note)) || fileReadOnly); // nothing to switch between
+    syncSourceButton();
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
     showCode(note, inTrash || fileReadOnly);
     renderLockState(note);
-    if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly);
+    if (state.rich) state.rich.setEditable(!inTrash && !fileReadOnly && !plainFile);
     renderFileRow(note);
     renderStickyButton(note);
     renderRemindButton(note);
@@ -2135,9 +2138,15 @@
 
   function updateStatus(note) {
     const body = el.bodyInput.value;
-    const words = H.countWords(body);
-    el.statusWords.textContent = words + (words === 1 ? ' word' : ' words');
-    el.statusChars.textContent = body.length + (body.length === 1 ? ' character' : ' characters');
+    if (tableStats && tableShown()) {
+      // A table is counted in rows and columns, not words.
+      el.statusWords.textContent = tableStats.rows.toLocaleString() + (tableStats.rows === 1 ? ' row' : ' rows');
+      el.statusChars.textContent = tableStats.cols + (tableStats.cols === 1 ? ' column' : ' columns');
+    } else {
+      const words = H.countWords(body);
+      el.statusWords.textContent = words + (words === 1 ? ' word' : ' words');
+      el.statusChars.textContent = body.length + (body.length === 1 ? ' character' : ' characters');
+    }
     el.statusUpdated.textContent = note.trashedAt ? 'Trashed ' + H.relativeTime(note.trashedAt) : 'Edited ' + H.relativeTime(note.updatedAt);
   }
 
@@ -2627,7 +2636,7 @@
       if (state.rich) state.rich.setEditable(false);
     } else if (note) {
       renderFileRow(note); // restores the right editor for the mode
-      if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note));
+      if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note) && !isPlainTextFile(note));
     }
   }
 
@@ -2873,8 +2882,17 @@
   }
 
   // Puts a Markdown link at the caret in whichever view is up, and saves.
+  // A CSV's table is read-only: adding a link, an attachment or a recording waits for its text view. Checked before a
+  // file is picked or recorded, so nothing is copied for a link that cannot go in.
+  function refuseInTable() {
+    if (!tableShown()) return false;
+    toast('Switch to Text (Ctrl+E) to add this to the file.');
+    return true;
+  }
+
   function insertLinkIntoNote(text, href) {
     if (!state.current || lockedNow()) return;
+    if (refuseInTable()) return;
     if (state.sourceMode || !state.rich) {
       const ta = src;
       if (ta.readOnly) return;
@@ -2894,6 +2912,7 @@
 
   async function attachFiles() {
     if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
+    if (refuseInTable()) return;
     const forNote = state.current.id;
     await flushSave();
     const items = await api.attachments.pick();
@@ -2916,6 +2935,7 @@
     if (rec.recorder) { rec.recorder.stop(); return; }
     if (rec.starting) return; // the microphone prompt is still up
     if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
+    if (refuseInTable()) return;
     if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
     rec.noteId = state.current.id;
     rec.starting = true;
@@ -3079,6 +3099,7 @@
       if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; showActiveMatch(); }
       return;
     }
+    if (tableShown()) { toast('Switch to Text (Ctrl+E) to replace in this file.'); return; }
     if (!state.rich) return;
     // Ranges may be stale (a restore or reload replaced the content): recount and check the text first.
     const wantedIdx = find.active;
@@ -3128,6 +3149,7 @@
       ta.value = out + ta.value.slice(last);
       ta.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
+      if (tableShown()) { toast('Switch to Text (Ctrl+E) to replace in this file.'); return; }
       if (!state.rich) return;
       runFind(true, true, true);
       n = state.rich.replaceRanges(find.ranges, text);
@@ -3230,7 +3252,7 @@
       return;
     }
     if (fresh || !sameQuery || !find.ranges.length) {
-      find.ranges = findRangesIn(el.richEditor, q);
+      find.ranges = findRangesIn(tableShown() ? el.csvView : el.richEditor, q);
       find.active = find.ranges.length ? (sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0) : -1; // after a replace, the next match now sits at the same index
     } else if (find.ranges.length) {
       find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
@@ -3597,6 +3619,50 @@
     return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
   }
 
+  // ---- images -------------------------------------------------------------------------------------
+  // An image file, fitted to the pane; a click (or Enter) shows it at its actual size, and again fits it. The picture
+  // comes from the main process as bytes and is shown from a blob: URL, so the page never reads files itself.
+  let imageUrl = null, imageSeq = 0;
+  async function showImage(note) {
+    const seq = ++imageSeq;
+    el.imageView.removeAttribute('src'); // the last picture never shows under this note's name
+    el.imageViewer.classList.remove('hidden', 'is-actual');
+    syncImageToggle();
+    try {
+      const { bytes, mime } = await api.files.imageBytes(note.id);
+      if (seq !== imageSeq || !state.current || state.current.id !== note.id) return;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      imageUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      el.imageView.alt = note.title;
+      el.imageView.src = imageUrl;
+    } catch (err) {
+      if (seq !== imageSeq) return;
+      clearImage();
+      showBanner('Could not show this image: ' + ipcErrorText(err) + ' Use "Open with…" to open it.');
+    }
+  }
+  function clearImage() {
+    imageSeq++;
+    el.imageViewer.classList.add('hidden');
+    el.imageView.removeAttribute('src');
+    if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
+  }
+  function toggleImageSize() {
+    el.imageViewer.classList.toggle('is-actual');
+    syncImageToggle();
+  }
+  // The picture is a toggle button (fit, or actual size): it says which, and so does the status line.
+  function syncImageToggle() {
+    const actual = el.imageViewer.classList.contains('is-actual');
+    el.imageView.setAttribute('aria-pressed', String(actual));
+    el.imageView.title = actual ? 'Actual size. Click or press Enter to fit it to the pane.' : 'Fitted to the pane. Click or press Enter for its actual size.';
+    const w = el.imageView.naturalWidth, h = el.imageView.naturalHeight;
+    if (!w || el.imageViewer.classList.contains('hidden')) return;
+    el.statusCode.textContent = w + ' × ' + h + ' px, ' + (actual ? 'actual size' : 'fitted');
+    el.statusCode.classList.remove('hidden');
+    el.imageView.setAttribute('aria-label', (state.current ? state.current.title + ', ' : '') + w + ' by ' + h + ' pixels, ' + (actual ? 'actual size' : 'fitted to the pane'));
+  }
+
   // ---- Word documents in WordCraft ----------------------------------------------------------------
   // wordNote: the document WordCraft shows, { id, fileMtime, name } as read or last saved.
   let wc = null, wordNote = null, wordShownKey = null, wordSeq = 0, wordcraftDown = false;
@@ -3664,21 +3730,41 @@
   }
   // WordCraft saved (Ctrl+S there, or a save Notes asked for): write it to the file with Notes' usual safety. target is
   // the document the save was made in, which may no longer be on show.
+  // Returns { ok, own }: own when the save is the note's document (written over it, into its "(edited)" copy, or as the
+  // .docx it moved to), not a copy under another name.
   async function saveWordFromFrame(name, bytes, target) {
-    if (!target) return false;
+    if (!target) return { ok: false, own: true };
     try {
       const r = await api.files.saveWord(target.id, bytes, name, target.fileMtime);
-      if (r.exported) { toast('Saved ' + r.exported.split(/[\\/]/).pop() + ' next to the document.', { label: 'Open', run: () => openFiles([r.exported]) }); return true; }
+      if (r.exported) { toast('Saved ' + r.exported.split(/[\\/]/).pop() + ' next to the document.', { label: 'Open', run: () => openFiles([r.exported]) }); return { ok: true, own: false }; }
+      if (r.relinked) { movedToDocx(target, r); return { ok: true, own: true }; }
       if (!r.savedAs) {
         target.fileMtime = r.mtime;
         if (wordNote === target) wordShownKey = target.id + ':' + r.mtime;
       }
       reportFileSaved(target, r, false, 'document');
-      return true;
+      return { ok: true, own: true };
     } catch (err) {
       toast('Could not save the document: ' + ipcErrorText(err));
-      return false;
+      return { ok: false, own: true };
     }
+  }
+
+  // WordCraft saved an .odt, .rtf or .doc as a .docx beside it, and the note moved to that file. Once this save has
+  // settled (a save made while leaving the note must finish first), the note is shown by its new file and opened again
+  // in WordCraft under that name, so its next save goes there.
+  function movedToDocx(target, r) {
+    target.fileMtime = r.mtime;
+    toast('Saved as ' + r.relinked.split(/[\\/]/).pop() + ' beside the original, which is unchanged. This note is that file now.');
+    setTimeout(async () => {
+      const fresh = await api.notes.get(target.id);
+      await refresh({ keepEditor: true });
+      if (!fresh || !state.current || state.current.id !== fresh.id) return;
+      state.current = fresh;
+      el.titleInput.value = fresh.title;
+      wordShownKey = null;
+      renderFileRow(fresh);
+    }, 0);
   }
   const wordDirty = () => !!(wc && wordNote && wc.isDirty());
   // Leaving the note, hiding or quitting: have WordCraft save first.
@@ -3689,6 +3775,11 @@
 
   async function showDocx(note) {
     if (useWordCraft()) { showWordCraft(note); return; }
+    if (!H.isOoxmlWordFile(note)) {
+      el.docxEditor.classList.add('hidden');
+      showBanner('Notes shows .' + H.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with…" to open it in Word.');
+      return;
+    }
     const key = note.id + ':' + note.fileMtime;
     if (docxShownKey === key) { if (docxBanner) showBanner(docxBanner); return; }
     docxShownKey = key;
@@ -3763,8 +3854,10 @@
   // A file's badge, in the list and over the note: a text file's language as it is written (LaTeX, Python,
   // Markdown, Plain text), or the kind of any other file as the acronym it is (PDF, DOCX).
   function fileBadge(note) {
+    if (note.fileKind === 'docx' || note.fileKind === 'image') return H.extOf(note.filePath).toUpperCase();
     if (note.fileKind !== 'text') return (note.fileKind || 'file').toUpperCase();
     if (!isPlainTextFile(note)) return 'Markdown';
+    if (H.isTableFile(note)) return H.extOf(note.filePath).toUpperCase();
     return window.NotesCode ? window.NotesCode.languageFor(H.extOf(note.filePath)).name : 'Plain text';
   }
 
@@ -3774,14 +3867,18 @@
     el.fileBanner.classList.add('hidden');
     if (!(isFile && note.fileKind === 'docx')) clearDocx();
     if (!(isFile && note.fileKind === 'pdf')) clearPdf();
+    if (!(isFile && note.fileKind === 'image')) clearImage();
     closeConvertMenu();
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || note.fileKind === 'docx'));
+    el.editor.classList.toggle('shows-image', isFile && note.fileKind === 'image');
     // WordCraft is a whole word processor: it gets the note's area, and shows its own title, counts and status.
     el.editorColumn.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     el.editor.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     syncTextViews(note);
     if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
+    el.fileConvertBtn.classList.add('hidden');
+    api.files.convertOptions(note.id).then((opts) => { if (state.currentId === note.id) el.fileConvertBtn.classList.toggle('hidden', !opts.length); }).catch(() => {});
     el.filePath.textContent = note.filePath;
     el.filePath.title = note.filePath;
     if (note.fileKind === 'pdf') {
@@ -3793,6 +3890,9 @@
       el.docxEditor.classList.toggle('hidden', useWordCraft());
       showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
+    } else if (note.fileKind === 'image') {
+      showBanner('');
+      showImage(note);
     } else if (note.fileKind === 'binary') {
       showBanner('This file type cannot be shown here. Use "Open with…" to open it in its own app.');
     }
@@ -4212,8 +4312,10 @@
     // retried over the text we are now showing.
     if (!state.dirty) state.pending.delete(fresh.id);
     src.reload(fresh.body);
-    // A PDF or Word file is shown by its own viewer: show the new version of the file there.
-    if (isViewerOnlyFile(fresh)) { renderFileRow(fresh); updateStatus(fresh); return; }
+    // A PDF, Word file or image is shown by its own viewer: show the new version there (a note that just became one, an
+    // old .rtf or image, leaves the code editor too).
+    if (isViewerOnlyFile(fresh)) { showCode(fresh, true); renderFileRow(fresh); updateStatus(fresh); return; }
+    if (H.isTableFile(fresh) && tableShown()) renderTable(fresh);
     if (state.rich && !isPlainTextFile(fresh)) {
       let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true }); // same note, new text: keep the caret
       if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
@@ -4544,7 +4646,8 @@
       onTrigger: (t) => showInlineMenu(t),
       onTriggerKey: (e) => inlineMenuKey(e),
       onUpdate: (md) => {
-        if (state.sourceMode || !state.currentId) return;
+        // A plain file (a CSV in its table view, say) is never the rendered editor's to write: its text is its own.
+        if (state.sourceMode || !state.currentId || isPlainTextFile(state.current)) return;
         if (md === el.bodyInput.value) return;
         el.bodyInput.value = md;
         scheduleSave();
@@ -4695,8 +4798,42 @@
   // or PDF file used to keep the textarea hidden, and showed nothing.
   function syncTextViews(note) {
     const none = lockedNow() || isViewerOnlyFile(note);
-    el.richEditor.classList.toggle('hidden', none || state.sourceMode);
+    const isTable = H.isTableFile(note);
+    const table = isTable && !state.sourceMode && !none;
+    el.richEditor.classList.toggle('hidden', none || state.sourceMode || isTable);
     el.bodyInput.classList.toggle('hidden', none || !state.sourceMode);
+    el.csvView.classList.toggle('hidden', !table);
+    fillPane(table || (!!note && note.fileKind === 'image' && !lockedNow()));
+    if (table) renderTable(note);
+  }
+
+  // A CSV or TSV file as a table (csv-view.js), from the text as it is now. Read-only: Ctrl+E edits it as text.
+  let tableDrawn = null; // { id, text } last drawn, so a redraw (a mode switch, a poll) keeps the scroll
+  let tableStats = null;
+  function renderTable(note) {
+    const text = el.bodyInput.value;
+    if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
+      tableStats = window.NotesCsv.render(el.csvView, text, H.extOf(note.filePath));
+      tableDrawn = { id: note.id, text };
+    }
+    updateStatus(note);
+  }
+  const tableShown = () => !el.csvView.classList.contains('hidden');
+  // A table or an image takes the rest of the pane, with its own scrolling, rather than a box scrolling in a page.
+  function fillPane(on) {
+    el.editorColumn.classList.toggle('fills-pane', on);
+    el.editor.classList.toggle('fills-pane', on);
+  }
+
+  // The Source button names what it switches to: for Markdown the rendered view or the source, for a CSV the table or
+  // the text. Set whenever the note or the mode changes.
+  function syncSourceButton() {
+    const table = H.isTableFile(state.current);
+    const label = state.sourceMode ? (table ? 'Table' : 'Rendered') : (table ? 'Text' : 'Source');
+    const what = state.sourceMode ? (table ? 'Show as a table' : 'Back to the rendered view') : (table ? 'Edit as text' : 'Show Markdown source');
+    setLabel(el.sourceBtn, label);
+    el.sourceBtn.setAttribute('aria-label', what);
+    el.sourceBtn.title = what + ' (Ctrl+E)';
   }
 
   function applyEditorMode(source) {
@@ -4704,21 +4841,20 @@
     if (source) hideInlineMenu();
     if (find.open) { clearFindHighlights(); setTimeout(() => { if (find.open) runFind(true, true); }, 0); }
     setPressed(el.sourceBtn, state.sourceMode);
-    setLabel(el.sourceBtn, state.sourceMode ? 'Rendered' : 'Source');
-    el.sourceBtn.setAttribute('aria-label', state.sourceMode ? 'Back to the rendered view' : 'Show Markdown source');
-    el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
+    syncSourceButton();
     syncTextViews(state.current);
+    renderCodePosition();
     if (state.sourceMode) autoGrow();
-    else if (state.rich && state.currentId && !isViewerOnlyFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+    else if (state.rich && state.currentId && !isViewerOnlyFile(state.current) && !isPlainTextFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
 
   function toggleSource(force) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (isViewerOnlyFile(state.current)) { toast('This file is shown as it is; it has no Markdown view to switch to.'); return; }
     if (next === state.sourceMode) return;
-    if (!next && isPlainTextFile(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
-    if (!next && !state.rich) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
-    if (!next && state.currentId) {
+    if (!next && isPlainTextFile(state.current) && !H.isTableFile(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
+    if (!next && !state.rich && !H.isTableFile(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
+    if (!next && state.currentId && !isPlainTextFile(state.current)) {
       // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
       state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
       if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false; // a real file gets the strict test
@@ -4728,12 +4864,13 @@
       }
     }
     applyEditorMode(next);
-    updateSettings({ editorMode: next ? 'source' : 'rendered' });
+    if (!H.isTableFile(state.current)) updateSettings({ editorMode: next ? 'source' : 'rendered' });
     focusBody();
   }
 
   function focusBody() {
-    if (state.sourceMode || !state.rich) src.focus();
+    if (tableShown()) el.csvView.focus();
+    else if (state.sourceMode || !state.rich) src.focus();
     else state.rich.focus();
   }
 
@@ -4837,8 +4974,9 @@
 
   // The status line: where the caret is, for the code editor only (the file row's badge names the language).
   function renderCodePosition() {
-    el.statusCode.classList.toggle('hidden', !codeOn);
-    if (!codeOn) return;
+    const shown = codeOn && state.sourceMode;
+    el.statusCode.classList.toggle('hidden', !shown);
+    if (!shown) return;
     const at = code.position();
     el.statusCode.textContent = 'Ln ' + at.line + ', Col ' + at.col;
   }
@@ -5125,6 +5263,7 @@
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+Shift+F', () => openFind(), noteOpen),
+      cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, noteOpen),
       ...[...el.moreMenu.querySelectorAll('.menu-item')].map((b) => fromButton(b, 'This note')),
       fromButton(el.restoreBtn, 'This note'),
@@ -5319,6 +5458,14 @@
     el.convertMenu.addEventListener('click', (e) => { const b = e.target.closest('[data-to]'); if (b) convertCurrent(b.dataset.to); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
     el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
+    // Images: a click or Enter toggles fitted and actual size; the status line gives the picture's size.
+    el.imageView.addEventListener('click', toggleImageSize);
+    el.imageView.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleImageSize(); } });
+    el.imageView.addEventListener('load', syncImageToggle);
+    el.imageView.addEventListener('error', () => {
+      if (!el.imageView.getAttribute('src')) return; // cleared on purpose
+      showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open with…" to open it.');
+    });
     el.agentFilesBtn.addEventListener('click', addAgentFiles);
     el.vaultAddFolderBtn.addEventListener('click', addVaultFolder);
     el.vaultCloneBtn.addEventListener('click', openCloneDialog);
