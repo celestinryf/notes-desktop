@@ -38,6 +38,8 @@
   --line: rgba(42, 26, 18, 0.1);    /* hairline between areas */
   --line-2: rgba(42, 26, 18, 0.16); /* hairline inside a surface */
   --field: rgba(42, 26, 18, 0.45);  /* outline of an input: >= 3:1 */
+  --field-bg: var(--raised);
+  --scroll-thumb: rgba(42, 26, 18, 0.2);
 
   /* the accent: fills only (primary button, selection, toggles that are on) */
   --accent: var(--tangerine);
@@ -100,14 +102,16 @@
   --accent-text: #ffa070;
   --danger: #ff8a66;
   --ok: #9ccf80;
-  --line: rgba(251, 241, 228, 0.08);
-  --line-2: rgba(251, 241, 228, 0.13);
-  --field: rgba(251, 241, 228, 0.4);
+  --line: rgba(0, 0, 0, 0.42);      /* separators are darker than the surfaces, never light */
+  --line-2: rgba(0, 0, 0, 0.55);
+  --field: rgba(0, 0, 0, 0.6);
+  --field-bg: #160f0b;              /* fields are sunk into what they sit on */
+  --scroll-thumb: rgba(251, 241, 228, 0.16);
   --accent-fg: #1b120d;
   --focus: #ffa070;
   --accent-hover: #ff925c;
   --document-bg: #120c08;
-  --sticker-line: #e9dccb;
+  --sticker-line: transparent;   /* no light outline: in dark the sticker is its tone and its shadow */
   --sticker-shadow: #000;
   color-scheme: dark;
 }
@@ -224,14 +228,13 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .btn:hover { background: var(--hover); }
 .btn-small { height: var(--control-h); padding: 0 10px; }
 .btn-block { width: 100%; }
-/* The primary action wears the sticker. */
+/* The primary action: the accent fill, flat (buttons and pills have no outline or hard shadow). */
 .btn-primary {
-  border: 2px solid var(--sticker-line);
+  border: none;
   background: var(--accent); color: var(--accent-fg);
-  box-shadow: 3px 3px 0 var(--sticker-shadow);
 }
 .btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--sticker-shadow); }
+.btn-primary:active { background: color-mix(in srgb, var(--accent) 80%, var(--ink)); }
 .btn-danger { color: var(--danger); }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
@@ -242,7 +245,7 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
   padding: 0 10px;
   border: 1px solid var(--field);
   border-radius: var(--r-md);
-  background: var(--raised);
+  background: var(--field-bg);
   transition: border-color var(--dur-1), box-shadow var(--dur-1);
 }
 .input:focus, .select:focus, .search:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
@@ -255,11 +258,11 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 
 /* ---- floating layers: menus, popovers (they wear the sticker) ---------------------------------------- */
 .popover {
-  position: fixed; z-index: 20;
+  position: fixed; z-index: 30; /* above the floating sidebar (25) that opens some of them */
   display: flex; flex-direction: column;
   min-width: 200px; max-width: 340px;
   padding: var(--s1);
-  border: 2px solid var(--sticker-line); border-radius: var(--r-md);
+  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
   background: var(--raised); color: var(--fg);
   box-shadow: 4px 4px 0 var(--sticker-shadow);
   animation: pop var(--dur-2) var(--ease) both;
@@ -306,11 +309,30 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   border-right: 1px solid var(--line);
   min-width: 0;
 }
-.brand { display: flex; align-items: center; gap: 10px; height: var(--bar-h); padding: 0 var(--s2); flex: none; }
-.brand-mark { width: 16px; height: 16px; background: var(--accent); border: 2px solid var(--sticker-line); border-radius: var(--r-xs); box-shadow: 2px 2px 0 var(--sticker-shadow); }
-.brand-name { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--t-lg); letter-spacing: -0.01em; font-variation-settings: "SOFT" 100, "WONK" 0; }
+.sidebar-top { display: flex; align-items: center; height: var(--bar-h); padding: 0 var(--s1); flex: none; }
+/* While it floats, the pane toggles wait in the top bar, so the floating sidebar has no header. */
+.app.sidebar-float .sidebar-top { display: none; }
+.app.sidebar-float .app-sidebar { padding-top: var(--s2); }
+
+/* Floating (pin off, or a window too narrow to dock it): out of sight until the pointer reaches the left edge or
+   the toggle is pressed, then over the page with a small margin all round. It floats, so it wears the sticker. */
+.sidebar-edge { display: none; position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--s2); }
+.app.sidebar-float .sidebar-edge { display: block; }
 .sidebar-actions { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s1) var(--s2); }
 .sidebar-actions .btn-primary { justify-content: flex-start; padding: 0 var(--s3); }
+.app.sidebar-float .app-sidebar {
+  display: flex; position: fixed; z-index: 25;
+  top: var(--s2); bottom: var(--s2); left: var(--s2);
+  width: var(--sidebar-w);
+  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: 4px 4px 0 var(--sticker-shadow);
+  transform: translateX(calc(-100% - var(--s5)));
+  visibility: hidden;
+  transition: transform var(--dur-2) var(--ease), visibility 0s linear var(--dur-2);
+}
+.app.sidebar-float.sidebar-peek .app-sidebar { transform: none; visibility: visible; transition: transform var(--dur-2) var(--ease); }
+.app.sidebar-float .app-sidebar > .resizer { display: none; }
 .search-trigger {
   display: flex; align-items: center; gap: var(--s2);
   height: 32px; padding: 0 var(--s2) 0 10px;
@@ -338,7 +360,8 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .nav-item:hover, .folder-row:hover { background: var(--hover); color: var(--fg); }
 .nav-item.is-active, .folder-row.is-active { background: var(--pressed); color: var(--fg); font-weight: 600; }
 .nav-item .icon, .folder-icon { color: var(--fg-3); }
-.nav-item.is-active .icon, .folder-row.is-active .folder-icon { color: var(--accent-text); }
+.nav-item.is-active .icon, .folder-row.is-active .folder-icon, .folder-row.holds-note .folder-icon { color: var(--accent-text); }
+.folder-row.holds-note { color: var(--fg); font-weight: 600; }
 .count { margin-left: auto; font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .count.is-zero { visibility: hidden; }
 .count.is-overdue { padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; }
@@ -351,16 +374,27 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   color: var(--fg-3);
 }
 .nav-heading-row { justify-content: space-between; padding-right: var(--s1); }
+button.nav-fold { width: 100%; gap: var(--s1); border: none; border-radius: var(--r-sm); background: transparent; text-align: left; cursor: pointer; }
+button.nav-fold:hover { background: var(--hover); color: var(--fg-2); }
+button.nav-fold .icon { width: 14px; height: 14px; transition: transform var(--dur-2) var(--ease); }
+button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .nav-heading-tools { display: flex; gap: 2px; }
 .nav-item.is-drop-target, .folder-row.is-drop-target { background: var(--selected); color: var(--selected-fg); box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* folder tree */
 .nav.folders { overflow-y: auto; flex: 0 1 auto; max-height: 45%; min-height: 0; }
-.folder-row { gap: 6px; padding-left: calc(var(--s1) + var(--depth, 0) * var(--s3)); cursor: pointer; }
+.tree { --indent: 16px; }
+.folder-row { gap: var(--s1); padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); cursor: pointer; }
+.folder-row:focus-visible, .note-tree .tree-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* Each level's children hang from a line under their parent's chevron; the branch you are in draws it darker. */
+.tree-children { position: relative; }
+.tree-children::before { content: ''; position: absolute; top: 2px; bottom: 2px; left: calc(var(--s1) + var(--depth, 0) * var(--indent) + 12px); width: 1px; background: var(--line-2); pointer-events: none; }
+:root[data-theme="dark"] .tree-children::before { background: rgba(251, 241, 228, 0.1); }
+.tree-children.is-here::before { background: color-mix(in srgb, var(--fg-3) 70%, transparent); }
 .folder-row.is-dragging, .note-card.is-dragging { opacity: 0.5; }
 .folder-chevron {
   display: grid; place-items: center;
-  width: 24px; height: 24px; flex: none; margin: 0 -4px 0 -2px;
+  width: 24px; height: 24px; flex: none;
   border: none; background: transparent; padding: 0; border-radius: var(--r-sm);
   color: var(--fg-3);
   transition: transform var(--dur-2) var(--ease);
@@ -461,6 +495,35 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .note-card-meta .where { display: inline-flex; align-items: center; gap: var(--s1); }
 .note-card-meta .where .icon { width: 12px; height: 12px; }
 .note-card.is-active .note-card-meta .tag { color: inherit; }
+/* The note list as folders with their notes (Settings: Note list, Folders). Compact rows, no boxes. */
+.note-tree { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); scrollbar-gutter: stable; }
+.note-tree .tree-row {
+  display: flex; align-items: center; gap: var(--s1);
+  min-height: 28px;
+  padding: 0 var(--s2) 0 calc(var(--s1) + var(--depth, 0) * var(--indent));
+  border-radius: var(--r-sm);
+  color: var(--fg-2); font-size: var(--t-sm);
+  cursor: pointer; user-select: none;
+}
+.note-tree .tree-row:hover { background: var(--hover); color: var(--fg); }
+.note-tree .tree-row.is-active { background: var(--selected); color: var(--selected-fg); font-weight: 600; }
+.note-tree .tree-row.is-dragging { opacity: 0.5; }
+.note-tree .tree-row.is-drop-target { background: var(--selected); box-shadow: inset 0 0 0 2px var(--accent); }
+.tree-chevron, .tree-spacer { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--fg-3); transition: transform var(--dur-2) var(--ease); }
+.tree-chevron .icon { width: 14px; height: 14px; }
+.tree-chevron.is-open { transform: rotate(90deg); }
+.tree-chevron.is-leaf { visibility: hidden; }
+.tree-icon { flex: none; display: grid; place-items: center; color: var(--fg-3); }
+.note-tree .tree-row.is-active .tree-icon { color: inherit; }
+.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-folder .tree-name { color: var(--fg); font-weight: 500; }
+.tree-folder .count { font-size: var(--t-xs); }
+.tree-mark { flex: none; display: grid; place-items: center; color: var(--accent-text); }
+.tree-mark .icon { width: 12px; height: 12px; fill: currentColor; }
+.note-tree .tree-heading { min-height: 24px; font-size: var(--t-xs); color: var(--fg-3); }
+.note-tree .tree-heading:hover { color: var(--fg); }
+.tree-outline::before { background: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
+
 .page-no { font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .empty { padding: var(--s6) var(--s5); text-align: center; color: var(--fg-2); }
 .empty-title { margin: 0 0 6px; font-weight: 600; color: var(--fg); }
@@ -481,20 +544,27 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .editor-pane.is-resizing .pane-peer { pointer-events: none; } /* the drag would be lost to the iframe */
 
 /* tabs */
-.tab-bar { flex: none; display: flex; align-items: flex-end; gap: var(--s1); height: var(--bar-h); padding: 0 var(--s2); border-bottom: 1px solid var(--line); background: var(--base); }
-.tab-bar > .tool-btn { margin-bottom: 6px; }
+.tab-bar { flex: none; display: flex; align-items: center; gap: var(--s1); height: var(--bar-h); padding: 0 var(--s2); border-bottom: 1px solid var(--line); background: var(--base); }
+
+.bar-toggles, .note-actions { display: flex; align-items: center; gap: 2px; align-self: center; flex: none; }
+.tab-bar > .bar-toggles { margin-right: var(--s2); padding-right: var(--s2); border-right: 1px solid var(--line-2); }
+.bar-toggles .tool-btn.is-on { background: transparent; color: var(--fg-2); }
+.bar-toggles .tool-btn.is-on:hover { background: var(--hover); color: var(--fg); }
+.tab-bar .tool-btn { flex: none; }
+/* No note on this side: nothing for the note's actions to act on. */
+.pane-main:has(> .editor.hidden) .note-actions { display: none; }
 .editor-pane.is-split .pane-main.is-active-side .tab-bar, body.pane-guest .pane-main.is-active-side .tab-bar { box-shadow: inset 0 -2px 0 var(--accent); }
-.tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; height: 100%; align-items: flex-end; overflow-x: auto; scrollbar-width: none; }
+.tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; align-self: center; align-items: center; overflow-x: auto; scrollbar-width: none; }
 .tab {
   display: flex; align-items: center; gap: var(--s1);
-  flex: 0 1 auto; min-width: 80px; max-width: 200px; height: 32px;
-  padding: 0 var(--s1) 0 var(--s3);
-  border-radius: var(--r-md) var(--r-md) 0 0;
+  flex: 0 1 auto; min-width: 80px; max-width: 200px; height: var(--control-h);
+  padding: 0 2px 0 var(--s3);
+  border-radius: var(--r-sm);
   background: transparent; color: var(--fg-2);
   font-size: var(--t-sm); white-space: nowrap; user-select: none; cursor: pointer;
 }
 .tab:hover { background: var(--hover); color: var(--fg); }
-.tab.is-active { background: var(--paper); color: var(--fg); font-weight: 600; box-shadow: 0 1px 0 var(--paper), inset 0 0 0 1px var(--line); clip-path: inset(-1px -1px 0 -1px); }
+.tab.is-active { background: var(--pressed); color: var(--fg); font-weight: 600; }
 .tab.is-drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-close { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--r-sm); background: transparent; color: inherit; opacity: 0.6; }
@@ -503,16 +573,13 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .tab-bar.is-drop-target { background: var(--selected); }
 /* The window's caption buttons sit over the top-right corner of the rightmost pane: keep clear of them. */
 .editor-pane:not(.is-split) .tab-bar, body.pane-guest .tab-bar { padding-right: calc(var(--caption-w) + var(--s2)); }
-.editor-pane:not(.is-split) .tab-bar.hidden ~ .editor .editor-toolbar,
-body.pane-guest .tab-bar.hidden ~ .editor .editor-toolbar { padding-right: calc(var(--caption-w) + var(--s2)); }
 
 /* The right side of a split is this page again, showing only the editor. */
 body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
-body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest #toggleSidebarBtn, body.pane-guest #toggleListBtn, body.pane-guest #botBtn, body.pane-guest #splitViewBtn, body.pane-guest .toolbar-left .toolbar-sep { display: none !important; }
+body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-edge, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
 
 /* nothing open */
 .editor-empty { position: relative; flex: 1; display: grid; place-items: center; padding: var(--s5); }
-.drag-strip { position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h); }
 .editor-empty-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s3); max-width: 360px; text-align: center; }
 .editor-empty-title { margin: 0; font-family: var(--font-display); font-size: var(--t-lg); font-weight: 600; }
 .editor-empty-sub { margin: 0 0 var(--s2); color: var(--fg-2); }
@@ -523,19 +590,11 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest #toggl
 .editor-empty-foot { margin: var(--s2) 0 0; font-size: var(--t-xs); color: var(--fg-3); }
 
 /* the note */
+.pane-main { container-type: inline-size; container-name: side; }
 .editor { flex: 1; display: flex; flex-direction: column; min-height: 0; container-type: inline-size; container-name: editor; }
-.editor-toolbar {
-  flex: none;
-  display: flex; align-items: center; gap: var(--s2);
-  height: var(--bar-h);
-  padding: 0 var(--s2);
-}
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.editor-toolbar .tool-btn { flex: none; }
-.editor-toolbar { overflow: hidden; }
-.toolbar-left { flex: 1 1 auto; }
-.toolbar-right { flex: none; }
 .toolbar-sep { width: 1px; height: 16px; margin: 0 var(--s1); background: var(--line-2); flex: none; }
+/* The folder a note is in, over its title (choosing another folder moves the note). */
+.note-path { display: flex; min-height: var(--control-h); margin: 0 0 0 -8px; }
 .crumb { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 44px; overflow: hidden; color: var(--fg-3); }
 .crumb > .icon { position: absolute; left: 8px; pointer-events: none; }
 .folder-select {
@@ -551,18 +610,19 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest #toggl
 .folder-select:focus-visible { outline: 2px solid var(--focus); }
 .folder-select option { background: var(--raised); color: var(--fg); }
 
-/* A narrow editor (small window, or one side of a split): labels give way to icons, rare details go. */
-@container editor (max-width: 600px) {
+/* A narrow side (small window, or one side of a split): labels give way to icons, rare details go. */
+@container side (max-width: 720px) {
   #sourceBtn .lbl, #shareBtn > span, #restoreBtn > span, #destroyBtn > span { display: none; }
   #sourceBtn, #shareBtn, #restoreBtn, #destroyBtn { width: var(--control-h); padding: 0; }
+  .tab { min-width: 64px; }
+}
+@container side (max-width: 520px) {
+  #sourceBtn, #splitViewBtn { display: none; }
+}
+@container editor (max-width: 600px) {
   #statusChars, .status-bar .dot { display: none; }
   .editor-column { padding-left: var(--s4); padding-right: var(--s4); }
   .title-input { font-size: 24px; }
-}
-@container editor (max-width: 420px) {
-  .crumb { display: none; }
-  #sourceBtn, #splitViewBtn { display: none; }
-  .toolbar-left .toolbar-sep { display: none; }
 }
 
 /* what is running: floats over the bottom right of the editor side, above the reader, with or without a note */
@@ -571,9 +631,8 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest #toggl
 .activity-chip {
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 var(--s2) 0 var(--s3);
-  border: 2px solid var(--sticker-line); border-radius: 999px;
+  border: 1px solid var(--line-2); border-radius: 999px;
   background: var(--raised); color: var(--danger);
-  box-shadow: 3px 3px 0 var(--sticker-shadow);
   font-size: var(--t-sm); font-weight: 600;
   animation: pop var(--dur-2) var(--ease) both;
 }
@@ -601,7 +660,7 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest #toggl
 .editor-column.shows-document { max-width: none; margin: 0; padding: var(--s2) var(--s3) var(--s3); }
 
 .title-input {
-  padding: var(--s2) 0 0;
+  padding: 0;
   border: none; background: transparent;
   font-family: var(--font-display);
   font-weight: 600;
@@ -851,10 +910,10 @@ button.book-name:hover { background: var(--hover); }
 .history-preview { margin: 0; overflow: auto; padding: 10px var(--s3); border-radius: var(--r-md); background: var(--well); font-family: var(--font-mono); font-size: var(--t-xs); line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .find-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1);
-  position: absolute; z-index: 8; top: calc(var(--bar-h) + var(--s2)); right: calc(var(--s4) + 10px);
+  position: absolute; z-index: 8; top: var(--s2); right: calc(var(--s4) + 10px);
   width: min(440px, calc(100% - 2 * var(--s4)));
   padding: var(--s1);
-  border: 2px solid var(--sticker-line); border-radius: var(--r-md);
+  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
   background: var(--raised);
   box-shadow: 4px 4px 0 var(--sticker-shadow);
   animation: pop var(--dur-2) var(--ease) both;
@@ -870,7 +929,7 @@ button.book-name:hover { background: var(--hover); }
 
 /* ---- print: the note only ----------------------------------------------------------------------------- */
 @media print {
-  .app-sidebar, .list-pane, .editor-toolbar, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; } /* one column: the hidden panes' grid columns would push the note right */
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }
@@ -932,7 +991,7 @@ button.book-name:hover { background: var(--hover); }
 /* ---- dialogs (they wear the sticker) ------------------------------------------------------------------ */
 .modal {
   padding: 0;
-  border: 2px solid var(--sticker-line);
+  border: 1px solid var(--sticker-line);
   border-radius: var(--r-md);
   background: var(--raised);
   color: var(--fg);
@@ -1000,7 +1059,7 @@ button.book-name:hover { background: var(--hover); }
   width: min(620px, calc(100vw - 32px));
   max-height: min(520px, 76vh);
   padding: 0;
-  border: 2px solid var(--sticker-line); border-radius: var(--r-md);
+  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
   background: var(--raised); color: var(--fg);
   box-shadow: 4px 4px 0 var(--sticker-shadow);
   overflow: hidden;
@@ -1035,7 +1094,7 @@ button.book-name:hover { background: var(--hover); }
   display: flex; align-items: center; gap: var(--s3);
   max-width: min(560px, calc(100vw - 32px));
   padding: var(--s2) var(--s2) var(--s2) var(--s4);
-  border: 2px solid var(--sticker-line); border-radius: var(--r-md);
+  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
   background: var(--raised); color: var(--fg);
   box-shadow: 4px 4px 0 var(--sticker-shadow);
   font-size: var(--t-sm); font-weight: 500;
@@ -1049,7 +1108,7 @@ button.book-name:hover { background: var(--hover); }
 /* ---- scrollbars --------------------------------------------------------------------------------------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-3); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 

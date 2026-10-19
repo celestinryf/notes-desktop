@@ -92,6 +92,8 @@
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
     moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
     inlineMenu: $('#inlineMenu'),
+    sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
+    tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
     activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
   };
 
@@ -177,6 +179,9 @@
     syncTitleBar();
     document.documentElement.style.setProperty('--editor-font-size', settings.fontSize + 'px');
     applySidebar();
+    el.tagList.classList.toggle('hidden', !!settings.tagsCollapsed);
+    el.tagsFold.setAttribute('aria-expanded', String(!settings.tagsCollapsed));
+    el.tagsFold.classList.toggle('is-folded', !!settings.tagsCollapsed);
     syncListCollapsed();
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
@@ -194,8 +199,7 @@
   function syncTitleBar() {
     if (GUEST) return;
     const css = getComputedStyle(document.documentElement);
-    const underTabs = hasPeer() || !el.tabBar.classList.contains('hidden') || readerOpen();
-    const color = css.getPropertyValue(underTabs ? '--base' : '--paper').trim();
+    const color = css.getPropertyValue('--base').trim(); // the top bar (and the reader's bar) are --base
     const symbol = css.getPropertyValue('--fg').trim();
     const wco = navigator.windowControlsOverlay;
     const rect = wco && wco.visible ? wco.getTitlebarAreaRect() : null;
@@ -218,28 +222,92 @@
 
   // ---- resizable panes -----------------------------------------------------
 
-  // A narrow window gives the room to the note: below NARROW_W the sidebar steps aside. That is layout, not a
-  // setting: the saved choice is untouched, the sidebar toggle (Ctrl+\) still shows it, and a wide window brings it back.
+  // The sidebar is docked (it takes its column) or hidden, as Zen's compact mode does it: out of the way until the
+  // pointer reaches the window's left edge, then floating over the page with a small margin. The toggle (Ctrl+\)
+  // hides and docks it. A window too narrow to dock it hides it the same way (layout, not a setting: widening the
+  // window docks it again).
+  // The pane toggles live in the sidebar's header while it is docked, and move to the start of the top bar when it
+  // hides, so they can always be reached (as Obsidian does).
   const NARROW_W = 1000;
-  let sidebarPeek = false; // shown on request while the window is narrow
+  let sidebarPeek = null; // hidden but shown: 'hover' (leaves with the pointer) or 'sticky' (until Esc or a click outside)
+  let peekTimer = null;
   const isNarrow = () => window.innerWidth < NARROW_W;
-  function sidebarHidden() {
-    return !!(state.settings && state.settings.sidebarCollapsed) || (isNarrow() && !sidebarPeek);
+  function sidebarLayout() {
+    if (state.settings && state.settings.sidebarCollapsed) return 'float';
+    return isNarrow() ? 'float' : 'docked';
   }
+  // Hidden from the grid: the sidebar takes no column.
+  function sidebarHidden() { return sidebarLayout() !== 'docked'; }
   function applySidebar() {
-    el.app.classList.toggle('sidebar-collapsed', sidebarHidden());
-    el.toggleSidebarBtn.classList.toggle('is-on', !sidebarHidden());
+    const layout = sidebarLayout();
+    if (layout !== 'float') sidebarPeek = null;
+    el.app.classList.toggle('sidebar-collapsed', layout !== 'docked');
+    el.app.classList.toggle('sidebar-float', layout === 'float');
+    el.app.classList.toggle('sidebar-peek', layout === 'float' && !!sidebarPeek);
+    el.toggleSidebarBtn.classList.toggle('is-on', layout === 'docked');
+    el.toggleSidebarBtn.title = layout === 'docked' ? 'Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back.' : 'Show the sidebar (Ctrl+\\)';
+    const home = layout === 'docked' ? el.sidebarTop : el.tabBar;
+    if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
   }
+  function peekSidebar(how) {
+    if (GUEST || sidebarLayout() !== 'float') return;
+    clearTimeout(peekTimer);
+    if (sidebarPeek === 'sticky' && how === 'hover') return;
+    const fromKeyboard = how === 'sticky' && !el.sidebar.contains(document.activeElement);
+    sidebarPeek = how;
+    applySidebar();
+    if (fromKeyboard) {
+      peekReturn = document.activeElement;
+      const target = el.sidebar.querySelector('.nav-item.is-active, .folder-row.is-active') || el.newNoteBtn;
+      setTimeout(() => target.focus(), 0);
+    }
+  }
+  let peekReturn = null;
+  function unpeekSidebar() {
+    clearTimeout(peekTimer);
+    if (!sidebarPeek) return;
+    sidebarPeek = null;
+    applySidebar();
+    const back = peekReturn;
+    peekReturn = null;
+    if (el.sidebar.contains(document.activeElement)) {
+      if (back && back.isConnected && !el.sidebar.contains(back)) back.focus();
+      else if (state.current) focusBody();
+    }
+  }
+  // Something needs the sidebar on screen (a new folder's name field lives there): float it in.
   function showSidebar() {
-    if (!sidebarHidden()) return;
-    sidebarPeek = isNarrow();
-    if (state.settings.sidebarCollapsed) updateSettings({ sidebarCollapsed: false });
-    else { applySidebar(); applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth); }
+    if (sidebarLayout() === 'float') peekSidebar('sticky');
   }
+  // The toggle and Ctrl+\: dock or hide. In a window too narrow to dock it, it floats in and out instead.
   function toggleSidebar() {
-    if (sidebarHidden()) { showSidebar(); return; }
-    if (isNarrow() && sidebarPeek) { sidebarPeek = false; applySidebar(); return; } // back to the narrow layout
-    updateSettings({ sidebarCollapsed: true });
+    if (GUEST) { toPeer({ type: 'command', name: 'toggleSidebar' }); return; }
+    const collapsed = !!state.settings.sidebarCollapsed;
+    if (!collapsed && isNarrow()) { if (sidebarPeek) unpeekSidebar(); else peekSidebar('sticky'); return; }
+    sidebarPeek = null;
+    updateSettings({ sidebarCollapsed: !collapsed });
+  }
+  function bindSidebarFloat() {
+    if (GUEST) return;
+    // Stay while something in it is still being used: a name being typed, or its folder menu.
+    const busy = () => state.editingFolder || state.menuFolderId || (el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
+    const leaveSoon = () => {
+      clearTimeout(peekTimer);
+      peekTimer = setTimeout(function check() {
+        if (sidebarPeek !== 'hover' || el.sidebar.matches(':hover')) return;
+        if (busy()) { peekTimer = setTimeout(check, 500); return; }
+        unpeekSidebar();
+      }, 350);
+    };
+    el.sidebarEdge.addEventListener('mouseenter', () => { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); });
+    el.sidebarEdge.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); else if (!sidebarPeek) clearTimeout(peekTimer); });
+    el.sidebarEdge.addEventListener('dragenter', () => peekSidebar('hover'));
+    el.sidebar.addEventListener('mouseenter', () => { if (sidebarPeek === 'hover') clearTimeout(peekTimer); });
+    el.sidebar.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); });
+    document.addEventListener('pointerdown', (e) => {
+      if (!sidebarPeek || el.sidebar.contains(e.target) || el.sidebarEdge.contains(e.target) || el.barToggles.contains(e.target) || el.folderMenu.contains(e.target)) return;
+      unpeekSidebar();
+    }, true);
   }
 
   function paneBudget() {
@@ -346,11 +414,14 @@
     else if (state.view === 'reminders') listOpts.reminders = true;
     else if (state.view === 'tag') listOpts.tag = state.tag;
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
-    const [notes, counts, tags, tree, folderPath] = await Promise.all([
+    const wantTree = state.settings.listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
+    const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
       api.notes.list(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' ? api.folders.path(state.folderId) : Promise.resolve([]),
+      wantTree ? api.notes.outline(state.settings.sort) : Promise.resolve(null),
     ]);
     state.notes = notes;
+    state.outline = outline;
     state.tree = tree;
     state.folderPath = folderPath;
     if (state.view === 'folder' && !folderPath.length) {
@@ -367,7 +438,7 @@
     renderList();
     // Page order or titles may have changed elsewhere (list, another window, a reorder): keep the strip in step.
     if (state.current && (book.id || bookOf(state.current))) renderBookStrip(state.current);
-    const inList = notes.some((n) => n.id === state.currentId);
+    const inList = treeModeActive() ? inTreeScope(state.currentId) : notes.some((n) => n.id === state.currentId);
     if (!inList && !opts.keepEditor) {
       const tabId = tabs.ids[tabs.at];
       if (!state.currentId && tabId) await selectNote(tabId); // this side's tab, at start or after its note closed
@@ -414,9 +485,13 @@
 
   function renderList() {
     const q = state.query;
+    const tree = treeModeActive();
     el.noteList.innerHTML = '';
-    el.listEmpty.classList.toggle('hidden', state.notes.length > 0);
-    if (!state.notes.length) renderListEmpty();
+    el.noteList.classList.toggle('hidden', tree);
+    el.noteTree.classList.toggle('hidden', !tree);
+    const empty = tree ? !treeHasContent() : !state.notes.length;
+    el.listEmpty.classList.toggle('hidden', !empty);
+    if (empty) renderListEmpty();
     el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
     const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', reminders: 'Reminders', tag: '#' + state.tag };
     el.listTitle.innerHTML = '';
@@ -431,6 +506,7 @@
         } else el.listTitle.append(document.createTextNode(p.name));
       });
     } else el.listTitle.textContent = titles[state.view];
+    if (tree) { renderNoteTree(); return; }
     const viewingBook = state.view === 'folder' && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
     const frag = document.createDocumentFragment();
     state.notes.forEach((n, i) => {
@@ -457,6 +533,13 @@
       frag.append(li);
     });
     el.noteList.append(frag);
+  }
+
+  function treeHasContent() {
+    const out = state.outline || {};
+    if (state.view !== 'folder') return state.tree.length > 0 || (out[''] || []).length > 0;
+    const node = flattenTree(state.tree).find((f) => f.id === state.folderId);
+    return !!node && (node.children.length > 0 || (out[node.id] || []).length > 0);
   }
 
   function renderListEmpty() {
@@ -499,6 +582,12 @@
 
   function refreshCard(note) {
     if (tabs.ids.includes(note.id)) { tabs.titles.set(note.id, H.deriveTitle(note)); renderActiveTabTitle(); }
+    if (state.outline) {
+      const title = H.deriveTitle(note);
+      for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
+      const row = el.noteTree.querySelector('.tree-note[data-id="' + note.id + '"] .tree-name');
+      if (row) row.textContent = title;
+    }
     const li = el.noteList.querySelector('.note-card[data-id="' + note.id + '"]');
     if (!li) return;
     li.innerHTML = cardHtml(note, state.query);
@@ -554,14 +643,37 @@
 
   // ---- folders -------------------------------------------------------------
 
+  function folderParents() {
+    const m = new Map();
+    for (const f of flattenTree(state.tree)) m.set(f.id, f.parentId || null);
+    return m;
+  }
+  // A folder and its ancestors, outermost first.
+  function pathTo(id) {
+    const parents = folderParents();
+    const out = [];
+    for (let x = id; x && parents.has(x) && out.length < 200; x = parents.get(x)) out.unshift(x);
+    return out;
+  }
+  // The sidebar opens one folder path at a time (the user's rule): the newest folder opened and the folders around it.
+  // Older settings could hold several open branches; only the newest one counts, and only as far down as it is open.
   function expandedSet() {
-    return new Set(state.settings.expandedFolders || []);
+    const list = (state.settings && state.settings.expandedFolders) || [];
+    if (!list.length) return new Set();
+    const open = new Set();
+    for (const id of pathTo(list[list.length - 1])) { if (!list.includes(id)) break; open.add(id); }
+    return open;
   }
 
   async function setExpanded(id, open) {
-    const set = expandedSet();
-    if (open) set.add(id); else set.delete(id);
-    await updateSettings({ expandedFolders: Array.from(set) });
+    let next;
+    if (open) next = pathTo(id);
+    else {
+      const cur = Array.from(expandedSet());
+      const i = cur.indexOf(id);
+      next = i >= 0 ? cur.slice(0, i) : cur; // closing a folder closes what is open inside it
+    }
+    await updateSettings({ expandedFolders: next });
     renderFolders();
   }
 
@@ -581,6 +693,7 @@
     // A background refresh must not rebuild the tree under an open name field: that would blur it and commit early.
     const liveInput = el.folderTree.querySelector('.folder-input');
     if (editing && liveInput && liveInput.dataset.editKey === editKey(editing)) return;
+    const refocus = treeFocusKey(el.folderTree);
     el.folderTree.innerHTML = '';
     if (!state.tree.length && !(editing && editing.mode === 'create' && !editing.parentId)) {
       const d = document.createElement('div');
@@ -589,27 +702,38 @@
       el.folderTree.append(d);
       return;
     }
-    const frag = document.createDocumentFragment();
-    const addRow = (node) => {
+    // The branch holding the folder on show draws its guide lines darker, so you can see where you are.
+    const here = new Set(state.view === 'folder' ? pathTo(state.folderId) : []);
+    const holding = state.current && state.current.folderId ? state.current.folderId : null;
+    for (const id of holding ? pathTo(holding) : []) here.add(id);
+    const addRow = (node, into) => {
+      const kids = node.children.length > 0;
+      const isOpen = kids && open.has(node.id);
       const row = document.createElement('div');
-      row.className = 'folder-row' + (state.view === 'folder' && state.folderId === node.id ? ' is-active' : '');
+      row.className = 'folder-row tree-row' + (state.view === 'folder' && state.folderId === node.id ? ' is-active' : '') + (node.id === holding ? ' holds-note' : '');
       row.dataset.id = node.id;
+      row.dataset.key = 'f:' + node.id;
       row.style.setProperty('--depth', node.depth);
       row.setAttribute('role', 'treeitem');
-      row.setAttribute('aria-expanded', node.children.length ? String(open.has(node.id)) : 'false');
+      row.setAttribute('aria-level', String(node.depth + 1));
+      if (kids) row.setAttribute('aria-expanded', String(isOpen));
+      row.setAttribute('aria-selected', String(row.classList.contains('is-active')));
+      row.tabIndex = -1;
       row.draggable = !(editing && editing.mode === 'rename' && editing.id === node.id);
+      row._toggle = kids ? (on) => setExpanded(node.id, on) : null;
 
       const chevron = document.createElement('button');
-      chevron.className = 'folder-chevron' + (node.children.length ? (open.has(node.id) ? ' is-open' : '') : ' is-leaf');
+      chevron.className = 'folder-chevron' + (kids ? (isOpen ? ' is-open' : '') : ' is-leaf');
+      chevron.tabIndex = -1;
       chevron.innerHTML = I('chevron-right');
-      chevron.title = open.has(node.id) ? 'Collapse' : 'Expand';
+      chevron.title = isOpen ? 'Collapse' : 'Expand';
       chevron.setAttribute('aria-label', chevron.title);
-      chevron.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(node.id, !open.has(node.id)); });
+      chevron.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(node.id, !isOpen); });
       row.append(chevron);
 
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.innerHTML = I(node.book ? 'book-open' : 'folder');
+      icon.innerHTML = I(node.book ? (isOpen ? 'book-open' : 'book') : (isOpen ? 'folder-open' : 'folder'));
       row.append(icon);
       if (node.isVaultRoot) {
         const st = state.vaultStatus[node.vaultId] || {};
@@ -634,6 +758,7 @@
         row.append(count);
         const menu = document.createElement('button');
         menu.className = 'folder-menu-btn';
+        menu.tabIndex = -1;
         menu.innerHTML = I('ellipsis');
         menu.title = 'Folder actions';
         menu.setAttribute('aria-label', 'Folder actions for ' + node.name);
@@ -641,7 +766,12 @@
         row.append(menu);
       }
 
-      row.addEventListener('click', () => { if (!(editing && editing.id === node.id)) setView('folder', node.id); });
+      // Showing a folder also opens it (and so closes any other open branch): one path at a time.
+      row.addEventListener('click', () => {
+        if (editing && editing.id === node.id) return;
+        if (kids && !isOpen) setExpanded(node.id, true);
+        setView('folder', node.id);
+      });
       row.addEventListener('dblclick', (e) => { if (!e.target.closest('.folder-input')) { e.preventDefault(); startRename(node.id); } });
       row.addEventListener('contextmenu', (e) => { e.preventDefault(); openFolderMenu(node.id, row, e); });
       wireDropTarget(row, node.id);
@@ -651,10 +781,15 @@
         row.classList.add('is-dragging');
       });
       row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
-      frag.append(row);
+      into.append(row);
 
-      if (editing && editing.mode === 'create' && editing.parentId === node.id) frag.append(createRow(node.depth + 1));
-      if (open.has(node.id)) node.children.forEach(addRow);
+      const creatingHere = editing && editing.mode === 'create' && editing.parentId === node.id;
+      if (isOpen || creatingHere) {
+        const group = treeGroup(node.depth, here.has(node.id));
+        if (creatingHere) group.append(createRow(node.depth + 1));
+        if (isOpen) node.children.forEach((c) => addRow(c, group));
+        into.append(group);
+      }
     };
     const createRow = (depth) => {
       const row = document.createElement('div');
@@ -662,17 +797,278 @@
       row.style.setProperty('--depth', depth);
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
-      icon.innerHTML = I(editing.book ? 'book-open' : 'folder');
+      icon.innerHTML = I(editing.book ? 'book' : 'folder');
       row.append(document.createElement('span'), icon);
       row.firstChild.className = 'folder-chevron is-leaf';
       row.append(folderInput('', (value) => commitFolderEdit(value)));
       return row;
     };
+    const frag = document.createDocumentFragment();
     if (editing && editing.mode === 'create' && !editing.parentId) frag.append(createRow(0));
-    state.tree.forEach(addRow);
+    state.tree.forEach((n) => addRow(n, frag));
     el.folderTree.append(frag);
     const input = el.folderTree.querySelector('.folder-input');
     if (input) { input.focus(); input.select(); }
+    else restoreTreeFocus(el.folderTree, refocus);
+  }
+
+  // ---- trees: shared parts of the sidebar's folders and the middle pane's folder view ----
+
+  // The children of a row at parentDepth; its guide line runs under the parent's chevron.
+  function treeGroup(parentDepth, isHere) {
+    const group = document.createElement('div');
+    group.className = 'tree-children' + (isHere ? ' is-here' : '');
+    group.setAttribute('role', 'group');
+    group.style.setProperty('--depth', parentDepth);
+    return group;
+  }
+
+  function visibleRows(root) { return Array.from(root.querySelectorAll('.tree-row')).filter((r) => r.offsetParent); }
+  function focusRow(root, row) {
+    for (const r of root.querySelectorAll('.tree-row[tabindex="0"]')) r.tabIndex = -1;
+    row.tabIndex = 0;
+    row.focus();
+  }
+  // A rebuild must not lose the keyboard: remember which row had focus, and focus it again afterwards.
+  function treeFocusKey(root) {
+    const a = document.activeElement;
+    return a && root.contains(a) && a.classList.contains('tree-row') ? a.dataset.key : null;
+  }
+  function restoreTreeFocus(root, key) {
+    const rows = visibleRows(root);
+    const target = (key && rows.find((r) => r.dataset.key === key)) || null;
+    if (target) { focusRow(root, target); return; }
+    const all = Array.from(root.querySelectorAll('.tree-row'));
+    const first = all.find((r) => r.classList.contains('is-active')) || all[0];
+    if (first) first.tabIndex = 0; // one row in the tab order, so Tab reaches the tree (even if the pane is hidden now)
+  }
+  // Arrow keys as in any tree: up and down move, right opens (then steps in), left closes (then steps out),
+  // Home and End jump, Enter or Space activates.
+  function bindTreeKeys(root) {
+    root.addEventListener('keydown', (e) => {
+      if (e.target.closest('input, select, textarea') || e.altKey || e.ctrlKey || e.metaKey) return;
+      const row = e.target.closest('.tree-row');
+      if (!row || !root.contains(row) || e.target !== row) return;
+      const rows = visibleRows(root);
+      const i = rows.indexOf(row);
+      const go = (j) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };
+      const expanded = row.getAttribute('aria-expanded');
+      if (e.key === 'ArrowDown') go(i + 1);
+      else if (e.key === 'ArrowUp') go(i - 1);
+      else if (e.key === 'Home') go(0);
+      else if (e.key === 'End') go(rows.length - 1);
+      else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (expanded === 'false' && row._toggle) row._toggle(true);
+        else if (expanded === 'true') go(i + 1);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (expanded === 'true' && row._toggle) row._toggle(false);
+        else {
+          const group = row.parentElement && row.parentElement.closest('.tree-children');
+          const parent = group && group.previousElementSibling;
+          if (parent && parent.classList.contains('tree-row')) focusRow(root, parent);
+        }
+      } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+    });
+    root.addEventListener('focusin', (e) => { const r = e.target.closest('.tree-row'); if (r) { for (const x of root.querySelectorAll('.tree-row[tabindex="0"]')) if (x !== r) x.tabIndex = -1; r.tabIndex = 0; } });
+  }
+
+  // ---- the middle pane as folders with their notes ("Note list: Folders" in Settings) ----
+  // Only where a tree means something: all notes, or one folder. Pinned, reminders, trash, tags and searches stay lists.
+
+  function treeModeActive() {
+    return !!state.settings && state.settings.listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
+  }
+  // Is the note somewhere in what the tree shows? (In a folder view the tree also shows its subfolders' notes.)
+  function inTreeScope(noteId) {
+    const out = state.outline || {};
+    const scope = state.view === 'folder' ? state.folderId : null;
+    const ids = scope ? new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
+    for (const [folder, notes] of Object.entries(out)) {
+      if (ids && !ids.has(folder)) continue;
+      if (notes.some((n) => n.id === noteId)) return true;
+    }
+    return false;
+  }
+
+  // The open note's headings, for its outline in the tree. Skips code fences; the text loses its Markdown marks.
+  function headingsOf(md) {
+    const out = [];
+    let fence = false;
+    for (const line of String(md || '').split(/\r?\n/)) {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+      if (fence) continue;
+      const m = /^\s{0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
+      if (m) out.push({ level: m[1].length, text: m[2].replace(/\*\*|__(?=\S)|(?<=\S)__|[*`]|~~|\[([^\]]*)\]\([^)]*\)/g, (x, t) => t || '').trim() });
+    }
+    return out;
+  }
+
+  function currentHeadings() {
+    const n = state.current;
+    if (!n || n.locked || isNonMarkdownFile(n)) return [];
+    if (!state.sourceMode && state.rich) {
+      return Array.from(el.richEditor.querySelectorAll('.rich-editor-content :is(h1, h2, h3, h4, h5, h6)')).slice(0, 60)
+        .map((h) => ({ level: Number(h.tagName.slice(1)), text: h.textContent.trim() })).filter((h) => h.text);
+    }
+    const md = state.currentId === n.id ? el.bodyInput.value : n.body;
+    return headingsOf(md).slice(0, 60);
+  }
+
+  // Jumps to the i-th heading of the open note, in whichever view is showing.
+  function jumpToHeading(i) {
+    if (state.sourceMode) {
+      const lines = el.bodyInput.value.split('\n');
+      let fence = false, count = -1, at = 0;
+      for (const line of lines) {
+        if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+        else if (!fence && /^\s{0,3}#{1,6}\s+\S/.test(line) && ++count === i) break;
+        at += line.length + 1;
+      }
+      el.bodyInput.focus();
+      el.bodyInput.setSelectionRange(at, at);
+      scrollTextareaToSelection(at);
+      return;
+    }
+    const h = el.richEditor.querySelectorAll('.rich-editor-content :is(h1, h2, h3, h4, h5, h6)')[i];
+    if (h) h.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  function renderNoteTree() {
+    const root = el.noteTree;
+    const refocus = treeFocusKey(root);
+    root.innerHTML = '';
+    const out = state.outline || {};
+    const open = new Set(state.settings.treeExpanded || []);
+    const scopeId = state.view === 'folder' ? state.folderId : null;
+    const scopeNode = scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) : null;
+    const here = new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []);
+    const heads = currentHeadings();
+    const minLevel = heads.length ? Math.min(...heads.map((h) => h.level)) : 1;
+    const setOpen = (id, on) => {
+      const next = new Set(state.settings.treeExpanded || []);
+      if (on) next.add(id); else next.delete(id);
+      updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
+    };
+
+    const noteRow = (n, depth, into) => {
+      const row = document.createElement('div');
+      const active = n.id === state.currentId;
+      row.className = 'tree-row tree-note' + (active ? ' is-active' : '');
+      row.dataset.id = n.id;
+      row.dataset.key = 'n:' + n.id;
+      row.style.setProperty('--depth', depth);
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-level', String(depth + 1));
+      row.setAttribute('aria-selected', String(active));
+      row.tabIndex = -1;
+      row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="tree-icon">' + I(n.locked ? 'lock' : n.fileKind ? 'file-text' : 'notebook-text') + '</span><span class="tree-name"></span>'
+        + (n.pinned ? '<span class="tree-mark" title="Pinned">' + I('star') + '</span>' : '');
+      row.querySelector('.tree-name').textContent = n.title;
+      row.title = n.title;
+      row.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
+      row.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; row.classList.add('is-dragging'); toPeer({ type: 'drag', id: n.id }); });
+      row.addEventListener('dragend', () => { row.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
+      into.append(row);
+      // The open note's outline, as Google Docs shows it: its headings, indented by level; a click goes there.
+      if (active && heads.length > 1) {
+        const group = treeGroup(depth, true);
+        group.classList.add('tree-outline');
+        heads.forEach((h, i) => {
+          const hr = document.createElement('div');
+          hr.className = 'tree-row tree-heading';
+          hr.dataset.key = 'h:' + n.id + ':' + i;
+          hr.style.setProperty('--depth', depth + 1 + (h.level - minLevel));
+          hr.setAttribute('role', 'treeitem');
+          hr.setAttribute('aria-level', String(depth + 2 + (h.level - minLevel)));
+          hr.tabIndex = -1;
+          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="tree-name"></span>';
+          hr.querySelector('.tree-name').textContent = h.text;
+          hr.title = h.text;
+          hr.addEventListener('click', () => jumpToHeading(i));
+          group.append(hr);
+        });
+        into.append(group);
+      }
+    };
+
+    const folderRow = (node, depth, into) => {
+      const notes = out[node.id] || [];
+      const kids = node.children.length + notes.length > 0;
+      const isOpen = kids && (open.has(node.id) || here.has(node.id) && state.revealInTree === state.currentId);
+      const row = document.createElement('div');
+      row.className = 'tree-row tree-folder' + (here.has(node.id) ? ' is-here' : '');
+      row.dataset.id = node.id;
+      row.dataset.key = 'f:' + node.id;
+      row.style.setProperty('--depth', depth);
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-level', String(depth + 1));
+      if (kids) row.setAttribute('aria-expanded', String(isOpen));
+      row.tabIndex = -1;
+      row._toggle = kids ? (on) => setOpen(node.id, on) : null;
+      row.innerHTML = '<span class="tree-chevron' + (isOpen ? ' is-open' : '') + (kids ? '' : ' is-leaf') + '" aria-hidden="true">' + I('chevron-right') + '</span>'
+        + '<span class="tree-icon">' + I(node.book ? (isOpen ? 'book-open' : 'book') : (isOpen ? 'folder-open' : 'folder')) + '</span><span class="tree-name"></span><span class="count"></span>';
+      row.querySelector('.tree-name').textContent = node.name;
+      row.querySelector('.count').textContent = node.count || '';
+      row.title = node.name;
+      row.addEventListener('click', () => { if (kids) setOpen(node.id, !isOpen); });
+      row.addEventListener('contextmenu', (e) => { e.preventDefault(); openFolderMenu(node.id, row, e); });
+      wireDropTarget(row, node.id);
+      into.append(row);
+      if (isOpen) {
+        const group = treeGroup(depth, here.has(node.id));
+        node.children.forEach((c) => folderRow(c, depth + 1, group));
+        notes.forEach((n) => noteRow(n, depth + 1, group));
+        into.append(group);
+      }
+    };
+
+    const frag = document.createDocumentFragment();
+    if (scopeNode) {
+      scopeNode.children.forEach((c) => folderRow(c, 0, frag));
+      (out[scopeNode.id] || []).forEach((n) => noteRow(n, 0, frag));
+    } else {
+      state.tree.forEach((c) => folderRow(c, 0, frag));
+      (out[''] || []).forEach((n) => noteRow(n, 0, frag));
+    }
+    root.append(frag);
+    restoreTreeFocus(root, refocus);
+    const active = root.querySelector('.tree-note.is-active');
+    if (active && state.revealInTree === state.currentId) { active.scrollIntoView({ block: 'nearest' }); state.revealInTree = null; }
+  }
+
+  // When a note opens, the sidebar opens the path to its folder (one path at a time) and marks the folder.
+  function revealInSidebar(note) {
+    if (GUEST) return;
+    const parents = note && note.folderId ? pathTo(note.folderId).slice(0, -1) : [];
+    const open = expandedSet();
+    if (parents.every((id) => open.has(id))) { renderFolders(); return; }
+    setExpanded(parents[parents.length - 1], true);
+  }
+
+  // When a note opens, the folder view opens the folders around it, once (they can be closed again).
+  function revealInTree(note) {
+    if (GUEST || !treeModeActive() || !note || !note.folderId) return;
+    const path = pathTo(note.folderId);
+    const have = new Set(state.settings.treeExpanded || []);
+    const missing = path.filter((id) => !have.has(id));
+    state.revealInTree = note.id;
+    if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
+    else renderNoteTree();
+  }
+
+  // The outline follows typing, at most twice a second, and only redraws when the headings changed.
+  let outlineTimer = null, outlineSig = '';
+  function scheduleOutline() {
+    if (!treeModeActive()) return;
+    clearTimeout(outlineTimer);
+    outlineTimer = setTimeout(() => {
+      const sig = state.currentId + '|' + currentHeadings().map((h) => h.level + h.text).join('|');
+      if (sig !== outlineSig) { outlineSig = sig; renderNoteTree(); }
+    }, 500);
   }
 
   function folderInput(value, commit) {
@@ -706,10 +1102,7 @@
     closeFolderMenu();
     showSidebar(); // the name field lives there
     state.editingFolder = { mode: 'create', parentId: parentId || null, book: !!asBook };
-    if (parentId) {
-      const set = expandedSet();
-      if (!set.has(parentId)) { set.add(parentId); updateSettings({ expandedFolders: Array.from(set) }).then(renderFolders); return; }
-    }
+    if (parentId && !expandedSet().has(parentId)) { setExpanded(parentId, true); return; }
     renderFolders();
   }
 
@@ -789,7 +1182,7 @@
   async function moveFolderTo(folderId, parentId) {
     const res = await api.folders.move(folderId, parentId || null);
     if (res && res.error) { toast(res.error); return; }
-    if (parentId) { const set = expandedSet(); if (!set.has(parentId)) { set.add(parentId); await updateSettings({ expandedFolders: Array.from(set) }); } }
+    if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
     await refresh({ keepEditor: true });
   }
 
@@ -834,6 +1227,8 @@
     }
     sel.value = current;
     if (sel.value !== current) sel.value = '';
+    const f = current ? flattenTree(state.tree).find((x) => x.id === current) : null;
+    setIcon(sel.parentElement, f && f.book ? 'book' : 'folder');
   }
 
   function openFolderMenu(id, anchor, ev) {
@@ -1153,7 +1548,6 @@
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     // One tab showing a note, and no split: no bar. A blank editor keeps it (its + is the way to a tab then), and a
     // split keeps both bars, for Close side and the active side's mark.
-    el.tabBar.classList.toggle('hidden', !hasPeer() && tabs.ids.length <= 1 && !!state.currentId);
     syncTitleBar();
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
     el.paneCloseBtn.classList.toggle('hidden', !GUEST);
@@ -1478,6 +1872,7 @@
     else if (name === 'openFiles') openFiles();
     else if (name === 'settings') openSettings();
     else if (name === 'newFolder') startCreateFolder(state.view === 'folder' ? state.folderId : null);
+    else if (name === 'toggleSidebar') toggleSidebar();
   }
 
   function runEditCommand(cmd) {
@@ -1700,6 +2095,8 @@
     el.editorEmpty.classList.add('hidden');
     el.editor.classList.remove('hidden');
     el.noteList.querySelectorAll('.note-card').forEach((c) => c.classList.toggle('is-active', c.dataset.id === id));
+    revealInTree(note);
+    revealInSidebar(note);
     updateStatus(note);
     if (hasPending) { state.dirty = true; setSaved('Save failed'); scheduleRetry(); }
     else setSaved('Saved');
@@ -3734,6 +4131,7 @@
 
   function scheduleSave() {
     state.lastTypedAt = Date.now();
+    scheduleOutline();
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
     state.dirty = true;
     // Edits that bypass the input event (Tab, list keys, Ctrl+B/I/K wrappers) still keep find's offsets honest.
@@ -4329,6 +4727,8 @@
     el.openAtLoginInput.checked = s.openAtLogin;
     el.alwaysOnTopInput.checked = s.alwaysOnTop;
     syncAlignSeg(s.editorAlign);
+    syncListModeSeg();
+    el.sidebarFloatInput.checked = !!s.sidebarCollapsed;
     el.editorFullWidthInput.checked = !s.editorWidth;
     el.editorWidthInput.disabled = !s.editorWidth;
     el.editorWidthInput.value = s.editorWidth || 760;
@@ -4365,6 +4765,11 @@
       if (sec) sec.scrollIntoView({ block: 'start' });
     });
     el.settingsScroll.addEventListener('scroll', markSettingsSection, { passive: true });
+  }
+
+  function syncListModeSeg() {
+    const mode = state.settings.listMode;
+    el.listModeSeg.querySelectorAll('button').forEach((b) => { const on = b.dataset.mode === mode; b.classList.toggle('is-on', on); b.setAttribute('aria-checked', String(on)); });
   }
 
   function syncAlignSeg(value) {
@@ -4514,8 +4919,9 @@
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
       ...[...el.shareMenu.querySelectorAll('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: b.textContent.trim(), icon: 'share-2', keys: '', ok: noteOpen && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action) })),
-      cmd('sidebar', 'View', state.settings && sidebarHidden() ? 'Show the sidebar' : 'Hide the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST),
+      cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
+      cmd('list-mode', 'View', state.settings && state.settings.listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', state.settings && state.settings.listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: state.settings.listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
       cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(state.settings && state.settings.sidebarCollapsed && state.settings.listCollapsed), 'zen distraction free writing'),
       cmd('width', 'View', state.settings && state.settings.editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: state.settings.editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
       fromButton(el.splitViewBtn, 'View', { title: 'Split view: open a second side', ok: usable(el.splitViewBtn) }),
@@ -4576,6 +4982,7 @@
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) { e.preventDefault(); closeAllBookMenus(); return; }
+      if (sidebarPeek) { e.preventDefault(); unpeekSidebar(); return; }
       if (readerOpen()) { e.preventDefault(); closeReader(); return; }
       if (document.activeElement === el.searchInput && el.searchInput.value) {
         el.searchInput.value = '';
@@ -4665,6 +5072,15 @@
     el.moreMenu.addEventListener('click', (e) => { if (e.target.closest('.menu-item')) closeMoreMenu(); });
     bindMenuKeys();
     bindSettingsNav();
+    bindSidebarFloat();
+    el.tagsFold.addEventListener('click', () => updateSettings({ tagsCollapsed: !state.settings.tagsCollapsed }));
+    bindTreeKeys(el.folderTree);
+    bindTreeKeys(el.noteTree);
+    el.listModeSeg.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mode]');
+      if (b) updateSettings({ listMode: b.dataset.mode }).then(() => { syncListModeSeg(); refresh({ keepEditor: true }); });
+    });
+    el.sidebarFloatInput.addEventListener('change', () => { sidebarPeek = null; updateSettings({ sidebarCollapsed: el.sidebarFloatInput.checked }); });
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
@@ -4849,7 +5265,6 @@
     wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
     window.addEventListener('resize', () => {
       if (!state.settings) return;
-      if (!isNarrow()) sidebarPeek = false;
       applySidebar();
       applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth);
     });

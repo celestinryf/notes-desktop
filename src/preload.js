@@ -16,6 +16,7 @@ const isOurPage = window.top === window || (location.protocol === 'file:' && /\/
 if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
   notes: {
     list: invoke('notes:list'),
+    outline: invoke('notes:outline'),
     get: invoke('notes:get'),
     create: invoke('notes:create'),
     update: invoke('notes:update'),
