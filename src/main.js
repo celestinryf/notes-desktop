@@ -1,7 +1,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } = require('electron');
 const { Store } = require('./store');
 const { GitSync } = require('./gitSync');
 const windowInput = require('./window-input');
@@ -12,6 +12,7 @@ const os = require('os');
 const H = require('./shared/helpers');
 const convert = require('./convert');
 const { runWorker } = require('./run-worker');
+const wordcraft = require('./wordcraft-host');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
@@ -27,6 +28,7 @@ const THEME_FG = { light: '#2a1a12', dark: '#f6eadb' };
 const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');
+wordcraft.registerScheme(protocol); // must happen before the app is ready
 app.setAppUserModelId('com.celestinryf.notes');
 app.setPath('userData', DATA_DIR);
 
@@ -343,6 +345,7 @@ function main() {
     stickies.broadcast('settings:changed', store.getSettings());
   }
 
+  let wordcraftReady = false;
   function info() {
     return {
       version: app.getVersion(),
@@ -352,6 +355,7 @@ function main() {
       hotkeyFallback: !!hotkeyState.fallback,
       hotkeyDisplay: H.displayAccelerator(hotkeyState.hotkey),
       platform: process.platform,
+      wordcraft: wordcraftReady, // WordCraft's web build is there, so Word documents open in it
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
       documentsDir: app.getPath('documents'),
       saveBlocked: !!store.saveBlocked,
@@ -697,6 +701,28 @@ function main() {
     const buf = await readDocxBuffer(file);
     rememberDocx(id, buf, mtime);
     return buf;
+  });
+  // WordCraft's saves of a Word note. The same kind of file goes over the note's file (after a backup, or into the
+  // "(edited)" copy if it changed on disk since it was read); another kind (Save As PDF, say) becomes a new file beside
+  // it and never overwrites anything.
+  const WORDCRAFT_EXPORTS = ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'];
+  ipcMain.handle('files:saveWord', (_e, id, bytes, name, expectedMtime) => {
+    const n = fileNoteOfKind(id, 'docx');
+    if (!ArrayBuffer.isView(bytes) || !bytes.byteLength || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the document is missing or larger than 100 MB, so nothing was written.');
+    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const own = path.extname(n.filePath).slice(1).toLowerCase();
+    const given = path.basename(String(name || ''));
+    const ext = path.extname(given).slice(1).toLowerCase();
+    // Only the document's own name is the document; Save As under another name (or another kind) is a new file.
+    if (given.toLowerCase() === path.basename(n.filePath).toLowerCase()) {
+      if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) throw new Error('that is not a Word document, so nothing was written.');
+      const saved = saveEdits(id, n.filePath, buf, expectedMtime);
+      rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
+      return saved;
+    }
+    if (!WORDCRAFT_EXPORTS.includes(ext)) throw new Error('Notes does not save .' + (ext || 'extensionless') + ' files from WordCraft.');
+    const base = H.safeFilename(path.basename(given, path.extname(given))) || path.basename(n.filePath, path.extname(n.filePath));
+    return { exported: convert.writeNew(path.dirname(n.filePath), base, ext, buf) };
   });
   const MAX_DOCX_PATCH_CHARS = 50 * 1024 * 1024;
   ipcMain.handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
@@ -1421,6 +1447,7 @@ function main() {
 
   app.whenReady().then(() => {
     const step = (name, fn) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
+    step('wordcraft', () => { wordcraftReady = wordcraft.serve(protocol); });
     step('theme', applyTheme);
     step('window', createWindow);
     if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });
