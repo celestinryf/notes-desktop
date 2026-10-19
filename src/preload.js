@@ -52,6 +52,7 @@ if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
     saveWord: invoke('files:saveWord'),
     pdfPickPages: invoke('files:pdfPickPages'),
     docxBytes: invoke('files:docxBytes'),
+    imageBytes: invoke('files:imageBytes'),
     convertOptions: invoke('files:convertOptions'),
     convert: invoke('files:convert'),
     asMarkdown: invoke('files:asMarkdown'),

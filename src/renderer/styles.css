@@ -746,6 +746,36 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   tab-size: 2;
 }
 .body-input:focus { outline: none; }
+/* ---- CSV and TSV as a table (csv-view.js): read-only; Ctrl+E edits the file as text --------------------------- */
+/* A table or an image takes the rest of the pane under the note's header, with its own scrolling (app.js fillPane). A short
+   table keeps its own height, so its scrollbar stays under its last row. */
+.editor-column.fills-pane { height: 100%; flex: 1 1 auto; max-width: none; padding-bottom: var(--s3); }
+.editor-column.fills-pane .editor-body { flex: 1 1 auto; min-height: 0; }
+.editor-column.fills-pane > :not(.editor-body) { flex-shrink: 0; } /* the header keeps its size; only the table or picture gives way */
+.editor.fills-pane .editor-scroll { overflow: hidden; }
+.csv-view { flex: 0 1 auto; min-height: 0; overflow: auto; border-radius: var(--r-md); }
+.csv-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.csv-table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: var(--t-sm); }
+.csv-table th, .csv-table td { max-width: 360px; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; vertical-align: top; background: var(--paper); }
+/* Zebra rows by tone; drawn opaque so the sticky row numbers cover what scrolls under them. */
+.csv-table tbody tr:nth-child(even) > * { background: linear-gradient(var(--well), var(--well)), var(--paper); }
+.csv-table thead th { position: sticky; top: 0; z-index: 2; background: var(--chrome); font-weight: 600; }
+.csv-table .rownum { position: sticky; left: 0; z-index: 1; color: var(--fg-3); font-size: var(--t-xs); font-weight: 400; text-align: right; }
+.csv-table thead .rownum { z-index: 3; }
+.csv-table .num { text-align: right; }
+.csv-note { margin: var(--s3) 0; color: var(--fg-3); font-size: var(--t-sm); }
+
+/* ---- images (app.js showImage): fitted to the pane; a click or Enter shows the actual size -------------------- */
+/* The picture is centred by its auto margins, which give way when it is larger than the pane, so its actual size scrolls
+   from the top left rather than being cut off. */
+.image-viewer { display: flex; flex: 1 1 0; min-height: 0; margin: 0; padding: var(--s3); overflow: auto; border-radius: var(--r-md); background: var(--document-bg); }
+/* A transparent picture shows over a checkerboard, as image viewers do. */
+.image-viewer img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; background: conic-gradient(color-mix(in srgb, var(--fg) 9%, transparent) 25%, transparent 0 50%, color-mix(in srgb, var(--fg) 9%, transparent) 0 75%, transparent 0) 0 0 / 8px 8px; }
+/* A picture has no words to count. */
+.editor.shows-image :is(#statusWords, #statusChars, .status-bar .dot) { display: none; }
+.image-viewer.is-actual img { max-width: none; max-height: none; cursor: zoom-out; }
+.image-viewer img:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
 /* A .txt file is prose: the writing font and size, as a note's text, not the mono of Markdown source and code. */
 .body-input.is-prose { font-family: var(--font-sans); font-size: var(--editor-font-size); }
 

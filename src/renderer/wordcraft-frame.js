@@ -8,13 +8,14 @@
               { type: 'theme', value: 'light' | 'dark' }   { type: 'page', dark }
      from it: { type: 'ready' }   { type: 'opened', doc, ok, error }   { type: 'save', doc, name, bytes }   { type: 'dirty', doc, dirty }
 
-   NotesWordCraft.create({ frame, origin, url, readyMs, theme, darkPage, onSave(name, bytes, context) -> Promise<boolean>,
+   NotesWordCraft.create({ frame, origin, url, readyMs, theme, darkPage, onSave(name, bytes, context) -> Promise<{ ok, own }>,
                            onDirty(dirty), onOpened(), onOpenFailed(error), onUnavailable() })
    returns { open(name, bytes, context), requestSave(ms) -> Promise<boolean>, isDirty(), close() }
    theme and darkPage: WordCraft's look (its chrome, and a dark page), sent once it is ready. The dark page is a view
    setting in WordCraft, so the file is unchanged.
    context is the caller's own record of the document, handed back with each of its saves: a save WordCraft sent before
-   the document was closed is still written with it, even if that happens after the close.
+   the document was closed is still written with it, even if that happens after the close. onSave says whether the save
+   was the document's own (ok: it reached the file; own: it is the document, not a copy under another name).
    onUnavailable: the frame never said it was ready (a build without hosted mode, or one that fails to load); nothing more
    is shown in it. */
 (function () {
@@ -55,7 +56,6 @@
         dirty = !!m.dirty;
         if (onDirty) onDirty(dirty || unsaved);
       } else if (m.type === 'save' && m.bytes instanceof Uint8Array && typeof m.name === 'string') {
-        const ofThisDocument = m.name.toLowerCase() === current.name.toLowerCase(); // not a Save As or export
         // A copy under another name leaves the document's own file as it was: if there were edits, they are still
         // unsaved for Notes (WordCraft calls the document saved after any save).
         const editedBefore = dirty || unsaved;
@@ -63,13 +63,13 @@
         const context = current.context;
         // One save at a time, in the order they were made, each to the document it was made in.
         // A save that throws counts as failed and never stops the ones after it.
-        saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => false).then((ok) => {
+        saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
           if (!current || current.doc !== doc) return;
-          if (ofThisDocument) {
-            unsaved = ok === false;
+          if (res.own) {
+            unsaved = !res.ok;
             if (onDirty) onDirty(dirty || unsaved);
             const done = waiters; waiters = [];
-            done.forEach((w) => w(ok !== false));
+            done.forEach((w) => w(res.ok));
           } else if (editedBefore) {
             unsaved = true;
             if (onDirty) onDirty(true);

@@ -244,7 +244,7 @@ function sanitizeNote(raw, now) {
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
     // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
     filePath: typeof raw.filePath === 'string' && raw.filePath ? raw.filePath : null,
-    fileKind: ['text', 'pdf', 'docx', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
+    fileKind: ['text', 'pdf', 'docx', 'image', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
     fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
@@ -1156,16 +1156,38 @@ class Store {
     const note = this.get(id);
     if (!note || !note.filePath) return { changed: false, missing: false };
     if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
+    // A file linked before Notes knew its kind (an image kept as "binary", an .rtf kept as plain text) moves to the
+    // kind its extension now names, and is read again as that.
+    const known = F.kindOf(note.filePath);
+    const rekind = (known === 'docx' || known === 'image') && known !== note.fileKind;
     const mtime = F.mtimeOf(note.filePath);
-    if (mtime === note.fileMtime) return { changed: false, missing: false };
-    let body = note.body;
-    if (note.fileKind === 'text') body = F.readText(note.filePath).body;
-    else if (note.fileKind === 'docx') body = (await F.readDocxText(note.filePath)).body;
-    // A PDF or Word file is shown from the file itself, so any new version is a change, even with the same text.
-    const changed = body !== note.body || note.fileKind === 'pdf' || note.fileKind === 'docx';
+    if (mtime === note.fileMtime && !rekind) return { changed: false, missing: false };
+    const kind = rekind ? known : note.fileKind;
+    let body = rekind ? '' : note.body;
+    if (kind === 'text') body = F.readText(note.filePath).body;
+    else if (kind === 'docx') body = (await F.readDocxText(note.filePath)).body;
+    // A PDF, Word file or image is shown from the file itself, so any new version is a change, even with the same text.
+    const changed = rekind || body !== note.body || kind !== 'text';
     // Cache update only: the file changed, the note's own edit time is not touched.
-    this._commit(() => { note.body = body; note.fileMtime = mtime; });
+    this._commit(() => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
     return { changed, missing: false };
+  }
+
+  // A Word document WordCraft saved as a .docx beside the original (an .odt, .rtf or .doc): the note now stands for the
+  // .docx, so later saves go there. Its title follows when it was the old file's name, and its text (the list snippet,
+  // search) is the new file's: the poll will not read it again, since the time it knows is the new file's. Returns the note.
+  relinkFileNote(id, newPath, body) {
+    const note = this.get(id);
+    if (!note || !note.filePath) return null;
+    const oldName = path.basename(note.filePath);
+    this._commit(() => {
+      if (note.title === oldName) note.title = path.basename(newPath);
+      note.filePath = newPath;
+      note.fileKind = F.kindOf(newPath);
+      note.fileMtime = F.mtimeOf(newPath);
+      if (typeof body === 'string') note.body = body;
+    });
+    return note;
   }
 
   fileNotes() {

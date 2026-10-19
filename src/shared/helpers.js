@@ -320,6 +320,25 @@
     return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
   }
 
+  // Word documents (fileKind 'docx'): everything WordCraft opens. Word's own zip formats are saved where they are; the
+  // others (RTF, ODT, the old binary .doc) WordCraft saves as a .docx beside them, and the note moves to it.
+  const WORD_EXT = new Set(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt']);
+  const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']); // Word's zip formats: the simple editor and mammoth read these
+  const WORD_TO_DOCX_EXT = new Set(['doc', 'dot', 'rtf', 'odt']);
+  // Images (fileKind 'image'), shown by the image viewer.
+  const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
+  const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+
+  // A comma- or tab-separated file: shown as a table, edited as text (Ctrl+E).
+  function isTableFile(note) {
+    return isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
+  }
+
+  // A Word file the simple editor can show (Word's zip formats); the rest need WordCraft.
+  function isOoxmlWordFile(note) {
+    return !!(note && note.filePath && note.fileKind === 'docx' && OOXML_EXT.has(extOf(note.filePath)));
+  }
+
   // The text a reader sees in an ATX heading, for use as a title. Unlike plainTextFromMarkdown (made for speech)
   // it keeps list-like prefixes ("1. Setup"), underscores inside words (my_file.py) and backslash-escaped
   // characters, and drops only the formatting.
@@ -431,7 +450,8 @@
 
   return {
     fuzzyScore,
-    splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, imageBaseFor, fileStamp,
+    splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
+    WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,

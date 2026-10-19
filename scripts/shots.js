@@ -80,6 +80,14 @@ The north loop reopened on Saturday. Bring water: the spring at mile four is dry
 
 Mud on the switchbacks below the ridge; the upper meadow is clear.
 `],
+  csv: ['trail-log.csv', `date,trail,distance_km,elevation_m,notes
+2026-09-06,North loop,8.4,640,"Mud on the switchbacks, upper meadow clear"
+2026-09-13,Ridge path,11.2,910,Spring at mile four is dry
+2026-09-20,Lake trail,5.1,120,
+2026-09-27,North loop,8.4,640,"Reopened after the storm; bring water"
+`],
+  'csv-wide': ['readings.csv', sampleReadings(150)],
+  png: ['ridge.png', samplePng(480, 300), 'image'],
   js: ['trail.js', `// Elevation gain over the first loop, in metres.
 const loop = { name: 'North loop', gain: 640, open: true };
 
@@ -88,12 +96,46 @@ export function describe(trail) {
 }
 `],
 };
+// A long, wide table for the CSV view: made-up test readings (a fixture, never shown to anyone but the screenshots),
+// with gaps and "n/a" in a number column so its alignment is decided by the column, not cell by cell.
+function sampleReadings(rows) {
+  const head = 'station,date,temp_c,humidity_pct,wind_kmh,pressure_hpa,rain_mm,notes';
+  const out = [head];
+  for (let i = 0; i < rows; i++) {
+    const day = String(1 + (i % 28)).padStart(2, '0');
+    const temp = i % 17 === 5 ? 'n/a' : (8 + ((i * 7) % 15) + (i % 10) / 10).toFixed(1);
+    const rain = i % 4 ? '' : ((i % 9) * 0.6).toFixed(1);
+    const note = i % 6 === 0 ? '"Test row ' + (i + 1) + ': a longer note, so the cell is cut short and shows its whole text on hover"' : '';
+    out.push(['Test ' + (1 + (i % 3)), '2026-09-' + day, temp, 40 + ((i * 11) % 50), (i * 3) % 40, 1000 + ((i * 13) % 30), rain, note].join(','));
+  }
+  return out.join('\n') + '\n';
+}
+// A small picture for the image viewer: a gradient with a transparent band, as a real PNG.
+function samplePng(w, h) {
+  const zlib = require('zlib');
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = y * (w * 4 + 1) + 1 + x * 4;
+      raw[o] = 240 - Math.round((x / w) * 120); raw[o + 1] = 120 + Math.round((y / h) * 80); raw[o + 2] = 62; raw[o + 3] = y < h / 6 ? 0 : 255;
+    }
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(Buffer.concat([Buffer.from(type), data])) >>> 0);
+    return Buffer.concat([len, Buffer.from(type), data, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
 function sampleFileNote(dir, kind) {
-  const [name, body] = SAMPLE_FILES[kind];
+  const [name, content, fileKind] = SAMPLE_FILES[kind];
   const file = path.join(dir, name);
-  fs.writeFileSync(file, body);
+  fs.writeFileSync(file, content);
   const now = Date.now();
-  return { id: 'n-' + kind, title: name, body, tags: [], folderId: null, filePath: file, fileKind: 'text', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 2000 };
+  const body = typeof content === 'string' ? content : '';
+  return { id: 'n-' + kind, title: name, body, tags: [], folderId: null, filePath: file, fileKind: fileKind || 'text', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 2000 };
 }
 
 function seed(now) {
@@ -208,6 +250,11 @@ const SCENES = {
   'tex-focus': { about: 'The code editor focused: caret, active line and number', file: 'tex', run: steps(openNote('trail.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=8'); await page.keyboard.press('End'); await sleep(300); }) },
   txt: { about: 'A .txt file: the plain text box, in the writing font', file: 'txt', run: openNote('trail.txt') },
   'code-js': { about: 'A JavaScript file in the code editor', file: 'js', run: openNote('trail.js') },
+  csv: { about: 'A CSV file as a table (Ctrl+E edits it as text)', file: 'csv', run: openNote('trail-log.csv') },
+  'csv-wide': { about: 'A long, wide CSV scrolled down and right: the header and row numbers stay', file: 'csv-wide', size: { width: 900, height: 640 },
+    run: steps(openNote('readings.csv'), async (page) => { await page.evaluate(() => { const v = document.getElementById('csvView'); v.scrollTop = 900; v.scrollLeft = 260; }); await sleep(300); }) },
+  image: { about: 'An image file in the image viewer', file: 'png', run: openNote('ridge.png') },
+  'image-actual': { about: 'An image at its actual size', file: 'png', run: steps(openNote('ridge.png'), async (page) => { await page.click('#imageView'); await sleep(300); }) },
   dropdown: { about: 'A select open: the note list sort', run: async (page) => { await page.click('#sortSelect'); await sleep(400); } },
   'dropdown-keys': { about: 'A select open, moved through with the keyboard', run: async (page) => { await page.click('#sortSelect'); await sleep(300); await page.keyboard.press('ArrowDown'); await sleep(300); } },
   'dropdown-folder': { about: 'The folder select over a note title, open', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#folderSelect'); await sleep(400); }) },

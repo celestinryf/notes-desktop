@@ -497,7 +497,7 @@ function main() {
       title: 'Open files as notes',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', 'docx', 'json', 'yaml', 'yml', 'csv', 'log'] },
+        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', ...H.WORD_EXT, ...H.IMAGE_EXT, 'csv', 'tsv', 'json', 'yaml', 'yml', 'log'] },
         { name: 'All files', extensions: ['*'] },
       ],
     });
@@ -525,7 +525,7 @@ function main() {
   // The opened file behind note id, which must be of the given kind (pdf, docx).
   function fileNoteOfKind(id, kind) {
     const n = store.get(id);
-    if (!n || !n.filePath || n.fileKind !== kind) throw new Error(kind === 'pdf' ? 'Not a PDF.' : 'Not a Word document.');
+    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.' }[kind] || 'Not a Word document.');
     return n;
   }
 
@@ -705,27 +705,53 @@ function main() {
     rememberDocx(id, buf, mtime);
     return buf;
   });
-  // WordCraft's saves of a Word note. The same kind of file goes over the note's file (after a backup, or into the
-  // "(edited)" copy if it changed on disk since it was read); another kind (Save As PDF, say) becomes a new file beside
-  // it and never overwrites anything.
+  // WordCraft's saves of a Word note:
+  // - Under the document's own name: over the note's file (after a backup, or into the "(edited)" copy if it changed on
+  //   disk since it was read).
+  // - An .odt, .rtf or old .doc, which WordCraft reads but saves as .docx (the format that keeps everything): its Save is
+  //   <name>.docx. That is written beside the original, never over anything, and the note moves to it; the original
+  //   stays as it was.
+  // - Anything else (Save As PDF, another name): a new file beside it, never over anything.
   const WORDCRAFT_EXPORTS = ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'];
-  ipcMain.handle('files:saveWord', (_e, id, bytes, name, expectedMtime) => {
+  // Whether bytes are what their extension says: Word's zip formats and ODT are zips, RTF starts {\rtf.
+  const looksLikeWord = (ext, buf) => {
+    if (H.OOXML_EXT.has(ext) || ext === 'odt') return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
+    if (ext === 'rtf') return buf.slice(0, 5).toString('latin1') === '{\\rtf';
+    return false; // WordCraft writes no .doc: such a save never goes over one
+  };
+  ipcMain.handle('files:saveWord', async (_e, id, bytes, name, expectedMtime) => {
     const n = fileNoteOfKind(id, 'docx');
     if (!ArrayBuffer.isView(bytes) || !bytes.byteLength || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the document is missing or larger than 100 MB, so nothing was written.');
     const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const own = path.extname(n.filePath).slice(1).toLowerCase();
+    const own = H.extOf(n.filePath);
     const given = path.basename(String(name || ''));
     const ext = path.extname(given).slice(1).toLowerCase();
-    // Only the document's own name is the document; Save As under another name (or another kind) is a new file.
+    const stem = path.basename(n.filePath, path.extname(n.filePath));
     if (given.toLowerCase() === path.basename(n.filePath).toLowerCase()) {
-      if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) throw new Error('that is not a Word document, so nothing was written.');
+      if (!looksLikeWord(own, buf)) throw new Error('that is not a .' + own + ' document, so nothing was written.');
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
       rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
       return saved;
     }
+    if (H.WORD_TO_DOCX_EXT.has(own) && given.toLowerCase() === (stem + '.docx').toLowerCase()) {
+      if (!looksLikeWord('docx', buf)) throw new Error('that is not a Word document, so nothing was written.');
+      const file = convert.writeNew(path.dirname(n.filePath), stem, 'docx', buf);
+      let body;
+      try { body = (await readDocxText(file)).body; } catch (_) { body = undefined; } // keeps the old text; the file is saved either way
+      const moved = store.relinkFileNote(id, file, body);
+      conflictCopies.delete(id); // an "(edited)" copy of the old file is not where the .docx's saves go
+      rememberDocx(id, buf, moved.fileMtime);
+      return { relinked: file, mtime: moved.fileMtime };
+    }
     if (!WORDCRAFT_EXPORTS.includes(ext)) throw new Error('Notes does not save .' + (ext || 'extensionless') + ' files from WordCraft.');
-    const base = H.safeFilename(path.basename(given, path.extname(given))) || path.basename(n.filePath, path.extname(n.filePath));
+    const base = H.safeFilename(path.basename(given, path.extname(given))) || stem;
     return { exported: convert.writeNew(path.dirname(n.filePath), base, ext, buf) };
+  });
+
+  // An image note's picture, for the image viewer.
+  ipcMain.handle('files:imageBytes', (_e, id) => {
+    const { bytes, mime } = readImage(fileNoteOfKind(id, 'image').filePath);
+    return { bytes, mime };
   });
   const MAX_DOCX_PATCH_CHARS = 50 * 1024 * 1024;
   ipcMain.handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
@@ -743,7 +769,7 @@ function main() {
     return saved;
   });
 
-  const { discoverAgentFiles, readDocxBuffer, mtimeOf, pathKey } = require('./files');
+  const { discoverAgentFiles, readDocxBuffer, readDocxText, readImage, mtimeOf, pathKey } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
   ipcMain.handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);

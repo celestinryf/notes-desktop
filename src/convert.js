@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { runWorker } = require('./run-worker');
 const { extOf, readText, readDocxBuffer, readDocxText } = require('./files');
+const { OOXML_EXT } = require('./shared/helpers');
 
 const FORMATS = {
   md: 'Markdown (.md)',
@@ -28,7 +29,9 @@ const PDF_TIMEOUT_MS = 2 * 60 * 1000;
 // What the file is, for conversion: md | txt | code | html | docx | pdf, or null when it cannot be converted.
 function sourceOf(note) {
   if (!note || !note.filePath) return null;
-  if (note.fileKind === 'pdf' || note.fileKind === 'docx') return note.fileKind;
+  if (note.fileKind === 'pdf') return 'pdf';
+  // Word's zip formats convert here; an .odt, .rtf or .doc is converted by WordCraft's own Save As instead.
+  if (note.fileKind === 'docx') return OOXML_EXT.has(extOf(note.filePath)) ? 'docx' : null;
   if (note.fileKind !== 'text') return null;
   const ext = extOf(note.filePath);
   if (MARKDOWN_EXT.has(ext)) return 'md';
