@@ -88,9 +88,10 @@ function importNotes(store, dir) {
     const h = hashOf(content);
     if (h !== f.hash) {
       const note = store.get(f.id);
-      if (f.readOnly) {
-        // A copy of an office file's text: the file is what counts, and Notes does not write it from Markdown.
-        details.push('ignored (read-only copy of ' + path.basename(String(f.filePath || f.rel)) + '): ' + f.rel);
+      if (f.readOnly || (note && note.filePath)) {
+        // A copy of an office file's text: the file is what counts, and Notes does not write it from Markdown. The
+        // note decides, not only the flag: the manifest sits in the folder the agent edits.
+        details.push('ignored (read-only copy of ' + path.basename(String((note && note.filePath) || f.filePath || f.rel)) + '): ' + f.rel);
       } else if (note && note.lock) {
         // Locked since the export: its text must not come back in clear as a copy.
         details.push('skipped (note locked meanwhile): ' + f.rel);

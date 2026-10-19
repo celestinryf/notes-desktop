@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fake Craft</title></head>
+<body style="margin:0;background:#222;color:#eee;font:14px sans-serif"><div id="s">fake craft: waiting</div>
+<script>
+// A stand-in for a Craft app's web build: speaks the hosted protocol (see Notes' renderer/craft-frame.js) and nothing
+// else. Used by a probe to drive Notes' Craft-app paths without building any Rust.
+let doc = null, name = null, bytes = null;
+const say = (m, t) => parent.postMessage(m, '*', t || []);
+const log = (t) => { document.getElementById('s').textContent = t; };
+window.addEventListener('message', (e) => {
+  const m = e.data; if (!m || typeof m !== 'object') return;
+  if (m.type === 'open') { doc = m.doc; name = m.name; bytes = new Uint8Array(m.bytes); log('open ' + name + ' (' + bytes.length + ' bytes)'); say({ type: 'opened', doc, ok: true }); }
+  else if (m.type === 'command' && m.doc === doc && m.id === 'file.save') { const copy = new Uint8Array(bytes); say({ type: 'save', doc, name, bytes: copy }, [copy.buffer]); say({ type: 'dirty', doc, dirty: false }); log('saved'); }
+  else if (m.type === 'fake-edit') { say({ type: 'dirty', doc, dirty: true }); log('edited'); }
+  else if (m.type === 'fake-save') { const copy = new Uint8Array(bytes); say({ type: 'save', doc, name: m.name || name, bytes: copy }, [copy.buffer]); if (!m.name) say({ type: 'dirty', doc, dirty: false }); log('saved as ' + (m.name || name)); }
+});
+say({ type: 'ready' });
+</script></body></html>

@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { runWorker } = require('./run-worker');
 const { extOf, readText, readDocumentBuffer, readDocxText } = require('./files');
-const { OOXML_EXT } = require('./shared/helpers');
+const { OOXML_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
 const markitdown = require('./markitdown');
 
 const FORMATS = {
@@ -159,7 +159,10 @@ async function toMarkdown(note, imagesDir) {
   const src = sourceOf(note);
   const file = note.filePath;
   if (src === 'pdf') return pdfToMarkdown(file);
-  if (src === 'office') return markitdown.toMarkdown(file);
+  if (src === 'office') {
+    if (ZIP_DOC_EXT.has(extOf(file))) await readDocumentBuffer(file); // the size limit and the zip guard first
+    return markitdown.toMarkdown(file);
+  }
   if (src === 'docx') {
     let n = 0;
     const html = await docxToHtml(file, imagesDir ? async (image) => {
