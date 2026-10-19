@@ -3779,26 +3779,21 @@
     // WordCraft is a whole word processor: it gets the note's area, and shows its own title, counts and status.
     el.editorColumn.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     el.editor.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
-    if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
+    syncTextViews(note);
+    if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
     el.filePath.textContent = note.filePath;
     el.filePath.title = note.filePath;
     if (note.fileKind === 'pdf') {
-      el.richEditor.classList.add('hidden');
-      el.bodyInput.classList.add('hidden');
       el.pdfEditor.classList.remove('hidden');
       showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
       showPdf(note);
     } else if (note.fileKind === 'docx') {
-      el.richEditor.classList.add('hidden');
-      el.bodyInput.classList.add('hidden');
       // WordCraft (when it is built) is the full editor, with its own ribbon; the simple editor is the fallback.
       el.docxEditor.classList.toggle('hidden', useWordCraft());
       showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
     } else if (note.fileKind === 'binary') {
-      el.richEditor.classList.add('hidden');
-      el.bodyInput.classList.add('hidden');
       showBanner('This file type cannot be shown here. Use "Open with…" to open it in its own app.');
     }
   }
@@ -4694,6 +4689,16 @@
     state.rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
   }
 
+  // Which view shows the open note's text: the rendered editor, or the source (the textarea, or the code editor in
+  // its place). A PDF, Word or other binary file shows neither (its own viewer does), and nor does a locked note.
+  // Set from the note every time, never left over from the last one: in source mode a text file opened after a Word
+  // or PDF file used to keep the textarea hidden, and showed nothing.
+  function syncTextViews(note) {
+    const none = lockedNow() || isViewerOnlyFile(note);
+    el.richEditor.classList.toggle('hidden', none || state.sourceMode);
+    el.bodyInput.classList.toggle('hidden', none || !state.sourceMode);
+  }
+
   function applyEditorMode(source) {
     state.sourceMode = !!source;
     if (source) hideInlineMenu();
@@ -4702,9 +4707,7 @@
     setLabel(el.sourceBtn, state.sourceMode ? 'Rendered' : 'Source');
     el.sourceBtn.setAttribute('aria-label', state.sourceMode ? 'Back to the rendered view' : 'Show Markdown source');
     el.sourceBtn.title = state.sourceMode ? 'Back to the rendered view (Ctrl+E)' : 'Show Markdown source (Ctrl+E)';
-    const viewerOnly = isViewerOnlyFile(state.current) || lockedNow();
-    el.bodyInput.classList.toggle('hidden', !state.sourceMode || viewerOnly);
-    el.richEditor.classList.toggle('hidden', state.sourceMode || viewerOnly);
+    syncTextViews(state.current);
     if (state.sourceMode) autoGrow();
     else if (state.rich && state.currentId && !isViewerOnlyFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
@@ -4790,6 +4793,12 @@
 
   let code = null;      // the code editor, made when a file first needs it
   let codeOn = false;   // it is showing the open note's text
+  let codeFailed = false; // it could not start: files use the textarea until Notes restarts
+
+  // Prose files (.txt) are written, not coded: the plain text box in the writing font, as the user asked, with no
+  // line numbers or highlighting. LaTeX, code and config get the code editor.
+  const PROSE_EXT = new Set(['txt', 'text']);
+  const isProseFile = (note) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
 
   function codeEditor() {
     if (!code) {
@@ -4807,12 +4816,23 @@
   // Shows the note's text in the code editor when it is a plain-text file (and the editor is built), else in the
   // textarea. A new note starts a new undo history.
   function showCode(note, readOnly) {
-    codeOn = !!window.NotesCode && isPlainTextFile(note);
-    el.bodyInput.classList.toggle('uses-code', codeOn);
+    codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile(note) && !isProseFile(note);
     if (codeOn) {
-      codeEditor().load(el.bodyInput.value, { ext: H.extOf(note.filePath), readOnly, placeholder: 'Plain text.', label: H.deriveTitle(note) });
-    } else if (code) code.load('', {}); // nothing of the last file is kept around
+      try {
+        codeEditor().load(el.bodyInput.value, { ext: H.extOf(note.filePath), readOnly, placeholder: 'Plain text.', label: H.deriveTitle(note) });
+      } catch (err) {
+        // Never a blank page: the textarea holds the text, so it shows it instead.
+        console.error('The code editor could not start:', err);
+        codeFailed = true;
+        codeOn = false;
+        toast('The code editor could not start, so this file opens as plain text.');
+      }
+    }
+    if (!codeOn && code) { try { code.load('', {}); } catch (_) { /* nothing of the last file is kept around */ } }
+    el.bodyInput.classList.toggle('uses-code', codeOn);
+    el.bodyInput.classList.toggle('is-prose', isProseFile(note));
     renderCodePosition();
+    autoGrow();
   }
 
   // The status line: where the caret is, for the code editor only (the file row's badge names the language).
@@ -5210,10 +5230,10 @@
         // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
         case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
         // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
-        case 'b': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('**', '**'); } return;
-        case 'i': if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('_', '_'); } return;
+        case 'b': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('**', '**'); } return;
+        case 'i': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
-          if (document.activeElement === el.bodyInput) { e.preventDefault(); wrapSelection('[', '](url)'); }
+          if (document.activeElement === el.bodyInput) { if (!isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('[', '](url)'); } }
           else if (bodyHasFocus() && !codeOn) { e.preventDefault(); openLinkDialog(); }
           return;
         default: break;
