@@ -409,6 +409,8 @@ function main() {
     if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', payload);
     stickies.broadcast('notes:reloaded', payload);
   }
+  // A file note's text arrived after the note did (a spreadsheet's, read by MarkItDown): the list shows it.
+  store.onFileText = (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'file', id }); };
 
   let trayRefreshTimer = null;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
@@ -719,19 +721,33 @@ function main() {
   //   GridCraft: .xls, .xlsb and .ods become .xlsx): its Save is <name>.<that>, written beside the original, never over
   //   anything, and the note moves to it; the original stays as it was.
   // - Anything else (Save As PDF, another name): a new file beside it, never over anything.
+  // own: the formats saved in place. to/from: the format the app saves the others as, and which they are.
   const CRAFT_SAVES = {
-    docx: { app: 'WordCraft', inPlace: true, to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
-    sheet: { app: 'GridCraft', inPlace: true, to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'xlsx', 'xlsm', 'ods', 'csv', 'tsv', 'txt', 'json', 'html', 'png'] },
-    deck: { app: 'DeckCraft', inPlace: false, to: null, from: new Set(), exports: ['pdf', 'pptx', 'potx', 'ppsx', 'png', 'jpg', 'jpeg', 'txt', 'md', 'html'] },
+    docx: { app: 'WordCraft', own: new Set([...H.OOXML_EXT, 'odt', 'rtf']), to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
+    sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'xlsx', 'ods', 'csv', 'tsv', 'txt', 'json', 'html', 'png'] },
+    deck: { app: 'DeckCraft', own: new Set(), to: null, from: new Set(), exports: ['pdf', 'pptx', 'potx', 'ppsx', 'png', 'jpg', 'jpeg', 'txt', 'md', 'html'] },
   };
-  // Whether bytes are what their extension says: the Office and OpenDocument formats are zips, RTF starts {\rtf.
-  // (WordCraft writes no .doc and GridCraft no .xls: such a save never goes over one.)
-  const ZIP_SAVE_EXT = new Set([...H.OOXML_EXT, 'odt', 'xlsx', 'xlsm', 'ods', ...H.DECK_EXT]);
+  // Whether bytes are what their extension says, for the formats this can be told of: the Office and OpenDocument
+  // formats are zips, RTF starts {\rtf. (WordCraft writes no .doc and GridCraft no .xls: such a save never goes
+  // over one.)
+  const checkable = (ext) => H.ZIP_DOC_EXT.has(ext) || ext === 'rtf';
   const looksLike = (ext, buf) => {
-    if (ZIP_SAVE_EXT.has(ext)) return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
+    if (H.ZIP_DOC_EXT.has(ext)) return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
     if (ext === 'rtf') return buf.slice(0, 5).toString('latin1') === '{\\rtf';
     return false;
   };
+  const assertLooksLike = (ext, buf) => { if (checkable(ext) && !looksLike(ext, buf)) throw new Error('that is not a .' + ext + ' file, so nothing was written.'); };
+  // A save that may not go over the note's file (a presentation; a format the app does not write) goes into one
+  // copy beside it, "<name> (from <app>).<ext>", written again on each save in this run: a stable place, so the
+  // document counts as saved and the folder does not fill with numbered copies.
+  const sideCopies = new Map(); // note id -> the copy's path
+  function sideCopy(id, dir, stem, ext, app, buf) {
+    const prev = sideCopies.get(id);
+    if (prev && fs.existsSync(prev)) { fs.writeFileSync(prev, buf); return prev; }
+    const file = convert.writeNew(dir, stem + ' (from ' + app + ')', ext, buf);
+    sideCopies.set(id, file);
+    return file;
+  }
   ipcMain.handle('files:saveCraft', async (_e, id, bytes, name, expectedMtime) => {
     const n = store.get(id);
     const rules = n && n.filePath && CRAFT_SAVES[n.fileKind];
@@ -744,23 +760,28 @@ function main() {
     const stem = path.basename(n.filePath, path.extname(n.filePath));
     const dir = path.dirname(n.filePath);
     if (given.toLowerCase() === path.basename(n.filePath).toLowerCase()) {
-      if (!looksLike(own, buf)) throw new Error('that is not a .' + own + ' file, so nothing was written.');
-      if (!rules.inPlace) return { exported: convert.writeNew(dir, stem, own, buf) };
+      assertLooksLike(own, buf);
+      if (!rules.own.has(own)) return { exported: sideCopy(id, dir, stem, own, rules.app, buf), own: true };
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
       if (n.fileKind === 'docx') rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
       return saved;
     }
     if (rules.to && rules.from.has(own) && given.toLowerCase() === (stem + '.' + rules.to).toLowerCase()) {
-      if (!looksLike(rules.to, buf)) throw new Error('that is not a .' + rules.to + ' file, so nothing was written.');
+      assertLooksLike(rules.to, buf);
       const file = convert.writeNew(dir, stem, rules.to, buf);
+      // The note moves to the new file now; its text follows (a Word document's at once, an office file's in the
+      // background, since MarkItDown takes seconds). A failed read keeps the old text; the file is saved either way.
       let body;
-      try { body = (await readNoteText(n.fileKind, file)).body; } catch (_) { body = undefined; } // keeps the old text; the file is saved either way
+      if (n.fileKind === 'docx') { try { body = (await readNoteText('docx', file)).body; } catch (_) { body = undefined; } }
       const moved = store.relinkFileNote(id, file, body);
+      if (n.fileKind !== 'docx') store.fillFileText(id);
       conflictCopies.delete(id); // an "(edited)" copy of the old file is not where the new file's saves go
+      sideCopies.delete(id);
       if (n.fileKind === 'docx') rememberDocx(id, buf, moved.fileMtime);
       return { relinked: file, mtime: moved.fileMtime };
     }
     if (!rules.exports.includes(ext)) throw new Error('Notes does not save .' + (ext || 'extensionless') + ' files from ' + rules.app + '.');
+    assertLooksLike(ext, buf);
     const base = H.safeFilename(path.basename(given, path.extname(given))) || stem;
     return { exported: convert.writeNew(dir, base, ext, buf) };
   });

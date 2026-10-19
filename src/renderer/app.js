@@ -1465,7 +1465,7 @@
       notes: ['create', 'update', 'togglePin', 'duplicate', 'splitIntoBook', 'undoSplit', 'trash', 'restore', 'destroy', 'emptyTrash'],
       folders: ['create', 'rename', 'setBook', 'reorderPages', 'move', 'delete'],
       lock: ['set', 'unlock', 'relock', 'remove'],
-      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveWord', 'convert', 'asMarkdown'],
+      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveCraft', 'convert', 'asMarkdown'],
       attachments: ['pick', 'addPaths', 'saveRecording'],
       stickies: ['open', 'close', 'create', 'setColor', 'setOnTop'],
       live: ['host', 'join', 'stop'],
@@ -3750,7 +3750,13 @@
       if (!target) return { ok: false, own: true };
       try {
         const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
-        if (r.exported) { toast('Saved ' + r.exported.split(/[\\/]/).pop() + ' next to the ' + ui.what + '.', { label: 'Open', run: () => openFiles([r.exported]) }); return { ok: true, own: false }; }
+        if (r.exported) {
+          const copy = r.exported.split(/[\\/]/).pop();
+          // own: the document's own save went into a copy beside the file (Notes never writes over a presentation),
+          // so the document counts as saved; the file is unchanged.
+          toast(r.own ? 'Saved as ' + copy + ' beside this file, which is unchanged.' : 'Saved ' + copy + ' next to the ' + ui.what + '.', { label: 'Open', run: () => openFiles([r.exported]) });
+          return { ok: true, own: !!r.own };
+        }
         if (r.relinked) { movedTo(target, r); return { ok: true, own: true }; }
         if (!r.savedAs) {
           target.fileMtime = r.mtime;
@@ -3783,7 +3789,9 @@
     const dirty = () => !!(fc && note && fc.isDirty());
     // Leaving the note, hiding or quitting: have the app save first.
     const flush = async () => (dirty() ? fc.requestSave(15000) : true);
-    return { usable, show, clear, dirty, flush };
+    // The next show opens the document again from the file, even the same version (a reload from disk).
+    const forget = () => { shownKey = null; };
+    return { usable, show, clear, dirty, flush, forget };
   }
   const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
   const useWordCraft = () => crafts.wordcraft.usable();
@@ -3803,7 +3811,7 @@
   }
 
   async function showDocx(note) {
-    if (useWordCraft()) { showWordCraft(note); return; }
+    if (useWordCraft()) { crafts.wordcraft.show(note); return; }
     if (!H.isOoxmlWordFile(note)) {
       el.docxEditor.classList.add('hidden');
       showBanner('Notes shows .' + H.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with…" to open it in Word.');
@@ -4371,7 +4379,7 @@
     state.dirty = false;
     pdfShownKey = null; // a PDF or Word document is shown again from the file even if it did not change, dropping its edits
     docxShownKey = null;
-    wordShownKey = null;
+    for (const c of Object.values(crafts)) c.forget();
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
     if (state.currentId !== id || !fresh) return;
