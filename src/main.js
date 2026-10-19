@@ -720,7 +720,7 @@ function main() {
   // own: the formats saved in place. to/from: the format the app saves the others as, and which they are.
   const CRAFT_SAVES = {
     docx: { app: 'WordCraft', own: new Set([...H.OOXML_EXT, 'odt', 'rtf']), to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
-    sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'xlsx', 'ods', 'csv', 'tsv', 'txt', 'json', 'html', 'png'] },
+    sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'csv', 'tsv', 'json', 'html'] },
   };
   // Whether bytes are what their extension says, for the formats this can be told of: the Office and OpenDocument
   // formats are zips, RTF starts {\rtf. (WordCraft writes no .doc and GridCraft no .xls: such a save never goes
@@ -759,6 +759,9 @@ function main() {
       if (!rules.own.has(own)) return { exported: sideCopy(id, dir, stem, own, rules.app, buf), own: true };
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
       if (n.fileKind === 'docx') rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
+      // The text Notes keeps of the file (search, the bot's copy) follows the save, in the background: MarkItDown
+      // takes seconds. A save into an "(edited)" copy leaves the file, and so its text, as it was.
+      if (!saved.savedAs) store.fillFileText(id);
       return saved;
     }
     if (rules.to && rules.from.has(own) && given.toLowerCase() === (stem + '.' + rules.to).toLowerCase()) {
