@@ -13,18 +13,16 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 // Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
-const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, DECK_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
+const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
 const markitdown = require('./markitdown');
 
 // Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
-// 'deck' (a presentation, for DeckCraft) | 'image' | 'binary'. Text is decided by extension, then by sniffing for
-// NUL bytes.
+// 'image' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
 function kindOf(filePath) {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
   if (WORD_EXT.has(ext)) return 'docx';
   if (SHEET_EXT.has(ext)) return 'sheet';
-  if (DECK_EXT.has(ext)) return 'deck';
   if (IMAGE_EXT.has(ext)) return 'image';
   if (TEXT_EXT.has(ext)) return 'text';
   try {
@@ -133,7 +131,7 @@ async function assertSafeZip(buf, want) {
 
 const isZipDocument = (filePath) => ZIP_DOC_EXT.has(extOf(filePath));
 
-// The bytes of a Word document, spreadsheet or presentation, checked for size and (for the zip formats) for zip bombs.
+// The bytes of a Word document or spreadsheet, checked for size and (for the zip formats) for zip bombs.
 // Everything that opens one goes through here.
 async function readDocumentBuffer(filePath) {
   if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
@@ -162,8 +160,8 @@ async function readDocxText(filePath) {
   return { body: body.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
 }
 
-// The text of a spreadsheet or presentation, kept as the note's body for search, the list snippet and the bot (the
-// file itself is shown by GridCraft or DeckCraft from its own bytes). MarkItDown reads it when it is installed and
+// The text of a spreadsheet, kept as the note's body for search, the list snippet and the bot (the file itself is
+// shown by GridCraft from its own bytes). MarkItDown reads it when it is installed and
 // reads the format; otherwise the body is '' and the file still opens. When MarkItDown fails on a file it could read
 // (a timeout, a crash), body is undefined: the caller keeps whatever text it had rather than erase it.
 const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
@@ -182,13 +180,13 @@ async function readOfficeText(filePath) {
 }
 
 // The kinds of file note that carry the file's text as their body.
-const TEXTED_KINDS = new Set(['text', 'docx', 'sheet', 'deck']);
+const TEXTED_KINDS = new Set(['text', 'docx', 'sheet']);
 // The body a file note of this kind keeps, with the file's time: { body, mtime }. Other kinds (a PDF, an image, a
 // binary) keep none.
 async function readNoteText(kind, filePath) {
   if (kind === 'text') return readText(filePath);
   if (kind === 'docx') return readDocxText(filePath);
-  if (kind === 'sheet' || kind === 'deck') return readOfficeText(filePath);
+  if (kind === 'sheet') return readOfficeText(filePath);
   return { body: '', mtime: mtimeOf(filePath) };
 }
 

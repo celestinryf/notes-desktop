@@ -1,12 +1,12 @@
 'use strict';
-/* The Craft apps edit office files inside Notes: WordCraft (Word documents), GridCraft (spreadsheets) and DeckCraft
-   (presentations), the user's forks of ArtCraft's Rust office apps (github.com/celestinryf/<name>), each built to
-   WebAssembly and shown in a frame of its own. A build is served from its folder under a private scheme named after
-   the app (wordcraft://app, gridcraft://app, deckcraft://app); the frame and the page talk with postMessage (see
-   apps/<name>-web/src/host.rs in each fork, and renderer/craft-frame.js).
+/* The Craft apps edit office files inside Notes: WordCraft (Word documents) and GridCraft (spreadsheets), the user's
+   forks of ArtCraft's Rust office apps (github.com/celestinryf/<name>), each built to WebAssembly and shown in a
+   frame of its own. A build is served from its folder under a private scheme named after the app (wordcraft://app,
+   gridcraft://app); the frame and the page talk with postMessage (see apps/<name>-web/src/host.rs in each fork, and
+   renderer/craft-frame.js).
 
    This module only finds and serves the builds. Without one, Notes shows what it can on its own: its simple Word
-   editor; for spreadsheets and presentations, a banner and "Open with…".
+   editor; for spreadsheets, a banner and "Open with…".
    Build one with `trunk build --release` in the fork's apps/<name>-web; the output is <repo>\dist\web. */
 const fs = require('fs');
 const os = require('os');
@@ -17,7 +17,6 @@ const path = require('path');
 const APPS = {
   wordcraft: { label: 'WordCraft', env: 'WORDCRAFT' },
   gridcraft: { label: 'GridCraft', env: 'GRIDCRAFT' },
-  deckcraft: { label: 'DeckCraft', env: 'DECKCRAFT' },
 };
 const KEYS = Object.keys(APPS);
 const MIME = {
@@ -49,7 +48,7 @@ function resolve(dir, url) {
   return file;
 }
 
-// Serves every app's build. Returns which are there: { wordcraft, gridcraft, deckcraft }.
+// Serves every app's build. Returns which are there: { wordcraft, gridcraft }.
 function serve(protocol) {
   const ready = {};
   for (const key of KEYS) {

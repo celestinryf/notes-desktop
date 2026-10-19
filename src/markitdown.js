@@ -1,9 +1,9 @@
 'use strict';
-/* MarkItDown (Microsoft's Python converter, `pip install "markitdown[all]"`) reads the office files Notes has no reader
-   of its own for: spreadsheets, presentations, e-books, Outlook messages and zips. Its Markdown is made for text
-   analysis, not for people (its own README says so): it is the text a note keeps for search and the bot, and the
-   source of "Convert to…" for these files, never how they are shown. It is optional: without `markitdown` on PATH
-   these files still open (in GridCraft and DeckCraft), they just have no text.
+/* MarkItDown (Microsoft's Python converter, `pip install "markitdown[all]"`) reads the files Notes has no reader of
+   its own for: spreadsheets, e-books, Outlook messages and zips. Its Markdown is made for text analysis, not for
+   people (its own README says so): it is the text a note keeps for search and the bot, and the source of
+   "Convert to…" for these files, never how they are shown. It is optional: without `markitdown` on PATH a
+   spreadsheet still opens (in GridCraft), it just has no text. (Presentations are out of Notes' scope.)
 
    It runs with no shell and no plugins: a plugin can send the file to an AI service, and Notes never does that.
    Callers run the size limit and the zip guard (files.readDocumentBuffer) on a zip-based file before calling it. */
@@ -16,7 +16,7 @@ const { resolveExecutable, launchSpec } = require('./claude-bin');
 // What MarkItDown reads that nothing else in Notes does (Word, PDF, HTML and text have their own readers): the
 // extensions its converters accept by name (checked against markitdown 0.1.8; the macro and template variants and
 // the OpenDocument formats are not among them).
-const EXT = new Set(['xlsx', 'xls', 'pptx', 'epub', 'msg', 'zip']);
+const EXT = new Set(['xlsx', 'xls', 'epub', 'msg', 'zip']);
 const MAX_INPUT_BYTES = 100 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 const TIMEOUT_MS = 2 * 60 * 1000;

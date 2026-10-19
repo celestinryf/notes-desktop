@@ -1,7 +1,7 @@
 'use strict';
-/* A Craft app in a frame: WordCraft, GridCraft or DeckCraft (the user's forks of ArtCraft's Rust office apps, built
+/* A Craft app in a frame: WordCraft or GridCraft (the user's forks of ArtCraft's Rust office apps, built
    to WebAssembly) editing a document in place of Notes' own editors. One frame per app, loaded once and reused for
-   every document; the three apps speak the same hosted-mode protocol.
+   every document; both apps speak the same hosted-mode protocol.
 
    Messages (see apps/<name>-web/src/host.rs in each fork). Each document gets a token (doc) that the app repeats on
    everything it says about it, so nothing about an earlier document is ever taken for the current one.
