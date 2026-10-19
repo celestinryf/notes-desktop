@@ -74,6 +74,12 @@ The climb gains $\Delta h = 640\,\text{m}$ over the first loop.
 
 \end{document}
 `],
+  txt: ['trail.txt', `Trail notes
+
+The north loop reopened on Saturday. Bring water: the spring at mile four is dry.
+
+Mud on the switchbacks below the ridge; the upper meadow is clear.
+`],
   js: ['trail.js', `// Elevation gain over the first loop, in metres.
 const loop = { name: 'North loop', gain: 640, open: true };
 
@@ -200,6 +206,7 @@ const SCENES = {
   tex: { about: 'A LaTeX file open in the code editor', file: 'tex', run: openNote('trail.tex') },
   'tex-small': { about: 'The code editor in a small window', file: 'tex', size: { width: 820, height: 560 }, run: openNote('trail.tex') },
   'tex-focus': { about: 'The code editor focused: caret, active line and number', file: 'tex', run: steps(openNote('trail.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=8'); await page.keyboard.press('End'); await sleep(300); }) },
+  txt: { about: 'A .txt file: the plain text box, in the writing font', file: 'txt', run: openNote('trail.txt') },
   'code-js': { about: 'A JavaScript file in the code editor', file: 'js', run: openNote('trail.js') },
   dropdown: { about: 'A select open: the note list sort', run: async (page) => { await page.click('#sortSelect'); await sleep(400); } },
   'dropdown-keys': { about: 'A select open, moved through with the keyboard', run: async (page) => { await page.click('#sortSelect'); await sleep(300); await page.keyboard.press('ArrowDown'); await sleep(300); } },
