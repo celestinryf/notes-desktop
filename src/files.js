@@ -12,11 +12,7 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
   'lua', 'luau', 'r', 'm', 'pl', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
-function extOf(filePath) {
-  const base = path.basename(filePath).toLowerCase();
-  if (!base.includes('.')) return base; // Makefile, Dockerfile
-  return base.slice(base.lastIndexOf('.') + 1);
-}
+const { extOf } = require('./shared/helpers'); // shared with the renderer, which picks the code editor's language by it
 
 // Returns 'text' | 'pdf' | 'docx' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
 function kindOf(filePath) {

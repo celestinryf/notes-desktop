@@ -308,6 +308,13 @@
     return !!(note && note.filePath && note.fileKind !== 'text');
   }
 
+  // A file's extension in lower case, or its whole name when it has none (Makefile, Dockerfile).
+  function extOf(filePath) {
+    const base = String(filePath || '').split(/[\\/]/).pop().toLowerCase();
+    if (!base.includes('.')) return base;
+    return base.slice(base.lastIndexOf('.') + 1);
+  }
+
   // An opened text file that is not Markdown (.txt, code, config) is edited as the plain text it is, never rendered.
   function isPlainTextFile(note) {
     return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
@@ -424,7 +431,7 @@
 
   return {
     fuzzyScore,
-    splitAtHeadings, headingTitle, isViewerOnlyFile, isPlainTextFile, imageBaseFor, fileStamp,
+    splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, imageBaseFor, fileStamp,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
