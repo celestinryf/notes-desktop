@@ -91,7 +91,7 @@
     historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
     moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
-    inlineMenu: $('#inlineMenu'),
+    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'),
     sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
     tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
     activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
@@ -1446,7 +1446,7 @@
       notes: ['create', 'update', 'togglePin', 'duplicate', 'splitIntoBook', 'undoSplit', 'trash', 'restore', 'destroy', 'emptyTrash'],
       folders: ['create', 'rename', 'setBook', 'reorderPages', 'move', 'delete'],
       lock: ['set', 'unlock', 'relock', 'remove'],
-      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'convert', 'asMarkdown'],
+      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveWord', 'convert', 'asMarkdown'],
       attachments: ['pick', 'addPaths', 'saveRecording'],
       stickies: ['open', 'close', 'create', 'setColor', 'setOnTop'],
       live: ['host', 'join', 'stop'],
@@ -3494,9 +3494,11 @@
   // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed
   // (nothing in it runs), with a policy that allows only inline styles and data: images. So the file's styles
   // cannot reach the app, and it loads nothing from the network, so opening it cannot tell anyone you did.
+  // docx-preview adds its own wrapper style after this one, so these rules are more specific to win. safe center: a page
+  // wider than the frame starts at its left edge and scrolls, instead of being cut off on the left.
   const DOCX_FRAME = '<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
-    + '<style>html, body { margin: 0; } .docx-wrapper { background: #e9e4da; padding: 16px; }</style></head><body></body></html>';
+    + '<style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; }</style></head><body></body></html>';
   // docxShownKey (note id + file version) skips re-rendering the same file; docxSeq drops a render that is
   // overtaken by a newer one.
   let docxShownKey = null;
@@ -3505,6 +3507,7 @@
   // docxBanner: what the banner says about it (shown again when the same version is shown again).
   let docx = null, docxNote = null, docxBanner = '';
   function clearDocx() {
+    clearWordCraft();
     docxShownKey = null;
     docxSeq++;
     docxNote = null;
@@ -3572,7 +3575,94 @@
     return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
   }
 
+  // ---- Word documents in WordCraft ----------------------------------------------------------------
+  // wordNote: the document WordCraft shows, { id, fileMtime, name } as read or last saved.
+  let wc = null, wordNote = null, wordShownKey = null, wordSeq = 0, wordcraftDown = false;
+  const useWordCraft = () => !!(state.info && state.info.wordcraft) && !GUEST && !wordcraftDown;
+  function wordcraft() {
+    if (!wc) {
+      wc = window.NotesWordCraft.create({
+        frame: el.wordcraftFrame,
+        origin: 'wordcraft://app',
+        url: 'wordcraft://app/index.html?host',
+        onSave: saveWordFromFrame,
+        onDirty: (d) => { if (wordNote && state.currentId === wordNote.id) setSaved(d ? 'Edited' : 'Saved'); },
+        onOpened: () => { el.wordcraftFrame.classList.remove('is-opening'); if (wordNote && state.currentId === wordNote.id) showBanner(''); },
+        onOpenFailed: (err) => {
+          clearWordCraft();
+          showBanner('WordCraft could not open this document: ' + err + '. Use "Open with…" to open it in Word.');
+        },
+        // The build is there but did not start: Word documents use the simple editor until Notes restarts.
+        onUnavailable: () => {
+          wordcraftDown = true;
+          clearWordCraft();
+          const n = state.current;
+          if (n && n.filePath && n.fileKind === 'docx') renderFileRow(n);
+          toast('WordCraft did not start, so Word documents open in the simple editor for now.');
+        },
+      });
+    }
+    return wc;
+  }
+  async function showWordCraft(note) {
+    const key = note.id + ':' + note.fileMtime;
+    el.wordcraftFrame.classList.remove('hidden');
+    if (wordShownKey === key) return;
+    wordShownKey = key;
+    const seq = ++wordSeq;
+    // The last document is closed at once, and the frame stays out of sight until the new one has opened, so
+    // nothing is typed into a document that is about to be replaced.
+    wordNote = null;
+    if (wc) wc.close();
+    el.wordcraftFrame.classList.add('is-opening');
+    showBanner('Opening in WordCraft…');
+    try {
+      const bytes = await api.files.docxBytes(note.id);
+      // Moved on (another note, or this one again) while the file was read: that later open wins.
+      if (seq !== wordSeq || !state.current || state.current.id !== note.id) return;
+      const name = note.filePath.split(/[\\/]/).pop();
+      wordNote = { id: note.id, fileMtime: note.fileMtime, name };
+      wordcraft().open(name, bytes, wordNote);
+    } catch (err) {
+      if (seq !== wordSeq) return;
+      clearWordCraft();
+      showBanner('Could not open this Word document in WordCraft: ' + ipcErrorText(err) + ' Use "Open with…" to open it in Word.');
+    }
+  }
+  function clearWordCraft() {
+    wordSeq++;
+    wordShownKey = null;
+    wordNote = null;
+    if (wc) wc.close();
+    el.wordcraftFrame.classList.add('hidden');
+  }
+  // WordCraft saved (Ctrl+S there, or a save Notes asked for): write it to the file with Notes' usual safety. target is
+  // the document the save was made in, which may no longer be on show.
+  async function saveWordFromFrame(name, bytes, target) {
+    if (!target) return false;
+    try {
+      const r = await api.files.saveWord(target.id, bytes, name, target.fileMtime);
+      if (r.exported) { toast('Saved ' + r.exported.split(/[\\/]/).pop() + ' next to the document.', { label: 'Open', run: () => openFiles([r.exported]) }); return true; }
+      if (!r.savedAs) {
+        target.fileMtime = r.mtime;
+        if (wordNote === target) wordShownKey = target.id + ':' + r.mtime;
+      }
+      reportFileSaved(target, r, false, 'document');
+      return true;
+    } catch (err) {
+      toast('Could not save the document: ' + ipcErrorText(err));
+      return false;
+    }
+  }
+  const wordDirty = () => !!(wc && wordNote && wc.isDirty());
+  // Leaving the note, hiding or quitting: have WordCraft save first.
+  async function flushWord() {
+    if (!wordDirty()) return true;
+    return wc.requestSave(15000);
+  }
+
   async function showDocx(note) {
+    if (useWordCraft()) { showWordCraft(note); return; }
     const key = note.id + ':' + note.fileMtime;
     if (docxShownKey === key) { if (docxBanner) showBanner(docxBanner); return; }
     docxShownKey = key;
@@ -3652,6 +3742,9 @@
     if (!(isFile && note.fileKind === 'pdf')) clearPdf();
     closeConvertMenu();
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || note.fileKind === 'docx'));
+    // WordCraft is a whole word processor: it gets the note's area, and shows its own title, counts and status.
+    el.editorColumn.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
+    el.editor.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
     if (!isFile) { const hid = lockedNow(); el.richEditor.classList.toggle('hidden', hid || state.sourceMode); el.bodyInput.classList.toggle('hidden', hid || !state.sourceMode); return; }
     el.fileKind.textContent = (note.fileKind || 'file').toUpperCase();
     el.filePath.textContent = note.filePath;
@@ -3665,8 +3758,9 @@
     } else if (note.fileKind === 'docx') {
       el.richEditor.classList.add('hidden');
       el.bodyInput.classList.add('hidden');
-      el.docxEditor.classList.remove('hidden');
-      showBanner('Opening the Word document…');
+      // WordCraft (when it is built) is the full editor, with its own ribbon; the simple editor is the fallback.
+      el.docxEditor.classList.toggle('hidden', useWordCraft());
+      showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
     } else if (note.fileKind === 'binary') {
       el.richEditor.classList.add('hidden');
@@ -3839,12 +3933,13 @@
   }
 
   // Opened documents (PDF, Word) as one: unsaved edits, edits in progress, and saving them.
-  const documentDirty = () => pdfDirty() || docxDirty();
-  const documentBusy = () => pdfBusy() || docxDirty();
+  const documentDirty = () => pdfDirty() || docxDirty() || wordDirty();
+  const documentBusy = () => pdfBusy() || docxDirty() || wordDirty();
   async function flushDocuments(opts) {
     const pdfSaved = await flushPdf(opts);
     const docxSaved = await flushDocx(opts);
-    return pdfSaved && docxSaved;
+    const wordSaved = await flushWord();
+    return pdfSaved && docxSaved && wordSaved;
   }
 
   // ---- PDF pages: turn, move, remove, add from another PDF ----------------------------------------
@@ -4035,9 +4130,10 @@
     else if (b === el.pdfSaveBtn) flushPdf({ commit: true, explicit: true });
   }
 
+  // An empty text hides the banner.
   function showBanner(text) {
     el.fileBanner.textContent = text;
-    el.fileBanner.classList.remove('hidden');
+    el.fileBanner.classList.toggle('hidden', !text);
   }
 
   async function openFiles(paths) {
@@ -4111,6 +4207,7 @@
     state.dirty = false;
     pdfShownKey = null; // a PDF or Word document is shown again from the file even if it did not change, dropping its edits
     docxShownKey = null;
+    wordShownKey = null;
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
     if (state.currentId !== id || !fresh) return;

@@ -776,6 +776,14 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .docx-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
 .docx-editor.read-only .docx-toolbar { display: none; }
 .docx-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+/* WordCraft's full editor for Word documents: it has its own ribbon, so it gets the whole note area. */
+.wordcraft-frame { flex: 1 1 auto; width: 100%; min-height: 320px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--paper); }
+.wordcraft-frame.is-opening { visibility: hidden; }
+.editor-column.shows-wordcraft { height: 100%; flex: 1 1 auto; }
+.editor-column.shows-wordcraft :is(.note-path, .title-input, .tags-input, .related) { display: none; }
+.editor-column.shows-wordcraft .editor-body { flex: 1 1 auto; min-height: 0; }
+.editor.shows-wordcraft .editor-scroll { overflow: hidden; }
+.editor.shows-wordcraft :is(#statusWords, #statusChars, .status-bar .dot) { display: none; }
 /* The PDF editor: a tool row over pdf.js's viewer, which must sit in an absolutely positioned, scrolling box. */
 .pdf-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
 .pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: var(--s1); border-bottom: 1px solid var(--line-2); background: var(--raised); }

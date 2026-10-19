@@ -44,6 +44,42 @@ function parseArgs(argv) {
 }
 
 /* Sample data: a believable notebook, so layouts are judged with real lengths, not lorem ipsum. */
+// A real Word document (made with the docx library) and the file note that opens it, for scenes that need one.
+async function sampleWordNote(dir) {
+  const { Document, Packer, Paragraph, HeadingLevel, TextRun } = require('docx');
+  const doc = new Document({ sections: [{ children: [
+    new Paragraph({ text: 'Trail report', heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ children: [new TextRun('The north loop reopened on Saturday. '), new TextRun({ text: 'Bring water:', bold: true }), new TextRun(' the spring at mile four is dry.')] }),
+    new Paragraph({ text: 'Conditions', heading: HeadingLevel.HEADING_2 }),
+    new Paragraph({ text: 'Mud on the switchbacks below the ridge; the upper meadow is clear.' }),
+  ] }] });
+  const file = path.join(dir, 'Trail report.docx');
+  fs.writeFileSync(file, await Packer.toBuffer(doc));
+  const now = Date.now();
+  return { id: 'n-word', title: 'Trail report.docx', body: '', tags: [], folderId: null, filePath: file, fileKind: 'docx', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 1000 };
+}
+
+// A LaTeX file and the file note that opens it, as plain text.
+function sampleTexNote(dir) {
+  const body = String.raw`\documentclass{article}
+\usepackage{amsmath}
+\title{Trail notes}
+
+\begin{document}
+\maketitle
+
+\section{Elevation}
+The climb gains $\Delta h = 640\,\text{m}$ over the first loop.
+% Check against the park map.
+
+\end{document}
+`;
+  const file = path.join(dir, 'trail.tex');
+  fs.writeFileSync(file, body);
+  const now = Date.now();
+  return { id: 'n-tex', title: 'trail.tex', body, tags: [], folderId: null, filePath: file, fileKind: 'text', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 2000 };
+}
+
 function seed(now) {
   const f = (id, name, extra) => Object.assign({ id, name, parentId: null, createdAt: now - 30 * DAY }, extra);
   const folders = [
@@ -139,6 +175,8 @@ const SCENES = {
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
   'tree-view': { about: 'The note list as folders with their notes, and the open note headings under it', settings: { listMode: 'tree' }, run: openNote('Q4 planning') },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
+  word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
+  tex: { about: 'A LaTeX file open as text', tex: true, run: openNote('trail.tex') },
   small: { about: 'A small window (820x560) with a note open', size: { width: 820, height: 560 }, run: openNote('Q4 planning') },
 };
 
@@ -149,6 +187,8 @@ async function shoot(theme, name, opts) {
   data.settings.theme = theme;
   Object.assign(data.settings, SCENES[name].settings || {});
   data.settings.window = { width: opts.size.width, height: opts.size.height };
+  if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
+  if (SCENES[name].tex) data.notes.push(sampleTexNote(dataDir));
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),
