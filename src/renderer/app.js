@@ -176,8 +176,20 @@
   function applyTheme() {
     const theme = effectiveTheme();
     document.documentElement.dataset.theme = theme;
+    applyColorScheme(theme);
     syncTitleBar();
     if (wc) wc.setTheme(theme);
+  }
+
+  // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.js); the
+  // built-in one clears them, so the stylesheet's own colours show.
+  function applyColorScheme(mode) {
+    const tokens = window.NotesThemes.resolve(state.settings, mode);
+    const style = document.documentElement.style;
+    for (const name of window.NotesThemes.TOKENS) {
+      if (tokens) style.setProperty('--' + name, tokens[name]);
+      else style.removeProperty('--' + name);
+    }
   }
 
   function applySettings(settings, opts) {
@@ -298,7 +310,8 @@
   function bindSidebarFloat() {
     if (GUEST) return;
     // Stay while something in it is still being used: a name being typed, or its folder menu.
-    const busy = () => state.editingFolder || state.menuFolderId || (el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
+    const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains('is-resizing')
+      || (el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
     const leaveSoon = () => {
       clearTimeout(peekTimer);
       peekTimer = setTimeout(function check() {
@@ -1554,8 +1567,10 @@
     el.tabList.replaceChildren(frag);
     const active = el.tabList.querySelector('.tab.is-active');
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    // One tab showing a note, and no split: no bar. A blank editor keeps it (its + is the way to a tab then), and a
-    // split keeps both bars, for Close side and the active side's mark.
+    // One tab showing a note, and no split: no tabs (the user's rule, PR 71). The bar itself stays, for the note's
+    // actions and the window's buttons. A blank editor keeps its + (the way to a tab then), and a split keeps both
+    // sides' tabs, for Close side and the active side's mark.
+    el.tabBar.classList.toggle('is-solo', !GUEST && !tabs.split && tabs.ids.length === 1 && !!tabs.ids[0]);
     syncTitleBar();
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
     el.paneCloseBtn.classList.toggle('hidden', !GUEST);
@@ -3506,7 +3521,7 @@
   // wider than the frame starts at its left edge and scrolls, instead of being cut off on the left.
   const DOCX_FRAME = '<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
-    + '<style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; }</style></head><body></body></html>';
+    + '<style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>';
   // docxShownKey (note id + file version) skips re-rendering the same file; docxSeq drops a render that is
   // overtaken by a newer one.
   let docxShownKey = null;

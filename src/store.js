@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const H = require('./shared/helpers');
+const Themes = require('./shared/themes');
 const F = require('./files');
 const L = require('./lock');
 
@@ -13,6 +14,8 @@ const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_SETTINGS = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
   theme: 'system',          // system | light | dark
+  colorScheme: 'notes',     // a scheme in src/shared/themes.js SCHEMES, or 'custom'; 'notes' is styles.css itself
+  customColors: null,       // { light?, dark? }: { background, text, accent } (#rrggbb) each; used by 'custom'
   fontSize: 16,
   openAtLogin: true,
   alwaysOnTop: false,
@@ -171,6 +174,8 @@ function sanitizeSettings(input) {
   const acc = H.parseAccelerator(s.hotkey);
   s.hotkey = acc.ok ? acc.value : DEFAULT_SETTINGS.hotkey;
   s.theme = ['system', 'light', 'dark'].includes(s.theme) ? s.theme : 'system';
+  s.customColors = Themes.cleanCustom(s.customColors);
+  s.colorScheme = Themes.cleanSchemeId(s.colorScheme, s.customColors);
   s.fontSize = clampFontSize(s.fontSize);
   s.openAtLogin = !!s.openAtLogin;
   s.alwaysOnTop = !!s.alwaysOnTop;
