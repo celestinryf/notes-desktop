@@ -2,9 +2,9 @@
 
    Identity (pinned, from the club website): cream / peach / tangerine / ember / leaf / ink; Fraunces for display,
    Geist for the interface, Geist Mono for code and paths only.
-   Signature move: the "sticker" (1px ink outline + hard 4px offset shadow), kept for the command palette alone.
-   The other floating layers (menus, dialogs, toasts, the find bar, select lists) lift off with a hairline and a
-   soft shadow (--float-*); buttons and pills are flat.
+   No shadows anywhere, and no dark edges round things in dark mode (the user dislikes them, 2026-10-19). Floating
+   layers (menus, dialogs, toasts, the find bar, select lists, the palette, the floating sidebar) stand apart by
+   their tone, with a thin warm hairline in light only; buttons and pills are flat.
    Everything else is quiet: tonal surfaces instead of borders, one accent with one job, a 4px grid. */
 
 :root {
@@ -49,12 +49,9 @@
   --accent-hover: #f68a52;
   --document-bg: #e6e0d6;  /* behind PDF pages: paper-white pages need a darker ground */
 
-  /* the sticker: the command palette's outline and hard shadow (the one floating layer that keeps it) */
-  --sticker-line: var(--ink);
-  --sticker-shadow: var(--ink);
-  /* every other floating layer: a hairline and a soft shadow */
+  /* floating layers: a thin warm hairline in light (the paper and a menu are nearly the same white); none in dark,
+     where the raised tone is enough. No shadows anywhere. */
   --float-line: var(--line-2);
-  --float-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent), 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent);
   /* code (the plain-text file editor): each >= 4.5:1 on the paper and raised surfaces, in both themes */
   --syn-keyword: var(--accent-text);  /* keywords, LaTeX commands */
   --syn-string: #8a5200;              /* strings */
@@ -101,7 +98,7 @@
   --chrome: #150e0a;
   --base: #1a120d;
   --paper: #211710;
-  --raised: #2b1f17;
+  --raised: #33261c;   /* a clear step above the paper (1.20:1) and the list (1.26:1): floating layers have no shadow */
   --hover: rgba(251, 241, 228, 0.06);
   --pressed: rgba(251, 241, 228, 0.1);
   --selected: rgba(244, 123, 62, 0.22);
@@ -109,7 +106,7 @@
   --well: rgba(251, 241, 228, 0.06);
   --fg: #f6eadb;
   --fg-2: #d3b9a4;
-  --fg-3: #b49a86;
+  --fg-3: #bea592;     /* 4.5:1+ on every surface, also under a hover or pressed fill (4.69:1 on a pressed row in a menu) */
   --accent-text: #ffa070;
   --danger: #ff8a66;
   --ok: #9ccf80;
@@ -122,9 +119,7 @@
   --focus: #ffa070;
   --accent-hover: #ff925c;
   --document-bg: #120c08;
-  --sticker-line: transparent;   /* no light outline: in dark the sticker is its tone and its shadow */
-  --sticker-shadow: #000;
-  --float-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --float-line: transparent;     /* no edge round floating layers in dark: neither light (never) nor black (disliked) */
   --syn-string: #e8b860;
   --syn-atom: #9ccf80;
   color-scheme: dark;
@@ -285,7 +280,6 @@ select:open::picker-icon { rotate: 180deg; }
   margin: var(--s1) 0; padding: var(--s1);
   border: 1px solid var(--float-line); border-radius: var(--r-md);
   background: var(--raised); color: var(--fg);
-  box-shadow: var(--float-shadow);
   max-height: min(320px, 60vh); overflow-y: auto;
   opacity: 0; translate: 0 -4px;
   transition: opacity var(--dur-2) var(--ease), translate var(--dur-2) var(--ease), display var(--dur-2) allow-discrete, overlay var(--dur-2) allow-discrete;
@@ -307,13 +301,12 @@ select option:disabled { opacity: 0.45; cursor: default; }
 input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--ember); }
 :root[data-theme="dark"] input[type="range"], :root[data-theme="dark"] input[type="checkbox"] { accent-color: var(--tangerine); }
 
-/* ---- floating layers: menus, the find bar, dialogs, toasts, the floating sidebar, select lists ------------- */
-/* They lift off the page with a hairline and a soft shadow. The command palette alone keeps the sticker, the app's
-   signature (see .palette); select lists take the same look in ::picker(select) below. */
-.popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .toast {
+/* ---- floating layers: menus, the find bar, dialogs, the palette, toasts, the floating sidebar, select lists --- */
+/* Flat: their raised tone sets them apart, with a hairline in light only. No shadow (the user dislikes them).
+   Select lists take the same look in ::picker(select) below. */
+.popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .palette, .toast {
   border: 1px solid var(--float-line); border-radius: var(--r-md);
   background: var(--raised); color: var(--fg);
-  box-shadow: var(--float-shadow);
 }
 .popover {
   position: fixed; z-index: 30; /* above the floating sidebar (25) that opens some of them */
@@ -386,7 +379,7 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   transition: transform var(--dur-2) var(--ease), visibility 0s linear var(--dur-2);
 }
 .app.sidebar-float.sidebar-peek .app-sidebar { transform: none; visibility: visible; transition: transform var(--dur-2) var(--ease); }
-.app.sidebar-float .app-sidebar > .resizer { display: none; }
+/* Its right edge resizes it, as the docked sidebar's does (same width, same handle; app.js setupResizer). */
 .search-trigger {
   display: flex; align-items: center; gap: var(--s2);
   height: 32px; padding: 0 var(--s2) 0 10px;
@@ -609,6 +602,8 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 /* No note on this side: nothing for the note's actions to act on. */
 .pane-main:has(> .editor.hidden) .note-actions { display: none; }
 .editor-pane.is-split .pane-main.is-active-side .tab-bar, body.pane-guest .pane-main.is-active-side .tab-bar { box-shadow: inset 0 -2px 0 var(--accent); }
+/* One tab showing a note and no split: no tabs, and no + (Ctrl+T and Ctrl+click still open a tab). */
+.tab-bar.is-solo .tabs, .tab-bar.is-solo .tab-add { display: none; }
 .tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; align-self: center; align-items: center; overflow-x: auto; scrollbar-width: none; }
 .tab {
   display: flex; align-items: center; gap: var(--s1);
@@ -901,9 +896,9 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-pages-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--s1) var(--s1) var(--s1) var(--s3); border-bottom: 1px solid var(--line-2); background: var(--raised); }
 .pdf-pages-title { font-size: var(--t-sm); color: var(--fg-2); }
 .pdf-pages-grid { flex: 1; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--s4); padding: var(--s4); background: var(--document-bg); }
-.pdf-page-card { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 156px; margin: 0; padding: var(--s2); border-radius: var(--r-md); background: var(--paper); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
+.pdf-page-card { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 156px; margin: 0; padding: var(--s2); border-radius: var(--r-md); background: var(--paper); }
 .pdf-page-thumb { width: 130px; height: 170px; display: flex; align-items: center; justify-content: center; }
-.pdf-page-thumb canvas { background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform var(--dur-2); }
+.pdf-page-thumb canvas { background: #fff; transition: transform var(--dur-2); }
 .pdf-page-num { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); color: var(--fg-2); }
 .pdf-page-acts { display: flex; gap: 2px; }
 .pdf-page-acts .tool-btn { width: var(--control-h); padding: 0; }
@@ -1121,7 +1116,7 @@ button.book-name:hover { background: var(--hover); }
 .segmented { display: inline-flex; align-self: flex-start; padding: 2px; border-radius: var(--r-md); background: var(--well); }
 .segmented button { height: 26px; padding: 0 var(--s3); border: none; border-radius: var(--r-sm); background: transparent; color: var(--fg-2); font-size: var(--t-sm); font-weight: 500; transition: background var(--dur-1); }
 .segmented button:hover { color: var(--fg); }
-.segmented button.is-on { background: var(--raised); color: var(--fg); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-2); }
+.segmented button.is-on { background: var(--raised); color: var(--fg); font-weight: 600; }
 
 /* Vaults */
 .vault-list { display: flex; flex-direction: column; gap: var(--s2); }
@@ -1134,15 +1129,12 @@ button.book-name:hover { background: var(--hover); }
 .vault-actions .input { max-width: 260px; height: var(--control-h); font-size: var(--t-xs); }
 .vault-empty { font-size: var(--t-sm); color: var(--fg-2); }
 
-/* ---- the command palette (the one floating layer that keeps the sticker) ------------------------------- */
+/* ---- the command palette ------------------------------------------------------------------------------ */
 .palette {
   position: fixed; top: 12vh; margin: 0 auto;
   width: min(620px, calc(100vw - 32px));
   max-height: min(520px, 76vh);
   padding: 0;
-  border: 1px solid var(--sticker-line); border-radius: var(--r-md);
-  background: var(--raised); color: var(--fg);
-  box-shadow: 4px 4px 0 var(--sticker-shadow);
   overflow: hidden;
 }
 .palette[open] { display: flex; flex-direction: column; animation: pop var(--dur-2) var(--ease) both; }

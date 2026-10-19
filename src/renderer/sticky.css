@@ -1,11 +1,12 @@
-/* Desktop sticky window. Tints are palette-derived; the dark theme deepens them. A sticky floats over the desktop,
-   so it wears the sticker outline (see the vault note "Notes App - Design System"). */
+/* Desktop sticky window. Tints are palette-derived; the dark theme deepens them. Flat, like every floating layer: its
+   tint sets it apart, with no outline or shadow (the user dislikes them; see the vault note "Notes App - Design
+   System"). */
 :root[data-color="peach"] { --sticky-bg: #f6dcc3; --sticky-bar: #f0cdaa; }
 :root[data-color="cream"] { --sticky-bg: #fbf1e4; --sticky-bar: #f3e3cc; }
 :root[data-color="leaf"]  { --sticky-bg: #dfe9d3; --sticky-bar: #cddcbd; }
 :root[data-color="sky"]   { --sticky-bg: #d9e6ee; --sticky-bar: #c4d8e4; }
 :root[data-color="rose"]  { --sticky-bg: #f4d6d6; --sticky-bar: #ecc1c1; }
-:root[data-color="ink"]   { --sticky-bg: #3a2a21; --sticky-bar: #2a1a12; --fg: #fbf1e4; --fg-3: #d8c4b0; --accent-text: #ffa070; --sticker-line: transparent; }
+:root[data-color="ink"]   { --sticky-bg: #3a2a21; --sticky-bar: #2a1a12; --fg: #fbf1e4; --fg-3: #d8c4b0; --accent-text: #ffa070; }
 :root[data-theme="dark"][data-color="peach"] { --sticky-bg: #4a3122; --sticky-bar: #3a2519; }
 :root[data-theme="dark"][data-color="cream"] { --sticky-bg: #3d3024; --sticky-bar: #2f251c; }
 :root[data-theme="dark"][data-color="leaf"]  { --sticky-bg: #2d3a26; --sticky-bar: #222d1c; }
@@ -18,14 +19,12 @@ body.sticky-body {
   background: var(--sticky-bg);
   color: var(--fg);
   font-family: var(--font-sans);
-  border: 1px solid var(--sticker-line);
   box-sizing: border-box;
 }
 .sticky-bar {
   display: flex; align-items: center; gap: 4px;
   padding: 4px 6px 4px 8px;
   background: var(--sticky-bar);
-  border-bottom: 1px solid color-mix(in srgb, var(--sticker-line) 25%, transparent);
   -webkit-app-region: drag;
   user-select: none;
   flex: 0 0 auto;

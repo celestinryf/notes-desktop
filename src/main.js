@@ -21,10 +21,7 @@ const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
-// The editor's paper colour (styles.css --paper), shown before the page paints; the page repaints the caption
-// buttons to match whatever sits under them (app:titleBar).
-const THEME_BG = { light: '#fffaf3', dark: '#211710' };
-const THEME_FG = { light: '#2a1a12', dark: '#f6eadb' };
+const Themes = require('./shared/themes');
 const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');
@@ -115,6 +112,12 @@ function main() {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   }
 
+  // The editor's paper and text colours in the colour scheme in use (src/shared/themes.js), shown before the page
+  // paints; the page repaints the caption buttons to match whatever sits under them (app:titleBar).
+  function windowColors() {
+    return Themes.windowColors(store.settings, effectiveTheme());
+  }
+
   function safeBounds(saved) {
     const def = { width: 1100, height: 720 };
     if (!saved) return def;
@@ -135,10 +138,10 @@ function main() {
       autoHideMenuBar: true,
       title: 'Notes',
       icon: iconImage(),
-      backgroundColor: THEME_BG[effectiveTheme()],
+      backgroundColor: windowColors().background,
       // Our own top band instead of Windows' white title bar; Windows still draws the caption buttons.
       titleBarStyle: 'hidden',
-      titleBarOverlay: { color: THEME_BG[effectiveTheme()], symbolColor: THEME_FG[effectiveTheme()], height: TITLE_BAR_H },
+      titleBarOverlay: { color: windowColors().background, symbolColor: windowColors().foreground, height: TITLE_BAR_H },
       alwaysOnTop: store.settings.alwaysOnTop,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
@@ -300,7 +303,7 @@ function main() {
 
   function applyTheme() {
     nativeTheme.themeSource = store.settings.theme;
-    if (win && !win.isDestroyed()) win.setBackgroundColor(THEME_BG[effectiveTheme()]);
+    if (win && !win.isDestroyed()) win.setBackgroundColor(windowColors().background);
   }
 
   function refreshTray() {
@@ -1003,7 +1006,8 @@ function main() {
       if (patch.hotkey && patch.hotkey !== before.hotkey) registerHotkey(before.hotkey);
       throw err;
     }
-    if (settings.theme !== before.theme) applyTheme();
+    const schemeChanged = settings.colorScheme !== before.colorScheme || JSON.stringify(settings.customColors) !== JSON.stringify(before.customColors);
+    if (settings.theme !== before.theme || schemeChanged) applyTheme();
     if (settings.alwaysOnTop !== before.alwaysOnTop && win) win.setAlwaysOnTop(settings.alwaysOnTop);
     if (settings.openAtLogin !== before.openAtLogin) applyLoginItem();
     if (settings.gitEnabled !== before.gitEnabled || settings.gitRemote !== before.gitRemote) {
@@ -1439,7 +1443,7 @@ function main() {
 
   nativeTheme.on('updated', () => {
     if (win && !win.isDestroyed()) {
-      win.setBackgroundColor(THEME_BG[effectiveTheme()]);
+      win.setBackgroundColor(windowColors().background);
       win.webContents.send('theme:system', nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
     }
     stickies.broadcast('settings:changed', store.getSettings());

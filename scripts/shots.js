@@ -185,6 +185,17 @@ const SCENES = {
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
   'tree-view': { about: 'The note list as folders with their notes, and the open note headings under it', settings: { listMode: 'tree' }, run: openNote('Q4 planning') },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
+  'sidebar-float-resize': { about: 'The floating sidebar widened by dragging its right edge, the handle still under the pointer', settings: { sidebarCollapsed: true }, run: async (page) => {
+    await page.mouse.move(2, 400); await sleep(600);
+    const box = await page.locator('#sidebarResizer').boundingBox();
+    const x = box.x + box.width / 2, y = box.y + 300;
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 40, y, { steps: 4 }); await page.mouse.move(x + 80, y, { steps: 4 }); await page.mouse.up();
+    await page.mouse.move(x + 80, y); await sleep(500);
+  } },
+  'two-tabs': { about: 'Two tabs open: the tabs show (with one, they do not)', run: steps(openNote('Q4 planning'), key('Control+t'), openNote('Groceries')) },
+  // A test seed to prove derivation end to end, not a premade scheme (those are still to be designed with the user).
+  'scheme-custom': { about: 'A custom colour scheme (test colours), derived from three seeds per mode', settings: { colorScheme: 'custom', customColors: {
+    light: { background: '#f2f5f7', text: '#1b2530', accent: '#2b6cb0' }, dark: { background: '#141a21', text: '#e3e9ef', accent: '#5b9bd5' } } }, run: openNote('Q4 planning') },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
   tex: { about: 'A LaTeX file open in the code editor', file: 'tex', run: openNote('trail.tex') },
   'tex-small': { about: 'The code editor in a small window', file: 'tex', size: { width: 820, height: 560 }, run: openNote('trail.tex') },
