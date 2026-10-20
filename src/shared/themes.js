@@ -27,7 +27,7 @@
     'chrome', 'base', 'paper', 'raised',
     'fg', 'fg-2', 'fg-3',
     'hover', 'pressed', 'selected', 'selected-fg', 'well',
-    'line', 'line-2', 'field', 'field-bg', 'float-line', 'scroll-thumb',
+    'line', 'line-2', 'field', 'field-bg', 'float-line', 'float-shadow', 'scroll-thumb',
     'accent', 'accent-fg', 'accent-hover', 'accent-text', 'focus',
     'danger', 'ok', 'document-bg',
     'syn-keyword', 'syn-string', 'syn-atom', 'syn-comment', 'syn-punct',
@@ -117,6 +117,7 @@
       field: light ? rgba(fg, 0.45) : 'rgba(0, 0, 0, 0.6)',
       'field-bg': light ? raised : mix(bg, '#000000', 0.35),
       'float-line': light ? rgba(fg, 0.16) : 'transparent',
+      'float-shadow': light ? '0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14)' : 'none', // not a colour: the lift under a floating layer, light only
       'scroll-thumb': rgba(fg, light ? 0.2 : 0.16),
       accent, 'accent-fg': accentFg, 'accent-hover': mix(accent, '#ffffff', 0.12), 'accent-text': accentText, focus: accentText,
       danger: legible(light ? '#a8340c' : '#ff8a66', grounds, 4.5, towardDark),
