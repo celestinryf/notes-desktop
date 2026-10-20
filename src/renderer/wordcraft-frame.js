@@ -5,18 +5,20 @@
    Messages (see WordCraft's apps/wordcraft-web/src/web/host.rs). Each document gets a token (doc) that WordCraft
    repeats on everything it says about it, so nothing about an earlier document is ever taken for the current one.
      to it:   { type: 'open', doc, name, bytes }   { type: 'command', doc, id: 'file.save' | 'edit.undo' | 'edit.redo' }
-              { type: 'theme', value: 'light' | 'dark' }
+              { type: 'theme', value: 'light' | 'dark' }   { type: 'page', dark }
      from it: { type: 'ready' }   { type: 'opened', doc, ok, error }   { type: 'save', doc, name, bytes }   { type: 'dirty', doc, dirty }
 
-   NotesWordCraft.create({ frame, origin, url, readyMs, theme, onSave(name, bytes, context) -> Promise<boolean>, onDirty(dirty),
-                           onOpened(), onOpenFailed(error), onUnavailable() })
-   returns { open(name, bytes, context), requestSave(ms) -> Promise<boolean>, isDirty(), setTheme(theme), close() }
+   NotesWordCraft.create({ frame, origin, url, readyMs, theme, darkPage, onSave(name, bytes, context) -> Promise<boolean>,
+                           onDirty(dirty), onOpened(), onOpenFailed(error), onUnavailable() })
+   returns { open(name, bytes, context), requestSave(ms) -> Promise<boolean>, isDirty(), close() }
+   theme and darkPage: WordCraft's look (its chrome, and a dark page), sent once it is ready. The dark page is a view
+   setting in WordCraft, so the file is unchanged.
    context is the caller's own record of the document, handed back with each of its saves: a save WordCraft sent before
    the document was closed is still written with it, even if that happens after the close.
    onUnavailable: the frame never said it was ready (a build without hosted mode, or one that fails to load); nothing more
    is shown in it. */
 (function () {
-  function create({ frame, origin, url, readyMs, theme, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
+  function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
     let ready = false;
     let loaded = false;
     let gaveUp = false;    // the frame was not ready in time: it is not used again
@@ -40,6 +42,7 @@
         clearTimeout(readyTimer);
         ready = true;
         if (theme) post({ type: 'theme', value: theme });
+        if (typeof darkPage === 'boolean') post({ type: 'page', dark: darkPage });
         if (queued) { const q = queued; queued = null; open(q.name, q.bytes, q.context); }
         return;
       }
@@ -114,13 +117,6 @@
       });
     }
 
-    // WordCraft's appearance follows Notes' (light or dark); sent once it is ready, and on every change.
-    function setTheme(value) {
-      if (value === theme) return;
-      theme = value;
-      if (ready && !gaveUp) post({ type: 'theme', value });
-    }
-
     // Nothing on show any more: whatever WordCraft says about the last document is ignored.
     function close() {
       waiters.forEach((w) => w(false));
@@ -131,7 +127,7 @@
       queued = null;
     }
 
-    return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), setTheme, close };
+    return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
   }
 
   window.NotesWordCraft = { create };
