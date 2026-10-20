@@ -68,6 +68,10 @@
         <h2 class="list-title" id="listTitle">All notes</h2>
         <div class="list-title-actions">
           <button class="btn btn-small btn-danger hidden" id="emptyTrashBtn">Empty trash</button>
+          <div class="segmented seg-icons" id="listModeSeg" role="radiogroup" aria-label="Show as">
+            <button type="button" data-mode="tree" role="radio" data-icon="folder-tree" title="Folders with their notes" aria-label="Folders with their notes"></button>
+            <button type="button" data-mode="list" role="radio" data-icon="list" title="One list, in sort order" aria-label="One list, in sort order"></button>
+          </div>
           <select id="sortSelect" class="select select-quiet" title="Sort notes" aria-label="Sort notes">
             <option value="updated">Last edited</option>
             <option value="created">Newest</option>
@@ -332,7 +336,10 @@
           <a href="#set-data" data-icon="download">Your data</a>
         </nav>
         <div class="settings-body">
-          <div class="settings-scroll" id="settingsScroll" tabindex="-1" autofocus>
+          <label class="search-wrap settings-search" data-icon="search">
+            <input id="settingsSearch" class="search" type="search" placeholder="Search settings" aria-label="Search settings (Ctrl+F)" title="Search settings (Ctrl+F)" autocomplete="off" spellcheck="false" autofocus />
+          </label>
+          <div class="settings-scroll" id="settingsScroll" tabindex="-1">
             <section class="settings-section" id="set-general">
               <h3>General</h3>
               <label class="field">
@@ -349,14 +356,6 @@
                   <option value="dark">Dark</option>
                 </select>
               </label>
-              <div class="field">
-                <span class="field-label">Note list</span>
-                <div class="segmented" id="listModeSeg" role="radiogroup" aria-label="Note list">
-                  <button type="button" data-mode="list" role="radio">List</button>
-                  <button type="button" data-mode="tree" role="radio">Folders</button>
-                </div>
-                <span class="field-help">List: the notes in the view, in the order you sort by. Folders: your folders with their notes inside, and the open note's headings under it. Pinned, Reminders, Trash, tags and searches are always a list.</span>
-              </div>
               <label class="field field-check">
                 <input id="sidebarFloatInput" type="checkbox" />
                 <span>Hide the sidebar. Point at the window's left edge to bring it in (Ctrl+\ does the same).</span>
@@ -445,6 +444,10 @@
               </div>
               <p class="dialog-foot" id="settingsInfo"></p>
             </section>
+            <div class="empty hidden" id="settingsEmpty">
+              <p class="empty-title">No settings match</p>
+              <p class="empty-sub">Try another word, or clear the search.</p>
+            </div>
           </div>
           <div class="settings-actions">
             <span class="field-help">Changes apply as you make them.</span>

@@ -8,6 +8,8 @@
    npm run shots -- --list               the scene names
    npm run shots -- --eval metrics.js    also evaluate a script in each scene and save its result as <scene>-<theme>.json
                                          (for example the ui-audit skill's scripts/ui-metrics.js)
+   npm run shots -- --css try.css        also inject a stylesheet into each scene before the shot, to compare a
+                                         candidate style against the real one without editing styles.css
    npm run shots -- --screen             also capture the window from the real screen as <scene>-<theme>-screen.png:
                                          it includes the caption buttons Windows draws. The window comes to the front
                                          for a moment, so do not use it while someone is typing.
@@ -26,7 +28,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 60 * 60 * 1000;
 
 function parseArgs(argv) {
-  const out = { scenes: null, themes: ['light', 'dark'], size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null, screen: false };
+  const out = { scenes: null, themes: ['light', 'dark'], size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null, css: null, screen: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(a + ' needs a value'); return v; };
@@ -37,6 +39,7 @@ function parseArgs(argv) {
     else if (a === '--list') out.list = true;
     else if (a === '--screen') out.screen = true;
     else if (a === '--eval') { out.eval = path.resolve(next()); if (!fs.existsSync(out.eval)) throw new Error('No such file: ' + out.eval); }
+    else if (a === '--css') { out.css = path.resolve(next()); if (!fs.existsSync(out.css)) throw new Error('No such file: ' + out.css); }
     else throw new Error('Unknown argument ' + a);
   }
   for (const t of out.themes) if (t !== 'light' && t !== 'dark') throw new Error('--theme is light, dark or both');
@@ -200,7 +203,7 @@ function seed(now) {
 // Opens a note by title: from the list or the folder view when it is on screen, else through the palette.
 const openNote = (title) => async (page) => {
   if ((await page.inputValue('#titleInput').catch(() => '')) === title && await page.isVisible('#titleInput')) return;
-  const row = page.locator('.note-card, .note-tree .tree-note', { hasText: title }).first();
+  const row = page.locator('.note-row', { hasText: title }).first();
   if (await row.count() && await row.isVisible()) await row.click();
   else {
     await page.keyboard.press('Control+p');
@@ -241,7 +244,10 @@ const SCENES = {
   slash: { about: 'The "/" block menu in a note', run: steps(openNote('Ideas for the garden'), typeAtEnd('/', true)) },
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
-  'tree-view': { about: 'The note list as folders with their notes, and the open note headings under it', settings: { listMode: 'tree' }, run: openNote('Q4 planning') },
+  'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
+  pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
+  'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
+  'settings-search-none': { about: 'A settings search with no match', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('zzqx'); await sleep(400); } },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
   'sidebar-float-resize': { about: 'The floating sidebar widened by dragging its right edge, the handle still under the pointer', settings: { sidebarCollapsed: true }, run: async (page) => {
     await page.mouse.move(2, 400); await sleep(600);
@@ -299,6 +305,7 @@ async function shoot(theme, name, opts) {
     await app.evaluate(({ BrowserWindow }, size) => { BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height); }, SCENES[name].size || opts.size);
     await page.evaluate(() => { window.confirm = () => true; return document.fonts && document.fonts.ready.then(() => true); });
     await sleep(900); // entrance animations
+    if (opts.css) await page.addStyleTag({ content: fs.readFileSync(opts.css, 'utf8') }); // a candidate style over the real one
     await SCENES[name].run(page);
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);

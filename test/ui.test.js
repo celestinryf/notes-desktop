@@ -35,7 +35,7 @@ const rendererErrors = [];
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
 
 test.before(async () => {
-  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3 }, notes: [] }));
+  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3, listMode: 'list', listLayout: 1 }, notes: [] }));
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
@@ -190,7 +190,7 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
   await page.keyboard.press('Control+Shift+Delete'); // trash this note so the following tests start as before
   await waitFor('rendered note trashed', () => findNote('Rendered').trashedAt);
   await page.click('.nav-item[data-view="trash"]', T);
-  await page.click('.note-card:has-text("Rendered")', T);
+  await page.click('.note-row:has-text("Rendered")', T);
   await page.click('#destroyBtn', T);
   await waitFor('rendered note destroyed', () => !findNote('Rendered'));
   await page.click('.nav-item[data-view="all"]', T);
@@ -213,56 +213,56 @@ test('search filters and highlights; clearing restores', async () => {
   await typeNote('Beta', 'kiwi and mango');
   await typeNote('Gamma', 'pure text');
   await page.fill('#searchInput', 'MANGO');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
-  assert.equal(await page.textContent('.note-card .note-card-title'), 'Beta');
-  assert.ok(await page.$('.note-card .mark'), 'match highlighted');
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1);
+  assert.equal(await page.textContent('.note-row .row-name'), 'Beta');
+  assert.ok(await page.$('.note-row .mark'), 'match highlighted');
   assert.equal(await page.textContent('#listTitle'), 'Results');
   await page.fill('#searchInput', 'nothing-matches-this');
   await waitForDom(() => !document.getElementById('listEmpty').classList.contains('hidden'));
   await page.fill('#searchInput', '');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 3);
 });
 
 test('sort options reorder the list', async () => {
   await page.selectOption('#sortSelect', 'title');
-  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent === 'Alpha');
-  const titles = await page.$$eval('.note-card .note-card-title', (els) => els.map((e) => e.textContent));
+  await waitForDom(() => document.querySelector('.note-row .row-name').textContent === 'Alpha');
+  const titles = await page.$$eval('.note-row .row-name', (els) => els.map((e) => e.textContent));
   assert.deepEqual(titles, ['Alpha', 'Beta', 'Gamma']);
   assert.equal(readNotes().settings.sort, 'title');
   await page.selectOption('#sortSelect', 'updated');
-  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent === 'Gamma');
+  await waitForDom(() => document.querySelector('.note-row .row-name').textContent === 'Gamma');
 });
 
 test('pin button, pinned view, and pinned-first ordering', async () => {
-  await page.click('.note-card:has-text("Alpha")');
+  await page.click('.note-row:has-text("Alpha")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
   await page.click('#pinBtn');
   await waitFor('Alpha pinned', () => findNote('Alpha').pinned);
   assert.equal(await page.getAttribute('#pinBtn', 'aria-pressed'), 'true');
-  await waitForDom(() => document.querySelector('.note-card .note-card-title').textContent.includes('Alpha'));
+  await waitForDom(() => document.querySelector('.note-row .row-name').textContent.includes('Alpha'));
   await page.click('.nav-item[data-view="pinned"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1);
   assert.equal(await page.textContent('#countPinned'), '1');
   await page.click('.nav-item[data-view="all"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 3);
 });
 
 test('tags filter in the sidebar', async () => {
-  await page.click('.note-card:has-text("Beta")');
+  await page.click('.note-row:has-text("Beta")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Beta');
   await page.fill('#tagsInput', 'Fruit, snacks');
   await page.press('#tagsInput', 'Enter');
   await waitFor('tags saved', () => findNote('Beta').tags.join(',') === 'fruit,snacks');
   await page.waitForSelector('#tagList .nav-item:has-text("fruit")');
   await page.click('#tagList .nav-item:has-text("fruit")');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1);
   assert.equal(await page.textContent('#listTitle'), '#fruit');
   await page.click('.nav-item[data-view="all"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 3);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 3);
 });
 
 test('duplicate creates a copy and selects it', async () => {
-  await page.click('.note-card:has-text("Gamma")');
+  await page.click('.note-row:has-text("Gamma")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma');
   await clickTool('#duplicateBtn');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
@@ -272,7 +272,7 @@ test('duplicate creates a copy and selects it', async () => {
 });
 
 test('Ctrl+B / Ctrl+I / Ctrl+K wrap the selection and toggle off again', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await page.focus('#bodyInput');
   await page.evaluate(() => { const t = document.getElementById('bodyInput'); t.setSelectionRange(0, 4); });
@@ -363,11 +363,11 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.waitForSelector('#richEditor:not(.hidden) p', { timeout: 8000 });
   const stampSoft = findNote('Soft breaks').updatedAt;
   const stampTable = findNote('Rich constructs').updatedAt;
-  await page.click('.note-card:has-text("Rich constructs")');
+  await page.click('.note-row:has-text("Rich constructs")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Rich constructs');
   await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
   await sleep(900);
-  await page.click('.note-card:has-text("Soft breaks")');
+  await page.click('.note-row:has-text("Soft breaks")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Soft breaks');
   await sleep(900);
   assert.equal(findNote('Soft breaks').body, soft, 'viewing did not rewrite soft breaks');
@@ -394,11 +394,11 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.fill('#bodyInput', lossy);
   await waitFor('lossy note saved', () => findNote('Lossy') && findNote('Lossy').body === lossy);
   // Prefer rendered globally again, then re-open the lossy note: it must stay in source with a notice.
-  await page.click('.note-card:has-text("Rich constructs")');
+  await page.click('.note-row:has-text("Rich constructs")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Rich constructs');
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
-  await page.click('.note-card:has-text("Lossy")');
+  await page.click('.note-row:has-text("Lossy")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Lossy');
   await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   await page.waitForSelector('#toast:not(.hidden)', { timeout: 8000 });
@@ -407,12 +407,12 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   assert.equal(findNote('Lossy').body, lossy, 'viewing did not rewrite the note');
   assert.equal(readNotes().settings.editorMode, 'rendered', 'the global preference is untouched');
   // And a normal note after it goes back to the rendered view automatically.
-  await page.click('.note-card:has-text("Rich constructs")');
+  await page.click('.note-row:has-text("Rich constructs")');
   await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
 
   // Clean up so later tests see the same notes as before.
   for (const title of ['Lossy', 'Rich constructs']) {
-    await page.click(`.note-card:has-text("${title}")`);
+    await page.click(`.note-row:has-text("${title}")`);
     await waitForDom((t) => document.getElementById('titleInput').value === t, title);
     await page.keyboard.press('Control+Shift+Delete');
     await waitFor(title + ' trashed', () => findNote(title).trashedAt);
@@ -422,7 +422,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.click('#emptyTrashBtn');
   await waitFor('trash emptied', () => !findNote('Lossy') && !findNote('Rich constructs') && !findNote('Soft breaks'));
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
 });
@@ -434,7 +434,7 @@ test.afterEach(() => {
 
 test('an edit that cannot be saved survives switching notes and lands once the disk allows it', { timeout: 60000 }, async () => {
   await useSourceMode(true);
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await page.fill('#bodyInput', 'before lock');
   await waitFor('baseline saved', () => findNote('Gamma (copy)').body === 'before lock');
@@ -445,13 +445,13 @@ test('an edit that cannot be saved survives switching notes and lands once the d
     await page.fill('#bodyInput', 'typed while locked');
     await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
     // Switch to a second note and edit it too: both failures must be kept, one per note.
-    await page.click('.note-card:has-text("Alpha")');
+    await page.click('.note-row:has-text("Alpha")');
     await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
     assert.equal(findNote('Gamma (copy)').body, 'before lock', 'nothing reached disk while locked');
     await page.fill('#bodyInput', 'alpha edited while locked');
     await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
     // Coming back to the first note must show the unsaved text, not the stale disk copy, and stay marked unsaved.
-    await page.click('.note-card:has-text("Gamma (copy)")');
+    await page.click('.note-row:has-text("Gamma (copy)")');
     await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
     assert.equal(await page.inputValue('#bodyInput'), 'typed while locked', 'pending edit shown on reselect');
     assert.equal(await page.textContent('#statusSaved'), 'Save failed');
@@ -466,11 +466,11 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   await waitForDom(() => document.getElementById('statusSaved').textContent === 'Saved');
   await page.fill('#bodyInput', 'pure text');
   await waitFor('restored body', () => findNote('Gamma (copy)').body === 'pure text');
-  await page.click('.note-card:has-text("Alpha")');
+  await page.click('.note-row:has-text("Alpha")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
   await page.fill('#bodyInput', alphaBefore);
   await waitFor('alpha restored', () => findNote('Alpha').body === alphaBefore);
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
 });
 
@@ -494,9 +494,9 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   assert.ok(body.includes('Fish & chips, 1 < 2 && 3 > 2, <3 ok'), 'ampersand and brackets stay literal: ' + JSON.stringify(body));
   assert.ok(body.includes('typed &amp;amp; literally'), 'an entity typed as text is escaped so it reloads as typed: ' + JSON.stringify(body));
   // Reload the note: the typed "&amp;" must come back as the five characters the user typed.
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
-  await page.click('.note-card:has-text("Entities")');
+  await page.click('.note-row:has-text("Entities")');
   await page.waitForSelector('#richEditor:not(.hidden) ol', { timeout: 8000 });
   assert.ok((await page.$eval('#richEditor p', (p) => p.textContent)).endsWith('typed &amp; literally'));
   await page.keyboard.press('Control+Shift+Delete');
@@ -506,7 +506,7 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   await page.click('#emptyTrashBtn');
   await waitFor('entities note destroyed', () => !findNote('Entities'));
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
 });
@@ -551,8 +551,8 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await page.evaluate((p) => window.notesApi.files.link([p]), softPath);
   await waitFor('soft file linked', () => readNotes().notes.some((n) => n.filePath && n.filePath.endsWith('soft.md')));
   await page.click('.nav-item[data-view="all"]'); // linking through the API does not refresh the list by itself
-  await page.waitForSelector('.note-card:has-text("soft.md")', { timeout: 8000 });
-  await page.click('.note-card:has-text("soft.md")');
+  await page.waitForSelector('.note-row:has-text("soft.md")', { timeout: 8000 });
+  await page.click('.note-row:has-text("soft.md")');
   await waitForDom(() => document.getElementById('titleInput').value === 'soft.md');
   await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   assert.equal(readNotes().settings.editorMode, 'rendered', 'global preference untouched');
@@ -560,7 +560,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.equal(fs.readFileSync(softPath, 'utf8'), 'first line\nsecond line\n', 'file untouched by opening it');
 
   // PDF opens in the app's PDF editor (pdf.js), with its pages drawn.
-  await page.click('.note-card:has-text("paper.pdf")');
+  await page.click('.note-row:has-text("paper.pdf")');
   await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
   await waitForDom(() => !document.getElementById('pdfEditor').classList.contains('hidden') && !!document.querySelector('#pdfEditor .pdfViewer .page canvas'));
   assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true);
@@ -582,7 +582,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   // Clean up: unlink the test notes (files stay), delete the folder, go back to the usual state.
   await page.click('.nav-item[data-view="all"]');
   for (const t of ['External note.md', 'paper.pdf', 'soft.md']) {
-    await page.click(`.note-card:has-text("${t}")`);
+    await page.click(`.note-row:has-text("${t}")`);
     await waitForDom((x) => document.getElementById('titleInput').value === x, t);
     await page.keyboard.press('Control+Shift+Delete');
     await waitFor(t + ' trashed', () => readNotes().notes.find((n) => n.title === t).trashedAt);
@@ -601,8 +601,8 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitFor('agent links removed', () => !readNotes().notes.some((n) => n.filePath) && !readNotes().folders.some((f) => f.name === 'Agent files'));
   assert.ok(fs.readFileSync(path.join(os.homedir(), '.claude', 'CLAUDE.md'), 'utf8').includes('# Global instructions'), 'the real file was never modified');
   await page.click('.nav-item[data-view="all"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length >= 2);
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom(() => document.querySelectorAll('.note-row').length >= 2);
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
 });
@@ -644,14 +644,14 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitFor('external file became a note', () => readNotes().notes.some((n) => n.title === 'External' && n.vaultId === vault.id), 15000);
 
   // The open note is refreshed when its file changes underneath it (as after a git pull) while it is clean.
-  await page.click('.note-card:has-text("Groceries")');
+  await page.click('.note-row:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
   await sleep(600);
   fs.writeFileSync(path.join(vaultDir, 'Groceries.md'), '- eggs\n- milk from another device\n');
   await waitForDom(() => document.getElementById('bodyInput').value.includes('milk from another device'), 15000);
 
   // Trash moves the file into .trash; empty trash deletes it.
-  await page.click('.note-card:has-text("Groceries")');
+  await page.click('.note-row:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
   await page.keyboard.press('Control+Shift+Delete');
   await waitFor('moved to .trash', () => fs.existsSync(path.join(vaultDir, '.trash', 'Groceries.md')) && !fs.existsSync(path.join(vaultDir, 'Groceries.md')));
@@ -675,12 +675,12 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitForDom(() => !document.getElementById('settingsDialog').open).catch(() => {});
   await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); });
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
 });
 
 test('bot: runs Claude Code over an exported workspace, streams output, and pulls the edits back in', { timeout: 60000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'bot target body');
@@ -736,7 +736,7 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
 });
 
 test('stickies: a note becomes a desktop window; edits flow both ways; colour and removal persist', { timeout: 60000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', '- [ ] buy milk\n');
@@ -751,7 +751,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await sticky.waitForSelector('#stickyEditor .rich-editor-content', { timeout: 15000 });
   await waitFor('sticky persisted', () => { const n = findNote('Gamma (copy)'); return n.sticky && n.sticky.color === 'peach'; });
   await waitForDom(() => document.getElementById('stickyBtn').classList.contains('is-on'));
-  await waitForDom(() => !!document.querySelector('.note-card.is-active .sticky-mark'));
+  await waitForDom(() => !!document.querySelector('.note-row.is-active .sticky-mark'));
   // The sticky renders the checklist.
   await waitFor('checkbox rendered', () => sticky.evaluate(() => !!document.querySelector('#stickyEditor ul[data-type="taskList"] input[type="checkbox"]')));
   assert.match(await sticky.textContent('#stickyTitle'), /Gamma \(copy\)/);
@@ -809,7 +809,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
 });
 
 test('stickies: a note the rendered view cannot reproduce opens read-only instead of being rewritten', { timeout: 30000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   const lossy = '---\ntitle: front matter\n---\n\nbody\n';
@@ -833,15 +833,15 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
 });
 
 test('undo after switching notes does nothing; typing with the find bar open does not eat text', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'gamma text');
   await waitFor('gamma saved', () => findNote('Gamma (copy)').body === 'gamma text');
   await useSourceMode(false);
   const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && !n.filePath);
-  await page.click('.note-card[data-id="' + other.id + '"]');
-  await waitForDom((id) => !!document.querySelector('.note-card.is-active[data-id="' + id + '"]'), other.id);
+  await page.click('.note-row[data-id="' + other.id + '"]');
+  await waitForDom((id) => !!document.querySelector('.note-row.is-active[data-id="' + id + '"]'), other.id);
   const before = await page.evaluate(() => document.getElementById('bodyInput').value);
   await page.click('.rich-editor-content');
   await page.keyboard.press('Control+z');
@@ -850,7 +850,7 @@ test('undo after switching notes does nothing; typing with the find bar open doe
   assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), before, 'undo did not bring the other note back');
   assert.equal(findNote(other.title).body, before);
   // Find bar open, typing in source view appends where the caret is.
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.keyboard.press('Control+Shift+f');
@@ -869,7 +869,7 @@ test('undo after switching notes does nothing; typing with the find bar open doe
 });
 
 test('find in note counts and steps through matches; print asks the system to print', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'needle one\nhay\nneedle two\n');
@@ -931,7 +931,7 @@ test('find in note counts and steps through matches; print asks the system to pr
 });
 
 test('reminders: set from the dialog, shown on the card and in the Reminders view, fired by the scheduler, cleared', { timeout: 30000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const id = findNote('Gamma (copy)').id;
   assert.equal(await toolLabel('#remindBtn'), 'Remind me…');
@@ -943,15 +943,15 @@ test('reminders: set from the dialog, shown on the card and in the Reminders vie
   await waitFor('reminder saved', () => { const n = findNote('Gamma (copy)'); return n.remindAt && n.remindAt > before + 3500 * 1000 && n.remindAt < before + 3700 * 1000; });
   await waitForDom(() => !document.getElementById('remindDialog').open);
   await waitForDom(() => document.getElementById('remindBtn').classList.contains('is-on'));
-  await waitForDom(() => !!document.querySelector('.note-card.is-active .remind-mark'));
+  await waitForDom(() => !!document.querySelector('.note-row.is-active .remind-mark'));
   await waitForDom(() => document.getElementById('countReminders').textContent === '1');
   await page.click('.nav-item[data-view="reminders"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1 && /Gamma/.test(document.querySelector('.note-card').textContent));
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1 && /Gamma/.test(document.querySelector('.note-row').textContent));
   // The scheduler announces a reminder when its time passes: toast in the app, badge turns overdue.
   await page.evaluate((nid) => window.notesApi.notes.update(nid, { remindAt: Date.now() + 600 }), id);
   await waitForDom(() => /⏰ Gamma \(copy\)/.test(document.getElementById('toast').textContent), 8000);
   await waitFor('marked reminded', () => { const n = findNote('Gamma (copy)'); return n.remindedAt && n.remindedAt >= n.remindAt; });
-  await waitForDom(() => !!document.querySelector('.note-card .remind-mark.is-overdue'), 8000);
+  await waitForDom(() => !!document.querySelector('.note-row .remind-mark.is-overdue'), 8000);
   await waitForDom(() => document.getElementById('countReminders').classList.contains('is-overdue'));
   // A later time rings again; clearing removes it from the view.
   await page.keyboard.press('Control+Shift+m');
@@ -960,9 +960,9 @@ test('reminders: set from the dialog, shown on the card and in the Reminders vie
   await page.click('#remindClearBtn');
   await waitFor('cleared', () => findNote('Gamma (copy)').remindAt === null);
   await waitForDom(() => document.getElementById('countReminders').textContent === '0');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 0);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 0);
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   // Typing a time in the picker works too.
   await page.keyboard.press('Control+Shift+m');
@@ -975,7 +975,7 @@ test('reminders: set from the dialog, shown on the card and in the Reminders vie
 });
 
 test('share: copy as Markdown, rich text and plain text; email via mailto; save as PDF and HTML', { timeout: 30000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', '# Head\n\n**bold** text\n');
@@ -1025,7 +1025,7 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
 });
 
 test('locking: a password locks the note, the file holds no plaintext, wrong password is refused, hiding the app relocks', { timeout: 60000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'the launch code is 4242-flamingo');
@@ -1053,13 +1053,13 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.click('#lockMenu [data-action="relock"]');
   await page.waitForSelector('#lockScreen:not(.hidden)');
   assert.ok(await page.evaluate(() => document.getElementById('bodyInput').classList.contains('hidden') && document.getElementById('richEditor').classList.contains('hidden')), 'editors hidden while locked');
-  await waitForDom(() => /Locked note/.test(document.querySelector('.note-card.is-active').textContent));
+  await waitForDom(() => !!document.querySelector('.note-row.is-active .lock-mark'));
   assert.equal(await page.evaluate(() => document.getElementById('stickyBtn').disabled), true, 'no stickies for locked notes');
   // Search finds the title, not the body.
   await page.fill('#searchInput', 'pelican');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 0 && /No|Nothing/.test(document.querySelector('.list-pane').textContent));
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 0 && /No|Nothing/.test(document.querySelector('.list-pane').textContent));
   await page.fill('#searchInput', '');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await page.waitForSelector('#lockScreen:not(.hidden)');
   // Title and tags still save while the body is locked.
   await page.fill('#titleInput', 'Gamma (copy) renamed');
@@ -1099,7 +1099,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
 
 test('live share: the app hosts a note; another participant over HTTP sees edits as they happen and can edit back', { timeout: 60000 }, async () => {
   const http = require('http');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'shared v1');
@@ -1114,7 +1114,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   await page.click('#liveCancelBtn');
   await waitFor('flag persisted', () => findNote('Gamma (copy)').live && findNote('Gamma (copy)').live.role === 'host');
   await page.waitForSelector('#liveRow:not(.hidden)');
-  await waitForDom(() => !!document.querySelector('.note-card.is-active .live-mark'));
+  await waitForDom(() => !!document.querySelector('.note-row.is-active .live-mark'));
   // The other participant: fetch the state, then follow the event stream.
   const local = url.replace(/\/\/[\d.]+:/, '//127.0.0.1:');
   const getJson = (u) => new Promise((resolve, reject) => http.get(u, (res) => { let t = ''; res.on('data', (d) => (t += d)); res.on('end', () => { try { resolve(JSON.parse(t)); } catch (e) { reject(e); } }); }).on('error', reject));
@@ -1178,7 +1178,7 @@ test('hardening: the page cannot be navigated away, and "Open with…" refuses p
 });
 
 test('replace in note: one at a time and all, in source and rendered views', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   // Offsets are measured on the original text: a capital İ (two code units when lower-cased) must not shift them.
@@ -1227,7 +1227,7 @@ test('replace in note: one at a time and all, in source and rendered views', asy
 });
 
 test('history: earlier versions are listed and one can be restored', { timeout: 40000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'version one');
@@ -1252,7 +1252,7 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
 });
 
 test('attachments and voice memos: files are copied in and linked; links open through the app; note links jump', { timeout: 40000 }, async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'files:');
@@ -1301,8 +1301,8 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await page.click('#linkApplyBtn');
   await waitFor('note link saved', () => findNote('Gamma (copy)').body === '[see also](note://' + other.id + ')');
   await page.click('.rich-editor-content a[href^="note://"]', { modifiers: ['Control'] });
-  await waitForDom((id) => !!document.querySelector('.note-card.is-active[data-id="' + id + '"]'), other.id);
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await waitForDom((id) => !!document.querySelector('.note-row.is-active[data-id="' + id + '"]'), other.id);
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'pure text');
@@ -1313,7 +1313,7 @@ test('zoom: Ctrl+= zooms in, Ctrl+- out, Ctrl+0 resets, and the level is remembe
   const level = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel());
   // Through Electron's real input path (what a physical key press takes); Playwright's keyboard injects below it.
   const realKey = (k) => app.evaluate(({ BrowserWindow }, keyCode) => { const wc = BrowserWindow.getAllWindows()[0].webContents; wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] }); wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] }); }, k);
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const start = await level();
   await realKey('=');
@@ -1359,10 +1359,10 @@ test('books: a folder becomes a book with page tabs; pages turn, get added and r
   await page.click('#folderMenuBook');
   await waitFor('book flag', () => readNotes().folders.find((f) => f.id === folder.id).book === true);
   await page.click('.folder-row[data-id="' + folder.id + '"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 3 && /p\. 1/.test(document.querySelector('.note-card').textContent));
-  const order = () => page.$$eval('.note-card', (els) => els.map((e) => e.querySelector('.note-card-title').textContent.replace(/^p\. \d+/, '').trim()));
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 3 && /p\. 1/.test(document.querySelector('.note-row').textContent));
+  const order = () => page.$$eval('.note-row', (els) => els.map((e) => e.querySelector('.row-name').textContent.replace(/^p\. \d+/, '').trim()));
   assert.deepEqual(await order(), ['Chapter 1', 'Chapter 2', 'Chapter 3'], 'reading order = creation order');
-  await page.click('.note-card[data-id="' + one.id + '"]');
+  await page.click('.note-row[data-id="' + one.id + '"]');
   await page.waitForSelector('#bookStrip:not(.hidden)');
   await waitForDom(() => document.querySelectorAll('#bookTabs .book-tab').length === 3);
   assert.equal(await page.textContent('#bookName'), 'Novel');
@@ -1381,10 +1381,10 @@ test('books: a folder becomes a book with page tabs; pages turn, get added and r
   // Reorder: Chapter 3 before Chapter 1 (the store call the drag-and-drop makes).
   await page.evaluate(([f, ids]) => window.notesApi.folders.reorderPages(f, ids), [folder.id, [three.id, one.id, two.id]]);
   await page.click('.folder-row[data-id="' + folder.id + '"]');
-  await waitForDom(() => /Chapter 3/.test(document.querySelector('.note-card').textContent));
+  await waitForDom(() => /Chapter 3/.test(document.querySelector('.note-row').textContent));
   assert.deepEqual(await order(), ['Chapter 3', 'Chapter 1', 'Chapter 2']);
   // Drag a tab in the strip: Chapter 2 onto Chapter 3 puts it first.
-  await page.click('.note-card[data-id="' + one.id + '"]');
+  await page.click('.note-row[data-id="' + one.id + '"]');
   await waitForDom(() => document.querySelectorAll('#bookTabs .book-tab').length === 3);
   await page.dragAndDrop('#bookTabs .book-tab[data-id="' + two.id + '"]', '#bookTabs .book-tab[data-id="' + three.id + '"]');
   await waitFor('dragged order saved', () => JSON.stringify(readNotes().folders.find((f) => f.id === folder.id).pageOrder) === JSON.stringify([two.id, three.id, one.id]), 8000);
@@ -1410,13 +1410,13 @@ test('books: a folder becomes a book with page tabs; pages turn, get added and r
   await waitForDom(() => document.getElementById('folderMenuBook').textContent === 'Turn back into a folder');
   await page.click('#folderMenuBook');
   await waitFor('book off', () => readNotes().folders.find((f) => f.id === folder.id).book === false);
-  await page.click('.note-card[data-id="' + one.id + '"]');
+  await page.click('.note-row[data-id="' + one.id + '"]');
   await waitForDom(() => document.getElementById('bookStrip').classList.contains('hidden'));
   await page.click('.nav-item[data-view="all"]');
 });
 
 test('speech: read aloud speaks the note and stops; dictation hands off to Windows', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   const voices = await page.evaluate(() => (window.speechSynthesis ? window.speechSynthesis.getVoices().length : -1));
   assert.ok(voices >= 0, 'speechSynthesis exists');
@@ -1524,7 +1524,7 @@ test('git history: edits are committed to a repo in the data folder', async () =
 });
 
 test('Alt+Arrow moves between notes', async () => {
-  await page.click('.note-card >> nth=0');
+  await page.click('.note-row >> nth=0');
   const first = await page.inputValue('#titleInput');
   await page.focus('#bodyInput');
   await page.keyboard.press('Alt+ArrowDown');
@@ -1536,7 +1536,7 @@ test('Alt+Arrow moves between notes', async () => {
 });
 
 test('trash with undo, restore, delete forever, empty trash', async () => {
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await clickTool('#deleteBtn');
   await waitFor('trashed', () => findNote('Gamma (copy)').trashedAt);
@@ -1547,24 +1547,24 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
   await page.keyboard.press('Control+Shift+Delete');
   await waitFor('trashed again', () => findNote('Gamma (copy)').trashedAt);
   await page.click('.nav-item[data-view="trash"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1);
   assert.equal(await page.textContent('#listTitle'), 'Trash');
   assert.equal(await page.$eval('#titleInput', (i) => i.readOnly), true, 'trashed note is read only');
   assert.equal(await page.$eval('#restoreBtn', (b) => b.classList.contains('hidden')), false);
   await page.click('#restoreBtn');
   await waitFor('restored', () => !findNote('Gamma (copy)').trashedAt);
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 0);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 0);
 
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await clickTool('#deleteBtn');
   await page.click('.nav-item[data-view="trash"]');
-  await page.click('.note-card:has-text("Gamma (copy)")');
+  await page.click('.note-row:has-text("Gamma (copy)")');
   await page.click('#destroyBtn');
   await waitFor('destroyed', () => !findNote('Gamma (copy)'));
 
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Beta")');
+  await page.click('.note-row:has-text("Beta")');
   await clickTool('#deleteBtn');
   await page.click('.nav-item[data-view="trash"]');
   await page.waitForSelector('#emptyTrashBtn:not(.hidden)');
@@ -1621,7 +1621,7 @@ test('export note, export all, and import through stubbed dialogs', async () => 
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [paths.inMd] });
   }, { outMd, outJson, inMd });
 
-  await page.click('.note-card:has-text("Alpha")');
+  await page.click('.note-row:has-text("Alpha")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
   await clickTool('#exportBtn');
   await waitFor('note exported', () => fs.existsSync(outMd));
@@ -1644,10 +1644,10 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   const step = (s) => console.log('  [folders] ' + s);
   const folders = () => readNotes().folders;
   const folderByName = (name) => folders().find((f) => f.name === name);
-  const row = (name) => `.folder-row:has(.folder-name:text-is("${name}"))`;
+  const row = (name) => `.folder-row:has(.row-name:text-is("${name}"))`;
   // Plain-DOM equivalents for page.evaluate, which cannot use Playwright selector engines.
   const waitForCount = (name, count) => waitForDom(([n, c]) => {
-    const r = Array.from(document.querySelectorAll('.folder-row')).find((x) => { const nm = x.querySelector('.folder-name'); return nm && nm.textContent === n; });
+    const r = Array.from(document.querySelectorAll('.folder-row')).find((x) => { const nm = x.querySelector('.row-name'); return nm && nm.textContent === n; });
     return !!r && r.querySelector('.count').textContent === String(c);
   }, [name, count]);
 
@@ -1659,7 +1659,7 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await page.waitForSelector(row('Work') + '.is-active');
   await waitFor('Work folder saved', () => folderByName('Work'));
   assert.equal(await page.textContent('#listTitle'), 'Work');
-  assert.equal(await page.$$eval('.note-card', (c) => c.length), 0, 'new folder is empty');
+  assert.equal(await page.$$eval('.note-row', (c) => c.length), 0, 'new folder is empty');
   step('created root folder');
 
   // New note while inside the folder lands in it.
@@ -1667,7 +1667,7 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
   await page.fill('#titleInput', 'In Work');
   await waitFor('note created in folder', () => { const n = findNote('In Work'); return n && n.folderId === folderByName('Work').id; });
-  assert.equal(await page.$$eval('.note-card', (c) => c.length), 1);
+  assert.equal(await page.$$eval('.note-row', (c) => c.length), 1);
   step('new note inside folder');
 
   // Subfolder through the context menu.
@@ -1685,14 +1685,14 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
 
   // Move a note with the editor's folder select.
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Gamma")');
+  await page.click('.note-row:has-text("Gamma")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma');
   await page.selectOption('#folderSelect', folderByName('Clients').id);
   await waitFor('Gamma moved to Clients', () => findNote('Gamma').folderId === folderByName('Clients').id);
   step('moved via select');
 
   // Move a note by dragging its card onto a folder.
-  await page.dragAndDrop('.note-card:has-text("Imported note")', row('Work'), { timeout: 8000 });
+  await page.dragAndDrop('.note-row:has-text("Imported note")', row('Work'), { timeout: 8000 });
   await waitFor('Imported note dragged into Work', () => findNote('Imported note').folderId === folderByName('Work').id);
   step('moved via drag');
 
@@ -1703,7 +1703,7 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
 
   // Collapse and expand persist.
   await page.click(row('Work') + ' .folder-chevron', { timeout: 8000 });
-  await waitForDom(() => !Array.from(document.querySelectorAll('.folder-name')).some((n) => n.textContent === 'Clients'));
+  await waitForDom(() => !Array.from(document.querySelectorAll('.row-name')).some((n) => n.textContent === 'Clients'));
   assert.deepEqual(readNotes().settings.expandedFolders, []);
   await page.click(row('Work') + ' .folder-chevron', { timeout: 8000 });
   await page.waitForSelector(row('Clients'), { timeout: 8000 });
@@ -1711,7 +1711,7 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   step('collapse/expand');
 
   // Rename inline by double-click.
-  await page.dblclick(row('Clients') + ' .folder-name', { timeout: 8000 });
+  await page.dblclick(row('Clients') + ' .row-name', { timeout: 8000 });
   await page.waitForSelector('#folderTree .folder-input', { timeout: 8000 });
   await page.fill('#folderTree .folder-input', 'Customers');
   await page.keyboard.press('Enter');
@@ -1733,9 +1733,9 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   // Search inside a folder looks across every note.
   await page.click(row('Work'), { timeout: 8000 });
   await page.fill('#searchInput', 'Alpha');
-  await page.waitForSelector('.note-card:has-text("Alpha")', { timeout: 8000 });
+  await page.waitForSelector('.note-row:has-text("Alpha")', { timeout: 8000 });
   await page.fill('#searchInput', '');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 2);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 2);
   step('global search from folder');
 
   // Deleting a folder lifts its contents to the parent.
@@ -1750,19 +1750,19 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   // Emptying the trash while a search is active deletes only the listed notes.
   await page.click('.nav-item[data-view="all"]');
   for (const t of ['In Work', 'Imported note']) {
-    await page.click(`.note-card:has-text("${t}")`);
+    await page.click(`.note-row:has-text("${t}")`);
     await waitForDom((x) => document.getElementById('titleInput').value === x, t);
     await page.keyboard.press('Control+Shift+Delete');
     await waitFor(t + ' trashed', () => findNote(t).trashedAt);
   }
   await page.click('.nav-item[data-view="trash"]');
   await page.fill('#searchInput', 'Imported');
-  await waitForDom(() => document.querySelectorAll('.note-card').length === 1);
+  await waitForDom(() => document.querySelectorAll('.note-row').length === 1);
   await page.click('#emptyTrashBtn');
   await waitFor('only the searched note destroyed', () => !findNote('Imported note'));
   assert.ok(findNote('In Work') && findNote('In Work').trashedAt, 'the other trashed note survives');
   await page.fill('#searchInput', '');
-  await page.click('.note-card:has-text("In Work")');
+  await page.click('.note-row:has-text("In Work")');
   await page.click('#restoreBtn');
   await waitFor('In Work restored', () => !findNote('In Work').trashedAt);
   await page.click('.nav-item[data-view="all"]');
@@ -1773,7 +1773,7 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await page.reload({ timeout: 8000 });
   await page.waitForSelector(row('Work'), { timeout: 8000 });
   await page.click('.nav-item[data-view="all"]', { timeout: 8000 });
-  await waitForDom(() => document.querySelectorAll('.note-card').length >= 3);
+  await waitForDom(() => document.querySelectorAll('.note-row').length >= 3);
   step('persisted across reload');
 });
 
@@ -1833,14 +1833,14 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   assert.ok(Math.abs(rows.row - rows.win) < 2, 'grid row ' + rows.row + ' vs window ' + rows.win);
   const many = await page.evaluate(async () => { const ids = []; for (let i = 0; i < 40; i++) ids.push((await window.notesApi.notes.create({ title: 'Scroll filler ' + i, body: 'x' })).id); return ids; });
   await page.click('.nav-item[data-view="all"]');
-  await waitForDom(() => document.querySelectorAll('.note-card').length >= 40);
+  await waitForDom(() => document.querySelectorAll('.note-row').length >= 40);
   const listBox = await page.evaluate(() => { const e = document.getElementById('noteList'); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 60, sh: e.scrollHeight, ch: e.clientHeight }; });
   assert.ok(listBox.sh > listBox.ch, 'the list overflows its pane');
   await page.mouse.move(listBox.x, listBox.y);
   await page.mouse.wheel(0, 500);
   await waitForDom(() => document.getElementById('noteList').scrollTop > 0);
   // A long note scrolls inside the editor.
-  await page.click('.note-card:has-text("Scroll filler 0")');
+  await page.click('.note-row:has-text("Scroll filler 0")');
   await useSourceMode(true);
   await page.fill('#bodyInput', Array.from({ length: 150 }, (_, i) => 'line ' + i).join('\n'));
   await page.evaluate(() => { document.querySelector('.editor-scroll').scrollTop = 0; });
@@ -1855,18 +1855,18 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   const inside = await page.evaluate((f) => window.notesApi.notes.create({ title: 'Inside the folder', body: 'in', folderId: f }), folder.id);
   const outside = await page.evaluate((id) => window.notesApi.notes.create({ title: 'Outside note', body: 'see [it](note://' + id + ')' }), inside.id);
   await page.click('.nav-item[data-view="all"]');
-  await page.click('.note-card:has-text("Outside note")');
+  await page.click('.note-row:has-text("Outside note")');
   await waitForDom(() => /Inside the folder/.test(document.getElementById('relatedOut').textContent), 8000);
   await page.click('#relatedOut button');
   await waitForDom(() => document.getElementById('titleInput').value === 'Inside the folder');
   await waitForDom(() => document.getElementById('listTitle').textContent.includes('Scoped folder'));
-  const titles = await page.evaluate(() => [...document.querySelectorAll('.note-card-title')].map((e) => e.textContent));
+  const titles = await page.evaluate(() => [...document.querySelectorAll('.note-row .row-name')].map((e) => e.textContent));
   assert.deepEqual(titles, ['Inside the folder'], 'only the folder\'s notes are listed');
   await waitFor('folder remembered for the next start', () => readNotes().settings.lastFolderId === folder.id);
   // A search looks everywhere; picking an unfiled result and clearing the search brings the list to All notes.
   await page.fill('#searchInput', 'Outside note');
-  await waitForDom(() => [...document.querySelectorAll('.note-card-title')].some((e) => e.textContent === 'Outside note'));
-  await page.click('.note-card:has-text("Outside note")');
+  await waitForDom(() => [...document.querySelectorAll('.note-row .row-name')].some((e) => e.textContent === 'Outside note'));
+  await page.click('.note-row:has-text("Outside note")');
   await page.focus('#searchInput');
   await page.keyboard.press('Escape');
   await waitForDom(() => document.getElementById('listTitle').textContent === 'All notes');
@@ -1926,8 +1926,8 @@ test('window state: Esc hides, a second launch re-shows the first instance, data
   const before = readNotes().notes.length;
   await page.reload({ timeout: 8000 });
   step('reloaded');
-  await page.waitForSelector('.note-card', { timeout: 8000 });
-  assert.equal(await page.$$eval('.note-card', (c) => c.length), before);
+  await page.waitForSelector('.note-row', { timeout: 8000 });
+  assert.equal(await page.$$eval('.note-row', (c) => c.length), before);
   step('data survived reload');
 });
 

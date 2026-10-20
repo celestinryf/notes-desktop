@@ -22,7 +22,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   sort: 'updated',          // updated | created | title
   sidebarCollapsed: false,   // hidden: it floats in when the pointer reaches the window's left edge (Zen's compact mode)
   listCollapsed: false,      // note list hidden (only while a note is open)
-  listMode: 'list',          // list | tree: the middle pane as a list of notes, or as folders with their notes
+  listMode: 'tree',          // tree | list: the middle pane as folders with their notes (the default), or as one list
+  listLayout: 1,            // which one-time list migrations have run (see sanitizeSettings)
   lastFolderId: null,       // folder the list showed last, restored at start
   sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
   listWidth: H.PANE_LIMITS.listWidth.def,
@@ -181,7 +182,10 @@ function sanitizeSettings(input) {
   s.alwaysOnTop = !!s.alwaysOnTop;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
   s.listCollapsed = !!s.listCollapsed;
-  s.listMode = s.listMode === 'tree' ? 'tree' : 'list';
+  s.listMode = s.listMode === 'list' ? 'list' : 'tree';
+  // 1: the folder view became the default (user, 2026-10-19); every save had written 'list' whether or not it was picked.
+  if ((Number(src.listLayout) || 0) < 1) s.listMode = 'tree';
+  s.listLayout = 1;
   s.treeExpanded = Array.isArray(s.treeExpanded) ? s.treeExpanded.filter((x) => typeof x === 'string').slice(0, 5000) : [];
   s.tagsCollapsed = !!s.tagsCollapsed;
   s.lastFolderId = typeof s.lastFolderId === 'string' && s.lastFolderId ? s.lastFolderId : null;
@@ -1253,7 +1257,9 @@ class Store {
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
       out[k] = ordered.map((n) => {
         const p = this.publicNote(n);
-        return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!n.lock, fileKind: n.fileKind || null, live: !!n.live, updatedAt: n.updatedAt };
+        // What a row shows: the title and its trailing marks (see rowInner in the renderer).
+        return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
+          fileKind: n.fileKind || null, filePath: n.filePath || null, remindAt: p.remindAt || null, live: p.live || null, updatedAt: n.updatedAt };
       });
     }
     return out;

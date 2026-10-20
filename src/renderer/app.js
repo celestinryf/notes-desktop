@@ -95,6 +95,7 @@
     sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
     tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
     activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
+    settingsSearch: $('#settingsSearch'), settingsEmpty: $('#settingsEmpty'),
   };
 
   const state = {
@@ -508,9 +509,11 @@
     const q = state.query;
     const tree = treeModeActive();
     el.noteList.innerHTML = '';
-    el.noteList.classList.toggle('hidden', tree);
-    el.noteTree.classList.toggle('hidden', !tree);
     const empty = tree ? !treeHasContent() : !state.notes.length;
+    el.noteList.classList.toggle('hidden', tree || empty); // an empty list would still take the pane and push the empty state down
+    el.noteTree.classList.toggle('hidden', !tree || empty);
+    el.listModeSeg.classList.toggle('hidden', !treeModePossible());
+    syncListModeSeg();
     el.listEmpty.classList.toggle('hidden', !empty);
     if (empty) renderListEmpty();
     el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
@@ -532,12 +535,12 @@
     const frag = document.createDocumentFragment();
     state.notes.forEach((n, i) => {
       const li = document.createElement('li');
-      li.className = 'note-card' + (n.id === state.currentId ? ' is-active' : '');
+      li.className = 'note-row' + (n.id === state.currentId ? ' is-active' : '');
       li.dataset.id = n.id;
       li.setAttribute('role', 'option');
-      li.style.animationDelay = Math.min(i, 12) * 20 + 'ms';
-      li.innerHTML = cardHtml(n, q);
-      if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.querySelector('.note-card-title').prepend(no); }
+      li.title = H.deriveTitle(n);
+      li.innerHTML = rowInner(n, q);
+      if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.prepend(no); }
       // Ctrl+click or middle-click opens the note in a new tab.
       li.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
       li.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
@@ -578,40 +581,59 @@
   function reminderMark(n) {
     if (!n.remindAt || n.trashedAt) return '';
     const overdue = n.remindAt <= Date.now();
-    return '<span class="remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
+    return '<span class="row-meta remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
-  // One renderer for a card's contents, used by the full list render and by single-card refreshes, so the
-  // pin, sticky, lock and reminder marks never disappear after a save.
-  function cardHtml(n, q) {
-    const tags = n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
+  // One renderer for a note row's contents, shared by the list, the folder view and single-row refreshes, so the
+  // pin, sticky, lock, live, file and reminder marks never disappear after a save. The row is the title; everything
+  // else trails it as a small mark (the user: "just the titles", 2026-10-19). Takes a note or an outline entry.
+  function rowInner(n, q) {
+    const title = n.body === undefined ? n.title : H.deriveTitle(n); // outline entries carry a derived title already
     const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
-    const marks = (n.pinned ? '<span class="mark pin" title="Pinned">' + I('star') + '</span>' : '')
-      + (n.sticky ? '<span class="mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
-      + (n.locked ? '<span class="mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
-      + (n.live ? '<span class="mark live-mark" title="Live share (' + n.live.role + ')">' + I('radio') + '</span>' : '');
-    const snippet = n.locked && !n.unlocked ? '<div class="note-card-snippet is-locked">Locked note</div>' : '<div class="note-card-snippet">' + highlight(H.snippet(n, 120), q) + '</div>';
-    return '<div class="note-card-title">' + marks + highlight(H.deriveTitle(n), q) + fileMark + '</div>' + snippet +
-      '<div class="note-card-meta"><span>' + escapeHtml(H.relativeTime(n.trashedAt || n.updatedAt)) + '</span>' + whereMark(n) + reminderMark(n) + tags + '</div>';
+    const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '')
+      + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
+      + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
+      + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? ' (' + n.live.role + ')' : '') + '">' + I('radio') + '</span>' : '');
+    // In search results a note whose title does not carry the match shows the matching text, dimmed, so the row says why it is there.
+    const inTitle = !q || H.tokenize(q).some((t) => title.toLowerCase().includes(t));
+    const why = inTitle || (n.locked && !n.unlocked) ? '' : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + '</span>';
+    return '<span class="row-name">' + highlight(title, q) + '</span>' + why + marks + fileMark + reminderMark(n) + whereMark(n);
   }
 
+  // The text around the first word of the query in the note's body (or its tags), on one line, about 80 characters.
+  function matchExcerpt(n, q) {
+    const body = String(n.body || '').replace(/\s+/g, ' ');
+    const low = body.toLowerCase();
+    const at = H.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+    if (at === undefined) return (n.tags || []).filter((t) => H.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => '#' + t).join(' ') || H.snippet(n, 80);
+    const start = Math.max(0, at - 30);
+    let text = body.slice(start, start + 80);
+    if (start > 0) text = '…' + text.replace(/^\S*\s/, '');
+    if (start + 80 < body.length) text = text.replace(/\s\S*$/, '') + '…';
+    return text;
+  }
+
+  // The folder a note is in, dimmed at the row's end, only where the folder is not already on screen.
   function whereMark(n) {
-    if (!n.folderId || (state.view === 'folder' && !state.query)) return '';
+    if (!n.folderId || treeModeActive() || (state.view === 'folder' && !state.query)) return '';
     const f = flattenTree(state.tree).find((x) => x.id === n.folderId);
-    return f ? '<span class="where">' + I(f.book ? 'book-open' : 'folder') + escapeHtml(f.name) + '</span>' : '';
+    return f ? '<span class="row-meta where">' + I(f.book ? 'book-open' : 'folder') + escapeHtml(f.name) + '</span>' : '';
   }
 
-  function refreshCard(note) {
+  function refreshRow(note) {
     if (tabs.ids.includes(note.id)) { tabs.titles.set(note.id, H.deriveTitle(note)); renderActiveTabTitle(); }
     if (state.outline) {
       const title = H.deriveTitle(note);
       for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
-      const row = el.noteTree.querySelector('.tree-note[data-id="' + note.id + '"] .tree-name');
-      if (row) row.textContent = title;
+      const row = el.noteTree.querySelector('.tree-note[data-id="' + note.id + '"]');
+      if (row) { row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(note, ''); row.title = title; }
     }
-    const li = el.noteList.querySelector('.note-card[data-id="' + note.id + '"]');
+    const li = el.noteList.querySelector('.note-row[data-id="' + note.id + '"]');
     if (!li) return;
-    li.innerHTML = cardHtml(note, state.query);
+    const pageNo = li.querySelector('.page-no');
+    li.innerHTML = rowInner(note, state.query);
+    li.title = H.deriveTitle(note);
+    if (pageNo) li.prepend(pageNo);
   }
 
   // ---- views ---------------------------------------------------------------
@@ -752,27 +774,23 @@
       chevron.addEventListener('click', (e) => { e.stopPropagation(); setExpanded(node.id, !isOpen); });
       row.append(chevron);
 
-      const icon = document.createElement('span');
-      icon.className = 'folder-icon';
-      icon.innerHTML = I(node.book ? (isOpen ? 'book-open' : 'book') : (isOpen ? 'folder-open' : 'folder'));
-      row.append(icon);
-      if (node.isVaultRoot) {
-        const st = state.vaultStatus[node.vaultId] || {};
-        const badge = document.createElement('span');
-        badge.className = 'vault-badge' + (st.syncing ? ' is-syncing' : '') + (st.lastError || st.conflict ? ' is-error' : '');
-        badge.innerHTML = I(st.isRepo ? 'refresh-cw' : 'folder-open');
-        badge.title = st.isRepo ? ('git' + (st.remote ? ' · ' + st.remote : ' · no remote') + (st.lastError ? '\n' + st.lastError : '')) : 'Folder vault (no git)';
-        row.append(badge);
-      }
-
       if (editing && editing.mode === 'rename' && editing.id === node.id) {
         row.append(folderInput(node.name, (value) => commitFolderEdit(value)));
       } else {
         const name = document.createElement('span');
-        name.className = 'folder-name';
+        name.className = 'row-name';
         name.textContent = node.name;
         name.title = node.name;
         row.append(name);
+        if (node.book) row.insertAdjacentHTML('beforeend', bookMark());
+        if (node.isVaultRoot) {
+          const st = state.vaultStatus[node.vaultId] || {};
+          const badge = document.createElement('span');
+          badge.className = 'vault-badge' + (st.syncing ? ' is-syncing' : '') + (st.lastError || st.conflict ? ' is-error' : '');
+          badge.innerHTML = I(st.isRepo ? 'refresh-cw' : 'folder-open');
+          badge.title = st.isRepo ? ('git' + (st.remote ? ' · ' + st.remote : ' · no remote') + (st.lastError ? '\n' + st.lastError : '')) : 'Folder vault (no git)';
+          row.append(badge);
+        }
         const count = document.createElement('span');
         count.className = 'count';
         count.textContent = node.count;
@@ -816,12 +834,10 @@
       const row = document.createElement('div');
       row.className = 'folder-row is-active';
       row.style.setProperty('--depth', depth);
-      const icon = document.createElement('span');
-      icon.className = 'folder-icon';
-      icon.innerHTML = I(editing.book ? 'book' : 'folder');
-      row.append(document.createElement('span'), icon);
+      row.append(document.createElement('span'));
       row.firstChild.className = 'folder-chevron is-leaf';
       row.append(folderInput('', (value) => commitFolderEdit(value)));
+      if (editing.book) row.insertAdjacentHTML('beforeend', bookMark());
       return row;
     };
     const frag = document.createDocumentFragment();
@@ -834,6 +850,9 @@
   }
 
   // ---- trees: shared parts of the sidebar's folders and the middle pane's folder view ----
+
+  // Folder rows carry no leading icon (the chevron already says "folder"); a book is told apart by this trailing mark.
+  function bookMark() { return '<span class="row-mark book-mark" title="Book: its notes are pages">' + I('book') + '</span>'; }
 
   // The children of a row at parentDepth; its guide line runs under the parent's chevron.
   function treeGroup(parentDepth, isHere) {
@@ -898,8 +917,11 @@
   // ---- the middle pane as folders with their notes ("Note list: Folders" in Settings) ----
   // Only where a tree means something: all notes, or one folder. Pinned, reminders, trash, tags and searches stay lists.
 
+  function treeModePossible() {
+    return !state.query && (state.view === 'all' || state.view === 'folder');
+  }
   function treeModeActive() {
-    return !!state.settings && state.settings.listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
+    return !!state.settings && state.settings.listMode === 'tree' && treeModePossible();
   }
   // Is the note somewhere in what the tree shows? (In a folder view the tree also shows its subfolders' notes.)
   function inTreeScope(noteId) {
@@ -976,7 +998,7 @@
     const noteRow = (n, depth, into) => {
       const row = document.createElement('div');
       const active = n.id === state.currentId;
-      row.className = 'tree-row tree-note' + (active ? ' is-active' : '');
+      row.className = 'tree-row tree-note note-row' + (active ? ' is-active' : '');
       row.dataset.id = n.id;
       row.dataset.key = 'n:' + n.id;
       row.style.setProperty('--depth', depth);
@@ -984,9 +1006,7 @@
       row.setAttribute('aria-level', String(depth + 1));
       row.setAttribute('aria-selected', String(active));
       row.tabIndex = -1;
-      row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="tree-icon">' + I(n.locked ? 'lock' : n.fileKind ? 'file-text' : 'notebook-text') + '</span><span class="tree-name"></span>'
-        + (n.pinned ? '<span class="tree-mark" title="Pinned">' + I('star') + '</span>' : '');
-      row.querySelector('.tree-name').textContent = n.title;
+      row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(n, '');
       row.title = n.title;
       row.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
       row.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
@@ -1006,8 +1026,8 @@
           hr.setAttribute('role', 'treeitem');
           hr.setAttribute('aria-level', String(depth + 2 + (h.level - minLevel)));
           hr.tabIndex = -1;
-          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="tree-name"></span>';
-          hr.querySelector('.tree-name').textContent = h.text;
+          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name"></span>';
+          hr.querySelector('.row-name').textContent = h.text;
           hr.title = h.text;
           hr.addEventListener('click', () => jumpToHeading(i));
           group.append(hr);
@@ -1031,8 +1051,8 @@
       row.tabIndex = -1;
       row._toggle = kids ? (on) => setOpen(node.id, on) : null;
       row.innerHTML = '<span class="tree-chevron' + (isOpen ? ' is-open' : '') + (kids ? '' : ' is-leaf') + '" aria-hidden="true">' + I('chevron-right') + '</span>'
-        + '<span class="tree-icon">' + I(node.book ? (isOpen ? 'book-open' : 'book') : (isOpen ? 'folder-open' : 'folder')) + '</span><span class="tree-name"></span><span class="count"></span>';
-      row.querySelector('.tree-name').textContent = node.name;
+        + '<span class="row-name"></span>' + (node.book ? bookMark() : '') + '<span class="count"></span>';
+      row.querySelector('.row-name').textContent = node.name;
       row.querySelector('.count').textContent = node.count || '';
       row.title = node.name;
       row.addEventListener('click', () => { if (kids) setOpen(node.id, !isOpen); });
@@ -2025,7 +2045,7 @@
     syncListCollapsed();
     el.editor.classList.add('hidden');
     el.editorEmpty.classList.remove('hidden');
-    el.noteList.querySelectorAll('.note-card.is-active').forEach((c) => c.classList.remove('is-active'));
+    markActiveRow(null);
   }
 
   // Selections run one at a time: two quick switches must not interleave their loads and flushes.
@@ -2121,7 +2141,7 @@
     renderFolderSelect();
     el.editorEmpty.classList.add('hidden');
     el.editor.classList.remove('hidden');
-    el.noteList.querySelectorAll('.note-card').forEach((c) => c.classList.toggle('is-active', c.dataset.id === id));
+    markActiveRow(id);
     revealInTree(note);
     revealInSidebar(note);
     updateStatus(note);
@@ -2129,6 +2149,17 @@
     else setSaved('Saved');
     placeInTab(note.id, opts.newTab);
     focusAfterOpen(opts.focus);
+  }
+
+  // The open note's row, in whichever of the list and the folder view is showing (null clears both).
+  function markActiveRow(id) {
+    for (const root of [el.noteList, el.noteTree]) {
+      root.querySelectorAll('.note-row').forEach((r) => {
+        const on = !!id && r.dataset.id === id;
+        r.classList.toggle('is-active', on);
+        if (r.hasAttribute('aria-selected')) r.setAttribute('aria-selected', String(on));
+      });
+    }
   }
 
   function focusAfterOpen(where) {
@@ -2717,7 +2748,7 @@
     renderStickyButton(updated);
     updateStatus(updated);
     const idx = state.notes.findIndex((n) => n.id === updated.id);
-    if (idx !== -1) { state.notes[idx] = updated; refreshCard(updated); }
+    if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
   }
 
   async function lockMenuAction(action) {
@@ -4447,7 +4478,7 @@
             const same = JSON.stringify(currentPatch()) === JSON.stringify(latest);
             state.dirty = !same;
             if (same) setSaved('Saved'); else scheduleSave();
-            refreshCard(updated);
+            refreshRow(updated);
           }
         } catch (err) { reportSaveFailure(err); scheduleRetry(); }
       },
@@ -4474,7 +4505,7 @@
         if (state.pending.get(id) === patch) state.pending.delete(id); // only clear what was actually written
         if (updated) {
           const idx = state.notes.findIndex((n) => n.id === id);
-          if (idx !== -1) { state.notes[idx] = updated; refreshCard(updated); }
+          if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
           toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
         }
       } catch (err) {
@@ -4556,7 +4587,7 @@
     if (idx !== -1) {
       const prevTags = (state.notes[idx].tags || []).join(',');
       state.notes[idx] = updated;
-      refreshCard(updated);
+      refreshRow(updated);
       if (state.settings.sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
       else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
@@ -5113,7 +5144,6 @@
     el.openAtLoginInput.checked = s.openAtLogin;
     el.alwaysOnTopInput.checked = s.alwaysOnTop;
     syncAlignSeg(s.editorAlign);
-    syncListModeSeg();
     el.sidebarFloatInput.checked = !!s.sidebarCollapsed;
     el.editorFullWidthInput.checked = !s.editorWidth;
     el.editorWidthInput.disabled = !s.editorWidth;
@@ -5122,6 +5152,8 @@
     el.gitEnabledInput.checked = s.gitEnabled;
     el.gitRemoteInput.value = s.gitRemote;
     populateVoices();
+    el.settingsSearch.value = '';
+    filterSettings();
     el.settingsDialog.showModal();
     renderVaultList();
     el.ttsRateInput.value = s.ttsRate;
@@ -5129,17 +5161,18 @@
     refreshGitStatus();
     el.settingsScroll.scrollTop = 0;
     markSettingsSection();
+    el.settingsSearch.focus(); // Ctrl+, then type: the fastest way to a setting
   }
 
   // The settings nav: a link jumps to its section, and the section in view is the one marked.
   function markSettingsSection() {
     const top = el.settingsScroll.getBoundingClientRect().top;
-    const sections = [...el.settingsScroll.querySelectorAll('.settings-section')];
+    const sections = [...el.settingsScroll.querySelectorAll('.settings-section')].filter((s) => s.offsetParent);
     let current = sections[0];
     for (const sec of sections) if (sec.getBoundingClientRect().top - top < 80) current = sec;
     // At the bottom, the last section is the one being read even if it is short.
     if (el.settingsScroll.scrollTop + el.settingsScroll.clientHeight >= el.settingsScroll.scrollHeight - 4) current = sections[sections.length - 1];
-    el.settingsNav.querySelectorAll('a').forEach((a) => a.classList.toggle('is-active', current && a.getAttribute('href') === '#' + current.id));
+    el.settingsNav.querySelectorAll('a').forEach((a) => a.classList.toggle('is-active', !!current && a.getAttribute('href') === '#' + current.id));
   }
 
   function bindSettingsNav() {
@@ -5147,10 +5180,66 @@
       const a = e.target.closest('a[href^="#"]');
       if (!a) return;
       e.preventDefault();
+      // A section the search had hidden comes back whole when its link is clicked.
+      if (a.classList.contains('is-dim')) { el.settingsSearch.value = ''; filterSettings(); }
       const sec = el.settingsScroll.querySelector(a.getAttribute('href'));
       if (sec) sec.scrollIntoView({ block: 'start' });
     });
     el.settingsScroll.addEventListener('scroll', markSettingsSection, { passive: true });
+    el.settingsSearch.addEventListener('input', filterSettings);
+    el.settingsSearch.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') e.preventDefault(); // the form would submit and close the dialog
+      else if (e.key === 'Escape' && el.settingsSearch.value) { e.preventDefault(); e.stopPropagation(); el.settingsSearch.value = ''; filterSettings(); }
+    });
+    el.settingsDialog.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); el.settingsSearch.focus(); el.settingsSearch.select(); }
+    });
+  }
+
+  // Search in Settings: every word typed must appear in a setting's label, help, options or buttons. Settings that
+  // do not match hide, so do sections left empty (their nav links dim; a click on one clears the search). Matches
+  // are marked with the CSS Custom Highlight API, which leaves the fields' DOM alone.
+  function filterSettings() {
+    const tokens = H.tokenize(el.settingsSearch.value);
+    const ranges = [];
+    let any = false;
+    for (const sec of el.settingsScroll.querySelectorAll('.settings-section')) {
+      let hits = 0;
+      for (const unit of sec.children) {
+        if (unit.tagName === 'H3') continue;
+        const text = unit.textContent.toLowerCase();
+        const ok = tokens.every((t) => text.includes(t));
+        unit.classList.toggle('is-filtered', !ok);
+        if (!ok) continue;
+        hits++;
+        if (tokens.length) collectMatches(unit, tokens, ranges);
+      }
+      sec.classList.toggle('is-filtered', tokens.length > 0 && !hits);
+      const link = el.settingsNav.querySelector('a[href="#' + sec.id + '"]');
+      if (link) link.classList.toggle('is-dim', tokens.length > 0 && !hits);
+      if (hits) any = true;
+    }
+    el.settingsEmpty.classList.toggle('hidden', any);
+    if (window.CSS && CSS.highlights) {
+      if (ranges.length) CSS.highlights.set('settings-match', new Highlight(...ranges));
+      else CSS.highlights.delete('settings-match');
+    }
+    markSettingsSection();
+  }
+
+  function collectMatches(root, tokens, out) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node; (node = walker.nextNode());) {
+      const text = node.textContent.toLowerCase();
+      for (const t of tokens) {
+        for (let i = text.indexOf(t); i !== -1; i = text.indexOf(t, i + t.length)) {
+          const r = new Range();
+          r.setStart(node, i);
+          r.setEnd(node, i + t.length);
+          out.push(r);
+        }
+      }
+    }
   }
 
   function syncListModeSeg() {
@@ -5318,7 +5407,7 @@
       ...['all', 'pinned', 'reminders', 'trash'].map((v) => cmd('go-' + v, 'Go to', { all: 'All notes', pinned: 'Pinned', reminders: 'Reminders', trash: 'Trash' }[v], { all: 'notebook-text', pinned: 'star', reminders: 'bell', trash: 'trash-2' }[v], '', () => setView(v), !GUEST)),
       ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
       ...[...el.tagList.querySelectorAll('.nav-item')].map((b) => cmd('tag-' + b.firstChild.textContent, 'Go to', 'Tag: #' + b.firstChild.textContent, 'hash', '', () => b.click(), !GUEST)),
-      cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font'),
+      cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font search'),
       cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
       cmd('export-all', 'App', 'Export all notes…', 'download', '', () => el.exportAllBtn.click(), !GUEST, 'backup json'),
       cmd('data-folder', 'App', 'Open the data folder', 'folder-open', '', () => el.dataFolderBtn.click(), !GUEST),
@@ -5813,7 +5902,7 @@
         const fresh = await api.notes.get(wanted);
         if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
         if (!fresh && wanted === state.currentId && !state.dirty) { clearEditor(); if (!GUEST) await refresh(); return; }
-        if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshCard(fresh); }
+        if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshRow(fresh); }
         // A PDF or Word file is shown from the file, so a new version of it (same text or not) is shown too.
         if (fresh && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
         else if (fresh && fresh.body !== el.bodyInput.value) {
