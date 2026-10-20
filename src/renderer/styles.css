@@ -746,6 +746,8 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   tab-size: 2;
 }
 .body-input:focus { outline: none; }
+/* A .txt file is prose: the writing font and size, as a note's text, not the mono of Markdown source and code. */
+.body-input.is-prose { font-family: var(--font-sans); font-size: var(--editor-font-size); }
 
 /* ---- the code editor (CodeMirror) for plain-text files, shown in the textarea's place (app.js showCode) ---- */
 .body-input.uses-code { display: none; }
