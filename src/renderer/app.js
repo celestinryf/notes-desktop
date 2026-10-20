@@ -91,7 +91,7 @@
     historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
     botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
     moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
-    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'),
+    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'), gridcraftFrame: $('#gridcraftFrame'),
     sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
     tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
     activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
@@ -1465,7 +1465,7 @@
       notes: ['create', 'update', 'togglePin', 'duplicate', 'splitIntoBook', 'undoSplit', 'trash', 'restore', 'destroy', 'emptyTrash'],
       folders: ['create', 'rename', 'setBook', 'reorderPages', 'move', 'delete'],
       lock: ['set', 'unlock', 'relock', 'remove'],
-      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveWord', 'convert', 'asMarkdown'],
+      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveCraft', 'convert', 'asMarkdown'],
       attachments: ['pick', 'addPaths', 'saveRecording'],
       stickies: ['open', 'close', 'create', 'setColor', 'setOnTop'],
       live: ['host', 'join', 'stop'],
@@ -3551,7 +3551,7 @@
   // docxBanner: what the banner says about it (shown again when the same version is shown again).
   let docx = null, docxNote = null, docxBanner = '';
   function clearDocx() {
-    clearWordCraft();
+    crafts.wordcraft.clear();
     docxShownKey = null;
     docxSeq++;
     docxNote = null;
@@ -3663,118 +3663,151 @@
     el.imageView.setAttribute('aria-label', (state.current ? state.current.title + ', ' : '') + w + ' by ' + h + ' pixels, ' + (actual ? 'actual size' : 'fitted to the pane'));
   }
 
-  // ---- Word documents in WordCraft ----------------------------------------------------------------
-  // wordNote: the document WordCraft shows, { id, fileMtime, name } as read or last saved.
-  let wc = null, wordNote = null, wordShownKey = null, wordSeq = 0, wordcraftDown = false;
-  const useWordCraft = () => !!(state.info && state.info.wordcraft) && !GUEST && !wordcraftDown;
-  function wordcraft() {
-    if (!wc) {
-      wc = window.NotesWordCraft.create({
-        frame: el.wordcraftFrame,
-        origin: 'wordcraft://app',
-        url: 'wordcraft://app/index.html?host',
-        onSave: saveWordFromFrame,
-        onDirty: (d) => { if (wordNote && state.currentId === wordNote.id) setSaved(d ? 'Edited' : 'Saved'); },
-        onOpened: () => { el.wordcraftFrame.classList.remove('is-opening'); if (wordNote && state.currentId === wordNote.id) showBanner(''); },
-        onOpenFailed: (err) => {
-          clearWordCraft();
-          showBanner('WordCraft could not open this document: ' + err + '. Use "Open with…" to open it in Word.');
-        },
-        // Word documents are always edited in the dark: dark chrome and a dark page, whatever Notes' own theme (the
-        // user's choice, 2026-10-19). The page's darkness is only how WordCraft shows it; the file is unchanged.
-        theme: 'dark',
-        darkPage: true,
-        // The build is there but did not start: Word documents use the simple editor until Notes restarts.
-        onUnavailable: () => {
-          wordcraftDown = true;
-          clearWordCraft();
-          const n = state.current;
-          if (n && n.filePath && n.fileKind === 'docx') renderFileRow(n);
-          toast('WordCraft did not start, so Word documents open in the simple editor for now.');
-        },
-      });
-    }
-    return wc;
-  }
-  async function showWordCraft(note) {
-    const key = note.id + ':' + note.fileMtime;
-    el.wordcraftFrame.classList.remove('hidden');
-    if (wordShownKey === key) return;
-    wordShownKey = key;
-    const seq = ++wordSeq;
-    // The last document is closed at once, and the frame stays out of sight until the new one has opened, so
-    // nothing is typed into a document that is about to be replaced.
-    wordNote = null;
-    if (wc) wc.close();
-    el.wordcraftFrame.classList.add('is-opening');
-    showBanner('Opening in WordCraft…');
-    try {
-      const bytes = await api.files.docxBytes(note.id);
-      // Moved on (another note, or this one again) while the file was read: that later open wins.
-      if (seq !== wordSeq || !state.current || state.current.id !== note.id) return;
-      const name = note.filePath.split(/[\\/]/).pop();
-      wordNote = { id: note.id, fileMtime: note.fileMtime, name };
-      wordcraft().open(name, bytes, wordNote);
-    } catch (err) {
-      if (seq !== wordSeq) return;
-      clearWordCraft();
-      showBanner('Could not open this Word document in WordCraft: ' + ipcErrorText(err) + ' Use "Open with…" to open it in Word.');
-    }
-  }
-  function clearWordCraft() {
-    wordSeq++;
-    wordShownKey = null;
-    wordNote = null;
-    if (wc) wc.close();
-    el.wordcraftFrame.classList.add('hidden');
-  }
-  // WordCraft saved (Ctrl+S there, or a save Notes asked for): write it to the file with Notes' usual safety. target is
-  // the document the save was made in, which may no longer be on show.
-  // Returns { ok, own }: own when the save is the note's document (written over it, into its "(edited)" copy, or as the
-  // .docx it moved to), not a copy under another name.
-  async function saveWordFromFrame(name, bytes, target) {
-    if (!target) return { ok: false, own: true };
-    try {
-      const r = await api.files.saveWord(target.id, bytes, name, target.fileMtime);
-      if (r.exported) { toast('Saved ' + r.exported.split(/[\\/]/).pop() + ' next to the document.', { label: 'Open', run: () => openFiles([r.exported]) }); return { ok: true, own: false }; }
-      if (r.relinked) { movedToDocx(target, r); return { ok: true, own: true }; }
-      if (!r.savedAs) {
-        target.fileMtime = r.mtime;
-        if (wordNote === target) wordShownKey = target.id + ':' + r.mtime;
+  // ---- Documents in the Craft apps ---------------------------------------------------------------
+  // WordCraft (Word documents) and GridCraft (spreadsheets): the user's forks of ArtCraft's Rust office apps, built to
+  // WebAssembly and shown in a frame each (craft-frame.js, one protocol for both). One controller per app. Its note
+  // is the document on show, { id, fileMtime, name } as read or last saved.
+  const CRAFT_UI = {
+    wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
+    gridcraft: { label: 'GridCraft', what: 'spreadsheet', frame: () => el.gridcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'Excel', without: 'spreadsheets cannot be shown for now.' },
+  };
+  function craftViewer(key) {
+    const ui = CRAFT_UI[key];
+    const frame = () => ui.frame();
+    let fc = null, note = null, shownKey = null, seq = 0, down = false;
+    // The build is there, this is the main window, and the app started the last time it was asked to.
+    const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
+    function controller() {
+      if (!fc) {
+        fc = window.NotesCraftFrame.create({
+          frame: frame(),
+          origin: key + '://app',
+          url: key + '://app/index.html?host',
+          onSave: saveFromFrame,
+          onDirty: (d) => { if (note && state.currentId === note.id) setSaved(d ? 'Edited' : 'Saved'); },
+          onOpened: () => { frame().classList.remove('is-opening'); if (note && state.currentId === note.id) showBanner(''); },
+          onOpenFailed: (err) => {
+            clear();
+            showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
+          },
+          // The Craft apps are always dark: dark chrome and a dark page, whatever Notes' own theme (the user's choice,
+          // 2026-10-19). The page's darkness is only how the app shows it; the file is unchanged.
+          theme: 'dark',
+          darkPage: true,
+          // The build is there but did not start: its documents do without it until Notes restarts.
+          onUnavailable: () => {
+            down = true;
+            clear();
+            const n = state.current;
+            if (n && n.filePath && H.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
+            toast(ui.label + ' did not start, so ' + ui.without);
+          },
+        });
       }
-      reportFileSaved(target, r, false, 'document');
-      return { ok: true, own: true };
-    } catch (err) {
-      toast('Could not save the document: ' + ipcErrorText(err));
-      return { ok: false, own: true };
+      return fc;
     }
+    async function show(n) {
+      const k = n.id + ':' + n.fileMtime;
+      frame().classList.remove('hidden');
+      if (shownKey === k) return;
+      shownKey = k;
+      const s = ++seq;
+      // The last document is closed at once, and the frame stays out of sight until the new one has opened, so
+      // nothing is typed into a document that is about to be replaced.
+      note = null;
+      if (fc) fc.close();
+      frame().classList.add('is-opening');
+      showBanner('Opening in ' + ui.label + '…');
+      try {
+        const bytes = await ui.bytes(n.id);
+        // Moved on (another note, or this one again) while the file was read: that later open wins.
+        if (s !== seq || !state.current || state.current.id !== n.id) return;
+        const name = n.filePath.split(/[\\/]/).pop();
+        note = { id: n.id, fileMtime: n.fileMtime, name };
+        controller().open(name, bytes, note);
+      } catch (err) {
+        if (s !== seq) return;
+        clear();
+        showBanner('Could not open this ' + ui.what + ' in ' + ui.label + ': ' + ipcErrorText(err) + ' Use "Open with…" to open it in ' + ui.openWith + '.');
+      }
+    }
+    function clear() {
+      seq++;
+      shownKey = null;
+      note = null;
+      if (fc) fc.close();
+      frame().classList.add('hidden');
+    }
+    // The app saved (Ctrl+S there, or a save Notes asked for): write it to the file with Notes' usual safety. target is
+    // the document the save was made in, which may no longer be on show.
+    // Returns { ok, own }: own when the save is the note's document (written over it, into its "(edited)" copy, or as
+    // the file it moved to), not a copy under another name.
+    async function saveFromFrame(name, bytes, target) {
+      if (!target) return { ok: false, own: true };
+      try {
+        const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
+        if (r.exported) {
+          const copy = r.exported.split(/[\\/]/).pop();
+          // own: the document's own save went into a copy beside the file (Notes never writes over a presentation),
+          // so the document counts as saved; the file is unchanged.
+          toast(r.own ? 'Saved as ' + copy + ' beside this file, which is unchanged.' : 'Saved ' + copy + ' next to the ' + ui.what + '.', { label: 'Open', run: () => openFiles([r.exported]) });
+          return { ok: true, own: !!r.own };
+        }
+        if (r.relinked) { movedTo(target, r); return { ok: true, own: true }; }
+        if (!r.savedAs) {
+          target.fileMtime = r.mtime;
+          if (note === target) shownKey = target.id + ':' + r.mtime;
+        }
+        reportFileSaved(target, r, false, ui.what);
+        return { ok: true, own: true };
+      } catch (err) {
+        toast('Could not save the ' + ui.what + ': ' + ipcErrorText(err));
+        return { ok: false, own: true };
+      }
+    }
+    // The app saved a format it reads but does not write (an .odt as a .docx, an .xls as an .xlsx) beside the
+    // original, and the note moved to that file. Once this save has settled (a save made while leaving the note must
+    // finish first), the note is shown by its new file and opened again in the app under that name, so its next save
+    // goes there.
+    function movedTo(target, r) {
+      target.fileMtime = r.mtime;
+      toast('Saved as ' + r.relinked.split(/[\\/]/).pop() + ' beside the original, which is unchanged. This note is that file now.');
+      setTimeout(async () => {
+        const fresh = await api.notes.get(target.id);
+        await refresh({ keepEditor: true });
+        if (!fresh || !state.current || state.current.id !== fresh.id) return;
+        state.current = fresh;
+        el.titleInput.value = fresh.title;
+        shownKey = null;
+        renderFileRow(fresh);
+      }, 0);
+    }
+    const dirty = () => !!(fc && note && fc.isDirty());
+    // Leaving the note, hiding or quitting: have the app save first.
+    const flush = async () => (dirty() ? fc.requestSave(15000) : true);
+    // The next show opens the document again from the file, even the same version (a reload from disk).
+    const forget = () => { shownKey = null; };
+    return { usable, show, clear, dirty, flush, forget };
   }
-
-  // WordCraft saved an .odt, .rtf or .doc as a .docx beside it, and the note moved to that file. Once this save has
-  // settled (a save made while leaving the note must finish first), the note is shown by its new file and opened again
-  // in WordCraft under that name, so its next save goes there.
-  function movedToDocx(target, r) {
-    target.fileMtime = r.mtime;
-    toast('Saved as ' + r.relinked.split(/[\\/]/).pop() + ' beside the original, which is unchanged. This note is that file now.');
-    setTimeout(async () => {
-      const fresh = await api.notes.get(target.id);
-      await refresh({ keepEditor: true });
-      if (!fresh || !state.current || state.current.id !== fresh.id) return;
-      state.current = fresh;
-      el.titleInput.value = fresh.title;
-      wordShownKey = null;
-      renderFileRow(fresh);
-    }, 0);
+  const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
+  const useWordCraft = () => crafts.wordcraft.usable();
+  // The Craft app for a file note, or null.
+  const craftFor = (n) => (n && n.filePath && H.CRAFT_OF[n.fileKind] ? crafts[H.CRAFT_OF[n.fileKind]] : null);
+  const craftDirty = () => Object.values(crafts).some((c) => c.dirty());
+  async function flushCrafts() {
+    let ok = true;
+    for (const c of Object.values(crafts)) ok = (await c.flush()) && ok;
+    return ok;
   }
-  const wordDirty = () => !!(wc && wordNote && wc.isDirty());
-  // Leaving the note, hiding or quitting: have WordCraft save first.
-  async function flushWord() {
-    if (!wordDirty()) return true;
-    return wc.requestSave(15000);
+  // A spreadsheet: GridCraft, or nothing but a banner (Notes has no editor of its own for it).
+  function showCraftOnly(n) {
+    const key = H.CRAFT_OF[n.fileKind];
+    if (crafts[key].usable()) { showBanner(''); crafts[key].show(n); return; }
+    showBanner('Notes shows .' + H.extOf(n.filePath) + ' files in ' + CRAFT_UI[key].label + ', which is not available right now. Use "Open with…" to open it in ' + CRAFT_UI[key].openWith + '.');
   }
 
   async function showDocx(note) {
-    if (useWordCraft()) { showWordCraft(note); return; }
+    if (useWordCraft()) { crafts.wordcraft.show(note); return; }
     if (!H.isOoxmlWordFile(note)) {
       el.docxEditor.classList.add('hidden');
       showBanner('Notes shows .' + H.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with…" to open it in Word.');
@@ -3854,7 +3887,7 @@
   // A file's badge, in the list and over the note: a text file's language as it is written (LaTeX, Python,
   // Markdown, Plain text), or the kind of any other file as the acronym it is (PDF, DOCX).
   function fileBadge(note) {
-    if (note.fileKind === 'docx' || note.fileKind === 'image') return H.extOf(note.filePath).toUpperCase();
+    if (['docx', 'sheet', 'image'].includes(note.fileKind)) return H.extOf(note.filePath).toUpperCase();
     if (note.fileKind !== 'text') return (note.fileKind || 'file').toUpperCase();
     if (!isPlainTextFile(note)) return 'Markdown';
     if (H.isTableFile(note)) return H.extOf(note.filePath).toUpperCase();
@@ -3866,14 +3899,16 @@
     el.fileRow.classList.toggle('hidden', !isFile);
     el.fileBanner.classList.add('hidden');
     if (!(isFile && note.fileKind === 'docx')) clearDocx();
+    for (const [kind, key] of Object.entries(H.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
     if (!(isFile && note.fileKind === 'pdf')) clearPdf();
     if (!(isFile && note.fileKind === 'image')) clearImage();
     closeConvertMenu();
-    el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || note.fileKind === 'docx'));
+    el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || !!H.CRAFT_OF[note.fileKind]));
     el.editor.classList.toggle('shows-image', isFile && note.fileKind === 'image');
-    // WordCraft is a whole word processor: it gets the note's area, and shows its own title, counts and status.
-    el.editorColumn.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
-    el.editor.classList.toggle('shows-wordcraft', isFile && note.fileKind === 'docx' && useWordCraft());
+    // A Craft app is a whole office app: it gets the note's area, and shows its own title, counts and status.
+    const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
+    el.editorColumn.classList.toggle('shows-craft', inCraft);
+    el.editor.classList.toggle('shows-craft', inCraft);
     syncTextViews(note);
     if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
@@ -3890,6 +3925,8 @@
       el.docxEditor.classList.toggle('hidden', useWordCraft());
       showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
+    } else if (note.fileKind === 'sheet') {
+      showCraftOnly(note);
     } else if (note.fileKind === 'image') {
       showBanner('');
       showImage(note);
@@ -4061,14 +4098,14 @@
     return true;
   }
 
-  // Opened documents (PDF, Word) as one: unsaved edits, edits in progress, and saving them.
-  const documentDirty = () => pdfDirty() || docxDirty() || wordDirty();
-  const documentBusy = () => pdfBusy() || docxDirty() || wordDirty();
+  // Opened documents (PDF, Word, the Craft apps') as one: unsaved edits, edits in progress, and saving them.
+  const documentDirty = () => pdfDirty() || docxDirty() || craftDirty();
+  const documentBusy = () => pdfBusy() || docxDirty() || craftDirty();
   async function flushDocuments(opts) {
     const pdfSaved = await flushPdf(opts);
     const docxSaved = await flushDocx(opts);
-    const wordSaved = await flushWord();
-    return pdfSaved && docxSaved && wordSaved;
+    const craftSaved = await flushCrafts();
+    return pdfSaved && docxSaved && craftSaved;
   }
 
   // ---- PDF pages: turn, move, remove, add from another PDF ----------------------------------------
@@ -4338,7 +4375,7 @@
     state.dirty = false;
     pdfShownKey = null; // a PDF or Word document is shown again from the file even if it did not change, dropping its edits
     docxShownKey = null;
-    wordShownKey = null;
+    for (const c of Object.values(crafts)) c.forget();
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
     if (state.currentId !== id || !fresh) return;

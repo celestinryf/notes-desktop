@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http:; frame-src 'self' file: wordcraft:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http:; frame-src 'self' file: wordcraft: gridcraft:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
@@ -248,7 +248,8 @@
                   <div class="pdf-pages-grid"></div>
                 </div>
               </div>
-              <iframe id="wordcraftFrame" class="wordcraft-frame hidden" title="WordCraft: the Word document" allow="clipboard-read; clipboard-write"></iframe>
+              <iframe id="wordcraftFrame" class="craft-frame hidden" title="WordCraft: the Word document" allow="clipboard-read; clipboard-write"></iframe>
+              <iframe id="gridcraftFrame" class="craft-frame hidden" title="GridCraft: the spreadsheet" allow="clipboard-read; clipboard-write"></iframe>
               <div id="docxEditor" class="docx-editor hidden">
                 <div class="pdf-toolbar docx-toolbar" role="toolbar" aria-label="Word tools">
                   <button class="tool-btn" data-docx-act="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
@@ -682,7 +683,7 @@
   <script src="pdf-pages.js"></script>
   <script src="pdf-comments.js"></script>
   <script src="docx-editor.js"></script>
-  <script src="wordcraft-frame.js"></script>
+  <script src="craft-frame.js"></script>
   <script src="csv-view.js"></script>
   <script src="sign-pad.js"></script>
   <script src="../shared/helpers.js"></script>

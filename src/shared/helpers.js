@@ -328,6 +328,18 @@
   // Images (fileKind 'image'), shown by the image viewer.
   const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
   const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+  // Spreadsheets (fileKind 'sheet') open in GridCraft, the user's fork of ArtCraft's Rust spreadsheet, as Word
+  // documents open in WordCraft. An .xlsx is saved where it is; the others GridCraft saves as an .xlsx beside them (as
+  // WordCraft does with .odt), and the note moves to it. (.csv and .tsv stay text files: Notes shows them as a table
+  // itself. Presentations are out of Notes' scope, the user's call on 2026-10-19.)
+  const SHEET_EXT = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods']);
+  // (.xlsm too: a macro workbook saved as .xlsx beside the original keeps the original's macros where they are.)
+  const SHEET_TO_XLSX_EXT = new Set(['xlsm', 'xls', 'xlsb', 'ods']);
+  // The Craft app that shows each kind of file.
+  const CRAFT_OF = { docx: 'wordcraft', sheet: 'gridcraft' };
+  // Documents that are zips (the Office and OpenDocument formats, e-books, zips themselves): the zip guard runs on them
+  // before anything unpacks them, and a save under such a name must be a zip.
+  const ZIP_DOC_EXT = new Set([...OOXML_EXT, 'odt', 'xlsx', 'xlsm', 'xlsb', 'ods', 'epub', 'zip']);
 
   // A comma- or tab-separated file: shown as a table, edited as text (Ctrl+E).
   function isTableFile(note) {
@@ -451,7 +463,7 @@
   return {
     fuzzyScore,
     splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
-    WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME,
+    WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
     noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,

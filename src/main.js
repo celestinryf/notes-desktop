@@ -12,7 +12,7 @@ const os = require('os');
 const H = require('./shared/helpers');
 const convert = require('./convert');
 const { runWorker } = require('./run-worker');
-const wordcraft = require('./wordcraft-host');
+const crafts = require('./craft-host');
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
@@ -25,7 +25,7 @@ const Themes = require('./shared/themes');
 const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');
-wordcraft.registerScheme(protocol); // must happen before the app is ready
+crafts.registerSchemes(protocol); // must happen before the app is ready
 app.setAppUserModelId('com.celestinryf.notes');
 app.setPath('userData', DATA_DIR);
 
@@ -348,7 +348,7 @@ function main() {
     stickies.broadcast('settings:changed', store.getSettings());
   }
 
-  let wordcraftReady = false;
+  let craftsReady = {}; // which Craft apps' builds are there: { wordcraft, gridcraft }
   function info() {
     return {
       version: app.getVersion(),
@@ -358,7 +358,7 @@ function main() {
       hotkeyFallback: !!hotkeyState.fallback,
       hotkeyDisplay: H.displayAccelerator(hotkeyState.hotkey),
       platform: process.platform,
-      wordcraft: wordcraftReady, // WordCraft's web build is there, so Word documents open in it
+      crafts: craftsReady, // the Craft apps whose web builds are there, so their documents open in them
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
       documentsDir: app.getPath('documents'),
       saveBlocked: !!store.saveBlocked,
@@ -409,6 +409,8 @@ function main() {
     if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', payload);
     stickies.broadcast('notes:reloaded', payload);
   }
+  // A file note's text arrived after the note did (a spreadsheet's, read by MarkItDown): the list shows it.
+  store.onFileText = (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'file', id }); };
 
   let trayRefreshTimer = null;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
@@ -497,7 +499,7 @@ function main() {
       title: 'Open files as notes',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', ...H.WORD_EXT, ...H.IMAGE_EXT, 'csv', 'tsv', 'json', 'yaml', 'yml', 'log'] },
+        { name: 'Notes and documents', extensions: ['md', 'markdown', 'txt', 'tex', 'latex', 'pdf', ...H.WORD_EXT, ...H.SHEET_EXT, ...H.IMAGE_EXT, 'csv', 'tsv', 'json', 'yaml', 'yml', 'log'] },
         { name: 'All files', extensions: ['*'] },
       ],
     });
@@ -522,10 +524,10 @@ function main() {
     if (!n || !n.filePath) return 'No file';
     return openSafely(n.filePath);
   });
-  // The opened file behind note id, which must be of the given kind (pdf, docx).
+  // The opened file behind note id, which must be of the given kind (pdf, docx, sheet, image).
   function fileNoteOfKind(id, kind) {
     const n = store.get(id);
-    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.' }[kind] || 'Not a Word document.');
+    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' }[kind] || 'Not a Word document.');
     return n;
   }
 
@@ -701,51 +703,85 @@ function main() {
   ipcMain.handle('files:docxBytes', async (_e, id) => {
     const file = fileNoteOfKind(id, 'docx').filePath;
     const mtime = mtimeOf(file);
-    const buf = await readDocxBuffer(file);
+    const buf = await readDocumentBuffer(file);
     rememberDocx(id, buf, mtime);
     return buf;
   });
-  // WordCraft's saves of a Word note:
-  // - Under the document's own name: over the note's file (after a backup, or into the "(edited)" copy if it changed on
-  //   disk since it was read).
-  // - An .odt, .rtf or old .doc, which WordCraft reads but saves as .docx (the format that keeps everything): its Save is
-  //   <name>.docx. That is written beside the original, never over anything, and the note moves to it; the original
-  //   stays as it was.
+  // A spreadsheet's bytes, for GridCraft.
+  ipcMain.handle('files:documentBytes', (_e, id) => readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath));
+  // The Craft apps' saves of a file note, by the note's kind:
+  // - Under the document's own name, in a format the app writes (own): over the note's file (after a backup, or into
+  //   the "(edited)" copy if it changed on disk since it was read). In another format (an .xlsm, an .ods): into one
+  //   copy beside the file, never over it.
+  // - A format the app reads but saves as its own zip format (WordCraft: .odt, .rtf and the old .doc become .docx;
+  //   GridCraft: .xlsm, .xls, .xlsb and .ods become .xlsx): its Save is <name>.<that>, written beside the original,
+  //   never over anything, and the note moves to it; the original stays as it was.
   // - Anything else (Save As PDF, another name): a new file beside it, never over anything.
-  const WORDCRAFT_EXPORTS = ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'];
-  // Whether bytes are what their extension says: Word's zip formats and ODT are zips, RTF starts {\rtf.
-  const looksLikeWord = (ext, buf) => {
-    if (H.OOXML_EXT.has(ext) || ext === 'odt') return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
-    if (ext === 'rtf') return buf.slice(0, 5).toString('latin1') === '{\\rtf';
-    return false; // WordCraft writes no .doc: such a save never goes over one
+  // own: the formats saved in place. to/from: the format the app saves the others as, and which they are.
+  const CRAFT_SAVES = {
+    docx: { app: 'WordCraft', own: new Set([...H.OOXML_EXT, 'odt', 'rtf']), to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
+    sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'csv', 'tsv', 'json', 'html'] },
   };
-  ipcMain.handle('files:saveWord', async (_e, id, bytes, name, expectedMtime) => {
-    const n = fileNoteOfKind(id, 'docx');
+  // Whether bytes are what their extension says, for the formats this can be told of: the Office and OpenDocument
+  // formats are zips, RTF starts {\rtf. (WordCraft writes no .doc and GridCraft no .xls: such a save never goes
+  // over one.)
+  const checkable = (ext) => H.ZIP_DOC_EXT.has(ext) || ext === 'rtf';
+  const looksLike = (ext, buf) => {
+    if (H.ZIP_DOC_EXT.has(ext)) return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
+    if (ext === 'rtf') return buf.slice(0, 5).toString('latin1') === '{\\rtf';
+    return false;
+  };
+  const assertLooksLike = (ext, buf) => { if (checkable(ext) && !looksLike(ext, buf)) throw new Error('that is not a .' + ext + ' file, so nothing was written.'); };
+  // A save that may not go over the note's file (a format the app does not write) goes into one copy beside it,
+  // "<name> (from <app>).<ext>", written again on each save in this run: a stable place, so the document counts as
+  // saved and the folder does not fill with numbered copies.
+  const sideCopies = new Map(); // note id -> the copy's path
+  function sideCopy(id, dir, stem, ext, app, buf) {
+    const prev = sideCopies.get(id);
+    if (prev && fs.existsSync(prev)) { fs.writeFileSync(prev, buf); return prev; }
+    const file = convert.writeNew(dir, stem + ' (from ' + app + ')', ext, buf);
+    sideCopies.set(id, file);
+    return file;
+  }
+  ipcMain.handle('files:saveCraft', async (_e, id, bytes, name, expectedMtime) => {
+    const n = store.get(id);
+    const rules = n && n.filePath && CRAFT_SAVES[n.fileKind];
+    if (!rules) throw new Error('Not a document a Craft app edits.');
     if (!ArrayBuffer.isView(bytes) || !bytes.byteLength || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the document is missing or larger than 100 MB, so nothing was written.');
     const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const own = H.extOf(n.filePath);
     const given = path.basename(String(name || ''));
     const ext = path.extname(given).slice(1).toLowerCase();
     const stem = path.basename(n.filePath, path.extname(n.filePath));
+    const dir = path.dirname(n.filePath);
     if (given.toLowerCase() === path.basename(n.filePath).toLowerCase()) {
-      if (!looksLikeWord(own, buf)) throw new Error('that is not a .' + own + ' document, so nothing was written.');
+      assertLooksLike(own, buf);
+      if (!rules.own.has(own)) return { exported: sideCopy(id, dir, stem, own, rules.app, buf), own: true };
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
-      rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
+      if (n.fileKind === 'docx') rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
+      // The text Notes keeps of the file (search, the bot's copy) follows the save, in the background: MarkItDown
+      // takes seconds. A save into an "(edited)" copy leaves the file, and so its text, as it was.
+      if (!saved.savedAs) store.fillFileText(id);
       return saved;
     }
-    if (H.WORD_TO_DOCX_EXT.has(own) && given.toLowerCase() === (stem + '.docx').toLowerCase()) {
-      if (!looksLikeWord('docx', buf)) throw new Error('that is not a Word document, so nothing was written.');
-      const file = convert.writeNew(path.dirname(n.filePath), stem, 'docx', buf);
+    if (rules.to && rules.from.has(own) && given.toLowerCase() === (stem + '.' + rules.to).toLowerCase()) {
+      assertLooksLike(rules.to, buf);
+      const file = convert.writeNew(dir, stem, rules.to, buf);
+      // The note moves to the new file now; its text follows (a Word document's at once, an office file's in the
+      // background, since MarkItDown takes seconds). A failed read keeps the old text; the file is saved either way.
       let body;
-      try { body = (await readDocxText(file)).body; } catch (_) { body = undefined; } // keeps the old text; the file is saved either way
+      if (n.fileKind === 'docx') { try { body = (await readNoteText('docx', file)).body; } catch (_) { body = undefined; } }
       const moved = store.relinkFileNote(id, file, body);
-      conflictCopies.delete(id); // an "(edited)" copy of the old file is not where the .docx's saves go
-      rememberDocx(id, buf, moved.fileMtime);
+      if (n.fileKind !== 'docx') store.fillFileText(id);
+      conflictCopies.delete(id); // an "(edited)" copy of the old file is not where the new file's saves go
+      sideCopies.delete(id);
+      if (n.fileKind === 'docx') rememberDocx(id, buf, moved.fileMtime);
       return { relinked: file, mtime: moved.fileMtime };
     }
-    if (!WORDCRAFT_EXPORTS.includes(ext)) throw new Error('Notes does not save .' + (ext || 'extensionless') + ' files from WordCraft.');
+    if (!rules.exports.includes(ext)) throw new Error('Notes does not save .' + (ext || 'extensionless') + ' files from ' + rules.app + '.');
+    assertLooksLike(ext, buf);
     const base = H.safeFilename(path.basename(given, path.extname(given))) || stem;
-    return { exported: convert.writeNew(path.dirname(n.filePath), base, ext, buf) };
+    return { exported: convert.writeNew(dir, base, ext, buf) };
   });
 
   // An image note's picture, for the image viewer.
@@ -769,7 +805,7 @@ function main() {
     return saved;
   });
 
-  const { discoverAgentFiles, readDocxBuffer, readDocxText, readImage, mtimeOf, pathKey } = require('./files');
+  const { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } = require('./files');
   ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
   ipcMain.handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);
@@ -1477,7 +1513,7 @@ function main() {
 
   app.whenReady().then(() => {
     const step = (name, fn) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
-    step('wordcraft', () => { wordcraftReady = wordcraft.serve(protocol); });
+    step('crafts', () => { craftsReady = crafts.serve(protocol); });
     step('theme', applyTheme);
     step('window', createWindow);
     if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });

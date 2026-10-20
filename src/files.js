@@ -13,14 +13,16 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 // Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
-const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME } = require('./shared/helpers');
+const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
+const markitdown = require('./markitdown');
 
-// Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'image' | 'binary'. Text is decided by
-// extension, then by sniffing for NUL bytes.
+// Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
+// 'image' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
 function kindOf(filePath) {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
   if (WORD_EXT.has(ext)) return 'docx';
+  if (SHEET_EXT.has(ext)) return 'sheet';
   if (IMAGE_EXT.has(ext)) return 'image';
   if (TEXT_EXT.has(ext)) return 'text';
   try {
@@ -85,7 +87,7 @@ const MAX_ZIP_UNPACKED = 100 * 1024 * 1024; // what the viewer parses on the pag
 const MAX_ZIP_ENTRIES = 20000;
 const inflateRaw = (buf, opts) => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
 const zipError = (msg) => Object.assign(new Error(msg), { code: 'EZIP' });
-const TOO_BIG_UNPACKED = 'This Word document unpacks to more than 100 MB, so Notes will not open it.';
+const TOO_BIG_UNPACKED = 'This document unpacks to more than 100 MB, so Notes will not open it.';
 
 // A Word document is a zip. A crafted one can unpack to gigabytes from a few kilobytes and hang the app, and its
 // directory can lie about sizes, so every entry is really inflated here (on the thread pool, capped) before any
@@ -96,29 +98,29 @@ async function assertSafeZip(buf, want) {
   for (let i = buf.length - 22, min = Math.max(0, buf.length - 22 - 65535); i >= min; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   }
-  if (eocd < 0) throw zipError('This is not a valid Word document (no zip directory).');
+  if (eocd < 0) throw zipError('This is not a valid document (no zip directory).');
   const count = buf.readUInt16LE(eocd + 10);
   let p = buf.readUInt32LE(eocd + 16);
-  if (count === 0xffff || p === 0xffffffff) throw zipError('This Word document uses a zip format Notes does not open (zip64).');
-  if (count > MAX_ZIP_ENTRIES) throw zipError('This Word document has too many parts to open safely.');
+  if (count === 0xffff || p === 0xffffffff) throw zipError('This document uses a zip format Notes does not open (zip64).');
+  if (count > MAX_ZIP_ENTRIES) throw zipError('This document has too many parts to open safely.');
   let total = 0;
   for (let n = 0; n < count; n++) {
-    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw zipError('This Word document is damaged (bad zip directory).');
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw zipError('This document is damaged (bad zip directory).');
     const method = buf.readUInt16LE(p + 10);
     const packed = buf.readUInt32LE(p + 20);
     const local = buf.readUInt32LE(p + 42);
     const name = buf.toString('utf8', p + 46, Math.min(buf.length, p + 46 + buf.readUInt16LE(p + 28)));
     p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
-    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw zipError('This Word document is damaged (bad zip entry).');
+    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw zipError('This document is damaged (bad zip entry).');
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
-    if (start + packed > buf.length) throw zipError('This Word document is damaged (truncated).');
+    if (start + packed > buf.length) throw zipError('This document is damaged (truncated).');
     let data = null;
     if (method === 0) { total += packed; data = buf.subarray(start, start + packed); }
     else if (method === 8) {
       try { data = await inflateRaw(buf.subarray(start, start + packed), { maxOutputLength: MAX_ZIP_UNPACKED - total + 1 }); total += data.length; }
       catch (err) {
         if (err.code === 'ERR_BUFFER_TOO_LARGE' || err instanceof RangeError) throw zipError(TOO_BIG_UNPACKED);
-        throw zipError('This Word document is damaged (' + err.message + ').');
+        throw zipError('This document is damaged (' + err.message + ').');
       }
     } else throw zipError('This Word document uses a compression Notes does not open.');
     if (total > MAX_ZIP_UNPACKED) throw zipError(TOO_BIG_UNPACKED);
@@ -127,15 +129,14 @@ async function assertSafeZip(buf, want) {
   return parts;
 }
 
-// Word documents that are zips (Word's own formats, and ODT), so the zip guard runs on them.
-const isZipWord = (filePath) => OOXML_EXT.has(extOf(filePath)) || extOf(filePath) === 'odt';
+const isZipDocument = (filePath) => ZIP_DOC_EXT.has(extOf(filePath));
 
-// The bytes of a Word document, checked for size and (for the zip formats) for zip bombs. Everything that opens a Word
-// document goes through here.
-async function readDocxBuffer(filePath) {
-  if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This Word document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
+// The bytes of a Word document or spreadsheet, checked for size and (for the zip formats) for zip bombs.
+// Everything that opens one goes through here.
+async function readDocumentBuffer(filePath) {
+  if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
   const buf = fs.readFileSync(filePath);
-  if (isZipWord(filePath)) await assertSafeZip(buf);
+  if (isZipDocument(filePath)) await assertSafeZip(buf);
   return buf;
 }
 
@@ -149,14 +150,44 @@ async function readDocxText(filePath) {
   let body = '';
   if (OOXML_EXT.has(ext)) {
     const mammoth = require('mammoth');
-    body = String((await mammoth.extractRawText({ buffer: await readDocxBuffer(filePath) })).value || '');
+    body = String((await mammoth.extractRawText({ buffer: await readDocumentBuffer(filePath) })).value || '');
   } else if (ext === 'odt') {
-    const parts = await assertSafeZip(await readDocxBuffer(filePath), ['content.xml']);
+    const parts = await assertSafeZip(await readDocumentBuffer(filePath), ['content.xml']);
     body = parts['content.xml'] ? odtText(parts['content.xml'].toString('utf8')) : '';
   } else if (ext === 'rtf') {
-    body = rtfText(await readDocxBuffer(filePath));
+    body = rtfText(await readDocumentBuffer(filePath));
   }
   return { body: body.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
+}
+
+// The text of a spreadsheet, kept as the note's body for search, the list snippet and the bot (the file itself is
+// shown by GridCraft from its own bytes). MarkItDown reads it when it is installed and
+// reads the format; otherwise the body is '' and the file still opens. When MarkItDown fails on a file it could read
+// (a timeout, a crash), body is undefined: the caller keeps whatever text it had rather than erase it.
+const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
+async function readOfficeText(filePath) {
+  const stat = fs.statSync(filePath);
+  const out = { body: '', mtime: stat.mtimeMs, size: stat.size };
+  if (!markitdown.available() || !markitdown.reads(extOf(filePath))) return out;
+  try {
+    await readDocumentBuffer(filePath); // the size limit and the zip guard, before anything unpacks the file
+    out.body = (await markitdown.toMarkdown(filePath)).markdown.slice(0, MAX_OFFICE_TEXT);
+  } catch (err) {
+    console.warn('[files] no text for ' + filePath + ': ' + err.message);
+    out.body = undefined;
+  }
+  return out;
+}
+
+// The kinds of file note that carry the file's text as their body.
+const TEXTED_KINDS = new Set(['text', 'docx', 'sheet']);
+// The body a file note of this kind keeps, with the file's time: { body, mtime }. Other kinds (a PDF, an image, a
+// binary) keep none.
+async function readNoteText(kind, filePath) {
+  if (kind === 'text') return readText(filePath);
+  if (kind === 'docx') return readDocxText(filePath);
+  if (kind === 'sheet') return readOfficeText(filePath);
+  return { body: '', mtime: mtimeOf(filePath) };
 }
 
 const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -301,4 +332,4 @@ function safeList(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocxBuffer, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

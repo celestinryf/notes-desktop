@@ -129,6 +129,16 @@ function samplePng(w, h) {
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+// A spreadsheet from scripts/fixtures (a small file made once with openpyxl, since
+// Notes has no writer of its own for it) and the file note that opens it.
+function sampleOfficeNote(dir, kind) {
+  const name = { sheet: 'Trail readings.xlsx' }[kind];
+  const file = path.join(dir, name);
+  fs.copyFileSync(path.join(ROOT, 'scripts', 'fixtures', name), file);
+  const now = Date.now();
+  return { id: 'n-' + kind, title: name, body: '', tags: [], folderId: null, filePath: file, fileKind: kind, fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 1500 };
+}
+
 function sampleFileNote(dir, kind) {
   const [name, content, fileKind] = SAMPLE_FILES[kind];
   const file = path.join(dir, name);
@@ -245,6 +255,8 @@ const SCENES = {
   'scheme-custom': { about: 'A custom colour scheme (test colours), derived from three seeds per mode', settings: { colorScheme: 'custom', customColors: {
     light: { background: '#f2f5f7', text: '#1b2530', accent: '#2b6cb0' }, dark: { background: '#141a21', text: '#e3e9ef', accent: '#5b9bd5' } } }, run: openNote('Q4 planning') },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
+  sheet: { about: 'A spreadsheet open in GridCraft (needs its web build)', office: 'sheet', run: steps(openNote('Trail readings.xlsx'), async () => { await sleep(8000); }) },
+  'sheet-nobuild': { about: 'A spreadsheet with no GridCraft build: the banner and "Open with…"', office: 'sheet', env: { NOTES_APP_NO_GRIDCRAFT: '1' }, run: openNote('Trail readings.xlsx') },
   tex: { about: 'A LaTeX file open in the code editor', file: 'tex', run: openNote('trail.tex') },
   'tex-small': { about: 'The code editor in a small window', file: 'tex', size: { width: 820, height: 560 }, run: openNote('trail.tex') },
   'tex-focus': { about: 'The code editor focused: caret, active line and number', file: 'tex', run: steps(openNote('trail.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=8'); await page.keyboard.press('End'); await sleep(300); }) },
@@ -270,6 +282,7 @@ async function shoot(theme, name, opts) {
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
+  if (SCENES[name].office) data.notes.push(sampleOfficeNote(dataDir, SCENES[name].office));
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),
@@ -278,7 +291,7 @@ async function shoot(theme, name, opts) {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1',
       NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_TERMINAL: '1',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
-    }),
+    }, SCENES[name].env || {}),
   });
   try {
     const page = await app.firstWindow();

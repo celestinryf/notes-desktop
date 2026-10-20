@@ -42,21 +42,30 @@ function specFor(p) {
   return null;
 }
 
-// opts.override: NOTES_APP_CLAUDE_BIN (a .js stand-in, an .exe, or a shim). opts.pathDirs: directories to
-// search (defaults to PATH plus the native installer's ~/.local/bin). Returns { file, isScript } or null.
-function resolveClaude(opts) {
+// The first of names found on the search path, as a launch spec { file, isScript }, or null. opts.override names
+// one file instead (a .js stand-in, an .exe, or a shim); opts.pathDirs the directories to search (default: PATH).
+function resolveExecutable(names, opts) {
   opts = opts || {};
   if (opts.override) return specFor(path.resolve(opts.override));
   const dirs = (opts.pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
-  const home = opts.home || process.env.USERPROFILE || process.env.HOME || '';
-  if (home) dirs.push(path.join(home, '.local', 'bin'));
   for (const d of dirs) {
-    for (const n of NAMES) {
+    for (const n of names) {
       const spec = specFor(path.join(d, n));
       if (spec) return spec;
     }
   }
   return null;
+}
+
+// opts.override: NOTES_APP_CLAUDE_BIN. opts.pathDirs: directories to search (defaults to PATH plus the native
+// installer's ~/.local/bin). Returns { file, isScript } or null.
+function resolveClaude(opts) {
+  opts = opts || {};
+  if (opts.override) return resolveExecutable(NAMES, { override: opts.override });
+  const dirs = (opts.pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
+  const home = opts.home || process.env.USERPROFILE || process.env.HOME || '';
+  if (home) dirs.push(path.join(home, '.local', 'bin'));
+  return resolveExecutable(NAMES, { pathDirs: dirs });
 }
 
 // Finds a plain Node binary for running a .js target; null means use the host with ELECTRON_RUN_AS_NODE.
@@ -100,4 +109,4 @@ function checkSubscriptionAuth(text) {
   return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
 }
 
-module.exports = { resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
+module.exports = { resolveExecutable, resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };

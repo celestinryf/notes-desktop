@@ -6,6 +6,10 @@ const path = require('path');
 const H = require('./shared/helpers');
 
 const MANIFEST = '.notes-manifest.json';
+// Office files among the notes (Word documents, spreadsheets, presentations) go along as read-only Markdown copies of
+// their text, so the bot can read them. The files themselves are what count: an edit to a copy is ignored on import.
+const DOCUMENTS_DIR = '_documents';
+const isOfficeNote = (n) => !!H.CRAFT_OF[n.fileKind];
 
 // The manifest lives inside the folder the agent edits, so nothing in it is trusted as a path: an entry
 // may only name a file inside the workspace. Returns the absolute path, or null.
@@ -33,25 +37,29 @@ function folderRelPath(store, folderId) {
   return parts.join(path.sep);
 }
 
-// Writes every live, non-file-backed note into dir. Returns the manifest { files: [{ id, rel, hash }] }.
+// Writes every live, non-file-backed note into dir, and the text of the office files among the notes under
+// _documents (read-only). Returns the manifest { files: [{ id, rel, hash, readOnly? }] }.
 function exportNotes(store, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const used = new Map(); // relDir -> Set(names)
   const files = [];
   // Oldest first, so a title clash gives the suffix to the newer note and names stay stable between runs.
-  const notes = store.notes.filter((n) => !n.trashedAt && !n.filePath && !n.lock).slice().sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-  for (const n of notes) {
-    const relDir = n.folderId ? folderRelPath(store, n.folderId) : '';
+  const byAge = (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+  const live = store.notes.filter((n) => !n.trashedAt && !n.lock);
+  const write = (n, relDir, content, extra) => {
     const dirKey = relDir.toLowerCase(); // Windows folders Work and work are one folder
     if (!used.has(dirKey)) used.set(dirKey, new Set());
     const name = uniqueIn(used.get(dirKey), H.safeFilename(H.deriveTitle(n)), '.md');
     const rel = relDir ? path.join(relDir, name) : name;
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    const content = n.body;
     fs.writeFileSync(abs, content, 'utf8');
-    files.push({ id: n.id, rel, hash: hashOf(content), folderId: n.folderId || null, updatedAt: n.updatedAt });
+    files.push(Object.assign({ id: n.id, rel, hash: hashOf(content), folderId: n.folderId || null, updatedAt: n.updatedAt }, extra));
+  };
+  for (const n of live.filter((n) => !n.filePath).sort(byAge)) write(n, n.folderId ? folderRelPath(store, n.folderId) : '', n.body);
+  for (const n of live.filter((n) => n.filePath && isOfficeNote(n) && n.body).sort(byAge)) {
+    write(n, DOCUMENTS_DIR, '<!-- The text of ' + n.filePath + ', as Notes reads it. Read-only: edits here are ignored; edit the file itself. -->\n\n' + n.body, { readOnly: true, filePath: n.filePath });
   }
   const manifest = { exportedAt: Date.now(), files };
   fs.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(manifest, null, 2), 'utf8');
@@ -80,7 +88,11 @@ function importNotes(store, dir) {
     const h = hashOf(content);
     if (h !== f.hash) {
       const note = store.get(f.id);
-      if (note && note.lock) {
+      if (f.readOnly || (note && note.filePath)) {
+        // A copy of an office file's text: the file is what counts, and Notes does not write it from Markdown. The
+        // note decides, not only the flag: the manifest sits in the folder the agent edits.
+        details.push('ignored (read-only copy of ' + path.basename(String((note && note.filePath) || f.filePath || f.rel)) + '): ' + f.rel);
+      } else if (note && note.lock) {
         // Locked since the export: its text must not come back in clear as a copy.
         details.push('skipped (note locked meanwhile): ' + f.rel);
       } else if (!note || note.trashedAt) {
@@ -103,7 +115,7 @@ function importNotes(store, dir) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       if (e.name === MANIFEST || e.name.startsWith('.')) continue;
       const rel = relDir ? path.join(relDir, e.name) : e.name;
-      if (e.isDirectory()) { walk(path.join(d, e.name), rel); continue; }
+      if (e.isDirectory()) { if (!relDir && e.name === DOCUMENTS_DIR) continue; walk(path.join(d, e.name), rel); continue; }
       if (!/\.(md|markdown|txt)$/i.test(e.name) || known.has(rel.toLowerCase())) continue;
       const content = fs.readFileSync(path.join(d, e.name), 'utf8').replace(/\r\n/g, '\n');
       const folderId = folderIdForRel(store, relDir);
@@ -158,4 +170,4 @@ function forgetNote(dir, noteId) {
   return true;
 }
 
-module.exports = { exportNotes, importNotes, refreshWorkspace, forgetNote, folderRelPath, MANIFEST };
+module.exports = { exportNotes, importNotes, refreshWorkspace, forgetNote, folderRelPath, MANIFEST, DOCUMENTS_DIR };
