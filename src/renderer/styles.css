@@ -49,9 +49,11 @@
   --accent-hover: #f68a52;
   --document-bg: #e6e0d6;  /* behind PDF pages: paper-white pages need a darker ground */
 
-  /* floating layers: a thin warm hairline in light (the paper and a menu are nearly the same white); none in dark,
-     where the raised tone is enough. No shadows anywhere. */
+  /* floating layers: a thin warm hairline and a faint lift in light (the paper and a menu are nearly the same white);
+     neither in dark, where the raised tone is enough. The lift is Fluent 2's shadow8, about: a 2px ambient plus a
+     4px/8px key. Side-by-side shots (vault, research 2026-10-20) showed it reads in light only; the user chose it. */
   --float-line: var(--line-2);
+  --float-shadow: 0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14);
   /* code (the plain-text file editor): each >= 4.5:1 on the paper and raised surfaces, in both themes */
   --syn-keyword: var(--accent-text);  /* keywords, LaTeX commands */
   --syn-string: #8a5200;              /* strings */
@@ -120,6 +122,7 @@
   --accent-hover: #ff925c;
   --document-bg: #120c08;
   --float-line: transparent;     /* no edge round floating layers in dark: neither light (never) nor black (disliked) */
+  --float-shadow: none;          /* a shadow is invisible on the dark paper; one strong enough to show would be that black edge */
   --syn-string: #e8b860;
   --syn-atom: #9ccf80;
   color-scheme: dark;
@@ -278,7 +281,7 @@ select::picker-icon {
 select:open::picker-icon { rotate: 180deg; }
 ::picker(select) {
   margin: var(--s1) 0; padding: var(--s1);
-  border: 1px solid var(--float-line); border-radius: var(--r-md);
+  border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow);
   background: var(--raised); color: var(--fg);
   max-height: min(320px, 60vh); overflow-y: auto;
   opacity: 0; translate: 0 -4px;
@@ -302,10 +305,10 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 :root[data-theme="dark"] input[type="range"], :root[data-theme="dark"] input[type="checkbox"] { accent-color: var(--tangerine); }
 
 /* ---- floating layers: menus, the find bar, dialogs, the palette, toasts, the floating sidebar, select lists --- */
-/* Flat: their raised tone sets them apart, with a hairline in light only. No shadow (the user dislikes them).
+/* Their raised tone sets them apart, with a hairline and a faint lift in light only; flat in dark.
    Select lists take the same look in ::picker(select) below. */
 .popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .palette, .toast {
-  border: 1px solid var(--float-line); border-radius: var(--r-md);
+  border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow);
   background: var(--raised); color: var(--fg);
 }
 .popover {
