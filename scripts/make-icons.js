@@ -7,7 +7,7 @@ const path = require('path');
 
 const NAMES = [
   // layout and navigation
-  'panel-left', 'list', 'columns-2', 'ellipsis', 'search', 'command', 'x', 'plus', 'minus',
+  'panel-left', 'list', 'folder-tree', 'columns-2', 'ellipsis', 'search', 'command', 'x', 'plus', 'minus',
   'chevron-right', 'chevron-left', 'chevron-down', 'arrow-up', 'arrow-down', 'external-link',
   // notes and organising
   'square-pen', 'folder-open', 'notebook-text', 'star', 'bell', 'trash-2', 'folder', 'folder-plus', 'book-open',

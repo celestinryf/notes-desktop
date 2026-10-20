@@ -406,8 +406,8 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .nav-item > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item:hover, .folder-row:hover { background: var(--hover); color: var(--fg); }
 .nav-item.is-active, .folder-row.is-active { background: var(--pressed); color: var(--fg); font-weight: 600; }
-.nav-item .icon, .folder-icon { color: var(--fg-3); }
-.nav-item.is-active .icon, .folder-row.is-active .folder-icon, .folder-row.holds-note .folder-icon { color: var(--accent-text); }
+.nav-item .icon { color: var(--fg-3); }
+.nav-item.is-active .icon { color: var(--accent-text); }
 .folder-row.holds-note { color: var(--fg); font-weight: 600; }
 .count { margin-left: auto; font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .count.is-zero { visibility: hidden; }
@@ -428,17 +428,20 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .nav-heading-tools { display: flex; gap: 2px; }
 .nav-item.is-drop-target, .folder-row.is-drop-target { background: var(--selected); color: var(--selected-fg); box-shadow: inset 0 0 0 2px var(--accent); }
 
-/* folder tree */
+/* folder tree (the sidebar's folders and the note list's folder view share this geometry: VS Code's and Obsidian's)
+   A row is a 24px chevron box and the name, nothing else in front: no folder or note icons (user, 2026-10-19).
+   Each level indents by the chevron's width, so a child's chevron sits under its parent's name. */
 .nav.folders { overflow-y: auto; flex: 0 1 auto; max-height: 45%; min-height: 0; }
-.tree { --indent: 16px; }
-.folder-row { gap: var(--s1); padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); cursor: pointer; }
+.tree { --indent: 24px; }
+.folder-row { gap: 0; padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); cursor: pointer; }
+.folder-row > .row-mark, .folder-row > .count, .folder-row > .vault-badge { margin-left: var(--s1); }
 .folder-row:focus-visible, .note-tree .tree-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* Each level's children hang from a line under their parent's chevron; the branch you are in draws it darker. */
 .tree-children { position: relative; }
 .tree-children::before { content: ''; position: absolute; top: 2px; bottom: 2px; left: calc(var(--s1) + var(--depth, 0) * var(--indent) + 12px); width: 1px; background: var(--line-2); pointer-events: none; }
 :root[data-theme="dark"] .tree-children::before { background: rgba(251, 241, 228, 0.1); }
 .tree-children.is-here::before { background: color-mix(in srgb, var(--fg-3) 70%, transparent); }
-.folder-row.is-dragging, .note-card.is-dragging { opacity: 0.5; }
+.folder-row.is-dragging, .note-row.is-dragging { opacity: 0.5; }
 .folder-chevron {
   display: grid; place-items: center;
   width: 24px; height: 24px; flex: none;
@@ -450,8 +453,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .folder-chevron:hover { background: var(--hover); }
 .folder-chevron.is-open { transform: rotate(90deg); }
 .folder-chevron.is-leaf { visibility: hidden; }
-.folder-icon { flex: none; display: grid; place-items: center; }
-.folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-menu-btn {
   display: grid; place-items: center;
   width: 24px; height: 24px; flex: none;
@@ -502,6 +503,13 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .search { height: 28px; padding-left: 32px; border-color: transparent; background: var(--well); font-size: var(--t-sm); }
 .search:hover { border-color: var(--line-2); }
 .search::placeholder { color: var(--fg-3); }
+/* The clear button is Lucide's x in our grey, not the browser's blue circle. */
+.search::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none; width: 16px; height: 16px; cursor: pointer;
+  background: var(--fg-3);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18'/%3E%3Cpath d='m6 6 12 12'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+}
+.search::-webkit-search-cancel-button:hover { background: var(--fg); }
 .list-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); height: 36px; padding: 0 var(--s2) 0 var(--s4); flex: none; }
 .list-title {
   margin: 0; min-width: 0;
@@ -510,74 +518,63 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 }
 .list-crumb { color: var(--fg-3); font-weight: 500; }
 .list-title-actions { display: flex; align-items: center; gap: var(--s1); flex: none; }
-.note-list { list-style: none; margin: 0; padding: 0 var(--s2) var(--s4); overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; scrollbar-gutter: stable; }
-.note-card {
-  position: relative;
-  padding: 10px var(--s3) 10px;
-  border-radius: var(--r-md);
-  cursor: pointer;
-  transition: background var(--dur-1);
-}
-.note-card + .note-card::before { content: ''; position: absolute; left: var(--s3); right: var(--s3); top: -1px; height: 1px; background: var(--line); }
-.note-card:hover { background: var(--hover); }
-.note-card.is-active { background: var(--selected); color: var(--selected-fg); }
-.note-card.is-active::before, .note-card.is-active + .note-card::before, .note-card:hover::before, .note-card:hover + .note-card::before { opacity: 0; }
-.note-card-title {
-  display: flex; align-items: center; gap: 6px;
-  font-weight: 600; font-size: var(--t-md);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.note-card-title .mark { display: inline-grid; place-items: center; flex: none; color: var(--fg-3); }
-.note-card-title .mark .icon { width: 13px; height: 13px; }
-.note-card-title .mark.pin { color: var(--accent-text); }
-.note-card-title .mark.pin .icon { fill: currentColor; }
-.note-card-title .mark.live-mark { color: var(--ok); }
-.note-card-title .file-mark { margin-left: auto; padding: 0 4px; border-radius: var(--r-xs); background: var(--well); font-size: var(--t-xs); font-weight: 600; color: var(--fg-3); letter-spacing: 0.02em; }
-.note-card.is-active .file-mark { color: var(--selected-fg); }
-.note-card-snippet { margin-top: 2px; color: var(--fg-2); font-size: var(--t-sm); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.note-card.is-active .note-card-snippet { color: inherit; opacity: 0.85; }
-.note-card-snippet.is-locked { font-style: italic; }
-.note-card-meta { display: flex; flex-wrap: wrap; gap: 2px var(--s2); align-items: center; margin-top: 4px; font-size: var(--t-xs); color: var(--fg-3); }
-.note-card.is-active .note-card-meta { color: inherit; opacity: 0.8; }
-.note-card-meta .tag { color: var(--accent-text); }
-.note-card-meta .where { display: inline-flex; align-items: center; gap: var(--s1); }
-.note-card-meta .where .icon { width: 12px; height: 12px; }
-.note-card.is-active .note-card-meta .tag { color: inherit; }
-/* The note list as folders with their notes (Settings: Note list, Folders). Compact rows, no boxes. */
-.note-tree { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); scrollbar-gutter: stable; }
-.note-tree .tree-row {
-  display: flex; align-items: center; gap: var(--s1);
+/* Rows: a note is one line, its title, with small marks trailing (pin, sticky, lock, live, file kind, reminder,
+   folder). No snippet, no date, no box (user, 2026-10-19: "just the titles"). The list and the folder view share
+   the same row; the folder view adds the chevron box and the indent. */
+.note-list { list-style: none; margin: 0; padding: 0 var(--s2) var(--s4); overflow-y: auto; flex: 1; scrollbar-gutter: stable; }
+.note-row, .note-tree .tree-row {
+  display: flex; align-items: center; gap: 0;
   min-height: 28px;
-  padding: 0 var(--s2) 0 calc(var(--s1) + var(--depth, 0) * var(--indent));
+  padding: 0 var(--s2);
   border-radius: var(--r-sm);
   color: var(--fg-2); font-size: var(--t-sm);
   cursor: pointer; user-select: none;
+  transition: background var(--dur-1), color var(--dur-1);
 }
-.note-tree .tree-row:hover { background: var(--hover); color: var(--fg); }
-.note-tree .tree-row.is-active { background: var(--selected); color: var(--selected-fg); font-weight: 600; }
-.note-tree .tree-row.is-dragging { opacity: 0.5; }
+.note-row:hover, .note-tree .tree-row:hover { background: var(--hover); color: var(--fg); }
+.note-row.is-active, .note-tree .tree-row.is-active { background: var(--selected); color: var(--selected-fg); font-weight: 600; }
 .note-tree .tree-row.is-drop-target { background: var(--selected); box-shadow: inset 0 0 0 2px var(--accent); }
+.row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-mark { flex: none; display: grid; place-items: center; margin-left: var(--s1); color: var(--fg-3); }
+.row-mark .icon { width: 13px; height: 13px; }
+.row-mark.pin { color: var(--accent-text); }
+.row-mark.pin .icon { fill: currentColor; }
+.row-mark.live-mark { color: var(--ok); }
+.note-row.is-active .row-mark, .folder-row.is-active .row-mark { color: inherit; }
+.file-mark { flex: none; margin-left: var(--s2); padding: 0 4px; border-radius: var(--r-xs); background: var(--well); font-size: var(--t-xs); font-weight: 600; color: var(--fg-3); letter-spacing: 0.02em; }
+.note-row.is-active .file-mark { color: var(--selected-fg); }
+.row-meta { flex: none; display: inline-flex; align-items: center; gap: var(--s1); max-width: 40%; margin-left: var(--s2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
+.row-meta .icon { width: 12px; height: 12px; flex: none; }
+.note-row.is-active .row-meta { color: inherit; opacity: 0.8; }
+/* A search result whose match is in the body: the matching text on a second line under the title. */
+.note-row:has(.row-meta.match) { flex-wrap: wrap; padding-bottom: 6px; }
+.row-meta.match { flex: 1 0 100%; max-width: none; order: 99; display: block; margin: 0; padding-left: 0; font-weight: 400; line-height: 1.4; }
+.note-row .page-no { flex: none; margin-right: var(--s2); }
+/* The folder view: folders with their notes, and the open note's headings under it. */
+.note-tree { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); scrollbar-gutter: stable; }
+.note-tree .tree-row { padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); }
 .tree-chevron, .tree-spacer { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--fg-3); transition: transform var(--dur-2) var(--ease); }
 .tree-chevron .icon { width: 14px; height: 14px; }
 .tree-chevron.is-open { transform: rotate(90deg); }
 .tree-chevron.is-leaf { visibility: hidden; }
-.tree-icon { flex: none; display: grid; place-items: center; color: var(--fg-3); }
-.note-tree .tree-row.is-active .tree-icon { color: inherit; }
-.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-folder .tree-name { color: var(--fg); font-weight: 500; }
-.tree-folder .count { font-size: var(--t-xs); }
-.tree-mark { flex: none; display: grid; place-items: center; color: var(--accent-text); }
-.tree-mark .icon { width: 12px; height: 12px; fill: currentColor; }
+.tree-folder .row-name { color: var(--fg); font-weight: 500; }
+.tree-folder .count { font-size: var(--t-xs); margin-left: var(--s2); }
 .note-tree .tree-heading { min-height: 24px; font-size: var(--t-xs); color: var(--fg-3); }
 .note-tree .tree-heading:hover { color: var(--fg); }
 .tree-outline::before { background: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
+/* The List / Folders switch in the list's title row: two icon buttons, the one in use filled. */
+.seg-icons { padding: 2px; }
+.seg-icons button { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; color: var(--fg-2); }
+.seg-icons button:hover { color: var(--fg); }
+.seg-icons button.is-on { background: var(--pressed); color: var(--fg); }
+.seg-icons .icon { width: 16px; height: 16px; }
 
 .page-no { font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .empty { padding: var(--s6) var(--s5); text-align: center; color: var(--fg-2); }
 .empty-title { margin: 0 0 6px; font-weight: 600; color: var(--fg); }
 .empty-sub { margin: 0; font-size: var(--t-sm); }
 .mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: var(--r-xs); padding: 0 1px; }
-.note-card-title .mark, .related .mark { background: none; padding: 0; }
+.related .mark { background: none; padding: 0; }
 .remind-mark { display: inline-flex; align-items: center; gap: var(--s1); white-space: nowrap; }
 .remind-mark .icon { width: 12px; height: 12px; }
 .remind-mark.is-overdue { color: var(--danger); font-weight: 600; }
@@ -1004,6 +1001,7 @@ button.book-name:hover { background: var(--hover); }
 .replace-row { display: flex; gap: var(--s1); width: 100%; align-items: center; }
 ::highlight(notes-find) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 ::highlight(notes-find-active) { background: var(--accent); color: var(--accent-fg); }
+::highlight(settings-match) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .tool-btn.is-recording { color: var(--danger); }
 
 /* ---- print: the note only ----------------------------------------------------------------------------- */
@@ -1105,10 +1103,15 @@ button.book-name:hover { background: var(--hover); }
 .settings-nav a.is-active { background: var(--pressed); color: var(--fg); font-weight: 600; }
 .settings-nav a .icon { color: var(--fg-3); }
 .settings-body { display: flex; flex-direction: column; min-height: 0; }
+/* Search sits over the sections: a word typed hides every setting without it, and empty sections with them. */
+.settings-search { flex: none; margin: var(--s4) var(--s5) 0; }
+.settings-search .search { height: 32px; }
+.settings-nav a.is-dim { color: var(--fg-3); opacity: 0.55; }
+.settings-section.is-filtered, .settings-section > .is-filtered { display: none; }
 .settings-scroll:focus { outline: none; }
-.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s4) var(--s5) var(--s5); scroll-behavior: smooth; }
+.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s2) var(--s5) var(--s5); scroll-behavior: smooth; }
 .settings-section { display: flex; flex-direction: column; gap: var(--s4); padding: var(--s3) 0 var(--s5); scroll-margin-top: var(--s2); }
-.settings-section + .settings-section { border-top: 1px solid var(--line); }
+.settings-section:not(.is-filtered) ~ .settings-section:not(.is-filtered) { border-top: 1px solid var(--line); }
 .settings-section > h3 { margin: 0; font-size: var(--t-md); font-weight: 600; }
 .settings-actions { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s5); border-top: 1px solid var(--line); }
 
