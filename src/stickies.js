@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Desktop stickies: one small frameless window per note that has note.sticky set. Main process only.
    Position, size, tint and the on-top flag are persisted on the note, so stickies come back at login. */

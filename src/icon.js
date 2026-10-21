@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Draws the app icon as raw BGRA pixels so no binary asset has to be checked in.
    A tangerine "sticker" with an ink border and three cream text lines. */

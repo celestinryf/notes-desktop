@@ -22,6 +22,9 @@
     "src/store.js",
     "src/preload.js",
     "src/main.js",
-    "src/shared/themes.js"
+    "src/shared/themes.js",
+    "src/*.js",
+    "src/shared/*.js",
+    "src/docx-edit/*.js"
   ]
 }

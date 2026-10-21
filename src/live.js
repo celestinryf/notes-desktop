@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Live share: edit one note together in real time over the local network, with no service in between.
    The host runs a tiny HTTP server for that note (state + server-sent events + updates); guests join with
@@ -13,7 +14,7 @@ const MAX_BODY = 2 * 1024 * 1024;
 function lanAddress() {
   const ifaces = os.networkInterfaces();
   for (const name of Object.keys(ifaces)) {
-    for (const i of ifaces[name]) if (i.family === 'IPv4' && !i.internal) return i.address;
+    for (const i of ifaces[name] || []) if (i.family === 'IPv4' && !i.internal) return i.address;
   }
   return '127.0.0.1';
 }
@@ -63,14 +64,15 @@ class LiveShare {
     if (this.sessions.has(noteId)) return Promise.resolve(this.statusOf(noteId));
     if (this.hosting.has(noteId)) return this.hosting.get(noteId); // a second click while the first listen() is pending
     const token = opts.token || crypto.randomBytes(16).toString('hex');
-    const session = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null };
+    /** @type {{ role: 'host', token: string, clients: Set<import('http').ServerResponse>, version: number, server: import('http').Server | null, url: string | null, port: number | null, error: string | null, local: boolean }} */
+    const session = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null, error: null, local: false };
     const server = http.createServer((req, res) => this._handle(session, noteId, req, res));
     server.on('clientError', (_err, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch (_) { /* ignore */ } });
     const p = new Promise((resolve, reject) => {
       server.once('error', (err) => {
         // The remembered port is taken (after a restart): take any free port; the link changes and the
         // status says so, which is better than a share that silently never comes back.
-        if (err && err.code === 'EADDRINUSE' && opts.port) {
+        if (err && 'code' in err && err.code === 'EADDRINUSE' && opts.port) {
           this.hosting.delete(noteId); // the retry below must not be answered with this very promise
           this.host(noteId, Object.assign({}, opts, { port: 0, movedFrom: opts.port })).then(resolve, reject);
           return;
@@ -80,7 +82,8 @@ class LiveShare {
       server.listen(opts.port || 0, opts.hostname || '0.0.0.0', () => {
         server.removeListener('error', reject);
         session.server = server;
-        session.port = server.address().port;
+        const addr = server.address();
+        session.port = addr && typeof addr === 'object' ? addr.port : null;
         session.url = 'http://' + (opts.advertise || lanAddress()) + ':' + session.port + '/live/' + token;
         this.sessions.set(noteId, session);
         session.error = opts.movedFrom ? 'Port ' + opts.movedFrom + ' was busy; the link changed, share it again.' : null;

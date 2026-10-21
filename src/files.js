@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* File-backed notes: which files the app can show or edit, how to read them, and where your agent files live. */
 const fs = require('fs');
@@ -167,6 +168,7 @@ async function readDocxText(filePath) {
 const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
 async function readOfficeText(filePath) {
   const stat = fs.statSync(filePath);
+  /** @type {{ body: string | undefined, mtime: number, size: number }} */
   const out = { body: '', mtime: stat.mtimeMs, size: stat.size };
   if (!markitdown.available() || !markitdown.reads(extOf(filePath))) return out;
   try {
@@ -226,7 +228,7 @@ function rtfText(buf) {
   for (let i = 0; i < s.length;) {
     const c = s[i];
     if (c === '{') { stack.push(skip); i++; continue; }
-    if (c === '}') { skip = stack.length ? stack.pop() : false; i++; continue; }
+    if (c === '}') { skip = stack.pop() ?? false; i++; continue; }
     if (c === '\r' || c === '\n') { i++; continue; }
     if (c !== '\\') { put(c); i++; continue; }
     const n = s[i + 1];

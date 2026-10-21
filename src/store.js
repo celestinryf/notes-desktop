@@ -1152,7 +1152,7 @@ class Store {
     // A spreadsheet's text takes MarkItDown seconds: the note appears now, and its text follows.
     const later = kind === 'sheet';
     if (!later) {
-      try { ({ body, mtime } = await F.readNoteText(kind, abs)); }
+      try { const read = await F.readNoteText(kind, abs); body = read.body ?? ''; mtime = read.mtime; }
       catch (err) { if (kind === 'text' && err.code === 'EENCODING') { kind = 'binary'; body = ''; } else throw err; }
     }
     const note = this.create({
