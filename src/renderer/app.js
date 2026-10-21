@@ -1,14 +1,25 @@
 /* Renderer: vanilla JS, talks to the main process through window.notesApi (see preload.js). */
+import H from '../shared/helpers.js';
+import NotesThemes from '../shared/themes.js';
+import NotesIcons from './icons.js';
+import { NotesPalette } from './palette.js';
+import { NotesPdfEditor } from './pdf-editor.js';
+import { NotesPdfPages } from './pdf-pages.js';
+import { NotesPdfComments } from './pdf-comments.js';
+import { NotesDocxEditor } from './docx-editor.js';
+import { NotesCraftFrame } from './craft-frame.js';
+import { NotesCsv } from './csv-view.js';
+import { NotesSignPad } from './sign-pad.js';
+
 (function () {
   'use strict';
 
   const api = withPeerNotice(window.notesApi);
-  const H = window.NotesHelpers;
   const { isViewerOnlyFile, isPlainTextFile } = H;
   // An opened file whose text is not Markdown: plain text, Word, PDF.
   const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
   const $ = (sel) => document.querySelector(sel);
-  const I = (name) => window.NotesIcons.svg(name);
+  const I = (name) => NotesIcons.svg(name);
 
   // A button's words live in its .lbl span when it has one, so its icon and shortcut hint survive a relabel.
   function setLabel(btn, text) {
@@ -18,7 +29,7 @@
   function setIcon(btn, name) {
     if (btn.dataset.icon === name) return;
     btn.dataset.icon = name;
-    window.NotesIcons.hydrate(btn.parentElement);
+    NotesIcons.hydrate(btn.parentElement);
   }
   function setPressed(btn, on) {
     btn.classList.toggle('is-on', !!on);
@@ -189,9 +200,9 @@
   // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.js); the
   // built-in one clears them, so the stylesheet's own colours show.
   function applyColorScheme(mode, settings) {
-    const tokens = window.NotesThemes.resolve(settings, mode);
+    const tokens = NotesThemes.resolve(settings, mode);
     const style = document.documentElement.style;
-    for (const name of window.NotesThemes.TOKENS) {
+    for (const name of NotesThemes.TOKENS) {
       if (tokens) style.setProperty('--' + name, tokens[name]);
       else style.removeProperty('--' + name);
     }
@@ -3635,8 +3646,8 @@
   }
 
   function docxController() {
-    if (!docx && window.NotesDocxEditor) {
-      docx = window.NotesDocxEditor.create({
+    if (!docx && NotesDocxEditor) {
+      docx = NotesDocxEditor.create({
         onDirty: (d) => { el.docxSaveBtn.textContent = d ? 'Save' : 'Saved'; },
         say: toast,
         onBlur: () => flushSave({ fromBlur: true }),
@@ -3717,7 +3728,7 @@
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
       if (!fc) {
-        fc = window.NotesCraftFrame.create({
+        fc = NotesCraftFrame.create({
           frame: frame(),
           origin: key + '://app',
           url: key + '://app/index.html?host',
@@ -4026,8 +4037,8 @@
   let pdfShownKey = null, pdfSeq = 0, pdfNote = null;
 
   function pdfController() {
-    if (!pdf && window.NotesPdfEditor) {
-      pdf = window.NotesPdfEditor.create(el.pdfEditor, {
+    if (!pdf && NotesPdfEditor) {
+      pdf = NotesPdfEditor.create(el.pdfEditor, {
         // Never disabled: a stroke or text box still in progress only counts once it is committed, which Save does.
         onDirty: (d) => { el.pdfSaveBtn.textContent = d ? 'Save' : 'Saved'; },
         onState: (s) => {
@@ -4152,8 +4163,8 @@
   let pdfPages = null, pdfPagesFor = null;
 
   function openPdfPages() {
-    if (!pdf || !pdfNote || !window.NotesPdfPages) return;
-    if (!pdfPages) pdfPages = window.NotesPdfPages.create(el.pdfPages, pdf, { pickPdf: pickPdfForPages, apply: applyPdfPages, close: closePdfPages, say: toast });
+    if (!pdf || !pdfNote || !NotesPdfPages) return;
+    if (!pdfPages) pdfPages = NotesPdfPages.create(el.pdfPages, pdf, { pickPdf: pickPdfForPages, apply: applyPdfPages, close: closePdfPages, say: toast });
     pdfPagesFor = pdfNote;
     el.pdfEditor.classList.add('organizing');
     pdfPages.open();
@@ -4249,8 +4260,8 @@
   const pdfCommentsShown = () => !!pdfComments && el.pdfEditor.classList.contains('commenting');
 
   function showPdfComments(show) {
-    if (show && (!pdf || !pdfNote || !window.NotesPdfComments)) return;
-    if (show && !pdfComments) pdfComments = window.NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
+    if (show && (!pdf || !pdfNote || !NotesPdfComments)) return;
+    if (show && !pdfComments) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
     el.pdfEditor.classList.toggle('commenting', show);
     el.pdfCommentsBtn.classList.toggle('is-on', show);
     if (!pdfComments) return;
@@ -4278,10 +4289,10 @@
   const signSay = (text) => { el.signStatus.textContent = text; }; // inside the dialog: a toast would sit behind it
 
   async function openSignDialog() {
-    if (!pdf || !pdfNote || !window.NotesSignPad || signBusy || el.signDialog.open) return;
+    if (!pdf || !pdfNote || !NotesSignPad || signBusy || el.signDialog.open) return;
     signBusy = true;
     try {
-      if (!signPad) signPad = window.NotesSignPad.create(el.signPad);
+      if (!signPad) signPad = NotesSignPad.create(el.signPad);
       let saved = null;
       try { saved = await api.signature.get(); } catch (_) { saved = null; }
       if (!pdfNote) return;
@@ -4888,7 +4899,7 @@
   function renderTable(note) {
     const text = el.bodyInput.value;
     if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
-      tableStats = window.NotesCsv.render(el.csvView, text, H.extOf(note.filePath));
+      tableStats = NotesCsv.render(el.csvView, text, H.extOf(note.filePath));
       tableDrawn = { id: note.id, text };
     }
     updateStatus(note);
@@ -5253,7 +5264,7 @@
   };
 
   // ---- Appearance: scheme swatches and custom colours --------------------------
-  const T = () => window.NotesThemes;
+  const T = () => NotesThemes;
   function renderSchemeGrid() {
     const s = draftSettings();
     const mode = effectiveTheme(s);
@@ -5515,7 +5526,7 @@
 
   let palette = null;
   function openPalette(query) {
-    if (!palette) palette = window.NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
+    if (!palette) palette = NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
     closeMoreMenu(); closeShareMenu();
     palette.open(query);
   }
@@ -5559,7 +5570,7 @@
       ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
       ...[...el.tagList.querySelectorAll('.nav-item')].map((b) => cmd('tag-' + b.firstChild.textContent, 'Go to', 'Tag: #' + b.firstChild.textContent, 'hash', '', () => b.click(), !GUEST)),
       cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font search'),
-      ...Object.keys(window.NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + window.NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (state.settings && state.settings.colorScheme) !== id, 'theme colors appearance')),
+      ...Object.keys(NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (state.settings && state.settings.colorScheme) !== id, 'theme colors appearance')),
       cmd('scheme-custom', 'View', 'Colour scheme: custom colours…', 'palette', '', side('settings', () => { openSettings(); document.getElementById('set-appearance').scrollIntoView({ block: 'start' }); }), true, 'theme colors appearance pick'),
       cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
       cmd('export-all', 'App', 'Export all notes…', 'download', '', () => el.exportAllBtn.click(), !GUEST, 'backup json'),
@@ -5583,7 +5594,7 @@
         run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody()),
       }));
     }
-    const out = window.NotesPalette.rank(query, commands, notes);
+    const out = NotesPalette.rank(query, commands, notes);
     const title = query.replace(/^\s*>\s*/, '').trim();
     if (title && !commandsOnly) out.push({ id: 'create', group: 'Create', title: 'New note "' + H.truncate(title, 60) + '"', icon: 'square-pen', keys: '', run: () => (GUEST ? toPeer({ type: 'command', name: 'newNote', title }) : newNote({ title })) });
     return out;
@@ -6087,7 +6098,7 @@
   }
 
   async function init() {
-    window.NotesIcons.hydrate(document);
+    NotesIcons.hydrate(document);
     if (navigator.windowControlsOverlay) navigator.windowControlsOverlay.addEventListener('geometrychange', syncTitleBar);
     const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
     if (GUEST) document.body.classList.add('pane-guest');

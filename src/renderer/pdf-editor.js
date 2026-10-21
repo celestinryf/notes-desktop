@@ -1,7 +1,7 @@
 /* The PDF viewer and editor for opened PDFs, exposed as window.NotesPdfEditor. It drives pdf.js's own viewer and
    Firefox's annotation editors (highlight, text box, drawing, picture); the PDF is parsed in pdf.js's worker, never
    on this page. Edits stay in pdf.js's annotation storage until save() turns them into the PDF's own bytes. */
-(function () {
+export const NotesPdfEditor = (function () {
   'use strict';
   const PV = window.PdfView;
   if (!PV) return;
@@ -362,5 +362,5 @@
     };
   }
 
-  window.NotesPdfEditor = { create, modes: Object.keys(MODES) };
+  return { create, modes: Object.keys(MODES) };
 })();

@@ -11,7 +11,7 @@
    the rest of that paragraph (if any) as the first paragraph of the next page. The break itself is not on the page,
    so it cannot be deleted or moved off its page boundary: the page body (article) before it is marked "ends with a
    page break", or the one after it "continues the paragraph before". */
-(function () {
+export const NotesDocxEditor = (function () {
   'use strict';
   const DV = window.DocxView;
   if (!DV || !DV.Ooxml || !DV.JSZip) return;
@@ -505,5 +505,5 @@
     };
   }
 
-  window.NotesDocxEditor = { create };
+  return { create };
 })();

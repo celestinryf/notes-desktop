@@ -4,7 +4,7 @@
    lenient about the rest. Every cell is set with textContent, never as HTML.
 
    NotesCsv.render(container, text, ext) */
-(function () {
+export const NotesCsv = (function () {
   const MAX_ROWS = 2000; // rows drawn; the rest are counted and the text view has them all
   const MAX_COLS = 200;
   const MAX_CELLS = 60000; // a wide file draws fewer rows, so the page never builds a huge table at once
@@ -103,5 +103,5 @@
     return { rows: total - 1, cols: widest };
   }
 
-  window.NotesCsv = { detectDelimiter, parse, render };
+  return { detectDelimiter, parse, render };
 })();

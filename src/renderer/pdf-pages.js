@@ -1,7 +1,9 @@
 /* The page organizer for an open PDF, exposed as window.NotesPdfPages: turn, move and remove pages, and add pages
    from another PDF. Changes are only a plan until Apply; then pdf.js builds the new page order and main turns the
    pages and writes the file. */
-(function () {
+import NotesIcons from './icons.js';
+
+export const NotesPdfPages = (function () {
   'use strict';
   const THUMB_W = 130, THUMB_H = 170;
 
@@ -47,7 +49,7 @@
       b.className = 'tool-btn icon-only';
       b.dataset.act = act;
       b.dataset.k = k;
-      b.innerHTML = window.NotesIcons.svg(icon);
+      b.innerHTML = NotesIcons.svg(icon);
       b.title = title;
       b.setAttribute('aria-label', title);
       return b;
@@ -145,5 +147,5 @@
     return { open };
   }
 
-  window.NotesPdfPages = { create };
+  return { create };
 })();

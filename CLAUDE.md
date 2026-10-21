@@ -24,4 +24,6 @@ Write handoffs, decisions, and findings back to that folder.
   - Dropdowns are native `<select>` elements styled with `appearance: base-select`; never build a custom dropdown widget.
 - Do not "polish" in place of fixing structure: the `ui-audit` skill starts at structure for a reason.
 
+The renderer is bundled: `src/renderer/app.js`, `sticky.js` and the modules they import are ES modules built by `npm run build:app` into `src/renderer/vendor/app.bundle.js` and `sticky.bundle.js`, which are tracked. Run it after any renderer edit; the unit test `renderer-bundle.test.js` fails when the tracked bundle is stale. The four vendor bundles (editor, docx, pdf, code) stay separate scripts and globals.
+
 Gate before any PR: `npm run test:all` (typecheck, unit, UI, e2e). `npm run typecheck` runs `tsc` over the files marked `// @ts-check` (store, main, preload, themes) against `src/types.d.ts`, which holds the domain types and the IPC contract; a new IPC channel goes into `IpcContract` and `NotesApi` there first. The e2e and hotkey checks send real keystrokes, so never run them while the user is at the keyboard. The UI suite and the shots set `NOTES_APP_DRY_SPEECH=1`, so read aloud says nothing; keep that flag on any new runner.

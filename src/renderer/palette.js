@@ -5,9 +5,11 @@
    NotesPalette.create({ dialog, input, list, source }) returns { open(query), close(), isOpen() }.
    source(query) returns (or resolves to) items: { id, title, group, hint, keys, icon, run(opts) }.
    The list keeps the order source gives; run gets { newTab } (Ctrl+Enter or Ctrl+click). */
-(function () {
-  const H = window.NotesHelpers;
-  const I = (name) => (window.NotesIcons && name ? window.NotesIcons.svg(name) : '');
+import H from '../shared/helpers.js';
+import NotesIcons from './icons.js';
+
+export const NotesPalette = (function () {
+  const I = (name) => (name ? NotesIcons.svg(name) : '');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
   // Bold the characters of the label that the query matched, in order.
@@ -158,5 +160,5 @@
     return strong ? cmds.slice(0, 10).concat(noteHits) : noteHits.concat(cmds.slice(0, 8));
   }
 
-  window.NotesPalette = { create, rank };
+  return { create, rank };
 })();
