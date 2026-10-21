@@ -4,10 +4,11 @@ import { find } from './find-state.js';
 import { src } from './code-editor.js';
 import H from '../shared/helpers.js';
 import { toast } from './toast.js';
+import { autoGrow } from './editor-view.js';
 
 const { isViewerOnlyFile } = H;
 
-export function createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave }) {
+export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
   const hist = { versions: [], index: -1, noteId: null };
 
   async function openHistory() {

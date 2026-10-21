@@ -299,7 +299,7 @@
           if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = "note-" + s;
           return s || UNTITLED;
         }
-        function isViewerOnlyFile7(note) {
+        function isViewerOnlyFile8(note) {
           return !!(note && note.filePath && note.fileKind !== "text");
         }
         function extOf(filePath) {
@@ -307,11 +307,11 @@
           if (!base.includes(".")) return base;
           return base.slice(base.lastIndexOf(".") + 1);
         }
-        function isPlainTextFile4(note) {
+        function isPlainTextFile5(note) {
           return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
         }
         function isNonMarkdownFile2(note) {
-          return isPlainTextFile4(note) || isViewerOnlyFile7(note);
+          return isPlainTextFile5(note) || isViewerOnlyFile8(note);
         }
         const WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
         const OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
@@ -323,7 +323,7 @@
         const CRAFT_OF = { docx: "wordcraft", sheet: "gridcraft" };
         const ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
         function isTableFile(note) {
-          return isPlainTextFile4(note) && ["csv", "tsv"].includes(extOf(note.filePath));
+          return isPlainTextFile5(note) && ["csv", "tsv"].includes(extOf(note.filePath));
         }
         function isOoxmlWordFile(note) {
           return !!(note && note.filePath && note.fileKind === "docx" && OOXML_EXT.has(extOf(note.filePath)));
@@ -440,8 +440,8 @@
           splitAtHeadings,
           headingTitle,
           extOf,
-          isViewerOnlyFile: isViewerOnlyFile7,
-          isPlainTextFile: isPlainTextFile4,
+          isViewerOnlyFile: isViewerOnlyFile8,
+          isPlainTextFile: isPlainTextFile5,
           isNonMarkdownFile: isNonMarkdownFile2,
           isTableFile,
           isOoxmlWordFile,
@@ -801,7 +801,7 @@
   });
 
   // src/renderer/app.js
-  var import_helpers16 = __toESM(require_helpers());
+  var import_helpers17 = __toESM(require_helpers());
   var import_themes = __toESM(require_themes());
   var import_icons5 = __toESM(require_icons());
 
@@ -3707,13 +3707,350 @@
     const at = code.position();
     el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
   }
-  function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }) {
-    hooks = { runFind, autoGrow, scrollTextareaToSelection };
-    return { showCode, renderCodePosition };
+  function createCodeEditor({ runFind, autoGrow: autoGrow2, scrollTextareaToSelection }) {
+    hooks = { runFind, autoGrow: autoGrow2, scrollTextareaToSelection };
+    return { showCode };
+  }
+
+  // src/renderer/editor-view.js
+  var import_helpers8 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers8.default;
+  function tableShown() {
+    return !el.csvView.classList.contains("hidden");
+  }
+  function focusBody() {
+    if (tableShown()) el.csvView.focus();
+    else if (state.sourceMode || !state.rich) src.focus();
+    else state.rich.focus();
+  }
+  function inTextField() {
+    const a = document.activeElement;
+    return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable || el.richEditor.contains(a));
+  }
+  function bodyHasFocus() {
+    return src.hasFocus() || el.richEditor.contains(document.activeElement);
+  }
+  function autoGrow() {
+    const ta = el.bodyInput;
+    if (ta.classList.contains("hidden") || ta.classList.contains("uses-code")) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.max(320, ta.scrollHeight + 2) + "px";
+  }
+  function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }) {
+    function createRichEditor() {
+      if (!window.NotesEditor) {
+        toast("Rendered editor failed to load; showing Markdown source.");
+        applyEditorMode(true);
+        return;
+      }
+      state.rich = window.NotesEditor.create(el.richEditor, {
+        placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
+        imageBase: () => import_helpers8.default.imageBaseFor(state.current),
+        onTrigger: (t) => showInlineMenu(t),
+        onTriggerKey: (e) => inlineMenuKey(e),
+        onUpdate: (md) => {
+          if (state.sourceMode || !state.currentId || isPlainTextFile3(state.current)) return;
+          if (md === el.bodyInput.value) return;
+          el.bodyInput.value = md;
+          scheduleSave();
+          if (find.open) runFind(true, true, true);
+        }
+      });
+      el.richEditor.addEventListener("click", (e) => {
+        const a = e.target.closest("a[href]");
+        if (a && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          followLink(a.getAttribute("href"));
+        }
+      });
+    }
+    const SLASH = [
+      { kind: "h1", title: "Heading 1", icon: "type", keys: "# ", words: "title big" },
+      { kind: "h2", title: "Heading 2", icon: "type", keys: "## ", words: "subtitle section" },
+      { kind: "h3", title: "Heading 3", icon: "type", keys: "### ", words: "small heading" },
+      { kind: "text", title: "Text", icon: "file-text", keys: "", words: "paragraph plain normal" },
+      { kind: "checklist", title: "Checklist", icon: "check", keys: "- [ ] ", words: "todo task checkbox" },
+      { kind: "bullets", title: "Bulleted list", icon: "list", keys: "- ", words: "unordered bullet" },
+      { kind: "numbers", title: "Numbered list", icon: "list", keys: "1. ", words: "ordered" },
+      { kind: "quote", title: "Quote", icon: "message-square", keys: "> ", words: "blockquote citation" },
+      { kind: "code", title: "Code block", icon: "code-xml", keys: "```", words: "snippet pre monospace" },
+      { kind: "table", title: "Table", icon: "layout-grid", keys: "", words: "grid rows columns" },
+      { kind: "divider", title: "Divider", icon: "minus", keys: "---", words: "rule line separator hr" },
+      { kind: "date", title: "Today's date", icon: "bell", keys: "", words: "now day time" },
+      { kind: "link", title: "Link to a note", icon: "link", keys: "[[", words: "note reference wiki" }
+    ];
+    const inline = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
+    async function showInlineMenu(t) {
+      const seq = ++inline.seq;
+      if (!t || state.sourceMode || !state.rich) {
+        if (!t) inline.dismissedAt = null;
+        hideInlineMenu();
+        return;
+      }
+      if (inline.dismissedAt === t.kind + ":" + t.from) {
+        hideInlineMenu();
+        return;
+      }
+      let items;
+      if (t.kind === "slash") {
+        items = SLASH.map((b) => ({ b, s: import_helpers8.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
+        if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
+      } else {
+        if (!inline.notes || !inline.trigger || inline.trigger.kind !== "link") inline.notes = await api.notes.list({ sort: "updated" });
+        if (seq !== inline.seq) return;
+        const q = t.query.trim();
+        const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
+        const scored = q ? notes.map((n) => ({ n, s: import_helpers8.default.fuzzyScore(q, import_helpers8.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
+        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers8.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers8.default.relativeTime(n.updatedAt), note: n }));
+        if (q) items.push({ id: "new", title: 'New note "' + import_helpers8.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
+      }
+      inline.trigger = t;
+      inline.items = items;
+      inline.active = 0;
+      if (!items.length) {
+        hideInlineMenu();
+        return;
+      }
+      renderInlineMenu();
+    }
+    function renderInlineMenu() {
+      const menu = el.inlineMenu;
+      menu.innerHTML = "";
+      inline.items.forEach((it, i) => {
+        const b = document.createElement("div");
+        b.className = "inline-item" + (i === inline.active ? " is-active" : "");
+        b.setAttribute("role", "option");
+        b.setAttribute("aria-selected", String(i === inline.active));
+        b.innerHTML = I(it.icon) + '<span class="lbl"></span>' + (it.keys ? '<span class="keys' + (inline.trigger.kind === "slash" ? " md" : "") + '"></span>' : "");
+        b.querySelector(".lbl").textContent = it.title;
+        if (it.keys) b.querySelector(".keys").textContent = it.keys;
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          chooseInline(i);
+        });
+        b.addEventListener("mousemove", () => {
+          if (inline.active !== i) {
+            inline.active = i;
+            paintInline();
+          }
+        });
+        menu.append(b);
+      });
+      menu.classList.remove("hidden");
+      const r = inline.trigger.rect;
+      const mw = menu.offsetWidth, mh = menu.offsetHeight;
+      let x = Math.min(r.left, window.innerWidth - mw - 8);
+      let y = r.bottom + 6;
+      if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 6);
+      menu.style.left = Math.max(8, x) + "px";
+      menu.style.top = y + "px";
+    }
+    function paintInline() {
+      [...el.inlineMenu.children].forEach((c, i) => {
+        c.classList.toggle("is-active", i === inline.active);
+        c.setAttribute("aria-selected", String(i === inline.active));
+        if (i === inline.active) c.scrollIntoView({ block: "nearest" });
+      });
+    }
+    function hideInlineMenu() {
+      el.inlineMenu.classList.add("hidden");
+      inline.trigger = null;
+      inline.items = [];
+    }
+    function inlineMenuKey(e) {
+      if (e.isComposing || e.keyCode === 229) return false;
+      if (!inline.trigger || el.inlineMenu.classList.contains("hidden")) return false;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = inline.items.length;
+        inline.active = (inline.active + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
+        paintInline();
+        return true;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        chooseInline(inline.active);
+        return true;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        inline.dismissedAt = inline.trigger.kind + ":" + inline.trigger.from;
+        hideInlineMenu();
+        return true;
+      }
+      return false;
+    }
+    async function chooseInline(i) {
+      const it = inline.items[i];
+      const t = inline.trigger;
+      if (!it || !t || !state.rich) return;
+      const range = { from: t.from, to: t.to };
+      hideInlineMenu();
+      if (t.kind === "slash") {
+        if (it.kind === "date") {
+          state.rich.insertTextAt(range, (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" }));
+          return;
+        }
+        if (it.kind === "link") {
+          state.rich.insertTextAt(range, "[[");
+          return;
+        }
+        state.rich.insertBlock(range, it.kind);
+        return;
+      }
+      if (it.create) {
+        const noteId = state.currentId;
+        let created;
+        try {
+          created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null });
+        } catch (err) {
+          toast("Could not create the note: " + (err.message || err));
+          return;
+        }
+        if (state.currentId !== noteId) return;
+        const typed = "[[" + t.query;
+        const at = state.rich.textAt(range) === typed ? range : null;
+        if (at) state.rich.insertLinkAt(at, it.create, "note://" + created.id);
+        else {
+          const r = state.rich.selectionRange();
+          state.rich.insertLinkAt({ from: r.to, to: r.to }, it.create, "note://" + created.id);
+        }
+        inline.notes = null;
+        refresh({ keepEditor: true });
+        toast('Created "' + import_helpers8.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
+        return;
+      }
+      state.rich.insertLinkAt(range, it.title, "note://" + it.note.id);
+    }
+    function syncTextViews(note) {
+      const none = lockedNow() || isViewerOnlyFile2(note);
+      const isTable = import_helpers8.default.isTableFile(note);
+      const table = isTable && !state.sourceMode && !none;
+      el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
+      el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
+      el.csvView.classList.toggle("hidden", !table);
+      fillPane(table || !!note && note.fileKind === "image" && !lockedNow());
+      if (table) renderTable2(note);
+    }
+    let tableDrawn = null;
+    let tableStats = null;
+    function renderTable2(note) {
+      const text = el.bodyInput.value;
+      if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
+        tableStats = NotesCsv.render(el.csvView, text, import_helpers8.default.extOf(note.filePath));
+        tableDrawn = { id: note.id, text };
+      }
+      updateStatus(note);
+    }
+    function fillPane(on) {
+      el.editorColumn.classList.toggle("fills-pane", on);
+      el.editor.classList.toggle("fills-pane", on);
+    }
+    function syncSourceButton() {
+      const table = import_helpers8.default.isTableFile(state.current);
+      const label = state.sourceMode ? table ? "Table" : "Rendered" : table ? "Text" : "Source";
+      const what = state.sourceMode ? table ? "Show as a table" : "Back to the rendered view" : table ? "Edit as text" : "Show Markdown source";
+      setLabel(el.sourceBtn, label);
+      el.sourceBtn.setAttribute("aria-label", what);
+      el.sourceBtn.title = what + " (Ctrl+E)";
+    }
+    function applyEditorMode(source) {
+      state.sourceMode = !!source;
+      if (source) hideInlineMenu();
+      if (find.open) {
+        clearFindHighlights();
+        setTimeout(() => {
+          if (find.open) runFind(true, true);
+        }, 0);
+      }
+      setPressed(el.sourceBtn, state.sourceMode);
+      syncSourceButton();
+      syncTextViews(state.current);
+      renderCodePosition();
+      if (state.sourceMode) autoGrow();
+      else if (state.rich && state.currentId && !isViewerOnlyFile2(state.current) && !isPlainTextFile3(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+    }
+    function toggleSource(force) {
+      const next = typeof force === "boolean" ? force : !state.sourceMode;
+      if (isViewerOnlyFile2(state.current)) {
+        toast("This file is shown as it is; it has no Markdown view to switch to.");
+        return;
+      }
+      if (next === state.sourceMode) return;
+      if (!next && isPlainTextFile3(state.current) && !import_helpers8.default.isTableFile(state.current)) {
+        toast("This is a plain-text file, so it is edited as the text it is.");
+        return;
+      }
+      if (!next && !state.rich && !import_helpers8.default.isTableFile(state.current)) {
+        toast("The rendered editor is unavailable; staying in Markdown source.");
+        return;
+      }
+      if (!next && state.currentId && !isPlainTextFile3(state.current)) {
+        state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+        if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false;
+        if (state.currentLossless === false) {
+          state.lossyOverride = state.currentId;
+          toast("Heads up: editing this note in the rendered view will rewrite formatting it cannot show.");
+        }
+      }
+      applyEditorMode(next);
+      if (!import_helpers8.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
+      focusBody();
+    }
+    async function followLink(href) {
+      href = String(href || "");
+      if (/^note:\/\//i.test(href)) {
+        const id = href.replace(/^note:\/\//i, "").replace(/\/$/, "");
+        const target = await api.notes.get(id);
+        if (!target) {
+          toast("That note no longer exists.");
+          return;
+        }
+        await scopeListToNote(target);
+        await selectNoteNow(id);
+        return;
+      }
+      if (/^attachment:\/\//i.test(href)) {
+        const r = await api.attachments.open(href);
+        if (r) toast(String(r));
+        return;
+      }
+      api.app.openExternal(href);
+    }
+    function openLinkDialog() {
+      if (!state.rich || state.sourceMode) return;
+      const existing = state.rich.activeLink();
+      if (!existing && !state.rich.hasSelection()) {
+        toast("Select the text to link first");
+        return;
+      }
+      state.linkRange = state.rich.selectionRange();
+      el.linkNoteSelect.innerHTML = '<option value="">\u2014 pick a note \u2014</option>';
+      api.notes.list({ sort: "title" }).then((notes) => {
+        for (const n of notes) {
+          if (n.id === state.currentId) continue;
+          const o = document.createElement("option");
+          o.value = "note://" + n.id;
+          o.textContent = import_helpers8.default.truncate(import_helpers8.default.deriveTitle(n), 60);
+          el.linkNoteSelect.append(o);
+        }
+        if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
+      });
+      el.linkInput.value = existing || "https://";
+      el.linkRemoveBtn.classList.toggle("hidden", !existing);
+      el.linkDialog.showModal();
+      el.linkInput.focus();
+      el.linkInput.select();
+    }
+    function tableStatsNow() {
+      return tableStats;
+    }
+    return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
   }
 
   // src/renderer/vaults-panel.js
-  var import_helpers8 = __toESM(require_helpers());
+  var import_helpers9 = __toESM(require_helpers());
   function createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded }) {
     async function syncVault(id) {
       toast("Syncing vault\u2026");
@@ -3865,7 +4202,7 @@
       else parts.push("no remote (local history only)");
       if (s.dirty) parts.push("uncommitted changes");
       if (s.syncing) parts.push("syncing\u2026");
-      if (s.lastSyncAt) parts.push("last sync " + import_helpers8.default.relativeTime(s.lastSyncAt));
+      if (s.lastSyncAt) parts.push("last sync " + import_helpers9.default.relativeTime(s.lastSyncAt));
       if (s.conflict) parts.push("CONFLICT: resolve in the folder");
       if (s.lastError) parts.push("error: " + s.lastError);
       return parts.join(" \xB7 ");
@@ -3874,9 +4211,9 @@
   }
 
   // src/renderer/locking.js
-  var import_helpers9 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers9.default;
-  function createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
+  var import_helpers10 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile4 } = import_helpers10.default;
+  function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
     function renderLockState(note) {
       const locked = !!(note && note.locked);
       const open = !!(note && note.unlocked);
@@ -3893,7 +4230,7 @@
         if (state.rich) state.rich.setEditable(false);
       } else if (note) {
         renderFileRow(note);
-        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile2(note) && !isPlainTextFile3(note));
+        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile3(note) && !isPlainTextFile4(note));
       }
     }
     function onLockButton() {
@@ -4007,9 +4344,9 @@
   }
 
   // src/renderer/attachments.js
-  var import_helpers10 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile3 } = import_helpers10.default;
-  function createAttachments({ api, tableShown, flushSave, refresh }) {
+  var import_helpers11 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile4 } = import_helpers11.default;
+  function createAttachments({ api, flushSave, refresh }) {
     function insertAttachmentLinks(items) {
       const ok = items.filter((x) => x && !x.error);
       const bad = items.filter((x) => x && x.error);
@@ -4042,7 +4379,7 @@
       }
     }
     async function attachFiles() {
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile3(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile4(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -4060,10 +4397,10 @@
         return;
       }
       const target = await api.notes.get(forNote);
-      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile3(target)) {
+      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile4(target)) {
         const links = ok.map((it) => "[\u{1F4CE} " + it.name.replace(/[[\]]/g, "") + "](" + it.href + ")").join("\n");
         await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + links + "\n" });
-        toast('Attached to "' + import_helpers10.default.truncate(import_helpers10.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
+        toast('Attached to "' + import_helpers11.default.truncate(import_helpers11.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
         refresh({ keepEditor: true });
       } else toast("Attached files are kept in the attachments folder; that note can no longer take them.");
     }
@@ -4074,7 +4411,7 @@
         return;
       }
       if (rec.starting) return;
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile3(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile4(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -4124,9 +4461,9 @@
             toast("Voice memo saved (" + mm + ":" + ss + "). Ctrl+click the link to play it.");
           } else {
             const target = await api.notes.get(rec.noteId);
-            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile3(target)) {
+            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile4(target)) {
               await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + "[" + label + "](" + saved.href + ")\n" });
-              toast('Voice memo saved into "' + import_helpers10.default.truncate(import_helpers10.default.deriveTitle(target), 30) + '", the note it was recorded in.');
+              toast('Voice memo saved into "' + import_helpers11.default.truncate(import_helpers11.default.deriveTitle(target), 30) + '", the note it was recorded in.');
               refresh({ keepEditor: true });
             } else toast("Voice memo saved as " + saved.name + " (that note can no longer take it; Attach it where you want it).");
           }
@@ -4149,9 +4486,9 @@
   }
 
   // src/renderer/history-dialog.js
-  var import_helpers11 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile4 } = import_helpers11.default;
-  function createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave }) {
+  var import_helpers12 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile5 } = import_helpers12.default;
+  function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
     const hist = { versions: [], index: -1, noteId: null };
     async function openHistory() {
       const note = state.current;
@@ -4182,7 +4519,7 @@
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
         li.innerHTML = '<span class="when"></span><span class="first"></span>';
         li.querySelector(".when").textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        li.querySelector(".first").textContent = import_helpers11.default.truncate(first, 48);
+        li.querySelector(".first").textContent = import_helpers12.default.truncate(first, 48);
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
@@ -4199,7 +4536,7 @@
       const note = state.current;
       if (!v || !note) return;
       el.historyDialog.close();
-      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile4(note)) {
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile5(note)) {
         toast("This note cannot take the restored text right now.");
         return;
       }
@@ -4222,9 +4559,9 @@
   }
 
   // src/renderer/speech.js
-  var import_helpers12 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile5, isNonMarkdownFile } = import_helpers12.default;
-  function createSpeech({ api, focusBody }) {
+  var import_helpers13 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile6, isNonMarkdownFile } = import_helpers13.default;
+  function createSpeech({ api }) {
     const tts = { active: false, queue: [], index: 0 };
     function selectedTextForSpeech() {
       if (state.sourceMode) {
@@ -4241,7 +4578,7 @@
       if (selected) return selected;
       const title = el.titleInput.value.trim();
       const note = state.current;
-      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers12.default.plainTextFromMarkdown(el.bodyInput.value);
+      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers13.default.plainTextFromMarkdown(el.bodyInput.value);
       return (title ? title + ".\n" : "") + body;
     }
     function pickVoice() {
@@ -4293,7 +4630,7 @@
         toast("Nothing to read yet.");
         return;
       }
-      tts.queue = import_helpers12.default.speechChunks(text);
+      tts.queue = import_helpers13.default.speechChunks(text);
       tts.index = 0;
       setReadAloudState(true);
       window.speechSynthesis.cancel();
@@ -4313,7 +4650,7 @@
       el.ttsVoiceSelect.value = voices.some((v) => v.name === current) ? current : "";
     }
     async function startDictation() {
-      if (!state.current || isViewerOnlyFile5(state.current) || state.current.trashedAt) {
+      if (!state.current || isViewerOnlyFile6(state.current) || state.current.trashedAt) {
         toast("Open an editable note first.");
         return;
       }
@@ -4326,7 +4663,7 @@
   }
 
   // src/renderer/find-bar.js
-  var import_helpers13 = __toESM(require_helpers());
+  var import_helpers14 = __toESM(require_helpers());
 
   // src/renderer/find-text.js
   function isQueryText(text, q) {
@@ -4345,8 +4682,8 @@
   }
 
   // src/renderer/find-bar.js
-  var { isViewerOnlyFile: isViewerOnlyFile6 } = import_helpers13.default;
-  function createFindBar({ api, tableShown, focusBody, flushSave, GUEST }) {
+  var { isViewerOnlyFile: isViewerOnlyFile7 } = import_helpers14.default;
+  function createFindBar({ api, flushSave, GUEST }) {
     function openFind() {
       if (!state.current) return;
       find.open = true;
@@ -4369,7 +4706,7 @@
     function replaceCurrent() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile7(state.current)) return;
       if (state.sourceMode) {
         const wanted = find.active;
         runFind(true, true, true);
@@ -4443,7 +4780,7 @@
     function replaceAll() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile7(state.current)) return;
       let n = 0;
       if (state.sourceMode) {
         const ta = src;
@@ -4618,7 +4955,7 @@
       else if (r.dry) toast("Print: dry run");
     }
     function exportOfCurrent() {
-      const title = import_helpers13.default.deriveTitle(state.current);
+      const title = import_helpers14.default.deriveTitle(state.current);
       return { name: title, html: (state.current.title ? "<h1>" + escapeHtml(state.current.title) + "</h1>" : "") + currentHtml() };
     }
     return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
@@ -4997,7 +5334,7 @@
   }
 
   // src/renderer/craft-notes.js
-  var import_helpers14 = __toESM(require_helpers());
+  var import_helpers15 = __toESM(require_helpers());
   function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow }) {
     const CRAFT_UI = {
       wordcraft: { label: "WordCraft", what: "Word document", frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: "Word", without: "Word documents open in the simple editor for now." },
@@ -5035,7 +5372,7 @@
               down = true;
               clear();
               const n = state.current;
-              if (n && n.filePath && import_helpers14.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
+              if (n && n.filePath && import_helpers15.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
               toast(ui.label + " did not start, so " + ui.without);
             }
           });
@@ -5117,7 +5454,7 @@
     }
     const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
     const useWordCraft = () => crafts.wordcraft.usable();
-    const craftFor = (n) => n && n.filePath && import_helpers14.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers14.default.CRAFT_OF[n.fileKind]] : null;
+    const craftFor = (n) => n && n.filePath && import_helpers15.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers15.default.CRAFT_OF[n.fileKind]] : null;
     const craftDirty = () => Object.values(crafts).some((c) => c.dirty());
     async function flushCrafts() {
       let ok = true;
@@ -5125,19 +5462,19 @@
       return ok;
     }
     function showCraftOnly(n) {
-      const key = import_helpers14.default.CRAFT_OF[n.fileKind];
+      const key = import_helpers15.default.CRAFT_OF[n.fileKind];
       if (crafts[key].usable()) {
         showBanner("");
         crafts[key].show(n);
         return;
       }
-      showBanner("Notes shows ." + import_helpers14.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
+      showBanner("Notes shows ." + import_helpers15.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
     }
     return { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly };
   }
 
   // src/renderer/word-note.js
-  var import_helpers15 = __toESM(require_helpers());
+  var import_helpers16 = __toESM(require_helpers());
   function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
     const DOCX_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"><style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>`;
     let docxShownKey = null;
@@ -5210,9 +5547,9 @@
         crafts.wordcraft.show(note);
         return;
       }
-      if (!import_helpers15.default.isOoxmlWordFile(note)) {
+      if (!import_helpers16.default.isOoxmlWordFile(note)) {
         el.docxEditor.classList.add("hidden");
-        showBanner("Notes shows ." + import_helpers15.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
+        showBanner("Notes shows ." + import_helpers16.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
         return;
       }
       const key = note.id + ":" + note.fileMtime;
@@ -5484,7 +5821,7 @@
   (function() {
     "use strict";
     const api = withPeerNotice(window.notesApi, peerChanged);
-    const { isViewerOnlyFile: isViewerOnlyFile7, isPlainTextFile: isPlainTextFile4, isNonMarkdownFile: isNonMarkdownFile2 } = import_helpers16.default;
+    const { isViewerOnlyFile: isViewerOnlyFile8, isPlainTextFile: isPlainTextFile5, isNonMarkdownFile: isNonMarkdownFile2 } = import_helpers17.default;
     function effectiveTheme(settings) {
       const s = settings || state.settings;
       const t = s ? s.theme : "system";
@@ -5519,8 +5856,8 @@
       applyEditorLayout(settings);
       if (el.settingsDialog.open && settingsDirty()) previewSettings();
       if (opts && opts.fromPeer) return;
-      if (import_helpers16.default.isTableFile(state.current)) return;
-      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile4(state.current);
+      if (import_helpers17.default.isTableFile(state.current)) return;
+      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile5(state.current);
       const wantSource = settings.editorMode === "source" || forcedSource;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     }
@@ -5656,18 +5993,18 @@
       }, true);
     }
     function paneBudget() {
-      return Math.max(0, window.innerWidth - import_helpers16.default.EDITOR_MIN);
+      return Math.max(0, window.innerWidth - import_helpers17.default.EDITOR_MIN);
     }
     function fitPaneWidths(sidebar, list) {
-      sidebar = import_helpers16.default.clampPane("sidebarWidth", sidebar);
-      list = import_helpers16.default.clampPane("listWidth", list);
+      sidebar = import_helpers17.default.clampPane("sidebarWidth", sidebar);
+      list = import_helpers17.default.clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
       const over = sidebarShown + list - paneBudget();
       if (over > 0) {
-        const listGive = Math.min(over, list - import_helpers16.default.PANE_LIMITS.listWidth.min);
+        const listGive = Math.min(over, list - import_helpers17.default.PANE_LIMITS.listWidth.min);
         list -= listGive;
         const rest = over - listGive;
-        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers16.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
+        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers17.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
       }
       return { sidebar, list };
     }
@@ -5679,8 +6016,8 @@
     }
     function currentPaneWidths() {
       return {
-        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers16.default.PANE_LIMITS.sidebarWidth.def,
-        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers16.default.PANE_LIMITS.listWidth.def
+        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers17.default.PANE_LIMITS.sidebarWidth.def,
+        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers17.default.PANE_LIMITS.listWidth.def
       };
     }
     function setupResizer(handle, key) {
@@ -5717,7 +6054,7 @@
       });
       handle.addEventListener("dblclick", () => {
         const patch = {};
-        patch[key] = import_helpers16.default.PANE_LIMITS[key].def;
+        patch[key] = import_helpers17.default.PANE_LIMITS[key].def;
         updateSettings(patch);
       });
     }
@@ -5851,7 +6188,7 @@
         li.className = "note-row" + (n.id === state.currentId ? " is-active" : "");
         li.dataset.id = n.id;
         li.setAttribute("role", "option");
-        li.title = import_helpers16.default.deriveTitle(n);
+        li.title = import_helpers17.default.deriveTitle(n);
         li.innerHTML = rowInner(n, q);
         if (viewingBook && !q) {
           const no = document.createElement("span");
@@ -5897,21 +6234,21 @@
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
       const overdue = n.remindAt <= Date.now();
-      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers16.default.formatWhen(n.remindAt)) + "</span>";
+      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers17.default.formatWhen(n.remindAt)) + "</span>";
     }
     function rowInner(n, q) {
-      const title = n.body === void 0 ? n.title : import_helpers16.default.deriveTitle(n);
+      const title = n.body === void 0 ? n.title : import_helpers17.default.deriveTitle(n);
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "") + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
-      const inTitle = !q || import_helpers16.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
+      const inTitle = !q || import_helpers17.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
       const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
       return '<span class="row-name">' + highlight(title, q) + "</span>" + why + marks + fileMark + reminderMark(n) + whereMark(n);
     }
     function matchExcerpt(n, q) {
       const body = String(n.body || "").replace(/\s+/g, " ");
       const low = body.toLowerCase();
-      const at = import_helpers16.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-      if (at === void 0) return (n.tags || []).filter((t) => import_helpers16.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers16.default.snippet(n, 80);
+      const at = import_helpers17.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (at === void 0) return (n.tags || []).filter((t) => import_helpers17.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers17.default.snippet(n, 80);
       const start = Math.max(0, at - 30);
       let text = body.slice(start, start + 80);
       if (start > 0) text = "\u2026" + text.replace(/^\S*\s/, "");
@@ -5925,11 +6262,11 @@
     }
     function refreshRow(note) {
       if (tabs.ids.includes(note.id)) {
-        tabs.titles.set(note.id, import_helpers16.default.deriveTitle(note));
+        tabs.titles.set(note.id, import_helpers17.default.deriveTitle(note));
         renderActiveTabTitle();
       }
       if (state.outline) {
-        const title = import_helpers16.default.deriveTitle(note);
+        const title = import_helpers17.default.deriveTitle(note);
         for (const list of Object.values(state.outline)) {
           const e = list.find((x) => x.id === note.id);
           if (e) {
@@ -5947,7 +6284,7 @@
       if (!li) return;
       const pageNo = li.querySelector(".page-no");
       li.innerHTML = rowInner(note, state.query);
-      li.title = import_helpers16.default.deriveTitle(note);
+      li.title = import_helpers17.default.deriveTitle(note);
       if (pageNo) li.prepend(pageNo);
     }
     async function setView(view, arg, refreshOpts) {
@@ -6436,11 +6773,11 @@
             await setView("folder", folder.id, { keepEditor: true });
             await selectNoteNow(page.id);
             el.titleInput.focus();
-            toast('Book "' + import_helpers16.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
+            toast('Book "' + import_helpers17.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
             return;
           }
           await setView("folder", folder.id);
-          toast('Folder "' + import_helpers16.default.truncate(folder.name, 30) + '" created');
+          toast('Folder "' + import_helpers17.default.truncate(folder.name, 30) + '" created');
         } else {
           if (name) await api.folders.rename(edit.id, name);
           await refresh({ keepEditor: true });
@@ -6484,7 +6821,7 @@
       if (state.currentId === noteId && updated) state.current = updated;
       await refresh({ keepEditor: true });
       const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
-      toast(name ? "Moved to " + import_helpers16.default.truncate(name, 30) : "Moved out of folders");
+      toast(name ? "Moved to " + import_helpers17.default.truncate(name, 30) : "Moved out of folders");
     }
     async function moveFolderTo(folderId, parentId) {
       const res = await api.folders.move(folderId, parentId || null);
@@ -6654,7 +6991,7 @@
     }
     function tabTitle(id) {
       if (!id) return "New tab";
-      if (id === state.currentId && state.current) return import_helpers16.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
+      if (id === state.currentId && state.current) return import_helpers17.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
       return tabs.titles.get(id) || "\u2026";
     }
     function renderTabs() {
@@ -6703,7 +7040,7 @@
       try {
         const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => void 0)));
         notes.forEach((n, i) => {
-          if (n) tabs.titles.set(ids[i], import_helpers16.default.deriveTitle(n));
+          if (n) tabs.titles.set(ids[i], import_helpers17.default.deriveTitle(n));
           else if (n === null) gone.push(ids[i]);
         });
       } finally {
@@ -7223,8 +7560,8 @@
       el.tagsInput.value = note.tags.join(", ");
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
-      const plainFile = isPlainTextFile4(note);
-      const markdown = !plainFile && !isViewerOnlyFile7(note);
+      const plainFile = isPlainTextFile5(note);
+      const markdown = !plainFile && !isViewerOnlyFile8(note);
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
@@ -7233,7 +7570,7 @@
       state.currentLossless = lossless;
       state.lossyOverride = null;
       el.bodyInput.placeholder = plainFile ? "Plain text." : "Markdown source. Ctrl+E switches back to the rendered view.";
-      const wantSource = import_helpers16.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
+      const wantSource = import_helpers17.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
@@ -7241,8 +7578,8 @@
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
-      const fileReadOnly = isViewerOnlyFile7(note);
-      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers16.default.isTableFile(note) || fileReadOnly);
+      const fileReadOnly = isViewerOnlyFile8(note);
+      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers17.default.isTableFile(note) || fileReadOnly);
       syncSourceButton();
       [el.titleInput, el.tagsInput].forEach((i) => {
         i.readOnly = inTrash;
@@ -7302,15 +7639,16 @@
     }
     function updateStatus(note) {
       const body = el.bodyInput.value;
-      if (tableStats && tableShown()) {
-        el.statusWords.textContent = tableStats.rows.toLocaleString() + (tableStats.rows === 1 ? " row" : " rows");
-        el.statusChars.textContent = tableStats.cols + (tableStats.cols === 1 ? " column" : " columns");
+      const stats = tableStatsNow();
+      if (stats && tableShown()) {
+        el.statusWords.textContent = stats.rows.toLocaleString() + (stats.rows === 1 ? " row" : " rows");
+        el.statusChars.textContent = stats.cols + (stats.cols === 1 ? " column" : " columns");
       } else {
-        const words = import_helpers16.default.countWords(body);
+        const words = import_helpers17.default.countWords(body);
         el.statusWords.textContent = words + (words === 1 ? " word" : " words");
         el.statusChars.textContent = body.length + (body.length === 1 ? " character" : " characters");
       }
-      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers16.default.relativeTime(note.trashedAt) : "Edited " + import_helpers16.default.relativeTime(note.updatedAt);
+      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers17.default.relativeTime(note.trashedAt) : "Edited " + import_helpers17.default.relativeTime(note.updatedAt);
     }
     function setSaved(label) {
       el.statusSaved.textContent = label;
@@ -7355,8 +7693,8 @@
         tab.draggable = true;
         tab.innerHTML = '<span class="no"></span><span class="t"></span>';
         tab.querySelector(".no").textContent = String(i + 1);
-        tab.querySelector(".t").textContent = import_helpers16.default.truncate(import_helpers16.default.deriveTitle(p) || "Untitled", 28);
-        tab.title = import_helpers16.default.deriveTitle(p) || "Untitled";
+        tab.querySelector(".t").textContent = import_helpers17.default.truncate(import_helpers17.default.deriveTitle(p) || "Untitled", 28);
+        tab.title = import_helpers17.default.deriveTitle(p) || "Untitled";
         tab.addEventListener("click", () => {
           if (p.id !== state.currentId) selectNote(p.id);
         });
@@ -7447,7 +7785,7 @@
       }
       await flushSave();
       if (!state.current || state.current.id !== note.id) return;
-      const plan = import_helpers16.default.splitAtHeadings(state.current.body, import_helpers16.default.deriveTitle(state.current));
+      const plan = import_helpers17.default.splitAtHeadings(state.current.body, import_helpers17.default.deriveTitle(state.current));
       if (plan.pages.length < 2) {
         toast("Add at least two headings (lines starting with #) to split this note into pages.");
         return;
@@ -7487,7 +7825,7 @@
       if (r.originalTrashed && state.currentId === id) clearEditor();
       await setView("folder", r.folder.id, { keepEditor: true });
       await selectNoteNow(r.pageIds[0]);
-      toast('Made the book "' + import_helpers16.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
+      toast('Made the book "' + import_helpers17.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
         label: "Undo",
         run: async () => {
           await flushSave();
@@ -7571,18 +7909,18 @@
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
         } else if (action === "copy-link") {
-          await api.app.copy({ text: "[" + (import_helpers16.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
+          await api.app.copy({ text: "[" + (import_helpers17.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
           toast("Copied. Paste it into another note to link to this page.");
         } else if (action === "delete") {
           if (id === state.currentId) {
             await trashCurrent();
             return;
           }
-          const title = import_helpers16.default.deriveTitle(page) || "Untitled";
+          const title = import_helpers17.default.deriveTitle(page) || "Untitled";
           await api.notes.trash(id);
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
-          toast('Moved "' + import_helpers16.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+          toast('Moved "' + import_helpers17.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
             await api.notes.restore(id);
             await refresh({ keepEditor: true });
             if (state.current) renderBookStrip(state.current);
@@ -7651,7 +7989,7 @@
         pages: pages.map((p, i) => {
           const locked = !!(p.locked && !p.unlocked);
           const body = locked ? "" : bodies[i];
-          return { id: p.id, no: i + 1, title: import_helpers16.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
+          return { id: p.id, no: i + 1, title: import_helpers17.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
         })
       };
     }
@@ -7687,15 +8025,16 @@
       else if (!r.canceled) toast("Could not export the book: " + r.error);
     }
     const { reader, openReader, closeReader, readerOpen } = createBookReader({ book, collectBook, syncTitleBar });
-    const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
-    const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, tableShown, focusBody, flushSave, GUEST });
+    const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
+    const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
-    const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
+    const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
-    const { attachFiles, toggleRecording } = createAttachments({ api, tableShown, flushSave, refresh });
-    const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave });
+    const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
+    const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
     async function refreshCurrentMeta() {
       if (!state.currentId) return;
       const fresh = await api.notes.get(state.currentId);
@@ -7711,7 +8050,7 @@
       await refresh({ keepEditor: true });
     }
     const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
-    const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api, focusBody });
+    const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api });
     const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, closePdfPages, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
     const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow });
     const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
@@ -7722,22 +8061,22 @@
     }
     const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
     function fileBadge(note) {
-      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers16.default.extOf(note.filePath).toUpperCase();
+      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers17.default.extOf(note.filePath).toUpperCase();
       if (note.fileKind !== "text") return (note.fileKind || "file").toUpperCase();
-      if (!isPlainTextFile4(note)) return "Markdown";
-      if (import_helpers16.default.isTableFile(note)) return import_helpers16.default.extOf(note.filePath).toUpperCase();
-      return window.NotesCode ? window.NotesCode.languageFor(import_helpers16.default.extOf(note.filePath)).name : "Plain text";
+      if (!isPlainTextFile5(note)) return "Markdown";
+      if (import_helpers17.default.isTableFile(note)) return import_helpers17.default.extOf(note.filePath).toUpperCase();
+      return window.NotesCode ? window.NotesCode.languageFor(import_helpers17.default.extOf(note.filePath)).name : "Plain text";
     }
     function renderFileRow(note) {
       const isFile = !!(note && note.filePath);
       el.fileRow.classList.toggle("hidden", !isFile);
       el.fileBanner.classList.add("hidden");
       if (!(isFile && note.fileKind === "docx")) clearDocx();
-      for (const [kind, key] of Object.entries(import_helpers16.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
+      for (const [kind, key] of Object.entries(import_helpers17.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
-      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers16.default.CRAFT_OF[note.fileKind]));
+      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers17.default.CRAFT_OF[note.fileKind]));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
       el.editorColumn.classList.toggle("shows-craft", inCraft);
@@ -7834,14 +8173,14 @@
       state.current = fresh;
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
-      if (isViewerOnlyFile7(fresh)) {
+      if (isViewerOnlyFile8(fresh)) {
         showCode2(fresh, true);
         renderFileRow(fresh);
         updateStatus(fresh);
         return;
       }
-      if (import_helpers16.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
-      if (state.rich && !isPlainTextFile4(fresh)) {
+      if (import_helpers17.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
+      if (state.rich && !isPlainTextFile5(fresh)) {
         let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
         if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
         state.currentLossless = lossless;
@@ -7895,7 +8234,7 @@
     state.pending = /* @__PURE__ */ new Map();
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
-      if (isViewerOnlyFile7(state.current)) delete patch.body;
+      if (isViewerOnlyFile8(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
     }
@@ -7961,7 +8300,7 @@
               state.notes[idx] = updated;
               refreshRow(updated);
             }
-            toast('Saved earlier changes to "' + import_helpers16.default.truncate(import_helpers16.default.deriveTitle(updated), 30) + '"');
+            toast('Saved earlier changes to "' + import_helpers17.default.truncate(import_helpers17.default.deriveTitle(updated), 30) + '"');
           }
         } catch (err) {
           if (/changed on disk/i.test(String(err && err.message))) {
@@ -8028,7 +8367,7 @@
         renderRelatedSoon();
         if (book.id && patch.title !== void 0) {
           const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t');
-          if (t) t.textContent = import_helpers16.default.truncate(import_helpers16.default.deriveTitle(updated) || "Untitled", 28);
+          if (t) t.textContent = import_helpers17.default.truncate(import_helpers17.default.deriveTitle(updated) || "Untitled", 28);
         }
         if (updated.filePath && el.filePath.textContent !== updated.filePath) {
           el.filePath.textContent = updated.filePath;
@@ -8088,13 +8427,13 @@
     async function trashCurrent() {
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
-      const title = import_helpers16.default.deriveTitle(state.current);
+      const title = import_helpers17.default.deriveTitle(state.current);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
       await api.notes.trash(id);
       clearEditor();
       await refresh();
-      toast('Moved "' + import_helpers16.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+      toast('Moved "' + import_helpers17.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
         await api.notes.restore(id);
         await refresh({ keepEditor: true });
         await selectNote(id);
@@ -8110,7 +8449,7 @@
     }
     async function destroyCurrent() {
       if (!state.current) return;
-      if (!window.confirm('Delete "' + import_helpers16.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
+      if (!window.confirm('Delete "' + import_helpers17.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
       state.pending.delete(state.currentId);
       state.dirty = false;
       await api.notes.destroy(state.currentId);
@@ -8155,339 +8494,12 @@
         toast("Export failed: " + (err.message || err));
       }
     }
-    function createRichEditor() {
-      if (!window.NotesEditor) {
-        toast("Rendered editor failed to load; showing Markdown source.");
-        applyEditorMode(true);
-        return;
-      }
-      state.rich = window.NotesEditor.create(el.richEditor, {
-        placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
-        imageBase: () => import_helpers16.default.imageBaseFor(state.current),
-        onTrigger: (t) => showInlineMenu(t),
-        onTriggerKey: (e) => inlineMenuKey(e),
-        onUpdate: (md) => {
-          if (state.sourceMode || !state.currentId || isPlainTextFile4(state.current)) return;
-          if (md === el.bodyInput.value) return;
-          el.bodyInput.value = md;
-          scheduleSave();
-          if (find.open) runFind(true, true, true);
-        }
-      });
-      el.richEditor.addEventListener("click", (e) => {
-        const a = e.target.closest("a[href]");
-        if (a && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault();
-          followLink(a.getAttribute("href"));
-        }
-      });
-    }
-    const SLASH = [
-      { kind: "h1", title: "Heading 1", icon: "type", keys: "# ", words: "title big" },
-      { kind: "h2", title: "Heading 2", icon: "type", keys: "## ", words: "subtitle section" },
-      { kind: "h3", title: "Heading 3", icon: "type", keys: "### ", words: "small heading" },
-      { kind: "text", title: "Text", icon: "file-text", keys: "", words: "paragraph plain normal" },
-      { kind: "checklist", title: "Checklist", icon: "check", keys: "- [ ] ", words: "todo task checkbox" },
-      { kind: "bullets", title: "Bulleted list", icon: "list", keys: "- ", words: "unordered bullet" },
-      { kind: "numbers", title: "Numbered list", icon: "list", keys: "1. ", words: "ordered" },
-      { kind: "quote", title: "Quote", icon: "message-square", keys: "> ", words: "blockquote citation" },
-      { kind: "code", title: "Code block", icon: "code-xml", keys: "```", words: "snippet pre monospace" },
-      { kind: "table", title: "Table", icon: "layout-grid", keys: "", words: "grid rows columns" },
-      { kind: "divider", title: "Divider", icon: "minus", keys: "---", words: "rule line separator hr" },
-      { kind: "date", title: "Today's date", icon: "bell", keys: "", words: "now day time" },
-      { kind: "link", title: "Link to a note", icon: "link", keys: "[[", words: "note reference wiki" }
-    ];
-    const inline = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
-    async function showInlineMenu(t) {
-      const seq = ++inline.seq;
-      if (!t || state.sourceMode || !state.rich) {
-        if (!t) inline.dismissedAt = null;
-        hideInlineMenu();
-        return;
-      }
-      if (inline.dismissedAt === t.kind + ":" + t.from) {
-        hideInlineMenu();
-        return;
-      }
-      let items;
-      if (t.kind === "slash") {
-        items = SLASH.map((b) => ({ b, s: import_helpers16.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
-        if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
-      } else {
-        if (!inline.notes || !inline.trigger || inline.trigger.kind !== "link") inline.notes = await api.notes.list({ sort: "updated" });
-        if (seq !== inline.seq) return;
-        const q = t.query.trim();
-        const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
-        const scored = q ? notes.map((n) => ({ n, s: import_helpers16.default.fuzzyScore(q, import_helpers16.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers16.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers16.default.relativeTime(n.updatedAt), note: n }));
-        if (q) items.push({ id: "new", title: 'New note "' + import_helpers16.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
-      }
-      inline.trigger = t;
-      inline.items = items;
-      inline.active = 0;
-      if (!items.length) {
-        hideInlineMenu();
-        return;
-      }
-      renderInlineMenu();
-    }
-    function renderInlineMenu() {
-      const menu = el.inlineMenu;
-      menu.innerHTML = "";
-      inline.items.forEach((it, i) => {
-        const b = document.createElement("div");
-        b.className = "inline-item" + (i === inline.active ? " is-active" : "");
-        b.setAttribute("role", "option");
-        b.setAttribute("aria-selected", String(i === inline.active));
-        b.innerHTML = I(it.icon) + '<span class="lbl"></span>' + (it.keys ? '<span class="keys' + (inline.trigger.kind === "slash" ? " md" : "") + '"></span>' : "");
-        b.querySelector(".lbl").textContent = it.title;
-        if (it.keys) b.querySelector(".keys").textContent = it.keys;
-        b.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          chooseInline(i);
-        });
-        b.addEventListener("mousemove", () => {
-          if (inline.active !== i) {
-            inline.active = i;
-            paintInline();
-          }
-        });
-        menu.append(b);
-      });
-      menu.classList.remove("hidden");
-      const r = inline.trigger.rect;
-      const mw = menu.offsetWidth, mh = menu.offsetHeight;
-      let x = Math.min(r.left, window.innerWidth - mw - 8);
-      let y = r.bottom + 6;
-      if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 6);
-      menu.style.left = Math.max(8, x) + "px";
-      menu.style.top = y + "px";
-    }
-    function paintInline() {
-      [...el.inlineMenu.children].forEach((c, i) => {
-        c.classList.toggle("is-active", i === inline.active);
-        c.setAttribute("aria-selected", String(i === inline.active));
-        if (i === inline.active) c.scrollIntoView({ block: "nearest" });
-      });
-    }
-    function hideInlineMenu() {
-      el.inlineMenu.classList.add("hidden");
-      inline.trigger = null;
-      inline.items = [];
-    }
-    function inlineMenuKey(e) {
-      if (e.isComposing || e.keyCode === 229) return false;
-      if (!inline.trigger || el.inlineMenu.classList.contains("hidden")) return false;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const n = inline.items.length;
-        inline.active = (inline.active + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
-        paintInline();
-        return true;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        chooseInline(inline.active);
-        return true;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        inline.dismissedAt = inline.trigger.kind + ":" + inline.trigger.from;
-        hideInlineMenu();
-        return true;
-      }
-      return false;
-    }
-    async function chooseInline(i) {
-      const it = inline.items[i];
-      const t = inline.trigger;
-      if (!it || !t || !state.rich) return;
-      const range = { from: t.from, to: t.to };
-      hideInlineMenu();
-      if (t.kind === "slash") {
-        if (it.kind === "date") {
-          state.rich.insertTextAt(range, (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" }));
-          return;
-        }
-        if (it.kind === "link") {
-          state.rich.insertTextAt(range, "[[");
-          return;
-        }
-        state.rich.insertBlock(range, it.kind);
-        return;
-      }
-      if (it.create) {
-        const noteId = state.currentId;
-        let created;
-        try {
-          created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null });
-        } catch (err) {
-          toast("Could not create the note: " + (err.message || err));
-          return;
-        }
-        if (state.currentId !== noteId) return;
-        const typed = "[[" + t.query;
-        const at = state.rich.textAt(range) === typed ? range : null;
-        if (at) state.rich.insertLinkAt(at, it.create, "note://" + created.id);
-        else {
-          const r = state.rich.selectionRange();
-          state.rich.insertLinkAt({ from: r.to, to: r.to }, it.create, "note://" + created.id);
-        }
-        inline.notes = null;
-        refresh({ keepEditor: true });
-        toast('Created "' + import_helpers16.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
-        return;
-      }
-      state.rich.insertLinkAt(range, it.title, "note://" + it.note.id);
-    }
-    function syncTextViews(note) {
-      const none = lockedNow() || isViewerOnlyFile7(note);
-      const isTable = import_helpers16.default.isTableFile(note);
-      const table = isTable && !state.sourceMode && !none;
-      el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
-      el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
-      el.csvView.classList.toggle("hidden", !table);
-      fillPane(table || !!note && note.fileKind === "image" && !lockedNow());
-      if (table) renderTable(note);
-    }
-    let tableDrawn = null;
-    let tableStats = null;
-    function renderTable(note) {
-      const text = el.bodyInput.value;
-      if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
-        tableStats = NotesCsv.render(el.csvView, text, import_helpers16.default.extOf(note.filePath));
-        tableDrawn = { id: note.id, text };
-      }
-      updateStatus(note);
-    }
-    function tableShown() {
-      return !el.csvView.classList.contains("hidden");
-    }
-    function fillPane(on) {
-      el.editorColumn.classList.toggle("fills-pane", on);
-      el.editor.classList.toggle("fills-pane", on);
-    }
-    function syncSourceButton() {
-      const table = import_helpers16.default.isTableFile(state.current);
-      const label = state.sourceMode ? table ? "Table" : "Rendered" : table ? "Text" : "Source";
-      const what = state.sourceMode ? table ? "Show as a table" : "Back to the rendered view" : table ? "Edit as text" : "Show Markdown source";
-      setLabel(el.sourceBtn, label);
-      el.sourceBtn.setAttribute("aria-label", what);
-      el.sourceBtn.title = what + " (Ctrl+E)";
-    }
-    function applyEditorMode(source) {
-      state.sourceMode = !!source;
-      if (source) hideInlineMenu();
-      if (find.open) {
-        clearFindHighlights();
-        setTimeout(() => {
-          if (find.open) runFind(true, true);
-        }, 0);
-      }
-      setPressed(el.sourceBtn, state.sourceMode);
-      syncSourceButton();
-      syncTextViews(state.current);
-      renderCodePosition2();
-      if (state.sourceMode) autoGrow();
-      else if (state.rich && state.currentId && !isViewerOnlyFile7(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
-    }
-    function toggleSource(force) {
-      const next = typeof force === "boolean" ? force : !state.sourceMode;
-      if (isViewerOnlyFile7(state.current)) {
-        toast("This file is shown as it is; it has no Markdown view to switch to.");
-        return;
-      }
-      if (next === state.sourceMode) return;
-      if (!next && isPlainTextFile4(state.current) && !import_helpers16.default.isTableFile(state.current)) {
-        toast("This is a plain-text file, so it is edited as the text it is.");
-        return;
-      }
-      if (!next && !state.rich && !import_helpers16.default.isTableFile(state.current)) {
-        toast("The rendered editor is unavailable; staying in Markdown source.");
-        return;
-      }
-      if (!next && state.currentId && !isPlainTextFile4(state.current)) {
-        state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
-        if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false;
-        if (state.currentLossless === false) {
-          state.lossyOverride = state.currentId;
-          toast("Heads up: editing this note in the rendered view will rewrite formatting it cannot show.");
-        }
-      }
-      applyEditorMode(next);
-      if (!import_helpers16.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
-      focusBody();
-    }
-    function focusBody() {
-      if (tableShown()) el.csvView.focus();
-      else if (state.sourceMode || !state.rich) src.focus();
-      else state.rich.focus();
-    }
-    function inTextField() {
-      const a = document.activeElement;
-      return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable || el.richEditor.contains(a));
-    }
-    function bodyHasFocus() {
-      return src.hasFocus() || el.richEditor.contains(document.activeElement);
-    }
-    function autoGrow() {
-      const ta = el.bodyInput;
-      if (ta.classList.contains("hidden") || ta.classList.contains("uses-code")) return;
-      ta.style.height = "auto";
-      ta.style.height = Math.max(320, ta.scrollHeight + 2) + "px";
-    }
-    async function followLink(href) {
-      href = String(href || "");
-      if (/^note:\/\//i.test(href)) {
-        const id = href.replace(/^note:\/\//i, "").replace(/\/$/, "");
-        const target = await api.notes.get(id);
-        if (!target) {
-          toast("That note no longer exists.");
-          return;
-        }
-        await scopeListToNote(target);
-        await selectNoteNow(id);
-        return;
-      }
-      if (/^attachment:\/\//i.test(href)) {
-        const r = await api.attachments.open(href);
-        if (r) toast(String(r));
-        return;
-      }
-      api.app.openExternal(href);
-    }
-    function openLinkDialog() {
-      if (!state.rich || state.sourceMode) return;
-      const existing = state.rich.activeLink();
-      if (!existing && !state.rich.hasSelection()) {
-        toast("Select the text to link first");
-        return;
-      }
-      state.linkRange = state.rich.selectionRange();
-      el.linkNoteSelect.innerHTML = '<option value="">\u2014 pick a note \u2014</option>';
-      api.notes.list({ sort: "title" }).then((notes) => {
-        for (const n of notes) {
-          if (n.id === state.currentId) continue;
-          const o = document.createElement("option");
-          o.value = "note://" + n.id;
-          o.textContent = import_helpers16.default.truncate(import_helpers16.default.deriveTitle(n), 60);
-          el.linkNoteSelect.append(o);
-        }
-        if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
-      });
-      el.linkInput.value = existing || "https://";
-      el.linkRemoveBtn.classList.toggle("hidden", !existing);
-      el.linkDialog.showModal();
-      el.linkInput.focus();
-      el.linkInput.select();
-    }
-    const { showCode: showCode2, renderCodePosition: renderCodePosition2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+    const { showCode: showCode2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
     const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
     function openSettings() {
       const s = state.settings;
       draft = {};
-      el.hotkeyInput.value = import_helpers16.default.displayAccelerator(s.hotkey).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers17.default.displayAccelerator(s.hotkey).replace(/ /g, "");
       el.hotkeyError.textContent = "";
       el.themeSelect.value = s.theme;
       renderSchemeGrid();
@@ -8556,7 +8568,7 @@
       draft = {};
       if (res.error) {
         el.hotkeyError.textContent = res.error;
-        el.hotkeyInput.value = import_helpers16.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
+        el.hotkeyInput.value = import_helpers17.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
         syncSettingsDirty();
         el.hotkeyInput.focus();
         return false;
@@ -8723,7 +8735,7 @@
       });
     }
     function filterSettings() {
-      const tokens = import_helpers16.default.tokenize(el.settingsSearch.value);
+      const tokens = import_helpers17.default.tokenize(el.settingsSearch.value);
       const ranges = [];
       let any = false;
       for (const sec of el.settingsScroll.querySelectorAll(".settings-section")) {
@@ -8787,7 +8799,7 @@
       if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
       else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
       else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers16.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers16.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
+      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers17.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers17.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
       if (s.lastError) text += "  Error: " + s.lastError;
       el.gitStatus.textContent = text;
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -8817,13 +8829,13 @@
       return { partial: null, value: mods.concat(key).join("+") };
     }
     function commitHotkey(value) {
-      const parsed = import_helpers16.default.parseAccelerator(value);
+      const parsed = import_helpers17.default.parseAccelerator(value);
       if (!parsed.ok) {
         el.hotkeyError.textContent = parsed.reason;
         return;
       }
       el.hotkeyError.textContent = "";
-      el.hotkeyInput.value = import_helpers16.default.displayAccelerator(parsed.value).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers17.default.displayAccelerator(parsed.value).replace(/ /g, "");
       setDraft({ hotkey: parsed.value });
     }
     let palette = null;
@@ -8894,16 +8906,16 @@
         notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
           id: "note-" + n.id,
           group: "Notes",
-          title: import_helpers16.default.deriveTitle(n),
+          title: import_helpers17.default.deriveTitle(n),
           icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
-          hint: n.folderId && folders.get(n.folderId) || import_helpers16.default.relativeTime(n.updatedAt),
-          matches: (q) => !n.locked && import_helpers16.default.matchesQuery(n, q),
+          hint: n.folderId && folders.get(n.folderId) || import_helpers17.default.relativeTime(n.updatedAt),
+          matches: (q) => !n.locked && import_helpers17.default.matchesQuery(n, q),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));
       }
       const out = NotesPalette.rank(query, commands, notes);
       const title = query.replace(/^\s*>\s*/, "").trim();
-      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers16.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
+      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers17.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
       return out;
     }
     function onKeydown(e) {
@@ -9060,20 +9072,20 @@
             return;
           // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
           case "b":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile4(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile5(state.current)) {
               e.preventDefault();
               wrapSelection("**", "**");
             }
             return;
           case "i":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile4(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile5(state.current)) {
               e.preventDefault();
               wrapSelection("_", "_");
             }
             return;
           case "k":
             if (document.activeElement === el.bodyInput) {
-              if (!isPlainTextFile4(state.current)) {
+              if (!isPlainTextFile5(state.current)) {
                 e.preventDefault();
                 wrapSelection("[", "](url)");
               }
@@ -9637,8 +9649,8 @@
       });
       el.hotkeyInput.addEventListener("blur", () => {
         const v = el.hotkeyInput.value.trim();
-        if (v && !v.endsWith("+") && v !== import_helpers16.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
-        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers16.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
+        if (v && !v.endsWith("+") && v !== import_helpers17.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
+        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers17.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
       });
       el.themeSelect.addEventListener("change", () => setDraft({ theme: el.themeSelect.value }));
       el.fontSizeInput.addEventListener("input", () => {
@@ -9754,7 +9766,7 @@
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && isViewerOnlyFile7(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && isViewerOnlyFile8(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {

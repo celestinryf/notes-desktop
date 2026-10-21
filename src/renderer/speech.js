@@ -4,10 +4,11 @@ import { src } from './code-editor.js';
 import H from '../shared/helpers.js';
 import { toast } from './toast.js';
 import { setActivity } from './activity.js';
+import { focusBody } from './editor-view.js';
 
 const { isViewerOnlyFile, isNonMarkdownFile } = H;
 
-export function createSpeech({ api, focusBody }) {
+export function createSpeech({ api }) {
   const tts = { active: false, queue: [], index: 0 };
 
   function selectedTextForSpeech() {

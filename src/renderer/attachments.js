@@ -4,10 +4,11 @@ import { src } from './code-editor.js';
 import H from '../shared/helpers.js';
 import { toast } from './toast.js';
 import { setActivity } from './activity.js';
+import { tableShown } from './editor-view.js';
 
 const { isViewerOnlyFile } = H;
 
-export function createAttachments({ api, tableShown, flushSave, refresh }) {
+export function createAttachments({ api, flushSave, refresh }) {
   function insertAttachmentLinks(items) {
     const ok = items.filter((x) => x && !x.error);
     const bad = items.filter((x) => x && x.error);

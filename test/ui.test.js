@@ -65,6 +65,9 @@ test.before(async () => {
     shell.showItemInFolder = (p) => { global.__shell.shown.push(p); };
     shell.openExternal = async (url) => { global.__shell.external.push(url); };
   });
+  // A page that failed to start fails the run here, in one line, not as a timeout in every test.
+  await sleep(500);
+  if (rendererErrors.length) throw new Error("the renderer failed at startup: " + rendererErrors.join("; "));
 });
 const shellCalls = () => app.evaluate(() => global.__shell);
 

@@ -6,10 +6,11 @@ import H from '../shared/helpers.js';
 import { ipcErrorText } from './text.js';
 import { toast } from './toast.js';
 import { placePopover } from './popover.js';
+import { focusBody, autoGrow } from './editor-view.js';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
-export function createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
+export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
   function renderLockState(note) {
     const locked = !!(note && note.locked);
     const open = !!(note && note.unlocked);

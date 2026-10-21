@@ -84,7 +84,7 @@ function showCode(note, readOnly) {
 }
 
 // The status line: where the caret is, for the code editor only (the file row's badge names the language).
-function renderCodePosition() {
+export function renderCodePosition() {
   const shown = codeOn && state.sourceMode;
   el.statusCode.classList.toggle('hidden', !shown);
   if (!shown) return;
@@ -94,5 +94,5 @@ function renderCodePosition() {
 
 export function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }) {
   hooks = { runFind, autoGrow, scrollTextareaToSelection };
-  return { showCode, renderCodePosition };
+  return { showCode };
 }
