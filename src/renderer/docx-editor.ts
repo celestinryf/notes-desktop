@@ -1,4 +1,3 @@
-// @ts-check
 /* Editing an opened Word document in place, exposed as window.NotesDocxEditor. The document is shown by docx-preview
    inside the sandboxed frame (nothing in it runs); this page makes its paragraphs editable and listens from outside.
 
@@ -17,6 +16,14 @@ export const NotesDocxEditor = (function () {
   const DV = window.DocxView;
   if (!DV || !DV.Ooxml || !DV.JSZip) return;
   const X = DV.Ooxml;
+  type Scan = Extract<ReturnType<typeof X.scanDocument>, { prefix: string }>;
+  type Fmt = { b?: boolean, i?: boolean, u?: boolean };
+  type ShownChar = { ch: string, fmt: Fmt, br: boolean, real?: boolean, picture?: string | null };
+  type ShownBaseline = { chars: Fmt[], pictures: (string | null)[], empty: Fmt };
+  type ShownPiece = { els: HTMLElement[], source: number | undefined, chars: ShownChar[] };
+  type PlacedPiece = ShownPiece & { source: number };
+  // edits: the count of edits when the save started.
+  type SaveInFlight = { plan: { first: number, last: number, pieces: PlacedPiece[] }[], patches: DocxPatch[], edits: number };
   const TAB_SHOWN = ' '; // docx-preview shows a tab as an em space
   const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false }; // a page break, as a character of a paragraph's text
   const NOT_TEXT = new Set([X.PAGE_BREAK, X.PICTURE]);
@@ -39,7 +46,9 @@ export const NotesDocxEditor = (function () {
     // xml/scan: document.xml as last saved, and its paragraphs. map: which paragraph a shown element stands for.
     // baselines: paragraph index -> { chars: [fmt], empty: fmt } as shown after the last save. edits: input events
     // since the last save started.
-    let doc = null, xml = '', scan = null, baselines = new Map(), dirty = false, edits = 0, seq = 0;
+    let doc: Document | null = null, xml = '', scan: Scan | null = null, baselines = new Map<number, ShownBaseline>(), dirty = false, edits = 0, seq = 0;
+    const shownDoc = (): Document => { if (!doc) throw new Error('no Word document is open'); return doc; };
+    const shownScan = (): Scan => { if (!scan) throw new Error('no Word document is open for editing'); return scan; };
     // Which paragraph of the file a shown <p> stands for is written on the element itself (data-notes-src="gen:index"):
     // the browser copies it to both halves when Enter splits a paragraph, whichever half it puts first. gen changes on
     // every save and every opening, so an element an Undo brings back from before is not taken at its old word.
@@ -56,10 +65,9 @@ export const NotesDocxEditor = (function () {
       has(p) { return map.get(p) !== undefined; },
       set(p, index) { p.setAttribute(SRC, gen + ':' + index); },
     };
-    // saving: what save() handed out and markSaved() takes in: { plan, patches, edits (the count when it started) }.
-    let saving = null;
+    let saving: SaveInFlight | null = null;
     // Computed formatting per element, for one reading of the page only: editing can restyle an element in place.
-    let styleCache = new WeakMap();
+    let styleCache = new WeakMap<Element, Fmt>();
 
     function setDirty(v) {
       if (dirty === v) return;
@@ -70,7 +78,8 @@ export const NotesDocxEditor = (function () {
     // ---- What is shown -------------------------------------------------------------------------------------
 
     function fmtOf(el) {
-      if (styleCache.has(el)) return styleCache.get(el);
+      const cached = styleCache.get(el);
+      if (cached) return cached;
       const win = el.ownerDocument.defaultView;
       const cs = win.getComputedStyle(el);
       let u = false;
@@ -86,7 +95,7 @@ export const NotesDocxEditor = (function () {
     // The characters of a shown paragraph, with bold/italic/underline: [{ ch, fmt }]. A line break the browser keeps
     // only to give an empty line its height (the last thing in the paragraph) does not count.
     function charsOf(p) {
-      const out = [];
+      const out: ShownChar[] = [];
       styleCache = new WeakMap();
       const walk = (node) => {
         for (let n = node.firstChild; n; n = n.nextSibling) {
@@ -128,22 +137,24 @@ export const NotesDocxEditor = (function () {
     // The editable paragraphs shown, in order: mapped ones, and ones the browser made by splitting (Enter); by page
     // body ([{ art, list }]) or all together.
     function shownByPage() {
-      return [...doc.querySelectorAll('article[contenteditable="true"]')].map((art) => ({
+      return [...shownDoc().querySelectorAll<HTMLElement>('article[contenteditable="true"]')].map((art) => ({
         art, list: [...art.querySelectorAll('p')].filter((p) => !p.closest('[contenteditable="false"]')),
       }));
     }
     const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
     // Which paragraph of the file each shown one belongs to: its own, or (made by Enter) the one before it.
     function sources(list) {
-      const out = new Map();
-      let last = null;
+      const out = new Map<HTMLElement, number>();
+      let last: number | undefined;
       for (const p of list) {
-        if (map.has(p)) last = map.get(p);
-        if (last !== null) out.set(p, last);
+        const at = map.get(p);
+        if (at !== undefined) last = at;
+        if (last !== undefined) out.set(p, last);
       }
       // Any before the first known one belong to the first known one.
       const firstKnown = list.find((p) => map.has(p));
-      for (const p of list) if (!out.has(p) && firstKnown) out.set(p, map.get(firstKnown));
+      const first = firstKnown ? map.get(firstKnown) : undefined;
+      for (const p of list) if (!out.has(p) && first !== undefined) out.set(p, first);
       return out;
     }
 
@@ -156,7 +167,7 @@ export const NotesDocxEditor = (function () {
       reset();
       const zip = await DV.JSZip.loadAsync(bytes);
       const part = zip.file('word/document.xml');
-      let block = null, display = bytes, nextScan = null, nextXml = '';
+      let block: string | null = null, display = bytes, nextScan: ReturnType<typeof X.scanDocument> | null = null, nextXml = '';
       if (!part) block = 'it has no main document part';
       else {
         nextXml = await part.async('string');
@@ -177,7 +188,7 @@ export const NotesDocxEditor = (function () {
       if (my !== seq) return null;
       doc = frameDoc;
       xml = nextXml;
-      scan = block ? null : nextScan;
+      scan = !block && nextScan && nextScan.prefix ? nextScan : null;
       const counts = scan ? attach() : { editable: 0, readOnly: 0 };
       if (scan && !counts.editable) scan = null;
       return Object.assign(counts, { block });
@@ -186,14 +197,14 @@ export const NotesDocxEditor = (function () {
     // Finds the editable paragraphs on the page, makes them (and only them) editable, and listens.
     function attach() {
       let editable = 0;
-      const pages = [...doc.querySelectorAll('section.docx > article')];
+      const pages = [...shownDoc().querySelectorAll('section.docx > article')];
       const take = (id) => {
-        const mark = doc.getElementById(id);
+        const mark = shownDoc().getElementById(id);
         const p = mark && mark.closest('p');
         if (mark) mark.remove();
         return p;
       };
-      for (const para of scan.paragraphs) {
+      for (const para of shownScan().paragraphs) {
         if (!para.editable) continue;
         const p = take(X.MARK + para.index);
         const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
@@ -213,22 +224,23 @@ export const NotesDocxEditor = (function () {
       }
       // Paragraphs the page does not show as the file holds them are not edited, nor any change spanning them.
       X.limitTo(scan, (i) => baselines.has(i));
-      const readOnly = scan.paragraphs.length - editable;
+      const readOnly = shownScan().paragraphs.length - editable;
       if (!editable) return { editable, readOnly };
       // Everything in the body that is not, and does not hold, an editable paragraph is fixed.
       const holders = new Set();
-      for (const art of doc.querySelectorAll('section.docx > article')) {
+      for (const art of shownDoc().querySelectorAll<HTMLElement>('section.docx > article')) {
         for (const p of art.querySelectorAll('p')) if (map.has(p)) for (let e = p.parentElement; e && e !== art; e = e.parentElement) holders.add(e);
         fix(art, holders);
         art.contentEditable = 'true';
         art.spellcheck = true;
       }
-      doc.addEventListener('beforeinput', onBeforeInput, true);
-      doc.addEventListener('input', onInput, true);
-      doc.addEventListener('paste', onPaste, true);
-      doc.addEventListener('drop', (e) => e.preventDefault(), true);
-      doc.addEventListener('keydown', onKeydown, true);
-      doc.defaultView.addEventListener('blur', () => { if (hooks.onBlur) hooks.onBlur(); });
+      shownDoc().addEventListener('beforeinput', onBeforeInput, true);
+      shownDoc().addEventListener('input', onInput, true);
+      shownDoc().addEventListener('paste', onPaste, true);
+      shownDoc().addEventListener('drop', (e) => e.preventDefault(), true);
+      shownDoc().addEventListener('keydown', onKeydown, true);
+      const win = shownDoc().defaultView;
+      if (win) win.addEventListener('blur', () => { if (hooks.onBlur) hooks.onBlur(); });
       return { editable, readOnly };
     }
     // A paragraph as shown: { chars, mark } (mark records its page break on the page), or null when it is not shown
@@ -283,12 +295,16 @@ export const NotesDocxEditor = (function () {
       const src = sources(list);
       const i = list.indexOf(a), j = list.indexOf(b);
       if (i < 0 || j < 0) return false;
-      const chain = scan.paragraphs[src.get(a)].chain;
+      const scanned = shownScan();
+      const paragraphOf = (p) => { const index = src.get(p); return index === undefined ? undefined : scanned.paragraphs[index]; };
+      const start = paragraphOf(a);
+      if (!start) return false;
       for (let k = Math.min(i, j); k <= Math.max(i, j); k++) {
-        if (scan.paragraphs[src.get(list[k])].chain !== chain) return false;
+        const para = paragraphOf(list[k]);
+        if (!para || para.chain !== start.chain) return false;
         // Nothing fixed may sit between two of them on the page.
         if (k > Math.min(i, j)) {
-          const between = doc.createRange();
+          const between = shownDoc().createRange();
           between.setStartAfter(list[k - 1]);
           between.setEndBefore(list[k]);
           const frag = between.cloneContents();
@@ -318,9 +334,9 @@ export const NotesDocxEditor = (function () {
       setDirty(true);
       // The line break just typed is the last one before the caret.
       if (e.inputType === 'insertLineBreak') {
-        const sel = doc.getSelection();
+        const sel = shownDoc().getSelection();
         const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
-        if (p) {
+        if (p && sel) {
           const caret = sel.getRangeAt(0);
           const typed = [...p.querySelectorAll('br')].filter((br) => caret.comparePoint(br, 0) <= 0).pop();
           if (typed) typed.setAttribute(REAL_BR, '');
@@ -336,14 +352,14 @@ export const NotesDocxEditor = (function () {
       if (!selectionAllowed()) { hooks.say('That part of the document cannot be changed here.'); return; }
       const lines = text.replace(/\r\n?/g, '\n').split('\n');
       lines.forEach((line, k) => {
-        if (k) doc.execCommand('insertParagraph');
-        if (line) doc.execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ''));
+        if (k) shownDoc().execCommand('insertParagraph');
+        if (line) shownDoc().execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ''));
       });
     }
     function onKeydown(e) {
       if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
         e.preventDefault();
-        if (selectionAllowed()) doc.execCommand('insertText', false, TAB_SHOWN);
+        if (selectionAllowed()) shownDoc().execCommand('insertText', false, TAB_SHOWN);
         return;
       }
       if (hooks.onKey) hooks.onKey(e);
@@ -369,11 +385,11 @@ export const NotesDocxEditor = (function () {
       if (!scan || !dirty) return null;
       const list = shownParagraphs();
       const src = sources(list);
-      for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
-        for (const n of art.childNodes) if (n.nodeType === 3 && n.data.trim()) throw new Error('some text is outside any paragraph');
+      for (const art of shownDoc().querySelectorAll('article[contenteditable="true"]')) {
+        for (const n of art.childNodes) if (n.nodeType === Node.TEXT_NODE && (n.textContent || '').trim()) throw new Error('some text is outside any paragraph');
       }
       // One piece per paragraph to write, with the page breaks put back where the page shows them.
-      const pieces = [];
+      const pieces: ShownPiece[] = [];
       const lost = () => new Error('a page break could not be placed');
       // A paragraph already holding a break gets no second one (the page shows only one per paragraph): the break
       // becomes a paragraph of its own, as Ctrl+Enter makes in Word.
@@ -397,27 +413,29 @@ export const NotesDocxEditor = (function () {
         });
         if (end) endWithBreak(pieces[pieces.length - 1]);
       }
-      if (pieces.some((pc) => pc.source === undefined)) throw new Error('a paragraph could not be matched to the file');
+      const placed = pieces.filter((pc): pc is PlacedPiece => pc.source !== undefined);
+      if (placed.length !== pieces.length) throw new Error('a paragraph could not be matched to the file');
       // A picture deleted and saved, then brought back by Undo, is no longer in the file to copy from.
       const known = new Set([...baselines.values()].flatMap((b) => b.pictures).filter(Boolean));
-      if (pieces.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture)))) {
+      if (placed.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture ?? null)))) {
         throw new Error('a picture deleted in an earlier save cannot be brought back with Undo');
       }
-      const bySource = new Map();
-      for (const pc of pieces) { if (!bySource.has(pc.source)) bySource.set(pc.source, []); bySource.get(pc.source).push(pc); }
+      const bySource = new Map<number, PlacedPiece[]>();
+      for (const pc of placed) { const same = bySource.get(pc.source) || []; same.push(pc); bySource.set(pc.source, same); }
       // Changed paragraphs, then per chain the span from the first to the last of them.
-      const spans = new Map();
+      const spans = new Map<number, { first: number, last: number }>();
       for (const para of scan.paragraphs) {
-        if (!baselines.has(para.index)) continue;
+        const base = baselines.get(para.index);
+        if (!base || !para.editable) continue;
         const pcs = bySource.get(para.index) || [];
-        if (pcs.length === 1 && sameChars(pcs[0].chars, baselines.get(para.index), para.text)) continue;
+        if (pcs.length === 1 && sameChars(pcs[0].chars, base, para.text)) continue;
         const sp = spans.get(para.chain);
         spans.set(para.chain, sp ? { first: sp.first, last: para.index } : { first: para.index, last: para.index });
       }
       if (!spans.size) return null;
-      const patches = [], plan = [];
+      const patches: DocxPatch[] = [], plan: SaveInFlight['plan'] = [];
       for (const { first, last } of spans.values()) {
-        const group = pieces.filter((pc) => pc.source >= first && pc.source <= last);
+        const group = placed.filter((pc) => pc.source >= first && pc.source <= last);
         const start = scan.paragraphs[first].start, end = scan.paragraphs[last].end;
         const out = X.rewriteParagraphs(xml, scan, first, last, group.map((pc) => ({ source: pc.source, chars: pc.chars })), baselines);
         patches.push({ start, end, old: xml.slice(start, end), xml: out });
@@ -442,45 +460,52 @@ export const NotesDocxEditor = (function () {
       saving = null;
       if (!s || !scan) return { ok: false, lost: false };
       try {
-        if (rebase(s)) return { ok: true, lost: false };
+        if (rebase(s, scan)) return { ok: true, lost: false };
       } catch (_) { /* the page could not be matched to the file as written */ }
       return { ok: false, lost: edits !== s.edits };
     }
-    function rebase(s) {
+    function rebase(s: SaveInFlight, current: Scan) {
       const nextXml = X.applyPatches(xml, s.patches);
       const next = X.scanDocument(nextXml);
-      const nextMap = new Map(), nextBase = new Map();
+      if (!next.prefix) return false;
+      const nextMap = new Map<HTMLElement, number>(), nextBase = new Map<number, ShownBaseline>();
       const byFirst = new Map(s.plan.map((g) => [g.first, g]));
       let ni = 0; // index in the new document
-      for (let i = 0; i < scan.paragraphs.length;) {
+      for (let i = 0; i < current.paragraphs.length;) {
         const g = byFirst.get(i);
         if (g) {
           for (const pc of g.pieces) {
             const para = next.paragraphs[ni];
             if (!para || !para.editable || !X.sameShownText(para.text, textOf(pc.chars))) return false;
             for (const el of pc.els) nextMap.set(el, ni);
-            nextBase.set(ni, baselineOf(pc.chars, (baselines.get(pc.source) || {}).empty || {}));
+            const before = baselines.get(pc.source);
+            nextBase.set(ni, baselineOf(pc.chars, before ? before.empty : {}));
             ni++;
           }
           i = g.last + 1;
           continue;
         }
-        if (baselines.has(i)) nextBase.set(ni, baselines.get(i));
+        const kept = baselines.get(i);
+        if (kept) nextBase.set(ni, kept);
         i++;
         ni++;
       }
       if (ni !== next.paragraphs.length) return false;
       // Paragraphs outside the changes keep their elements, at their new index.
-      const shift = new Map();
+      const shift = new Map<number, number>();
       let at = 0;
-      for (let i = 0; i < scan.paragraphs.length;) {
+      for (let i = 0; i < current.paragraphs.length;) {
         const g = byFirst.get(i);
         if (g) { at += g.pieces.length; i = g.last + 1; continue; }
         shift.set(i, at);
         at++;
         i++;
       }
-      for (const p of shownParagraphs()) if (map.has(p) && shift.has(map.get(p)) && !nextMap.has(p)) nextMap.set(p, shift.get(map.get(p)));
+      for (const p of shownParagraphs()) {
+        const was = map.get(p);
+        const to = was === undefined ? undefined : shift.get(was);
+        if (to !== undefined && !nextMap.has(p)) nextMap.set(p, to);
+      }
       X.limitTo(next, (i) => nextBase.has(i));
       xml = nextXml;
       scan = next;

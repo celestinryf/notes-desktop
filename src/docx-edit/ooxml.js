@@ -23,13 +23,18 @@ const W_MAIN = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 /** @typedef {{ kind: 'marker', xml: string, text?: undefined }} Marker */
 /** @typedef {Run | Marker} Item */
 /** @typedef {{ pPr: string | null, pPrNoSect: string | null, hasSect: boolean, markRPr: string, items: Item[], pageBreaks: PageBreak[], contentStart: number }} ParagraphModel */
-/** @typedef {{ start: number, openEnd: number, end?: number, placeOk?: boolean, parentStart: number, selfClosing: boolean, index?: number, openTag?: string, editable?: boolean, reason?: string, text?: string, chain?: number } & Partial<ParagraphModel>} ScannedParagraph */
+/** @typedef {{ start: number, openEnd: number, end?: number, placeOk: boolean, parentStart: number, selfClosing: boolean }} ScannedParagraph */
+/** @typedef {{ index: number, start: number, openEnd: number, end: number, parentStart: number, selfClosing: boolean, openTag: string, chain: number }} ParagraphPlace */
+/** @typedef {ParagraphPlace & ParagraphModel & { editable: true, reason: '', text: string }} EditableParagraph */
+/** @typedef {ParagraphPlace & { editable: false, reason: string }} FixedParagraph */
+/** @typedef {EditableParagraph | FixedParagraph} Paragraph */
+/** @typedef {{ prefix: string, paragraphs: Paragraph[] }} Scan */
 /** @typedef {{ b?: boolean, i?: boolean, u?: boolean }} Fmt */
-/** @typedef {{ chars: Fmt[], pictures?: string[], empty: Fmt }} Baseline */
-/** @typedef {{ source: number, chars: { ch: string, fmt: Fmt, picture?: string }[] }} Piece */
-/** @typedef {{ end?: false, ch: string, para: number, pos: number, item: Run, first: boolean, last: boolean, picture?: string, name?: string }} OldChar */
+/** @typedef {{ chars: Fmt[], pictures?: (string | null)[], empty: Fmt }} Baseline */
+/** @typedef {{ source: number, chars: { ch: string, fmt: Fmt, picture?: string | null }[] }} Piece */
+/** @typedef {{ end?: false, ch: string, para: number, pos: number, item: Run, first: boolean, last: boolean, picture?: string, name?: string | null }} OldChar */
 /** @typedef {OldChar | { end: true, para: number, ch?: undefined, name?: undefined }} OldToken */
-/** @typedef {{ end?: false, ch: string, fmt: Fmt, name?: string, piece: Piece }} NewChar */
+/** @typedef {{ end?: false, ch: string, fmt: Fmt, name?: string | null, piece: Piece }} NewChar */
 /** @typedef {NewChar | { end: true, piece: Piece, ch?: undefined, name?: undefined }} NewToken */
 /** @typedef {{ at: number, xml: string, para: number }} MarkerAt */
 /** @typedef {{ ch: string, fmt: Fmt, from: OldChar | null, like: OldChar | null, item: Run | null, set: Fmt, key: string }} NewRunChar */
@@ -297,14 +302,16 @@ function scanDocument(xml) {
   }
   if (stack.length) throw new Error('the document XML is damaged (an element is not closed)');
 
-  paragraphs.forEach((para, index) => {
-    para.index = index;
-    para.openTag = para.selfClosing ? '<' + P + '>' : xml.slice(para.start, para.openEnd);
-    /** @type {ParagraphModel | null} */
-    let model = null;
+  /** @type {Paragraph[]} */
+  const finished = paragraphs.map(/** @returns {Paragraph} */ (para, index) => {
+    if (para.end === undefined) throw new Error('the document XML is damaged (a paragraph is not closed)');
+    const place = { index, start: para.start, openEnd: para.openEnd, end: para.end, parentStart: para.parentStart, selfClosing: para.selfClosing,
+      openTag: para.selfClosing ? '<' + P + '>' : xml.slice(para.start, para.openEnd), chain: 0 };
+    /** @type {ParagraphModel} */
+    let model;
     try {
       if (!para.placeOk) readOnly('a text box or content control');
-      if (para.selfClosing) model = { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], pageBreaks: [], contentStart: para.end ?? para.openEnd };
+      if (para.selfClosing) model = { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], pageBreaks: [], contentStart: para.end };
       else {
         const node = parseNodes(xml, para.start, para.end)[0];
         if (!node || !node.name) throw new Error('the paragraph element could not be read');
@@ -312,28 +319,21 @@ function scanDocument(xml) {
       }
     } catch (err) {
       if (!(err instanceof ReadOnly)) throw err;
-      para.editable = false;
-      para.reason = err.message;
+      return { ...place, editable: false, reason: err.message };
     }
-    if (model) {
-      Object.assign(para, model);
-      para.editable = true;
-      para.reason = '';
-      para.text = model.items.map((it) => (it.kind === 'run' ? it.text : '')).join('');
-      para.items = model.items;
-    }
-    delete para.placeOk;
+    const text = model.items.map((it) => (it.kind === 'run' ? it.text : '')).join('');
+    return { ...place, ...model, editable: true, reason: '', text };
   });
   // Chains of paragraphs text may move between.
   let chain = 0;
-  paragraphs.forEach((para, i) => {
-    const prev = paragraphs[i - 1];
+  finished.forEach((para, i) => {
+    const prev = finished[i - 1];
     const joins = prev && prev.editable && para.editable && !prev.hasSect && !para.hasSect
       && prev.parentStart === para.parentStart && !xml.slice(prev.end, para.start).trim();
     if (!joins) chain++;
     para.chain = chain;
   });
-  return { prefix: W, paragraphs };
+  return { prefix: W, paragraphs: finished };
 }
 
 // Document-wide reasons not to edit: settings.xml (tracked changes on, or editing restricted), or null when none.
@@ -453,11 +453,15 @@ const fmtKey = (f) => (f.b ? 'b' : '') + (f.i ? 'i' : '') + (f.u ? 'u' : '');
    baselines: paragraph index -> { chars: [fmt per char of its text], pictures: [name per char, for pictures],
    empty: fmt } as first shown. A picture is kept only where it has the same name; it is never added.
    A paragraph that came through unchanged is copied as it was; so is each untouched run of a changed one. */
-/** @param {{ prefix: string, paragraphs: ScannedParagraph[] }} scan @param {Piece[]} pieces @param {Map<number, Baseline>} baselines */
+/** @param {Scan} scan @param {Piece[]} pieces @param {Map<number, Baseline>} baselines */
 function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   const W = scan.prefix;
-  const paras = scan.paragraphs.slice(first, last + 1);
-  if (paras.some((p) => !p.editable || p.chain !== paras[0].chain)) throw new Error('those paragraphs cannot be changed together');
+  /** @type {EditableParagraph[]} */
+  const paras = [];
+  for (const p of scan.paragraphs.slice(first, last + 1)) {
+    if (!p.editable || p.chain !== scan.paragraphs[first].chain) throw new Error('those paragraphs cannot be changed together');
+    paras.push(p);
+  }
   if (pieces.some((pc) => pc.source < first || pc.source > last)) throw new Error('a paragraph came from outside the change');
 
   // Old tokens: each paragraph's characters (with the run they are in), then a paragraph end.
@@ -469,21 +473,20 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   for (const p of paras) {
     let pos = 0;
     firstToken.set(p.index, old.length);
-    const baseline = p.index === undefined ? undefined : baselines.get(p.index);
+    const baseline = baselines.get(p.index);
     const names = (baseline && baseline.pictures) || [];
-    for (const it of p.items || []) {
-      const index = p.index === undefined ? -1 : p.index;
-      if (it.kind === 'marker') { markerAt.push({ at: old.length, xml: it.xml, para: index }); continue; }
+    for (const it of p.items) {
+      if (it.kind === 'marker') { markerAt.push({ at: old.length, xml: it.xml, para: p.index }); continue; }
       let pic = 0;
       for (let c = 0; c < it.text.length; c++) {
         /** @type {OldChar} */
-        const t = { ch: it.text[c], para: index, pos, item: it, first: c === 0, last: c === it.text.length - 1 };
+        const t = { ch: it.text[c], para: p.index, pos, item: it, first: c === 0, last: c === it.text.length - 1 };
         if (t.ch === PICTURE) { t.picture = it.pictures[pic++]; t.name = names[pos]; }
         old.push(t);
         pos++;
       }
     }
-    old.push({ end: true, para: p.index === undefined ? -1 : p.index });
+    old.push({ end: true, para: p.index });
   }
   /** @type {NewToken[]} */
   const neu = [];
@@ -529,7 +532,7 @@ function rewriteParagraphs(xml, scan, first, last, pieces, baselines) {
   let out = '';
   let j = 0;
   for (const pc of pieces) {
-    const src = scan.paragraphs[pc.source];
+    const src = paras[pc.source - first];
     const nth = (seen.get(pc.source) || 0) + 1;
     seen.set(pc.source, nth);
     const base = baselines.get(pc.source) || { chars: [], empty: {} };

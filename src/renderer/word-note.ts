@@ -1,11 +1,12 @@
-// @ts-check
 import { el } from './dom.ts';
 import { state } from './state.ts';
-import { NotesDocxEditor } from './docx-editor.js';
+import { NotesDocxEditor } from './docx-editor.ts';
 import { oneAtATime } from './one-at-a-time.ts';
 import * as H from '../shared/helpers.ts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
+
+type DocxController = ReturnType<NonNullable<typeof NotesDocxEditor>['create']>;
 
 export function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
   // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed
@@ -18,11 +19,11 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     + '<style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>';
   // docxShownKey (note id + file version) skips re-rendering the same file; docxSeq drops a render that is
   // overtaken by a newer one.
-  let docxShownKey = null;
+  let docxShownKey: string | null = null;
   let docxSeq = 0;
   // docx: the editing controller; docxNote: the document on show and editable, { id, fileMtime } as loaded or saved;
   // docxBanner: what the banner says about it (shown again when the same version is shown again).
-  let docx = null, docxNote = null, docxBanner = '';
+  let docx: DocxController | null = null, docxNote: { id: string, fileMtime: number | null } | null = null, docxBanner = '';
   function clearDocx() {
     crafts.wordcraft.clear();
     docxShownKey = null;
@@ -34,7 +35,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   }
   // A fresh frame per document, so no styles from the last one linger. Only a load of this frame page counts: the
   // about:blank load from an earlier clearDocx can still arrive and must not be taken for it.
-  function freshDocxFrame() {
+  function freshDocxFrame(): Promise<Document> {
     return new Promise((resolve) => {
       const onLoad = () => {
         const doc = el.docxView.contentDocument;
@@ -132,9 +133,10 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   });
 
   async function saveDocxNow(explicit) {
-    const target = docxNote;
+    const target = docxNote, ed = docx;
+    if (!target || !ed) return true;
     let c;
-    try { c = docx.save(); } catch (err) { toast('Could not save the document: ' + (err.message || err) + '. Your changes are still here; use Reload to start again from the file.'); return false; }
+    try { c = ed.save(); } catch (err) { toast('Could not save the document: ' + (err.message || err) + '. Your changes are still here; use Reload to start again from the file.'); return false; }
     if (!c) return true;
     try {
       const r = await api.files.saveDocx(target.id, c.patches, target.fileMtime);
@@ -142,7 +144,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
       const inPlace = reportFileSaved(target, r, explicit, 'document');
       if (inPlace) docxShownKey = target.id + ':' + r.mtime;
       // The page now stands for the file as written; if it cannot be matched to it, the document is shown again.
-      const synced = docx.markSaved();
+      const synced = ed.markSaved();
       if (!synced.ok) {
         docxShownKey = null;
         if (state.current && state.current.id === target.id) showDocx(state.current);
@@ -150,7 +152,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
       }
       return true;
     } catch (err) {
-      docx.saveFailed();
+      ed.saveFailed();
       toast('Could not save the document: ' + ipcErrorText(err) + ' Your changes are still here.');
       return false;
     }
