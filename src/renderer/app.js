@@ -10,6 +10,12 @@ import { NotesDocxEditor } from './docx-editor.js';
 import { NotesCraftFrame } from './craft-frame.js';
 import { NotesCsv } from './csv-view.js';
 import { NotesSignPad } from './sign-pad.js';
+import { I, el, setLabel, setIcon, setPressed } from './dom.js';
+import { state } from './state.js';
+import { escapeHtml, highlight, ipcErrorText } from './text.js';
+import { toast } from './toast.js';
+import { setActivity } from './activity.js';
+import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } from './tree.js';
 
 (function () {
   'use strict';
@@ -18,167 +24,6 @@ import { NotesSignPad } from './sign-pad.js';
   const { isViewerOnlyFile, isPlainTextFile } = H;
   // An opened file whose text is not Markdown: plain text, Word, PDF.
   const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
-  const $ = (sel) => document.querySelector(sel);
-  const I = (name) => NotesIcons.svg(name);
-
-  // A button's words live in its .lbl span when it has one, so its icon and shortcut hint survive a relabel.
-  function setLabel(btn, text) {
-    const l = btn.querySelector('.lbl');
-    if (l) l.textContent = text; else btn.textContent = text;
-  }
-  function setIcon(btn, name) {
-    if (btn.dataset.icon === name) return;
-    btn.dataset.icon = name;
-    NotesIcons.hydrate(btn.parentElement);
-  }
-  function setPressed(btn, on) {
-    btn.classList.toggle('is-on', !!on);
-    btn.setAttribute('aria-pressed', String(!!on));
-  }
-
-  const el = {
-    app: $('#app'),
-    sidebar: $('#sidebar'),
-    newNoteBtn: $('#newNoteBtn'),
-    navItems: Array.from(document.querySelectorAll('.nav-item[data-view]')),
-    countAll: $('#countAll'), countPinned: $('#countPinned'), countTrash: $('#countTrash'), countReminders: $('#countReminders'),
-    remindBtn: $('#remindBtn'), remindDialog: $('#remindDialog'), remindForm: $('#remindForm'), remindInput: $('#remindInput'), remindQuick: $('#remindQuick'),
-    remindCurrent: $('#remindCurrent'), remindClearBtn: $('#remindClearBtn'), remindCancelBtn: $('#remindCancelBtn'),
-    shareBtn: $('#shareBtn'), shareMenu: $('#shareMenu'), shareReveal: $('#shareReveal'),
-    lockBtn: $('#lockBtn'), lockMenu: $('#lockMenu'), lockDialog: $('#lockDialog'), lockForm: $('#lockForm'), lockDialogTitle: $('#lockDialogTitle'), lockDialogHint: $('#lockDialogHint'),
-    lockPassword: $('#lockPassword'), lockPassword2: $('#lockPassword2'), lockConfirmRow: $('#lockConfirmRow'), lockError: $('#lockError'), lockCancelBtn: $('#lockCancelBtn'), lockSubmitBtn: $('#lockSubmitBtn'),
-    liveRow: $('#liveRow'), liveText: $('#liveText'), liveLinkBtn: $('#liveLinkBtn'), liveStopBtn: $('#liveStopBtn'), shareLiveHost: $('#shareLiveHost'), shareLiveStop: $('#shareLiveStop'),
-    liveDialog: $('#liveDialog'), liveForm: $('#liveForm'), liveDialogTitle: $('#liveDialogTitle'), liveDialogHint: $('#liveDialogHint'), liveLinkLabel: $('#liveLinkLabel'), liveLinkInput: $('#liveLinkInput'),
-    liveError: $('#liveError'), liveCopyBtn: $('#liveCopyBtn'), liveCancelBtn: $('#liveCancelBtn'), liveSubmitBtn: $('#liveSubmitBtn'),
-    pageMenu: $('#pageMenu'), bookMenu: $('#bookMenu'), newBookBtn: $('#newBookBtn'),
-    splitBtn: $('#splitBtn'), splitDialog: $('#splitDialog'), splitForm: $('#splitForm'), splitLead: $('#splitLead'), splitPages: $('#splitPages'), splitName: $('#splitName'), splitKeep: $('#splitKeep'), splitCancelBtn: $('#splitCancelBtn'),
-    bookReader: $('#bookReader'), bookReaderTitle: $('#bookReaderTitle'), bookReaderToc: $('#bookReaderToc'), bookReaderBody: $('#bookReaderBody'), bookReaderScroll: $('#bookReaderScroll'),
-    bookReaderPdfBtn: $('#bookReaderPdfBtn'), bookReaderPrintBtn: $('#bookReaderPrintBtn'), bookReaderCloseBtn: $('#bookReaderCloseBtn'),
-    bookStrip: $('#bookStrip'), bookName: $('#bookName'), bookTabs: $('#bookTabs'), bookPrevBtn: $('#bookPrevBtn'), bookNextBtn: $('#bookNextBtn'), bookAddBtn: $('#bookAddBtn'),
-    relatedPanel: $('#relatedPanel'), relatedOut: $('#relatedOut'), relatedIn: $('#relatedIn'), relatedTags: $('#relatedTags'), folderMenuBook: $('#folderMenuBook'),
-    lockScreen: $('#lockScreen'), lockScreenPassword: $('#lockScreenPassword'), lockScreenBtn: $('#lockScreenBtn'), lockScreenError: $('#lockScreenError'),
-    tagList: $('#tagList'),
-    themeBtn: $('#themeBtn'), settingsBtn: $('#settingsBtn'),
-    hotkeyHint: $('#hotkeyHint'), hotkeyHint2: $('#hotkeyHint2'),
-    searchInput: $('#searchInput'), sortSelect: $('#sortSelect'),
-    listTitle: $('#listTitle'), emptyTrashBtn: $('#emptyTrashBtn'),
-    noteList: $('#noteList'), listEmpty: $('#listEmpty'),
-    editorEmpty: $('#editorEmpty'), editor: $('#editor'),
-    editorPane: $('#editorPane'), paneMain: $('#paneMain'), tabBar: $('#tabBar'), tabList: $('#tabList'), tabAddBtn: $('#tabAddBtn'), splitViewBtn: $('#splitViewBtn'), paneCloseBtn: $('#paneCloseBtn'), splitDivider: $('#splitDivider'),
-    toggleSidebarBtn: $('#toggleSidebarBtn'), toggleListBtn: $('#toggleListBtn'), hideListBtn: $('#hideListBtn'), pinBtn: $('#pinBtn'), sourceBtn: $('#sourceBtn'),
-    editorColumn: $('#editorColumn'), richEditor: $('#richEditor'),
-    linkDialog: $('#linkDialog'), linkForm: $('#linkForm'), linkInput: $('#linkInput'), linkRemoveBtn: $('#linkRemoveBtn'), linkCancelBtn: $('#linkCancelBtn'),
-    alignSeg: $('#alignSeg'), editorWidthInput: $('#editorWidthInput'), editorWidthValue: $('#editorWidthValue'), editorFullWidthInput: $('#editorFullWidthInput'),
-    gitEnabledInput: $('#gitEnabledInput'), gitRemoteInput: $('#gitRemoteInput'), gitStatus: $('#gitStatus'), gitCommitBtn: $('#gitCommitBtn'), gitPushBtn: $('#gitPushBtn'),
-    exportBtn: $('#exportBtn'), duplicateBtn: $('#duplicateBtn'), restoreBtn: $('#restoreBtn'),
-    deleteBtn: $('#deleteBtn'), destroyBtn: $('#destroyBtn'),
-    titleInput: $('#titleInput'), tagsInput: $('#tagsInput'), bodyInput: $('#bodyInput'), codeHost: $('#codeHost'), csvView: $('#csvView'), imageViewer: $('#imageViewer'), imageView: $('#imageView'),
-    statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'), statusCode: $('#statusCode'),
-    settingsDialog: $('#settingsDialog'), settingsForm: $('#settingsForm'),
-    hotkeyInput: $('#hotkeyInput'), hotkeyError: $('#hotkeyError'), themeSelect: $('#themeSelect'),
-    schemeGrid: $('#schemeGrid'), customModeNote: $('#customModeNote'), customBgInput: $('#customBgInput'), customTextInput: $('#customTextInput'), customAccentInput: $('#customAccentInput'), schemeResetBtn: $('#schemeResetBtn'),
-    settingsDirtyNote: $('#settingsDirtyNote'), cancelSettingsBtn: $('#cancelSettingsBtn'), saveSettingsBtn: $('#saveSettingsBtn'),
-    settingsSaveDialog: $('#settingsSaveDialog'), settingsSaveKeepBtn: $('#settingsSaveKeepBtn'), settingsSaveDiscardBtn: $('#settingsSaveDiscardBtn'), settingsSaveList: $('#settingsSaveList'),
-    fontSizeInput: $('#fontSizeInput'), fontSizeValue: $('#fontSizeValue'),
-    openAtLoginInput: $('#openAtLoginInput'), alwaysOnTopInput: $('#alwaysOnTopInput'),
-    importBtn: $('#importBtn'), exportAllBtn: $('#exportAllBtn'), dataFolderBtn: $('#dataFolderBtn'),
-    settingsInfo: $('#settingsInfo'),
-    toast: $('#toast'),
-    sidebarResizer: $('#sidebarResizer'), listResizer: $('#listResizer'),
-    newFolderBtn: $('#newFolderBtn'), folderTree: $('#folderTree'), folderSelect: $('#folderSelect'), folderMenu: $('#folderMenu'),
-    navAll: document.querySelector('.nav-item[data-view="all"]'),
-    openFileBtn: $('#openFileBtn'), fileRow: $('#fileRow'), fileKind: $('#fileKind'), filePath: $('#filePath'),
-    fileRevealBtn: $('#fileRevealBtn'), fileOpenBtn: $('#fileOpenBtn'), fileReloadBtn: $('#fileReloadBtn'), docxView: $('#docxView'), docxEditor: $('#docxEditor'), docxSaveBtn: $('#docxSaveBtn'),
-    fileConvertBtn: $('#fileConvertBtn'), convertMenu: $('#convertMenu'),
-    fileBanner: $('#fileBanner'), pdfEditor: $('#pdfEditor'), pdfSaveBtn: $('#pdfSaveBtn'), pdfUndoBtn: $('#pdfUndoBtn'), pdfRedoBtn: $('#pdfRedoBtn'), pdfZoomLabel: $('#pdfZoom'), pdfPages: $('#pdfPages'), pdfComments: $('#pdfComments'), pdfCommentsBtn: $('#pdfCommentsBtn'), pdfCommentsClose: $('#pdfCommentsClose'), agentFilesBtn: $('#agentFilesBtn'), agentFilesStatus: $('#agentFilesStatus'),
-    signDialog: $('#signDialog'), signForm: $('#signForm'), signPad: $('#signPad'), signRemember: $('#signRemember'), signClearBtn: $('#signClearBtn'),
-    signForgetBtn: $('#signForgetBtn'), signCancelBtn: $('#signCancelBtn'), signPlaceBtn: $('#signPlaceBtn'), signName: $('#signName'), signTypeBtn: $('#signTypeBtn'), signStatus: $('#signStatus'),
-    readAloudBtn: $('#readAloudBtn'), dictateBtn: $('#dictateBtn'), ttsVoiceSelect: $('#ttsVoiceSelect'), ttsRateInput: $('#ttsRateInput'), ttsRateValue: $('#ttsRateValue'),
-    vaultList: $('#vaultList'), vaultAddFolderBtn: $('#vaultAddFolderBtn'), vaultCloneBtn: $('#vaultCloneBtn'),
-    vaultDialog: $('#vaultDialog'), vaultForm: $('#vaultForm'), vaultUrlInput: $('#vaultUrlInput'), vaultDestInput: $('#vaultDestInput'), vaultDestBtn: $('#vaultDestBtn'),
-    vaultNameInput: $('#vaultNameInput'), vaultError: $('#vaultError'), vaultCancelBtn: $('#vaultCancelBtn'), vaultCloneSubmitBtn: $('#vaultCloneSubmitBtn'),
-    folderMenuSync: $('#folderMenuSync'), folderMenuOpen: $('#folderMenuOpen'),
-    stickyBtn: $('#stickyBtn'), botBtn: $('#botBtn'), printBtn: $('#printBtn'),
-    findBar: $('#findBar'), findInput: $('#findInput'), findCount: $('#findCount'), findPrevBtn: $('#findPrevBtn'), findNextBtn: $('#findNextBtn'), findCloseBtn: $('#findCloseBtn'),
-    findReplaceToggle: $('#findReplaceToggle'), replaceRow: $('#replaceRow'), replaceInput: $('#replaceInput'), replaceOneBtn: $('#replaceOneBtn'), replaceAllBtn: $('#replaceAllBtn'),
-    attachBtn: $('#attachBtn'), recordBtn: $('#recordBtn'), historyBtn: $('#historyBtn'), linkNoteSelect: $('#linkNoteSelect'),
-    historyDialog: $('#historyDialog'), historyList: $('#historyList'), historyPreview: $('#historyPreview'), historyStatus: $('#historyStatus'), historyCloseBtn: $('#historyCloseBtn'), historyRestoreBtn: $('#historyRestoreBtn'), botPanel: $('#botPanel'), botScope: $('#botScope'), botAllowEdits: $('#botAllowEdits'), botTerminalBtn: $('#botTerminalBtn'),
-    botCloseBtn: $('#botCloseBtn'), botPrompt: $('#botPrompt'), botRunBtn: $('#botRunBtn'), botOutput: $('#botOutput'),
-    moreBtn: $('#moreBtn'), moreMenu: $('#moreMenu'), paletteBtn: $('#paletteBtn'), palette: $('#palette'), paletteInput: $('#paletteInput'), paletteList: $('#paletteList'),
-    inlineMenu: $('#inlineMenu'), wordcraftFrame: $('#wordcraftFrame'), gridcraftFrame: $('#gridcraftFrame'),
-    sidebarTop: $('#sidebarTop'), barToggles: $('#barToggles'), sidebarEdge: $('#sidebarEdge'), noteTree: $('#noteTree'), noteActions: $('#noteActions'),
-    tagsFold: $('#tagsFold'), listModeSeg: $('#listModeSeg'), sidebarFloatInput: $('#sidebarFloatInput'),
-    activityBar: $('#activityBar'), emptyNewNoteBtn: $('#emptyNewNoteBtn'), settingsNav: $('#settingsNav'), settingsScroll: $('#settingsScroll'),
-    settingsSearch: $('#settingsSearch'), settingsEmpty: $('#settingsEmpty'),
-  };
-
-  const state = {
-    view: 'all',          // all | pinned | trash | tag | folder
-    tag: null,
-    folderId: null,
-    tree: [],
-    folderPath: [],
-    menuFolderId: null,
-    editingFolder: null,  // { mode: 'create' | 'rename', id, parentId }
-    query: '',
-    notes: [],
-    currentId: null,
-    current: null,
-    sourceMode: false,    // false: rendered editor, true: raw Markdown textarea
-    rich: null,           // rendered editor instance (window.NotesEditor)
-    settings: null,
-    info: null,
-    systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
-    dirty: false,
-    saveTimer: null,
-    savingFor: null,
-  };
-
-  // ---- utilities -----------------------------------------------------------
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  // Match on the raw text and escape each piece afterwards, so entities in notes are never split by a mark.
-  function highlight(text, query) {
-    const raw = String(text);
-    const tokens = H.tokenize(query);
-    if (!tokens.length) return escapeHtml(raw);
-    const re = new RegExp('(' + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'ig');
-    return raw.split(re).map((part, i) => (i % 2 ? '<span class="mark">' + escapeHtml(part) + '</span>' : escapeHtml(part))).join('');
-  }
-
-  // The message of an error thrown in the main process, without Electron's "Error invoking remote method" prefix.
-  function ipcErrorText(err) {
-    return String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-  }
-
-  let toastTimer = null;
-  let toastMs = 0;
-  // Hovering a toast holds it, so a slow reader (or an Undo just out of reach) does not lose it.
-  el.toast.addEventListener('mouseenter', () => clearTimeout(toastTimer));
-  el.toast.addEventListener('mouseleave', () => { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, Math.min(toastMs, 3000)); });
-  function toast(message, action) {
-    clearTimeout(toastTimer);
-    el.toast.innerHTML = '';
-    const text = document.createElement('span');
-    text.textContent = message;
-    el.toast.append(text);
-    if (action) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = action.label;
-      b.addEventListener('click', () => { hideToast(); action.run(); });
-      el.toast.append(b);
-    }
-    el.toast.classList.remove('hidden');
-    // Long enough to read: about a quarter second a word, 3 to 8 seconds; an undo offer gets the full 8.
-    const words = String(message).split(/\s+/).length;
-    toastMs = action ? 8000 : Math.min(8000, Math.max(3000, words * 250));
-    toastTimer = setTimeout(hideToast, toastMs);
-  }
-  function hideToast() { el.toast.classList.add('hidden'); }
 
   // ---- theme & settings ----------------------------------------------------
 
@@ -864,71 +709,6 @@ import { NotesSignPad } from './sign-pad.js';
     const input = el.folderTree.querySelector('.folder-input');
     if (input) { input.focus(); input.select(); }
     else restoreTreeFocus(el.folderTree, refocus);
-  }
-
-  // ---- trees: shared parts of the sidebar's folders and the middle pane's folder view ----
-
-  // Folder rows carry no leading icon (the chevron already says "folder"); a book is told apart by this trailing mark.
-  function bookMark() { return '<span class="row-mark book-mark" title="Book: its notes are pages">' + I('book') + '</span>'; }
-
-  // The children of a row at parentDepth; its guide line runs under the parent's chevron.
-  function treeGroup(parentDepth, isHere) {
-    const group = document.createElement('div');
-    group.className = 'tree-children' + (isHere ? ' is-here' : '');
-    group.setAttribute('role', 'group');
-    group.style.setProperty('--depth', parentDepth);
-    return group;
-  }
-
-  function visibleRows(root) { return Array.from(root.querySelectorAll('.tree-row')).filter((r) => r.offsetParent); }
-  function focusRow(root, row) {
-    for (const r of root.querySelectorAll('.tree-row[tabindex="0"]')) r.tabIndex = -1;
-    row.tabIndex = 0;
-    row.focus();
-  }
-  // A rebuild must not lose the keyboard: remember which row had focus, and focus it again afterwards.
-  function treeFocusKey(root) {
-    const a = document.activeElement;
-    return a && root.contains(a) && a.classList.contains('tree-row') ? a.dataset.key : null;
-  }
-  function restoreTreeFocus(root, key) {
-    const rows = visibleRows(root);
-    const target = (key && rows.find((r) => r.dataset.key === key)) || null;
-    if (target) { focusRow(root, target); return; }
-    const all = Array.from(root.querySelectorAll('.tree-row'));
-    const first = all.find((r) => r.classList.contains('is-active')) || all[0];
-    if (first) first.tabIndex = 0; // one row in the tab order, so Tab reaches the tree (even if the pane is hidden now)
-  }
-  // Arrow keys as in any tree: up and down move, right opens (then steps in), left closes (then steps out),
-  // Home and End jump, Enter or Space activates.
-  function bindTreeKeys(root) {
-    root.addEventListener('keydown', (e) => {
-      if (e.target.closest('input, select, textarea') || e.altKey || e.ctrlKey || e.metaKey) return;
-      const row = e.target.closest('.tree-row');
-      if (!row || !root.contains(row) || e.target !== row) return;
-      const rows = visibleRows(root);
-      const i = rows.indexOf(row);
-      const go = (j) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };
-      const expanded = row.getAttribute('aria-expanded');
-      if (e.key === 'ArrowDown') go(i + 1);
-      else if (e.key === 'ArrowUp') go(i - 1);
-      else if (e.key === 'Home') go(0);
-      else if (e.key === 'End') go(rows.length - 1);
-      else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        if (expanded === 'false' && row._toggle) row._toggle(true);
-        else if (expanded === 'true') go(i + 1);
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        if (expanded === 'true' && row._toggle) row._toggle(false);
-        else {
-          const group = row.parentElement && row.parentElement.closest('.tree-children');
-          const parent = group && group.previousElementSibling;
-          if (parent && parent.classList.contains('tree-row')) focusRow(root, parent);
-        }
-      } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
-    });
-    root.addEventListener('focusin', (e) => { const r = e.target.closest('.tree-row'); if (r) { for (const x of root.querySelectorAll('.tree-row[tabindex="0"]')) if (x !== r) x.tabIndex = -1; r.tabIndex = 0; } });
   }
 
   // ---- the middle pane as folders with their notes ("Note list: Folders" in Settings) ----
@@ -5493,31 +5273,6 @@ import { NotesSignPad } from './sign-pad.js';
       const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
       items[next].focus();
     }, true);
-  }
-
-  // ---- what is running: recording, reading aloud --------------------------------------------
-  // A long-running mode must stay visible and stoppable while its menu is closed.
-
-  const activities = new Map(); // key -> { chip, a }
-  function setActivity(key, a) {
-    const had = activities.get(key);
-    if (!a) { if (had) { had.chip.remove(); activities.delete(key); } return; }
-    if (had) {
-      had.a = a;
-      had.chip.querySelector('.activity-text').textContent = a.text;
-      had.chip.title = a.stopLabel;
-      return;
-    }
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'activity-chip';
-    chip.title = a.stopLabel;
-    chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I('x');
-    chip.querySelector('.activity-text').textContent = a.text;
-    const entry = { chip, a };
-    chip.addEventListener('click', () => entry.a.stop());
-    activities.set(key, entry);
-    el.activityBar.append(chip);
   }
 
   // ---- the command palette (Ctrl+P) -----------------------------------------------------------
