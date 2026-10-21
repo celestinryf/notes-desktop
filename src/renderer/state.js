@@ -18,4 +18,6 @@ export const state = {
   dirty: false,
   saveTimer: null,
   savingFor: null,
+  lastTypedAt: 0,
+  liveStatus: {},
 };

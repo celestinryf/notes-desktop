@@ -299,7 +299,7 @@
           if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = "note-" + s;
           return s || UNTITLED;
         }
-        function isViewerOnlyFile(note) {
+        function isViewerOnlyFile2(note) {
           return !!(note && note.filePath && note.fileKind !== "text");
         }
         function extOf(filePath) {
@@ -307,7 +307,7 @@
           if (!base.includes(".")) return base;
           return base.slice(base.lastIndexOf(".") + 1);
         }
-        function isPlainTextFile(note) {
+        function isPlainTextFile3(note) {
           return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
         }
         const WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
@@ -320,7 +320,7 @@
         const CRAFT_OF = { docx: "wordcraft", sheet: "gridcraft" };
         const ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
         function isTableFile(note) {
-          return isPlainTextFile(note) && ["csv", "tsv"].includes(extOf(note.filePath));
+          return isPlainTextFile3(note) && ["csv", "tsv"].includes(extOf(note.filePath));
         }
         function isOoxmlWordFile(note) {
           return !!(note && note.filePath && note.fileKind === "docx" && OOXML_EXT.has(extOf(note.filePath)));
@@ -437,8 +437,8 @@
           splitAtHeadings,
           headingTitle,
           extOf,
-          isViewerOnlyFile,
-          isPlainTextFile,
+          isViewerOnlyFile: isViewerOnlyFile2,
+          isPlainTextFile: isPlainTextFile3,
           isTableFile,
           isOoxmlWordFile,
           imageBaseFor,
@@ -797,7 +797,7 @@
   });
 
   // src/renderer/app.js
-  var import_helpers4 = __toESM(require_helpers());
+  var import_helpers7 = __toESM(require_helpers());
   var import_themes = __toESM(require_themes());
   var import_icons5 = __toESM(require_icons());
 
@@ -2857,8 +2857,13 @@
     systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
     dirty: false,
     saveTimer: null,
-    savingFor: null
+    savingFor: null,
+    lastTypedAt: 0,
+    liveStatus: {}
   };
+
+  // src/renderer/find-state.js
+  var find = { open: false, query: "", ranges: [], active: -1, sourceHits: [] };
 
   // src/renderer/text.js
   var import_helpers2 = __toESM(require_helpers());
@@ -3219,6 +3224,480 @@
     return { renderRemindButton, openRemindDialog, setReminder };
   }
 
+  // src/renderer/peer-notice.js
+  function withPeerNotice(raw, onWrite) {
+    const WRITES = {
+      notes: ["create", "update", "togglePin", "duplicate", "splitIntoBook", "undoSplit", "trash", "restore", "destroy", "emptyTrash"],
+      folders: ["create", "rename", "setBook", "reorderPages", "move", "delete"],
+      lock: ["set", "unlock", "relock", "remove"],
+      files: ["link", "refresh", "savePdf", "pdfApplyPages", "pdfRestore", "saveDocx", "saveCraft", "convert", "asMarkdown"],
+      attachments: ["pick", "addPaths", "saveRecording"],
+      stickies: ["open", "close", "create", "setColor", "setOnTop"],
+      live: ["host", "join", "stop"],
+      vaults: ["add", "clone", "update", "remove", "sync", "scan", "initRepo"],
+      agentFiles: ["link"],
+      bot: ["importWorkspace"],
+      app: ["importMarkdown"]
+    };
+    if (!raw) return raw;
+    const out = {};
+    for (const ns of Object.keys(raw)) {
+      const writes = WRITES[ns];
+      if (!writes) {
+        out[ns] = raw[ns];
+        continue;
+      }
+      out[ns] = Object.assign({}, raw[ns]);
+      for (const name of writes) {
+        const fn = raw[ns][name];
+        if (typeof fn === "function") out[ns][name] = (...args) => {
+          const r = fn(...args);
+          Promise.resolve(r).then(onWrite, () => {
+          });
+          return r;
+        };
+      }
+    }
+    return out;
+  }
+
+  // src/renderer/live-share.js
+  function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow }) {
+    function renderLiveRow(note) {
+      const live = note && note.live;
+      el.liveRow.classList.toggle("hidden", !live);
+      if (!live) return;
+      const s = state.liveStatus[note.id];
+      const peers = s ? s.peers : 0;
+      const connected = s ? s.connected : false;
+      el.liveRow.classList.toggle("is-off", !connected);
+      el.liveText.textContent = live.role === "host" ? "Live: you are sharing this note \xB7 " + peers + (peers === 1 ? " person" : " people") + " connected" + (s && s.localOnly ? " \xB7 no network found, the link only works on this computer" : "") + (s && s.error ? " \xB7 " + s.error : "") : connected ? "Live: following a shared note" + (s && s.pending ? " \xB7 sending your edits\u2026" : "") : "Live: reconnecting to the host\u2026" + (s && s.error ? " (" + s.error + ")" : "") + (s && s.pending ? " \xB7 your edits will be sent when it is back" : "");
+    }
+    async function startLiveHost() {
+      const note = state.current;
+      if (!note) return;
+      const r = await api.live.host(note.id);
+      if (!r.ok) {
+        toast("Could not share: " + r.error);
+        return;
+      }
+      await refreshCurrentMeta();
+      openLiveDialog("link", r.status.url);
+    }
+    async function stopLive() {
+      const note = state.current;
+      if (!note || !note.live) return;
+      await flushSave();
+      await api.live.stop(note.id);
+      delete state.liveStatus[note.id];
+      await refreshCurrentMeta();
+      toast("Live share ended. The note stays.");
+    }
+    function openLiveDialog(mode, url) {
+      el.liveDialog.dataset.mode = mode;
+      const hosting = mode === "link";
+      el.liveDialogTitle.textContent = hosting ? "Live share link" : "Join a live share";
+      el.liveDialogHint.textContent = hosting ? "Anyone on your local network with this link edits this note with you, live. The link is not encrypted, so use it on networks you trust. Windows may ask once to allow Notes through the firewall; say yes or nobody can connect. Stop sharing from the Share menu when you are done." : "Paste the link the other person shared. You get your own copy of the note that stays in step while the share lasts.";
+      el.liveLinkLabel.textContent = hosting ? "Link" : "Link to join";
+      el.liveLinkInput.value = hosting ? url : "";
+      el.liveLinkInput.readOnly = hosting;
+      el.liveCopyBtn.classList.toggle("hidden", !hosting);
+      el.liveSubmitBtn.classList.toggle("hidden", hosting);
+      el.liveCancelBtn.textContent = hosting ? "Close" : "Cancel";
+      el.liveError.textContent = "";
+      el.liveDialog.showModal();
+      el.liveLinkInput.focus();
+      el.liveLinkInput.select();
+    }
+    async function submitLiveDialog() {
+      if (el.liveDialog.dataset.mode !== "join") {
+        el.liveDialog.close();
+        return;
+      }
+      const url = el.liveLinkInput.value.trim();
+      if (!url) {
+        el.liveError.textContent = "Paste a link.";
+        return;
+      }
+      el.liveSubmitBtn.disabled = true;
+      el.liveError.textContent = "Connecting\u2026";
+      try {
+        const r = await api.live.join(url, state.view === "folder" ? state.folderId : null);
+        if (!r.ok) {
+          el.liveError.textContent = r.error;
+          return;
+        }
+        el.liveDialog.close();
+        state.liveStatus[r.noteId] = r.status;
+        await setView("all");
+        await selectNoteNow(r.noteId);
+        toast("Joined. Edits on either side show up here as they happen.");
+      } finally {
+        el.liveSubmitBtn.disabled = false;
+      }
+    }
+    return { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog };
+  }
+
+  // src/renderer/sharing.js
+  var import_helpers4 = __toESM(require_helpers());
+  function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
+    function syncShareMenu() {
+      const n = state.current;
+      if (!n) return;
+      el.shareReveal.classList.toggle("hidden", !n.filePath);
+      el.shareLiveHost.classList.toggle("hidden", !!n.live || !!n.locked || !!n.filePath);
+      el.shareLiveStop.classList.toggle("hidden", !n.live);
+    }
+    function openShareMenu() {
+      if (!state.current || state.current.trashedAt) return;
+      syncShareMenu();
+      placePopover(el.shareMenu, el.shareBtn);
+    }
+    function closeShareMenu() {
+      el.shareMenu.classList.add("hidden");
+    }
+    function currentHtml() {
+      const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
+      if (live) return live.innerHTML;
+      return markdownToHtml(el.bodyInput.value, state.current);
+    }
+    function markdownToHtml(md, note) {
+      if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
+      const host = document.createElement("div");
+      host.style.position = "absolute";
+      host.style.left = "-99999px";
+      document.body.append(host);
+      try {
+        let ed = null;
+        try {
+          ed = window.NotesEditor.create(host, { imageBase: () => import_helpers4.default.imageBaseFor(note) });
+          ed.setMarkdown(String(md || ""));
+          return host.querySelector(".rich-editor-content").innerHTML;
+        } finally {
+          if (ed) ed.destroy();
+        }
+      } finally {
+        host.remove();
+      }
+    }
+    async function shareAction(action) {
+      closeShareMenu();
+      let note = state.current;
+      if (!note) return;
+      if (note.locked && !note.unlocked) {
+        toast("Unlock the note first.");
+        return;
+      }
+      await flushSave();
+      if (!state.current || state.current.id !== note.id) return;
+      note = state.current;
+      const titleLine = note.title ? note.title + "\n\n" : "";
+      try {
+        if (action === "copy-md") {
+          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note) });
+          toast("Copied as Markdown");
+        } else if (action === "copy-text") {
+          await api.app.copy({ text: titleLine + import_helpers4.default.plainTextFromMarkdown(el.bodyInput.value) });
+          toast("Copied as plain text");
+        } else if (action === "copy-html") {
+          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
+          toast("Copied as rich text");
+        } else if (action === "copy-note-link") {
+          await api.app.copy({ text: "[" + (import_helpers4.default.deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
+          toast("Copied. Paste it into another note to link here.");
+        } else if (action === "email") {
+          const r = await api.app.emailNote(note.id);
+          toast(r.ok ? r.truncated ? "Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest." : "Opened your mail app with the note." : "Could not open mail: " + r.error);
+        } else if (action === "pdf") {
+          if (find.open) closeFind();
+          if (GUEST) {
+            const r2 = await api.book.export("pdf", Object.assign(exportOfCurrent(), { dialogTitle: "Save as PDF" }));
+            if (r2.ok) toast("Saved PDF to " + r2.filePath);
+            else if (!r2.canceled) toast("Could not save PDF: " + r2.error);
+            return;
+          }
+          const chosen = await api.app.pdfPath(note.id);
+          if (!chosen.ok) {
+            if (!chosen.canceled) toast("Could not save PDF: " + chosen.error);
+            return;
+          }
+          if (state.currentId !== note.id || lockedNow()) {
+            toast("The note changed while the dialog was open; nothing was saved.");
+            return;
+          }
+          await flushSave();
+          const r = await api.app.writePdf(chosen.filePath);
+          if (r.ok) toast("Saved PDF to " + r.filePath);
+          else toast("Could not save PDF: " + r.error);
+        } else if (action === "html") {
+          const r = await api.app.exportHtml(note.id, currentHtml());
+          if (r.ok) toast("Saved HTML to " + r.filePath);
+          else if (!r.canceled) toast("Could not save HTML: " + r.error);
+        } else if (action === "md") {
+          await exportCurrent();
+        } else if (action === "reveal") {
+          await api.files.reveal(note.id);
+        } else if (action === "live-host") {
+          await startLiveHost();
+        } else if (action === "live-join") {
+          openLiveDialog("join");
+        } else if (action === "live-stop") {
+          await stopLive();
+        }
+      } catch (err) {
+        toast("Share failed: " + (err.message || err));
+      }
+    }
+    return { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction };
+  }
+
+  // src/renderer/sticky-button.js
+  var import_helpers5 = __toESM(require_helpers());
+  var { isViewerOnlyFile, isPlainTextFile } = import_helpers5.default;
+  function createStickyButton({ api, flushSave, refreshCurrentMeta }) {
+    function renderStickyButton(note) {
+      const on = !!(note && note.sticky);
+      el.stickyBtn.classList.toggle("is-on", on);
+      setLabel(el.stickyBtn, on ? "Take off the desktop" : "Stick to the desktop");
+      el.stickyBtn.title = on ? "Remove this note from the desktop (Ctrl+Shift+T)" : "Put this note on the desktop as a sticky (Ctrl+Shift+T)";
+      const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
+      el.stickyBtn.disabled = !note || !!note.trashedAt || notMarkdown && !on || !!note.locked;
+      el.stickyBtn.title = note && note.locked ? "Locked notes cannot be stickies" : el.stickyBtn.title;
+    }
+    async function toggleSticky() {
+      const note = state.current;
+      if (!note || el.stickyBtn.disabled) return;
+      await flushSave();
+      try {
+        if (note.sticky) {
+          await api.stickies.close(note.id, { forget: true });
+          toast("Removed from the desktop. The note is kept.");
+        } else {
+          await api.stickies.open(note.id);
+          toast("On the desktop. Drag its top bar to move it; its close button removes it, Esc just hides it (tray \u2192 Stickies brings it back).");
+        }
+      } catch (err) {
+        toast("Could not change the sticky: " + (err.message || err));
+      }
+      await refreshCurrentMeta();
+    }
+    return { renderStickyButton, toggleSticky };
+  }
+
+  // src/renderer/bot-panel.js
+  function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) {
+    const bot = { open: false, running: false };
+    function toggleBot(force) {
+      bot.open = typeof force === "boolean" ? force : !bot.open;
+      el.botPanel.classList.toggle("hidden", !bot.open);
+      el.botBtn.classList.toggle("is-on", bot.open);
+      if (bot.open) {
+        describeBotScope();
+        el.botPrompt.focus();
+      }
+    }
+    function describeBotScope() {
+      const n = state.current;
+      let text = "Scope: all plain notes (exported to a workspace folder for the run)";
+      if (n && n.vaultId) text = "Scope: this note\u2019s vault folder";
+      else if (n && n.filePath) text = "Scope: the folder containing this file";
+      el.botScope.textContent = text;
+      el.botScope.title = text;
+    }
+    function botAppend(text, cls) {
+      const span = document.createElement("span");
+      if (cls) span.className = cls;
+      span.textContent = text;
+      el.botOutput.append(span);
+      el.botOutput.scrollTop = el.botOutput.scrollHeight;
+    }
+    async function runBot() {
+      if (bot.running) {
+        await api.bot.cancel();
+        return;
+      }
+      const prompt = el.botPrompt.value.trim();
+      await flushSave();
+      el.botOutput.textContent = "";
+      if (!prompt) {
+        const r = await api.bot.importWorkspace();
+        botAppend(r.error ? "Import failed: " + r.error + "\n" : "Pulled in workspace edits. " + importSummary(r) + "\n" + (r.details || []).map((d) => "  " + d).join("\n") + (r.details && r.details.length ? "\n" : ""), r.error ? "bot-err" : "bot-meta");
+        await refresh({ keepEditor: true });
+        el.botPrompt.focus();
+        return;
+      }
+      const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
+      if (!res.ok) {
+        botAppend(res.error + "\n", "bot-err");
+        return;
+      }
+    }
+    function onBotEvent(ev) {
+      if (ev.type === "start") {
+        bot.running = true;
+        el.botPanel.classList.add("is-running");
+        el.botRunBtn.textContent = "Stop";
+        botAppend("Claude Code, on your Claude " + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + " " : "") + "subscription (no API credits)\n", "bot-meta");
+        botAppend("Working in " + ev.cwd + (ev.focus ? "  (looking at " + ev.focus + ")" : "") + "\n", "bot-meta");
+        if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
+      } else if (ev.type === "out") {
+        botAppend(ev.text);
+      } else if (ev.type === "err") {
+        botAppend(ev.text, "bot-err");
+      } else if (ev.type === "end") {
+        bot.running = false;
+        el.botPanel.classList.remove("is-running");
+        el.botRunBtn.textContent = "Run";
+        if (ev.error) botAppend("\n" + ev.error + "\n", "bot-err");
+        else {
+          const imp = ev.imported;
+          const summary = imp && !imp.error ? " " + importSummary(imp) : "";
+          botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + "." + summary + "\n", "bot-meta");
+          if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
+        }
+        refresh({ keepEditor: true }).then(async () => {
+          if (state.currentId && !state.dirty) {
+            const wanted = state.currentId;
+            const fresh = await api.notes.get(wanted);
+            if (fresh && fresh.id === state.currentId && !state.dirty && !state.inflight.has(fresh.id) && fresh.body !== el.bodyInput.value) {
+              applyFreshFileBody(fresh);
+              toast("This note was updated by the bot.");
+            }
+          }
+        });
+      } else if (ev.type === "reloaded") {
+        refresh({ keepEditor: true });
+      }
+    }
+    function importSummary(imp) {
+      return "Notes updated: " + imp.updated + ", created: " + imp.created + (imp.conflicts ? ", conflicts: " + imp.conflicts : "") + (imp.missing ? ", files removed by the agent (notes kept): " + imp.missing : "") + ".";
+    }
+    async function openBotTerminal() {
+      await flushSave();
+      const res = await api.bot.openTerminal(state.currentId);
+      if (!res.ok) {
+        toast("Could not open a terminal: " + res.error);
+        return;
+      }
+      toast("Claude Code opened in a terminal at " + res.cwd + (res.kind === "workspace" ? ". Its edits are pulled in on the next Run, or press Run with an empty prompt." : ""));
+    }
+    return { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal };
+  }
+
+  // src/renderer/code-editor.js
+  var import_helpers6 = __toESM(require_helpers());
+  var { isPlainTextFile: isPlainTextFile2 } = import_helpers6.default;
+  function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }) {
+    let code = null;
+    let codeOn = false;
+    let codeFailed = false;
+    const PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
+    const isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(import_helpers6.default.extOf(note.filePath));
+    function codeEditor() {
+      if (!code) {
+        code = window.NotesCode.create({
+          parent: el.codeHost,
+          onChange: (text) => {
+            el.bodyInput.value = text;
+            el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+          onSelection: renderCodePosition,
+          // While the find bar is open, Enter steps between matches, as it does in the textarea.
+          onEnter: (shift) => {
+            if (!find.open) return false;
+            runFind(!shift);
+            return true;
+          }
+        });
+      }
+      return code;
+    }
+    function showCode(note, readOnly) {
+      codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile2(note) && !isProseFile(note);
+      if (codeOn) {
+        try {
+          codeEditor().load(el.bodyInput.value, { ext: import_helpers6.default.extOf(note.filePath), readOnly, placeholder: "Plain text.", label: import_helpers6.default.deriveTitle(note) });
+        } catch (err) {
+          console.error("The code editor could not start:", err);
+          codeFailed = true;
+          codeOn = false;
+          toast("The code editor could not start, so this file opens as plain text.");
+        }
+      }
+      if (!codeOn && code) {
+        try {
+          code.load("", {});
+        } catch (_) {
+        }
+      }
+      el.bodyInput.classList.toggle("uses-code", codeOn);
+      el.bodyInput.classList.toggle("is-prose", isProseFile(note));
+      renderCodePosition();
+      autoGrow();
+    }
+    function renderCodePosition() {
+      const shown = codeOn && state.sourceMode;
+      el.statusCode.classList.toggle("hidden", !shown);
+      if (!shown) return;
+      const at = code.position();
+      el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
+    }
+    const src = {
+      get value() {
+        return el.bodyInput.value;
+      },
+      set value(text) {
+        el.bodyInput.value = text;
+        if (codeOn) code.setValue(el.bodyInput.value);
+      },
+      // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
+      reload(text) {
+        el.bodyInput.value = text;
+        if (codeOn) code.setValue(el.bodyInput.value, { history: false });
+      },
+      get readOnly() {
+        return el.bodyInput.readOnly;
+      },
+      get selectionStart() {
+        return codeOn ? code.selectionStart : el.bodyInput.selectionStart;
+      },
+      get selectionEnd() {
+        return codeOn ? code.selectionEnd : el.bodyInput.selectionEnd;
+      },
+      setSelectionRange(from, to) {
+        if (codeOn) code.setSelectionRange(from, to);
+        else el.bodyInput.setSelectionRange(from, to);
+      },
+      focus() {
+        if (codeOn) code.focus();
+        else el.bodyInput.focus();
+      },
+      hasFocus() {
+        return codeOn ? code.hasFocus() : document.activeElement === el.bodyInput;
+      },
+      // Scrolls a position into view (a find match, a heading).
+      reveal(at) {
+        if (codeOn) code.reveal(at);
+        else scrollTextareaToSelection(at);
+      },
+      // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
+      dispatchEvent(event) {
+        return el.bodyInput.dispatchEvent(event);
+      },
+      get codeOn() {
+        return codeOn;
+      },
+      // Undo or redo in the code editor when the keyboard is in it; false when it is not.
+      undoRedo(cmd) {
+        if (!codeOn || !code.contains(document.activeElement)) return false;
+        code[cmd === "redo" ? "redo" : "undo"]();
+        return true;
+      }
+    };
+    return { src, showCode, renderCodePosition };
+  }
+
   // src/renderer/images.js
   function createImages({ api, showBanner }) {
     let imageUrl = null, imageSeq = 0;
@@ -3330,7 +3809,7 @@
   }
 
   // src/renderer/editor-text.js
-  function createEditorText({ find, runFind, scheduleSave }) {
+  function createEditorText({ runFind, scheduleSave }) {
     function wrapSelection(before, after) {
       const ta = el.bodyInput;
       if (ta.readOnly) return;
@@ -3396,9 +3875,9 @@
   // src/renderer/app.js
   (function() {
     "use strict";
-    const api = withPeerNotice(window.notesApi);
-    const { isViewerOnlyFile, isPlainTextFile } = import_helpers4.default;
-    const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
+    const api = withPeerNotice(window.notesApi, peerChanged);
+    const { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers7.default;
+    const isNonMarkdownFile = (n) => isPlainTextFile3(n) || isViewerOnlyFile2(n);
     function effectiveTheme(settings) {
       const s = settings || state.settings;
       const t = s ? s.theme : "system";
@@ -3433,8 +3912,8 @@
       applyEditorLayout(settings);
       if (el.settingsDialog.open && settingsDirty()) previewSettings();
       if (opts && opts.fromPeer) return;
-      if (import_helpers4.default.isTableFile(state.current)) return;
-      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile(state.current);
+      if (import_helpers7.default.isTableFile(state.current)) return;
+      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile3(state.current);
       const wantSource = settings.editorMode === "source" || forcedSource;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     }
@@ -3563,18 +4042,18 @@
       }, true);
     }
     function paneBudget() {
-      return Math.max(0, window.innerWidth - import_helpers4.default.EDITOR_MIN);
+      return Math.max(0, window.innerWidth - import_helpers7.default.EDITOR_MIN);
     }
     function fitPaneWidths(sidebar, list) {
-      sidebar = import_helpers4.default.clampPane("sidebarWidth", sidebar);
-      list = import_helpers4.default.clampPane("listWidth", list);
+      sidebar = import_helpers7.default.clampPane("sidebarWidth", sidebar);
+      list = import_helpers7.default.clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
       const over = sidebarShown + list - paneBudget();
       if (over > 0) {
-        const listGive = Math.min(over, list - import_helpers4.default.PANE_LIMITS.listWidth.min);
+        const listGive = Math.min(over, list - import_helpers7.default.PANE_LIMITS.listWidth.min);
         list -= listGive;
         const rest = over - listGive;
-        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers4.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
+        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers7.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
       }
       return { sidebar, list };
     }
@@ -3586,8 +4065,8 @@
     }
     function currentPaneWidths() {
       return {
-        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers4.default.PANE_LIMITS.sidebarWidth.def,
-        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers4.default.PANE_LIMITS.listWidth.def
+        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers7.default.PANE_LIMITS.sidebarWidth.def,
+        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers7.default.PANE_LIMITS.listWidth.def
       };
     }
     function setupResizer(handle, key) {
@@ -3624,7 +4103,7 @@
       });
       handle.addEventListener("dblclick", () => {
         const patch = {};
-        patch[key] = import_helpers4.default.PANE_LIMITS[key].def;
+        patch[key] = import_helpers7.default.PANE_LIMITS[key].def;
         updateSettings(patch);
       });
     }
@@ -3758,7 +4237,7 @@
         li.className = "note-row" + (n.id === state.currentId ? " is-active" : "");
         li.dataset.id = n.id;
         li.setAttribute("role", "option");
-        li.title = import_helpers4.default.deriveTitle(n);
+        li.title = import_helpers7.default.deriveTitle(n);
         li.innerHTML = rowInner(n, q);
         if (viewingBook && !q) {
           const no = document.createElement("span");
@@ -3804,21 +4283,21 @@
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
       const overdue = n.remindAt <= Date.now();
-      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers4.default.formatWhen(n.remindAt)) + "</span>";
+      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers7.default.formatWhen(n.remindAt)) + "</span>";
     }
     function rowInner(n, q) {
-      const title = n.body === void 0 ? n.title : import_helpers4.default.deriveTitle(n);
+      const title = n.body === void 0 ? n.title : import_helpers7.default.deriveTitle(n);
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "") + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
-      const inTitle = !q || import_helpers4.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
+      const inTitle = !q || import_helpers7.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
       const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
       return '<span class="row-name">' + highlight(title, q) + "</span>" + why + marks + fileMark + reminderMark(n) + whereMark(n);
     }
     function matchExcerpt(n, q) {
       const body = String(n.body || "").replace(/\s+/g, " ");
       const low = body.toLowerCase();
-      const at = import_helpers4.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-      if (at === void 0) return (n.tags || []).filter((t) => import_helpers4.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers4.default.snippet(n, 80);
+      const at = import_helpers7.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (at === void 0) return (n.tags || []).filter((t) => import_helpers7.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers7.default.snippet(n, 80);
       const start = Math.max(0, at - 30);
       let text = body.slice(start, start + 80);
       if (start > 0) text = "\u2026" + text.replace(/^\S*\s/, "");
@@ -3832,11 +4311,11 @@
     }
     function refreshRow(note) {
       if (tabs.ids.includes(note.id)) {
-        tabs.titles.set(note.id, import_helpers4.default.deriveTitle(note));
+        tabs.titles.set(note.id, import_helpers7.default.deriveTitle(note));
         renderActiveTabTitle();
       }
       if (state.outline) {
-        const title = import_helpers4.default.deriveTitle(note);
+        const title = import_helpers7.default.deriveTitle(note);
         for (const list of Object.values(state.outline)) {
           const e = list.find((x) => x.id === note.id);
           if (e) {
@@ -3854,7 +4333,7 @@
       if (!li) return;
       const pageNo = li.querySelector(".page-no");
       li.innerHTML = rowInner(note, state.query);
-      li.title = import_helpers4.default.deriveTitle(note);
+      li.title = import_helpers7.default.deriveTitle(note);
       if (pageNo) li.prepend(pageNo);
     }
     async function setView(view, arg, refreshOpts) {
@@ -4343,11 +4822,11 @@
             await setView("folder", folder.id, { keepEditor: true });
             await selectNoteNow(page.id);
             el.titleInput.focus();
-            toast('Book "' + import_helpers4.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
+            toast('Book "' + import_helpers7.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
             return;
           }
           await setView("folder", folder.id);
-          toast('Folder "' + import_helpers4.default.truncate(folder.name, 30) + '" created');
+          toast('Folder "' + import_helpers7.default.truncate(folder.name, 30) + '" created');
         } else {
           if (name) await api.folders.rename(edit.id, name);
           await refresh({ keepEditor: true });
@@ -4391,7 +4870,7 @@
       if (state.currentId === noteId && updated) state.current = updated;
       await refresh({ keepEditor: true });
       const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
-      toast(name ? "Moved to " + import_helpers4.default.truncate(name, 30) : "Moved out of folders");
+      toast(name ? "Moved to " + import_helpers7.default.truncate(name, 30) : "Moved out of folders");
     }
     async function moveFolderTo(folderId, parentId) {
       const res = await api.folders.move(folderId, parentId || null);
@@ -4625,7 +5104,7 @@
       else parts.push("no remote (local history only)");
       if (s.dirty) parts.push("uncommitted changes");
       if (s.syncing) parts.push("syncing\u2026");
-      if (s.lastSyncAt) parts.push("last sync " + import_helpers4.default.relativeTime(s.lastSyncAt));
+      if (s.lastSyncAt) parts.push("last sync " + import_helpers7.default.relativeTime(s.lastSyncAt));
       if (s.conflict) parts.push("CONFLICT: resolve in the folder");
       if (s.lastError) parts.push("error: " + s.lastError);
       return parts.join(" \xB7 ");
@@ -4660,41 +5139,6 @@
       peerDrag: null
       // a tab or note card being dragged on the other side
     };
-    function withPeerNotice(raw) {
-      const WRITES = {
-        notes: ["create", "update", "togglePin", "duplicate", "splitIntoBook", "undoSplit", "trash", "restore", "destroy", "emptyTrash"],
-        folders: ["create", "rename", "setBook", "reorderPages", "move", "delete"],
-        lock: ["set", "unlock", "relock", "remove"],
-        files: ["link", "refresh", "savePdf", "pdfApplyPages", "pdfRestore", "saveDocx", "saveCraft", "convert", "asMarkdown"],
-        attachments: ["pick", "addPaths", "saveRecording"],
-        stickies: ["open", "close", "create", "setColor", "setOnTop"],
-        live: ["host", "join", "stop"],
-        vaults: ["add", "clone", "update", "remove", "sync", "scan", "initRepo"],
-        agentFiles: ["link"],
-        bot: ["importWorkspace"],
-        app: ["importMarkdown"]
-      };
-      if (!raw) return raw;
-      const out = {};
-      for (const ns of Object.keys(raw)) {
-        const writes = WRITES[ns];
-        if (!writes) {
-          out[ns] = raw[ns];
-          continue;
-        }
-        out[ns] = Object.assign({}, raw[ns]);
-        for (const name of writes) {
-          const fn = raw[ns][name];
-          if (typeof fn === "function") out[ns][name] = (...args) => {
-            const r = fn(...args);
-            Promise.resolve(r).then(peerChanged, () => {
-            });
-            return r;
-          };
-        }
-      }
-      return out;
-    }
     function peerWindow() {
       return GUEST ? window.parent : tabs.frame && tabs.frame.contentWindow;
     }
@@ -4751,7 +5195,7 @@
     }
     function tabTitle(id) {
       if (!id) return "New tab";
-      if (id === state.currentId && state.current) return import_helpers4.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
+      if (id === state.currentId && state.current) return import_helpers7.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
       return tabs.titles.get(id) || "\u2026";
     }
     function renderTabs() {
@@ -4800,7 +5244,7 @@
       try {
         const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => void 0)));
         notes.forEach((n, i) => {
-          if (n) tabs.titles.set(ids[i], import_helpers4.default.deriveTitle(n));
+          if (n) tabs.titles.set(ids[i], import_helpers7.default.deriveTitle(n));
           else if (n === null) gone.push(ids[i]);
         });
       } finally {
@@ -5139,8 +5583,7 @@
         return;
       }
       if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === "redo" ? "redo" : "undo"]().run();
-      else if (codeOn && code.contains(document.activeElement)) code[cmd === "redo" ? "redo" : "undo"]();
-      else document.execCommand(cmd === "redo" ? "redo" : "undo");
+      else if (!src.undoRedo(cmd)) document.execCommand(cmd === "redo" ? "redo" : "undo");
     }
     function dropIndex(e) {
       const t = e.target.closest(".tab");
@@ -5321,8 +5764,8 @@
       el.tagsInput.value = note.tags.join(", ");
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
-      const plainFile = isPlainTextFile(note);
-      const markdown = !plainFile && !isViewerOnlyFile(note);
+      const plainFile = isPlainTextFile3(note);
+      const markdown = !plainFile && !isViewerOnlyFile2(note);
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
@@ -5331,7 +5774,7 @@
       state.currentLossless = lossless;
       state.lossyOverride = null;
       el.bodyInput.placeholder = plainFile ? "Plain text." : "Markdown source. Ctrl+E switches back to the rendered view.";
-      const wantSource = import_helpers4.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
+      const wantSource = import_helpers7.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
@@ -5339,8 +5782,8 @@
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
-      const fileReadOnly = isViewerOnlyFile(note);
-      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers4.default.isTableFile(note) || fileReadOnly);
+      const fileReadOnly = isViewerOnlyFile2(note);
+      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers7.default.isTableFile(note) || fileReadOnly);
       syncSourceButton();
       [el.titleInput, el.tagsInput].forEach((i) => {
         i.readOnly = inTrash;
@@ -5404,11 +5847,11 @@
         el.statusWords.textContent = tableStats.rows.toLocaleString() + (tableStats.rows === 1 ? " row" : " rows");
         el.statusChars.textContent = tableStats.cols + (tableStats.cols === 1 ? " column" : " columns");
       } else {
-        const words = import_helpers4.default.countWords(body);
+        const words = import_helpers7.default.countWords(body);
         el.statusWords.textContent = words + (words === 1 ? " word" : " words");
         el.statusChars.textContent = body.length + (body.length === 1 ? " character" : " characters");
       }
-      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers4.default.relativeTime(note.trashedAt) : "Edited " + import_helpers4.default.relativeTime(note.updatedAt);
+      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers7.default.relativeTime(note.trashedAt) : "Edited " + import_helpers7.default.relativeTime(note.updatedAt);
     }
     function setSaved(label) {
       el.statusSaved.textContent = label;
@@ -5453,8 +5896,8 @@
         tab.draggable = true;
         tab.innerHTML = '<span class="no"></span><span class="t"></span>';
         tab.querySelector(".no").textContent = String(i + 1);
-        tab.querySelector(".t").textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(p) || "Untitled", 28);
-        tab.title = import_helpers4.default.deriveTitle(p) || "Untitled";
+        tab.querySelector(".t").textContent = import_helpers7.default.truncate(import_helpers7.default.deriveTitle(p) || "Untitled", 28);
+        tab.title = import_helpers7.default.deriveTitle(p) || "Untitled";
         tab.addEventListener("click", () => {
           if (p.id !== state.currentId) selectNote(p.id);
         });
@@ -5545,7 +5988,7 @@
       }
       await flushSave();
       if (!state.current || state.current.id !== note.id) return;
-      const plan = import_helpers4.default.splitAtHeadings(state.current.body, import_helpers4.default.deriveTitle(state.current));
+      const plan = import_helpers7.default.splitAtHeadings(state.current.body, import_helpers7.default.deriveTitle(state.current));
       if (plan.pages.length < 2) {
         toast("Add at least two headings (lines starting with #) to split this note into pages.");
         return;
@@ -5585,7 +6028,7 @@
       if (r.originalTrashed && state.currentId === id) clearEditor();
       await setView("folder", r.folder.id, { keepEditor: true });
       await selectNoteNow(r.pageIds[0]);
-      toast('Made the book "' + import_helpers4.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
+      toast('Made the book "' + import_helpers7.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
         label: "Undo",
         run: async () => {
           await flushSave();
@@ -5669,18 +6112,18 @@
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
         } else if (action === "copy-link") {
-          await api.app.copy({ text: "[" + (import_helpers4.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
+          await api.app.copy({ text: "[" + (import_helpers7.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
           toast("Copied. Paste it into another note to link to this page.");
         } else if (action === "delete") {
           if (id === state.currentId) {
             await trashCurrent();
             return;
           }
-          const title = import_helpers4.default.deriveTitle(page) || "Untitled";
+          const title = import_helpers7.default.deriveTitle(page) || "Untitled";
           await api.notes.trash(id);
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
-          toast('Moved "' + import_helpers4.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+          toast('Moved "' + import_helpers7.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
             await api.notes.restore(id);
             await refresh({ keepEditor: true });
             if (state.current) renderBookStrip(state.current);
@@ -5749,7 +6192,7 @@
         pages: pages.map((p, i) => {
           const locked = !!(p.locked && !p.unlocked);
           const body = locked ? "" : bodies[i];
-          return { id: p.id, no: i + 1, title: import_helpers4.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
+          return { id: p.id, no: i + 1, title: import_helpers7.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
         })
       };
     }
@@ -5786,81 +6229,7 @@
     }
     const { reader, openReader, closeReader, readerOpen } = createBookReader({ book, collectBook, syncTitleBar });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
-    state.lastTypedAt = 0;
-    state.liveStatus = {};
-    function renderLiveRow(note) {
-      const live = note && note.live;
-      el.liveRow.classList.toggle("hidden", !live);
-      if (!live) return;
-      const s = state.liveStatus[note.id];
-      const peers = s ? s.peers : 0;
-      const connected = s ? s.connected : false;
-      el.liveRow.classList.toggle("is-off", !connected);
-      el.liveText.textContent = live.role === "host" ? "Live: you are sharing this note \xB7 " + peers + (peers === 1 ? " person" : " people") + " connected" + (s && s.localOnly ? " \xB7 no network found, the link only works on this computer" : "") + (s && s.error ? " \xB7 " + s.error : "") : connected ? "Live: following a shared note" + (s && s.pending ? " \xB7 sending your edits\u2026" : "") : "Live: reconnecting to the host\u2026" + (s && s.error ? " (" + s.error + ")" : "") + (s && s.pending ? " \xB7 your edits will be sent when it is back" : "");
-    }
-    async function startLiveHost() {
-      const note = state.current;
-      if (!note) return;
-      const r = await api.live.host(note.id);
-      if (!r.ok) {
-        toast("Could not share: " + r.error);
-        return;
-      }
-      await refreshCurrentMeta();
-      openLiveDialog("link", r.status.url);
-    }
-    async function stopLive() {
-      const note = state.current;
-      if (!note || !note.live) return;
-      await flushSave();
-      await api.live.stop(note.id);
-      delete state.liveStatus[note.id];
-      await refreshCurrentMeta();
-      toast("Live share ended. The note stays.");
-    }
-    function openLiveDialog(mode, url) {
-      el.liveDialog.dataset.mode = mode;
-      const hosting = mode === "link";
-      el.liveDialogTitle.textContent = hosting ? "Live share link" : "Join a live share";
-      el.liveDialogHint.textContent = hosting ? "Anyone on your local network with this link edits this note with you, live. The link is not encrypted, so use it on networks you trust. Windows may ask once to allow Notes through the firewall; say yes or nobody can connect. Stop sharing from the Share menu when you are done." : "Paste the link the other person shared. You get your own copy of the note that stays in step while the share lasts.";
-      el.liveLinkLabel.textContent = hosting ? "Link" : "Link to join";
-      el.liveLinkInput.value = hosting ? url : "";
-      el.liveLinkInput.readOnly = hosting;
-      el.liveCopyBtn.classList.toggle("hidden", !hosting);
-      el.liveSubmitBtn.classList.toggle("hidden", hosting);
-      el.liveCancelBtn.textContent = hosting ? "Close" : "Cancel";
-      el.liveError.textContent = "";
-      el.liveDialog.showModal();
-      el.liveLinkInput.focus();
-      el.liveLinkInput.select();
-    }
-    async function submitLiveDialog() {
-      if (el.liveDialog.dataset.mode !== "join") {
-        el.liveDialog.close();
-        return;
-      }
-      const url = el.liveLinkInput.value.trim();
-      if (!url) {
-        el.liveError.textContent = "Paste a link.";
-        return;
-      }
-      el.liveSubmitBtn.disabled = true;
-      el.liveError.textContent = "Connecting\u2026";
-      try {
-        const r = await api.live.join(url, state.view === "folder" ? state.folderId : null);
-        if (!r.ok) {
-          el.liveError.textContent = r.error;
-          return;
-        }
-        el.liveDialog.close();
-        state.liveStatus[r.noteId] = r.status;
-        await setView("all");
-        await selectNoteNow(r.noteId);
-        toast("Joined. Edits on either side show up here as they happen.");
-      } finally {
-        el.liveSubmitBtn.disabled = false;
-      }
-    }
+    const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
     const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
     function renderLockState(note) {
       const locked = !!(note && note.locked);
@@ -5878,7 +6247,7 @@
         if (state.rich) state.rich.setEditable(false);
       } else if (note) {
         renderFileRow(note);
-        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note) && !isPlainTextFile(note));
+        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile2(note) && !isPlainTextFile3(note));
       }
     }
     function onLockButton() {
@@ -5989,113 +6358,7 @@
       } else if (action === "remove") openLockDialog("remove");
     }
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
-    function syncShareMenu() {
-      const n = state.current;
-      if (!n) return;
-      el.shareReveal.classList.toggle("hidden", !n.filePath);
-      el.shareLiveHost.classList.toggle("hidden", !!n.live || !!n.locked || !!n.filePath);
-      el.shareLiveStop.classList.toggle("hidden", !n.live);
-    }
-    function openShareMenu() {
-      if (!state.current || state.current.trashedAt) return;
-      syncShareMenu();
-      placePopover(el.shareMenu, el.shareBtn);
-    }
-    function closeShareMenu() {
-      el.shareMenu.classList.add("hidden");
-    }
-    function currentHtml() {
-      const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
-      if (live) return live.innerHTML;
-      return markdownToHtml(el.bodyInput.value, state.current);
-    }
-    function markdownToHtml(md, note) {
-      if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
-      const host = document.createElement("div");
-      host.style.position = "absolute";
-      host.style.left = "-99999px";
-      document.body.append(host);
-      try {
-        let ed = null;
-        try {
-          ed = window.NotesEditor.create(host, { imageBase: () => import_helpers4.default.imageBaseFor(note) });
-          ed.setMarkdown(String(md || ""));
-          return host.querySelector(".rich-editor-content").innerHTML;
-        } finally {
-          if (ed) ed.destroy();
-        }
-      } finally {
-        host.remove();
-      }
-    }
-    async function shareAction(action) {
-      closeShareMenu();
-      let note = state.current;
-      if (!note) return;
-      if (note.locked && !note.unlocked) {
-        toast("Unlock the note first.");
-        return;
-      }
-      await flushSave();
-      if (!state.current || state.current.id !== note.id) return;
-      note = state.current;
-      const titleLine = note.title ? note.title + "\n\n" : "";
-      try {
-        if (action === "copy-md") {
-          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note) });
-          toast("Copied as Markdown");
-        } else if (action === "copy-text") {
-          await api.app.copy({ text: titleLine + import_helpers4.default.plainTextFromMarkdown(el.bodyInput.value) });
-          toast("Copied as plain text");
-        } else if (action === "copy-html") {
-          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
-          toast("Copied as rich text");
-        } else if (action === "copy-note-link") {
-          await api.app.copy({ text: "[" + (import_helpers4.default.deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
-          toast("Copied. Paste it into another note to link here.");
-        } else if (action === "email") {
-          const r = await api.app.emailNote(note.id);
-          toast(r.ok ? r.truncated ? "Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest." : "Opened your mail app with the note." : "Could not open mail: " + r.error);
-        } else if (action === "pdf") {
-          if (find.open) closeFind();
-          if (GUEST) {
-            const r2 = await api.book.export("pdf", Object.assign(exportOfCurrent(), { dialogTitle: "Save as PDF" }));
-            if (r2.ok) toast("Saved PDF to " + r2.filePath);
-            else if (!r2.canceled) toast("Could not save PDF: " + r2.error);
-            return;
-          }
-          const chosen = await api.app.pdfPath(note.id);
-          if (!chosen.ok) {
-            if (!chosen.canceled) toast("Could not save PDF: " + chosen.error);
-            return;
-          }
-          if (state.currentId !== note.id || lockedNow()) {
-            toast("The note changed while the dialog was open; nothing was saved.");
-            return;
-          }
-          await flushSave();
-          const r = await api.app.writePdf(chosen.filePath);
-          if (r.ok) toast("Saved PDF to " + r.filePath);
-          else toast("Could not save PDF: " + r.error);
-        } else if (action === "html") {
-          const r = await api.app.exportHtml(note.id, currentHtml());
-          if (r.ok) toast("Saved HTML to " + r.filePath);
-          else if (!r.canceled) toast("Could not save HTML: " + r.error);
-        } else if (action === "md") {
-          await exportCurrent();
-        } else if (action === "reveal") {
-          await api.files.reveal(note.id);
-        } else if (action === "live-host") {
-          await startLiveHost();
-        } else if (action === "live-join") {
-          openLiveDialog("join");
-        } else if (action === "live-stop") {
-          await stopLive();
-        }
-      } catch (err) {
-        toast("Share failed: " + (err.message || err));
-      }
-    }
+    const { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     function insertAttachmentLinks(items) {
       const ok = items.filter((x) => x && !x.error);
       const bad = items.filter((x) => x && x.error);
@@ -6128,7 +6391,7 @@
       }
     }
     async function attachFiles() {
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile2(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -6146,10 +6409,10 @@
         return;
       }
       const target = await api.notes.get(forNote);
-      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
+      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile2(target)) {
         const links = ok.map((it) => "[\u{1F4CE} " + it.name.replace(/[[\]]/g, "") + "](" + it.href + ")").join("\n");
         await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + links + "\n" });
-        toast('Attached to "' + import_helpers4.default.truncate(import_helpers4.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
+        toast('Attached to "' + import_helpers7.default.truncate(import_helpers7.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
         refresh({ keepEditor: true });
       } else toast("Attached files are kept in the attachments folder; that note can no longer take them.");
     }
@@ -6160,7 +6423,7 @@
         return;
       }
       if (rec.starting) return;
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile2(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -6210,9 +6473,9 @@
             toast("Voice memo saved (" + mm + ":" + ss + "). Ctrl+click the link to play it.");
           } else {
             const target = await api.notes.get(rec.noteId);
-            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
+            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile2(target)) {
               await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + "[" + label + "](" + saved.href + ")\n" });
-              toast('Voice memo saved into "' + import_helpers4.default.truncate(import_helpers4.default.deriveTitle(target), 30) + '", the note it was recorded in.');
+              toast('Voice memo saved into "' + import_helpers7.default.truncate(import_helpers7.default.deriveTitle(target), 30) + '", the note it was recorded in.');
               refresh({ keepEditor: true });
             } else toast("Voice memo saved as " + saved.name + " (that note can no longer take it; Attach it where you want it).");
           }
@@ -6261,7 +6524,7 @@
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
         li.innerHTML = '<span class="when"></span><span class="first"></span>';
         li.querySelector(".when").textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        li.querySelector(".first").textContent = import_helpers4.default.truncate(first, 48);
+        li.querySelector(".first").textContent = import_helpers7.default.truncate(first, 48);
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
@@ -6278,7 +6541,7 @@
       const note = state.current;
       if (!v || !note) return;
       el.historyDialog.close();
-      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile(note)) {
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile2(note)) {
         toast("This note cannot take the restored text right now.");
         return;
       }
@@ -6297,7 +6560,6 @@
       if (ok) toast("Restored the version from " + new Date(v.at).toLocaleString() + ". The text you had is still in history.");
       else if (state.conflictShown !== note.id) toast("Could not save the restored text yet; it will be retried.");
     }
-    const find = { open: false, query: "", ranges: [], active: -1, sourceHits: [] };
     function openFind() {
       if (!state.current) return;
       find.open = true;
@@ -6320,7 +6582,7 @@
     function replaceCurrent() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile2(state.current)) return;
       if (state.sourceMode) {
         const wanted = find.active;
         runFind(true, true, true);
@@ -6394,7 +6656,7 @@
     function replaceAll() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile2(state.current)) return;
       let n = 0;
       if (state.sourceMode) {
         const ta = src;
@@ -6583,35 +6845,10 @@
       else if (r.dry) toast("Print: dry run");
     }
     function exportOfCurrent() {
-      const title = import_helpers4.default.deriveTitle(state.current);
+      const title = import_helpers7.default.deriveTitle(state.current);
       return { name: title, html: (state.current.title ? "<h1>" + escapeHtml(state.current.title) + "</h1>" : "") + currentHtml() };
     }
-    function renderStickyButton(note) {
-      const on = !!(note && note.sticky);
-      el.stickyBtn.classList.toggle("is-on", on);
-      setLabel(el.stickyBtn, on ? "Take off the desktop" : "Stick to the desktop");
-      el.stickyBtn.title = on ? "Remove this note from the desktop (Ctrl+Shift+T)" : "Put this note on the desktop as a sticky (Ctrl+Shift+T)";
-      const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
-      el.stickyBtn.disabled = !note || !!note.trashedAt || notMarkdown && !on || !!note.locked;
-      el.stickyBtn.title = note && note.locked ? "Locked notes cannot be stickies" : el.stickyBtn.title;
-    }
-    async function toggleSticky() {
-      const note = state.current;
-      if (!note || el.stickyBtn.disabled) return;
-      await flushSave();
-      try {
-        if (note.sticky) {
-          await api.stickies.close(note.id, { forget: true });
-          toast("Removed from the desktop. The note is kept.");
-        } else {
-          await api.stickies.open(note.id);
-          toast("On the desktop. Drag its top bar to move it; its close button removes it, Esc just hides it (tray \u2192 Stickies brings it back).");
-        }
-      } catch (err) {
-        toast("Could not change the sticky: " + (err.message || err));
-      }
-      await refreshCurrentMeta();
-    }
+    const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     async function refreshCurrentMeta() {
       if (!state.currentId) return;
       const fresh = await api.notes.get(state.currentId);
@@ -6626,101 +6863,7 @@
       renderLiveRow(state.current);
       await refresh({ keepEditor: true });
     }
-    const bot = { open: false, running: false };
-    function toggleBot(force) {
-      bot.open = typeof force === "boolean" ? force : !bot.open;
-      el.botPanel.classList.toggle("hidden", !bot.open);
-      el.botBtn.classList.toggle("is-on", bot.open);
-      if (bot.open) {
-        describeBotScope();
-        el.botPrompt.focus();
-      }
-    }
-    function describeBotScope() {
-      const n = state.current;
-      let text = "Scope: all plain notes (exported to a workspace folder for the run)";
-      if (n && n.vaultId) text = "Scope: this note\u2019s vault folder";
-      else if (n && n.filePath) text = "Scope: the folder containing this file";
-      el.botScope.textContent = text;
-      el.botScope.title = text;
-    }
-    function botAppend(text, cls) {
-      const span = document.createElement("span");
-      if (cls) span.className = cls;
-      span.textContent = text;
-      el.botOutput.append(span);
-      el.botOutput.scrollTop = el.botOutput.scrollHeight;
-    }
-    async function runBot() {
-      if (bot.running) {
-        await api.bot.cancel();
-        return;
-      }
-      const prompt = el.botPrompt.value.trim();
-      await flushSave();
-      el.botOutput.textContent = "";
-      if (!prompt) {
-        const r = await api.bot.importWorkspace();
-        botAppend(r.error ? "Import failed: " + r.error + "\n" : "Pulled in workspace edits. " + importSummary(r) + "\n" + (r.details || []).map((d) => "  " + d).join("\n") + (r.details && r.details.length ? "\n" : ""), r.error ? "bot-err" : "bot-meta");
-        await refresh({ keepEditor: true });
-        el.botPrompt.focus();
-        return;
-      }
-      const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
-      if (!res.ok) {
-        botAppend(res.error + "\n", "bot-err");
-        return;
-      }
-    }
-    function onBotEvent(ev) {
-      if (ev.type === "start") {
-        bot.running = true;
-        el.botPanel.classList.add("is-running");
-        el.botRunBtn.textContent = "Stop";
-        botAppend("Claude Code, on your Claude " + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + " " : "") + "subscription (no API credits)\n", "bot-meta");
-        botAppend("Working in " + ev.cwd + (ev.focus ? "  (looking at " + ev.focus + ")" : "") + "\n", "bot-meta");
-        if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
-      } else if (ev.type === "out") {
-        botAppend(ev.text);
-      } else if (ev.type === "err") {
-        botAppend(ev.text, "bot-err");
-      } else if (ev.type === "end") {
-        bot.running = false;
-        el.botPanel.classList.remove("is-running");
-        el.botRunBtn.textContent = "Run";
-        if (ev.error) botAppend("\n" + ev.error + "\n", "bot-err");
-        else {
-          const imp = ev.imported;
-          const summary = imp && !imp.error ? " " + importSummary(imp) : "";
-          botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + "." + summary + "\n", "bot-meta");
-          if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
-        }
-        refresh({ keepEditor: true }).then(async () => {
-          if (state.currentId && !state.dirty) {
-            const wanted = state.currentId;
-            const fresh = await api.notes.get(wanted);
-            if (fresh && fresh.id === state.currentId && !state.dirty && !state.inflight.has(fresh.id) && fresh.body !== el.bodyInput.value) {
-              applyFreshFileBody(fresh);
-              toast("This note was updated by the bot.");
-            }
-          }
-        });
-      } else if (ev.type === "reloaded") {
-        refresh({ keepEditor: true });
-      }
-    }
-    function importSummary(imp) {
-      return "Notes updated: " + imp.updated + ", created: " + imp.created + (imp.conflicts ? ", conflicts: " + imp.conflicts : "") + (imp.missing ? ", files removed by the agent (notes kept): " + imp.missing : "") + ".";
-    }
-    async function openBotTerminal() {
-      await flushSave();
-      const res = await api.bot.openTerminal(state.currentId);
-      if (!res.ok) {
-        toast("Could not open a terminal: " + res.error);
-        return;
-      }
-      toast("Claude Code opened in a terminal at " + res.cwd + (res.kind === "workspace" ? ". Its edits are pulled in on the next Run, or press Run with an empty prompt." : ""));
-    }
+    const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
     const tts = { active: false, queue: [], index: 0 };
     function selectedTextForSpeech() {
       if (state.sourceMode) {
@@ -6737,7 +6880,7 @@
       if (selected) return selected;
       const title = el.titleInput.value.trim();
       const note = state.current;
-      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers4.default.plainTextFromMarkdown(el.bodyInput.value);
+      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers7.default.plainTextFromMarkdown(el.bodyInput.value);
       return (title ? title + ".\n" : "") + body;
     }
     function pickVoice() {
@@ -6789,7 +6932,7 @@
         toast("Nothing to read yet.");
         return;
       }
-      tts.queue = import_helpers4.default.speechChunks(text);
+      tts.queue = import_helpers7.default.speechChunks(text);
       tts.index = 0;
       setReadAloudState(true);
       window.speechSynthesis.cancel();
@@ -6809,7 +6952,7 @@
       el.ttsVoiceSelect.value = voices.some((v) => v.name === current) ? current : "";
     }
     async function startDictation() {
-      if (!state.current || isViewerOnlyFile(state.current) || state.current.trashedAt) {
+      if (!state.current || isViewerOnlyFile2(state.current) || state.current.trashedAt) {
         toast("Open an editable note first.");
         return;
       }
@@ -6926,7 +7069,7 @@
               down = true;
               clear();
               const n = state.current;
-              if (n && n.filePath && import_helpers4.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
+              if (n && n.filePath && import_helpers7.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
               toast(ui.label + " did not start, so " + ui.without);
             }
           });
@@ -7008,7 +7151,7 @@
     }
     const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
     const useWordCraft = () => crafts.wordcraft.usable();
-    const craftFor = (n) => n && n.filePath && import_helpers4.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers4.default.CRAFT_OF[n.fileKind]] : null;
+    const craftFor = (n) => n && n.filePath && import_helpers7.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers7.default.CRAFT_OF[n.fileKind]] : null;
     const craftDirty = () => Object.values(crafts).some((c) => c.dirty());
     async function flushCrafts() {
       let ok = true;
@@ -7016,22 +7159,22 @@
       return ok;
     }
     function showCraftOnly(n) {
-      const key = import_helpers4.default.CRAFT_OF[n.fileKind];
+      const key = import_helpers7.default.CRAFT_OF[n.fileKind];
       if (crafts[key].usable()) {
         showBanner("");
         crafts[key].show(n);
         return;
       }
-      showBanner("Notes shows ." + import_helpers4.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
+      showBanner("Notes shows ." + import_helpers7.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
     }
     async function showDocx(note) {
       if (useWordCraft()) {
         crafts.wordcraft.show(note);
         return;
       }
-      if (!import_helpers4.default.isOoxmlWordFile(note)) {
+      if (!import_helpers7.default.isOoxmlWordFile(note)) {
         el.docxEditor.classList.add("hidden");
-        showBanner("Notes shows ." + import_helpers4.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
+        showBanner("Notes shows ." + import_helpers7.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
         return;
       }
       const key = note.id + ":" + note.fileMtime;
@@ -7110,22 +7253,22 @@
       if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
     }
     function fileBadge(note) {
-      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers4.default.extOf(note.filePath).toUpperCase();
+      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers7.default.extOf(note.filePath).toUpperCase();
       if (note.fileKind !== "text") return (note.fileKind || "file").toUpperCase();
-      if (!isPlainTextFile(note)) return "Markdown";
-      if (import_helpers4.default.isTableFile(note)) return import_helpers4.default.extOf(note.filePath).toUpperCase();
-      return window.NotesCode ? window.NotesCode.languageFor(import_helpers4.default.extOf(note.filePath)).name : "Plain text";
+      if (!isPlainTextFile3(note)) return "Markdown";
+      if (import_helpers7.default.isTableFile(note)) return import_helpers7.default.extOf(note.filePath).toUpperCase();
+      return window.NotesCode ? window.NotesCode.languageFor(import_helpers7.default.extOf(note.filePath)).name : "Plain text";
     }
     function renderFileRow(note) {
       const isFile = !!(note && note.filePath);
       el.fileRow.classList.toggle("hidden", !isFile);
       el.fileBanner.classList.add("hidden");
       if (!(isFile && note.fileKind === "docx")) clearDocx();
-      for (const [kind, key] of Object.entries(import_helpers4.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
+      for (const [kind, key] of Object.entries(import_helpers7.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
-      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers4.default.CRAFT_OF[note.fileKind]));
+      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers7.default.CRAFT_OF[note.fileKind]));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
       el.editorColumn.classList.toggle("shows-craft", inCraft);
@@ -7544,14 +7687,14 @@
       state.current = fresh;
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
-      if (isViewerOnlyFile(fresh)) {
+      if (isViewerOnlyFile2(fresh)) {
         showCode(fresh, true);
         renderFileRow(fresh);
         updateStatus(fresh);
         return;
       }
-      if (import_helpers4.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
-      if (state.rich && !isPlainTextFile(fresh)) {
+      if (import_helpers7.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
+      if (state.rich && !isPlainTextFile3(fresh)) {
         let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
         if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
         state.currentLossless = lossless;
@@ -7605,7 +7748,7 @@
     state.pending = /* @__PURE__ */ new Map();
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
-      if (isViewerOnlyFile(state.current)) delete patch.body;
+      if (isViewerOnlyFile2(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
     }
@@ -7671,7 +7814,7 @@
               state.notes[idx] = updated;
               refreshRow(updated);
             }
-            toast('Saved earlier changes to "' + import_helpers4.default.truncate(import_helpers4.default.deriveTitle(updated), 30) + '"');
+            toast('Saved earlier changes to "' + import_helpers7.default.truncate(import_helpers7.default.deriveTitle(updated), 30) + '"');
           }
         } catch (err) {
           if (/changed on disk/i.test(String(err && err.message))) {
@@ -7738,7 +7881,7 @@
         renderRelatedSoon();
         if (book.id && patch.title !== void 0) {
           const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t');
-          if (t) t.textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(updated) || "Untitled", 28);
+          if (t) t.textContent = import_helpers7.default.truncate(import_helpers7.default.deriveTitle(updated) || "Untitled", 28);
         }
         if (updated.filePath && el.filePath.textContent !== updated.filePath) {
           el.filePath.textContent = updated.filePath;
@@ -7798,13 +7941,13 @@
     async function trashCurrent() {
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
-      const title = import_helpers4.default.deriveTitle(state.current);
+      const title = import_helpers7.default.deriveTitle(state.current);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
       await api.notes.trash(id);
       clearEditor();
       await refresh();
-      toast('Moved "' + import_helpers4.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+      toast('Moved "' + import_helpers7.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
         await api.notes.restore(id);
         await refresh({ keepEditor: true });
         await selectNote(id);
@@ -7820,7 +7963,7 @@
     }
     async function destroyCurrent() {
       if (!state.current) return;
-      if (!window.confirm('Delete "' + import_helpers4.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
+      if (!window.confirm('Delete "' + import_helpers7.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
       state.pending.delete(state.currentId);
       state.dirty = false;
       await api.notes.destroy(state.currentId);
@@ -7873,11 +8016,11 @@
       }
       state.rich = window.NotesEditor.create(el.richEditor, {
         placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
-        imageBase: () => import_helpers4.default.imageBaseFor(state.current),
+        imageBase: () => import_helpers7.default.imageBaseFor(state.current),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),
         onUpdate: (md) => {
-          if (state.sourceMode || !state.currentId || isPlainTextFile(state.current)) return;
+          if (state.sourceMode || !state.currentId || isPlainTextFile3(state.current)) return;
           if (md === el.bodyInput.value) return;
           el.bodyInput.value = md;
           scheduleSave();
@@ -7921,16 +8064,16 @@
       }
       let items;
       if (t.kind === "slash") {
-        items = SLASH.map((b) => ({ b, s: import_helpers4.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
+        items = SLASH.map((b) => ({ b, s: import_helpers7.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
         if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
       } else {
         if (!inline.notes || !inline.trigger || inline.trigger.kind !== "link") inline.notes = await api.notes.list({ sort: "updated" });
         if (seq !== inline.seq) return;
         const q = t.query.trim();
         const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
-        const scored = q ? notes.map((n) => ({ n, s: import_helpers4.default.fuzzyScore(q, import_helpers4.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers4.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers4.default.relativeTime(n.updatedAt), note: n }));
-        if (q) items.push({ id: "new", title: 'New note "' + import_helpers4.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
+        const scored = q ? notes.map((n) => ({ n, s: import_helpers7.default.fuzzyScore(q, import_helpers7.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
+        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers7.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers7.default.relativeTime(n.updatedAt), note: n }));
+        if (q) items.push({ id: "new", title: 'New note "' + import_helpers7.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
       }
       inline.trigger = t;
       inline.items = items;
@@ -8046,14 +8189,14 @@
         }
         inline.notes = null;
         refresh({ keepEditor: true });
-        toast('Created "' + import_helpers4.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
+        toast('Created "' + import_helpers7.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
       state.rich.insertLinkAt(range, it.title, "note://" + it.note.id);
     }
     function syncTextViews(note) {
-      const none = lockedNow() || isViewerOnlyFile(note);
-      const isTable = import_helpers4.default.isTableFile(note);
+      const none = lockedNow() || isViewerOnlyFile2(note);
+      const isTable = import_helpers7.default.isTableFile(note);
       const table = isTable && !state.sourceMode && !none;
       el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
       el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
@@ -8066,7 +8209,7 @@
     function renderTable(note) {
       const text = el.bodyInput.value;
       if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
-        tableStats = NotesCsv.render(el.csvView, text, import_helpers4.default.extOf(note.filePath));
+        tableStats = NotesCsv.render(el.csvView, text, import_helpers7.default.extOf(note.filePath));
         tableDrawn = { id: note.id, text };
       }
       updateStatus(note);
@@ -8077,7 +8220,7 @@
       el.editor.classList.toggle("fills-pane", on);
     }
     function syncSourceButton() {
-      const table = import_helpers4.default.isTableFile(state.current);
+      const table = import_helpers7.default.isTableFile(state.current);
       const label = state.sourceMode ? table ? "Table" : "Rendered" : table ? "Text" : "Source";
       const what = state.sourceMode ? table ? "Show as a table" : "Back to the rendered view" : table ? "Edit as text" : "Show Markdown source";
       setLabel(el.sourceBtn, label);
@@ -8098,24 +8241,24 @@
       syncTextViews(state.current);
       renderCodePosition();
       if (state.sourceMode) autoGrow();
-      else if (state.rich && state.currentId && !isViewerOnlyFile(state.current) && !isPlainTextFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      else if (state.rich && state.currentId && !isViewerOnlyFile2(state.current) && !isPlainTextFile3(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
     }
     function toggleSource(force) {
       const next = typeof force === "boolean" ? force : !state.sourceMode;
-      if (isViewerOnlyFile(state.current)) {
+      if (isViewerOnlyFile2(state.current)) {
         toast("This file is shown as it is; it has no Markdown view to switch to.");
         return;
       }
       if (next === state.sourceMode) return;
-      if (!next && isPlainTextFile(state.current) && !import_helpers4.default.isTableFile(state.current)) {
+      if (!next && isPlainTextFile3(state.current) && !import_helpers7.default.isTableFile(state.current)) {
         toast("This is a plain-text file, so it is edited as the text it is.");
         return;
       }
-      if (!next && !state.rich && !import_helpers4.default.isTableFile(state.current)) {
+      if (!next && !state.rich && !import_helpers7.default.isTableFile(state.current)) {
         toast("The rendered editor is unavailable; staying in Markdown source.");
         return;
       }
-      if (!next && state.currentId && !isPlainTextFile(state.current)) {
+      if (!next && state.currentId && !isPlainTextFile3(state.current)) {
         state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
         if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false;
         if (state.currentLossless === false) {
@@ -8124,7 +8267,7 @@
         }
       }
       applyEditorMode(next);
-      if (!import_helpers4.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
+      if (!import_helpers7.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
       focusBody();
     }
     function focusBody() {
@@ -8179,7 +8322,7 @@
           if (n.id === state.currentId) continue;
           const o = document.createElement("option");
           o.value = "note://" + n.id;
-          o.textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(n), 60);
+          o.textContent = import_helpers7.default.truncate(import_helpers7.default.deriveTitle(n), 60);
           el.linkNoteSelect.append(o);
         }
         if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
@@ -8190,108 +8333,12 @@
       el.linkInput.focus();
       el.linkInput.select();
     }
-    let code = null;
-    let codeOn = false;
-    let codeFailed = false;
-    const PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
-    const isProseFile = (note) => isPlainTextFile(note) && PROSE_EXT.has(import_helpers4.default.extOf(note.filePath));
-    function codeEditor() {
-      if (!code) {
-        code = window.NotesCode.create({
-          parent: el.codeHost,
-          onChange: (text) => {
-            el.bodyInput.value = text;
-            el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
-          },
-          onSelection: renderCodePosition,
-          // While the find bar is open, Enter steps between matches, as it does in the textarea.
-          onEnter: (shift) => {
-            if (!find.open) return false;
-            runFind(!shift);
-            return true;
-          }
-        });
-      }
-      return code;
-    }
-    function showCode(note, readOnly) {
-      codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile(note) && !isProseFile(note);
-      if (codeOn) {
-        try {
-          codeEditor().load(el.bodyInput.value, { ext: import_helpers4.default.extOf(note.filePath), readOnly, placeholder: "Plain text.", label: import_helpers4.default.deriveTitle(note) });
-        } catch (err) {
-          console.error("The code editor could not start:", err);
-          codeFailed = true;
-          codeOn = false;
-          toast("The code editor could not start, so this file opens as plain text.");
-        }
-      }
-      if (!codeOn && code) {
-        try {
-          code.load("", {});
-        } catch (_) {
-        }
-      }
-      el.bodyInput.classList.toggle("uses-code", codeOn);
-      el.bodyInput.classList.toggle("is-prose", isProseFile(note));
-      renderCodePosition();
-      autoGrow();
-    }
-    function renderCodePosition() {
-      const shown = codeOn && state.sourceMode;
-      el.statusCode.classList.toggle("hidden", !shown);
-      if (!shown) return;
-      const at = code.position();
-      el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
-    }
-    const src = {
-      get value() {
-        return el.bodyInput.value;
-      },
-      set value(text) {
-        el.bodyInput.value = text;
-        if (codeOn) code.setValue(el.bodyInput.value);
-      },
-      // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
-      reload(text) {
-        el.bodyInput.value = text;
-        if (codeOn) code.setValue(el.bodyInput.value, { history: false });
-      },
-      get readOnly() {
-        return el.bodyInput.readOnly;
-      },
-      get selectionStart() {
-        return codeOn ? code.selectionStart : el.bodyInput.selectionStart;
-      },
-      get selectionEnd() {
-        return codeOn ? code.selectionEnd : el.bodyInput.selectionEnd;
-      },
-      setSelectionRange(from, to) {
-        if (codeOn) code.setSelectionRange(from, to);
-        else el.bodyInput.setSelectionRange(from, to);
-      },
-      focus() {
-        if (codeOn) code.focus();
-        else el.bodyInput.focus();
-      },
-      hasFocus() {
-        return codeOn ? code.hasFocus() : document.activeElement === el.bodyInput;
-      },
-      // Scrolls a position into view (a find match, a heading).
-      reveal(at) {
-        if (codeOn) code.reveal(at);
-        else scrollTextareaToSelection(at);
-      },
-      // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
-      dispatchEvent(event) {
-        return el.bodyInput.dispatchEvent(event);
-      }
-    };
-    const { wrapSelection, handleEditorKeydown } = createEditorText({ find, runFind, scheduleSave });
+    const { src, showCode, renderCodePosition } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+    const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
     function openSettings() {
       const s = state.settings;
       draft = {};
-      el.hotkeyInput.value = import_helpers4.default.displayAccelerator(s.hotkey).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers7.default.displayAccelerator(s.hotkey).replace(/ /g, "");
       el.hotkeyError.textContent = "";
       el.themeSelect.value = s.theme;
       renderSchemeGrid();
@@ -8360,7 +8407,7 @@
       draft = {};
       if (res.error) {
         el.hotkeyError.textContent = res.error;
-        el.hotkeyInput.value = import_helpers4.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
+        el.hotkeyInput.value = import_helpers7.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
         syncSettingsDirty();
         el.hotkeyInput.focus();
         return false;
@@ -8527,7 +8574,7 @@
       });
     }
     function filterSettings() {
-      const tokens = import_helpers4.default.tokenize(el.settingsSearch.value);
+      const tokens = import_helpers7.default.tokenize(el.settingsSearch.value);
       const ranges = [];
       let any = false;
       for (const sec of el.settingsScroll.querySelectorAll(".settings-section")) {
@@ -8591,7 +8638,7 @@
       if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
       else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
       else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers4.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers4.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
+      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers7.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers7.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
       if (s.lastError) text += "  Error: " + s.lastError;
       el.gitStatus.textContent = text;
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -8621,13 +8668,13 @@
       return { partial: null, value: mods.concat(key).join("+") };
     }
     function commitHotkey(value) {
-      const parsed = import_helpers4.default.parseAccelerator(value);
+      const parsed = import_helpers7.default.parseAccelerator(value);
       if (!parsed.ok) {
         el.hotkeyError.textContent = parsed.reason;
         return;
       }
       el.hotkeyError.textContent = "";
-      el.hotkeyInput.value = import_helpers4.default.displayAccelerator(parsed.value).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers7.default.displayAccelerator(parsed.value).replace(/ /g, "");
       setDraft({ hotkey: parsed.value });
     }
     let palette = null;
@@ -8698,16 +8745,16 @@
         notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
           id: "note-" + n.id,
           group: "Notes",
-          title: import_helpers4.default.deriveTitle(n),
+          title: import_helpers7.default.deriveTitle(n),
           icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
-          hint: n.folderId && folders.get(n.folderId) || import_helpers4.default.relativeTime(n.updatedAt),
-          matches: (q) => !n.locked && import_helpers4.default.matchesQuery(n, q),
+          hint: n.folderId && folders.get(n.folderId) || import_helpers7.default.relativeTime(n.updatedAt),
+          matches: (q) => !n.locked && import_helpers7.default.matchesQuery(n, q),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));
       }
       const out = NotesPalette.rank(query, commands, notes);
       const title = query.replace(/^\s*>\s*/, "").trim();
-      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers4.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
+      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers7.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
       return out;
     }
     function onKeydown(e) {
@@ -8864,24 +8911,24 @@
             return;
           // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
           case "b":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile3(state.current)) {
               e.preventDefault();
               wrapSelection("**", "**");
             }
             return;
           case "i":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile3(state.current)) {
               e.preventDefault();
               wrapSelection("_", "_");
             }
             return;
           case "k":
             if (document.activeElement === el.bodyInput) {
-              if (!isPlainTextFile(state.current)) {
+              if (!isPlainTextFile3(state.current)) {
                 e.preventDefault();
                 wrapSelection("[", "](url)");
               }
-            } else if (bodyHasFocus() && !codeOn) {
+            } else if (bodyHasFocus() && !src.codeOn) {
               e.preventDefault();
               openLinkDialog();
             }
@@ -9476,8 +9523,8 @@
       });
       el.hotkeyInput.addEventListener("blur", () => {
         const v = el.hotkeyInput.value.trim();
-        if (v && !v.endsWith("+") && v !== import_helpers4.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
-        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers4.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
+        if (v && !v.endsWith("+") && v !== import_helpers7.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
+        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers7.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
       });
       el.themeSelect.addEventListener("change", () => setDraft({ theme: el.themeSelect.value }));
       el.fontSizeInput.addEventListener("input", () => {
@@ -9593,7 +9640,7 @@
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && isViewerOnlyFile2(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {
