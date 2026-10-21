@@ -1,3 +1,4 @@
+// @ts-check
 import { el, I, setLabel, setPressed } from './dom.js';
 import { state, lockedNow } from './state.js';
 import { find } from './find-state.js';
@@ -18,7 +19,7 @@ export function focusBody() {
 
 export function inTextField() {
   const a = document.activeElement;
-  return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable || el.richEditor.contains(a));
+  return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || (a instanceof HTMLElement && a.isContentEditable) || el.richEditor.contains(a));
 }
 
 export function bodyHasFocus() {
@@ -76,6 +77,9 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
     { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
   ];
+  /** @typedef {{ kind: 'slash' | 'link', query: string, from: number, to: number, rect: { left: number, right: number, top: number, bottom: number } }} InlineTrigger */
+  /** @typedef {{ id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: PublicNote, create?: string }} InlineItem */
+  /** @type {{ trigger: InlineTrigger | null, items: InlineItem[], active: number, dismissedAt: string | null, notes: PublicNote[] | null, seq: number }} */
   const inline = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
 
   async function showInlineMenu(t) {
@@ -87,10 +91,11 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       items = SLASH.map((b) => ({ b, s: H.fuzzyScore(t.query, b.title + ' ' + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
       if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
     } else {
-      if (!inline.notes || !inline.trigger || inline.trigger.kind !== 'link') inline.notes = await api.notes.list({ sort: 'updated' });
+      const known = !inline.notes || !inline.trigger || inline.trigger.kind !== 'link' ? await api.notes.list({ sort: 'updated' }) : inline.notes;
+      inline.notes = known;
       if (seq !== inline.seq) return; // typing moved on while the notes loaded
       const q = t.query.trim();
-      const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
+      const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
       const scored = q ? notes.map((n) => ({ n, s: H.fuzzyScore(q, H.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
       items = scored.slice(0, 8).map((n) => ({ id: n.id, title: H.deriveTitle(n), icon: n.locked ? 'lock' : 'notebook-text', keys: H.relativeTime(n.updatedAt), note: n }));
       if (q) items.push({ id: 'new', title: 'New note "' + H.truncate(q, 40) + '"', icon: 'square-pen', keys: '', create: q });
@@ -103,6 +108,8 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   }
 
   function renderInlineMenu() {
+    const trigger = inline.trigger;
+    if (!trigger) return;
     const menu = el.inlineMenu;
     menu.innerHTML = '';
     inline.items.forEach((it, i) => {
@@ -110,16 +117,24 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       b.className = 'inline-item' + (i === inline.active ? ' is-active' : '');
       b.setAttribute('role', 'option');
       b.setAttribute('aria-selected', String(i === inline.active));
-      b.innerHTML = I(it.icon) + '<span class="lbl"></span>' + (it.keys ? '<span class="keys' + (inline.trigger.kind === 'slash' ? ' md' : '') + '"></span>' : '');
-      b.querySelector('.lbl').textContent = it.title;
-      if (it.keys) b.querySelector('.keys').textContent = it.keys;
+      b.innerHTML = I(it.icon);
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = it.title;
+      b.append(lbl);
+      if (it.keys) {
+        const keys = document.createElement('span');
+        keys.className = 'keys' + (trigger.kind === 'slash' ? ' md' : '');
+        keys.textContent = it.keys;
+        b.append(keys);
+      }
       // mousedown, not click: the editor must keep focus, or blurring it would close the menu first.
       b.addEventListener('mousedown', (e) => { e.preventDefault(); chooseInline(i); });
       b.addEventListener('mousemove', () => { if (inline.active !== i) { inline.active = i; paintInline(); } });
       menu.append(b);
     });
     menu.classList.remove('hidden');
-    const r = inline.trigger.rect;
+    const r = trigger.rect;
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
     let x = Math.min(r.left, window.innerWidth - mw - 8);
     let y = r.bottom + 6;
@@ -141,7 +156,8 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   // Keys while the menu is open. Returns true when the menu used the key.
   function inlineMenuKey(e) {
     if (e.isComposing || e.keyCode === 229) return false;
-    if (!inline.trigger || el.inlineMenu.classList.contains('hidden')) return false;
+    const trigger = inline.trigger;
+    if (!trigger || el.inlineMenu.classList.contains('hidden')) return false;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const n = inline.items.length;
@@ -152,7 +168,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); chooseInline(inline.active); return true; }
     if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); // Escape closes the menu, not the window
-      inline.dismissedAt = inline.trigger.kind + ':' + inline.trigger.from;
+      inline.dismissedAt = trigger.kind + ':' + trigger.from;
       hideInlineMenu();
       return true;
     }
@@ -162,13 +178,14 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   async function chooseInline(i) {
     const it = inline.items[i];
     const t = inline.trigger;
-    if (!it || !t || !state.rich) return;
+    const rich = state.rich;
+    if (!it || !t || !rich) return;
     const range = { from: t.from, to: t.to };
     hideInlineMenu();
     if (t.kind === 'slash') {
-      if (it.kind === 'date') { state.rich.insertTextAt(range, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return; }
-      if (it.kind === 'link') { state.rich.insertTextAt(range, '[['); return; } // reopens as the note picker
-      state.rich.insertBlock(range, it.kind);
+      if (it.kind === 'date') { rich.insertTextAt(range, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return; }
+      if (it.kind === 'link') { rich.insertTextAt(range, '[['); return; } // reopens as the note picker
+      rich.insertBlock(range, it.kind);
       return;
     }
     if (it.create) {
@@ -178,15 +195,15 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       catch (err) { toast('Could not create the note: ' + (err.message || err)); return; }
       if (state.currentId !== noteId) return; // moved to another note meanwhile; the new note still exists
       const typed = '[[' + t.query;
-      const at = state.rich.textAt(range) === typed ? range : null;
-      if (at) state.rich.insertLinkAt(at, it.create, 'note://' + created.id);
-      else { const r = state.rich.selectionRange(); state.rich.insertLinkAt({ from: r.to, to: r.to }, it.create, 'note://' + created.id); }
+      const at = rich.textAt(range) === typed ? range : null;
+      if (at) rich.insertLinkAt(at, it.create, 'note://' + created.id);
+      else { const r = rich.selectionRange(); rich.insertLinkAt({ from: r.to, to: r.to }, it.create, 'note://' + created.id); }
       inline.notes = null;
       refresh({ keepEditor: true });
       toast('Created "' + H.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
       return;
     }
-    state.rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
+    if (it.note) rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
   }
 
   // Which view shows the open note's text: the rendered editor, or the source (the textarea, or the code editor in
@@ -250,10 +267,11 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (next === state.sourceMode) return;
     if (!next && isPlainTextFile(state.current) && !H.isTableFile(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
     if (!next && !state.rich && !H.isTableFile(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
-    if (!next && state.currentId && !isPlainTextFile(state.current)) {
+    const rich = state.rich;
+    if (!next && rich && state.currentId && !isPlainTextFile(state.current)) {
       // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
-      state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
-      if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false; // a real file gets the strict test
+      state.currentLossless = rich.setMarkdown(el.bodyInput.value);
+      if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false; // a real file gets the strict test
       if (state.currentLossless === false) {
         state.lossyOverride = state.currentId;
         toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');

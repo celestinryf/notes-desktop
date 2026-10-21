@@ -4110,7 +4110,7 @@
   }
   function inTextField() {
     const a = document.activeElement;
-    return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable || el.richEditor.contains(a));
+    return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a instanceof HTMLElement && a.isContentEditable || el.richEditor.contains(a));
   }
   function bodyHasFocus() {
     return src.hasFocus() || el.richEditor.contains(document.activeElement);
@@ -4181,10 +4181,11 @@
         items = SLASH.map((b) => ({ b, s: import_helpers9.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
         if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
       } else {
-        if (!inline.notes || !inline.trigger || inline.trigger.kind !== "link") inline.notes = await api.notes.list({ sort: "updated" });
+        const known = !inline.notes || !inline.trigger || inline.trigger.kind !== "link" ? await api.notes.list({ sort: "updated" }) : inline.notes;
+        inline.notes = known;
         if (seq !== inline.seq) return;
         const q = t.query.trim();
-        const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
+        const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
         const scored = q ? notes.map((n) => ({ n, s: import_helpers9.default.fuzzyScore(q, import_helpers9.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
         items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers9.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers9.default.relativeTime(n.updatedAt), note: n }));
         if (q) items.push({ id: "new", title: 'New note "' + import_helpers9.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
@@ -4199,6 +4200,8 @@
       renderInlineMenu();
     }
     function renderInlineMenu() {
+      const trigger = inline.trigger;
+      if (!trigger) return;
       const menu = el.inlineMenu;
       menu.innerHTML = "";
       inline.items.forEach((it, i) => {
@@ -4206,9 +4209,17 @@
         b.className = "inline-item" + (i === inline.active ? " is-active" : "");
         b.setAttribute("role", "option");
         b.setAttribute("aria-selected", String(i === inline.active));
-        b.innerHTML = I(it.icon) + '<span class="lbl"></span>' + (it.keys ? '<span class="keys' + (inline.trigger.kind === "slash" ? " md" : "") + '"></span>' : "");
-        b.querySelector(".lbl").textContent = it.title;
-        if (it.keys) b.querySelector(".keys").textContent = it.keys;
+        b.innerHTML = I(it.icon);
+        const lbl = document.createElement("span");
+        lbl.className = "lbl";
+        lbl.textContent = it.title;
+        b.append(lbl);
+        if (it.keys) {
+          const keys = document.createElement("span");
+          keys.className = "keys" + (trigger.kind === "slash" ? " md" : "");
+          keys.textContent = it.keys;
+          b.append(keys);
+        }
         b.addEventListener("mousedown", (e) => {
           e.preventDefault();
           chooseInline(i);
@@ -4222,7 +4233,7 @@
         menu.append(b);
       });
       menu.classList.remove("hidden");
-      const r = inline.trigger.rect;
+      const r = trigger.rect;
       const mw = menu.offsetWidth, mh = menu.offsetHeight;
       let x = Math.min(r.left, window.innerWidth - mw - 8);
       let y = r.bottom + 6;
@@ -4244,7 +4255,8 @@
     }
     function inlineMenuKey(e) {
       if (e.isComposing || e.keyCode === 229) return false;
-      if (!inline.trigger || el.inlineMenu.classList.contains("hidden")) return false;
+      const trigger = inline.trigger;
+      if (!trigger || el.inlineMenu.classList.contains("hidden")) return false;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const n = inline.items.length;
@@ -4260,7 +4272,7 @@
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        inline.dismissedAt = inline.trigger.kind + ":" + inline.trigger.from;
+        inline.dismissedAt = trigger.kind + ":" + trigger.from;
         hideInlineMenu();
         return true;
       }
@@ -4269,19 +4281,20 @@
     async function chooseInline(i) {
       const it = inline.items[i];
       const t = inline.trigger;
-      if (!it || !t || !state.rich) return;
+      const rich = state.rich;
+      if (!it || !t || !rich) return;
       const range = { from: t.from, to: t.to };
       hideInlineMenu();
       if (t.kind === "slash") {
         if (it.kind === "date") {
-          state.rich.insertTextAt(range, (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" }));
+          rich.insertTextAt(range, (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" }));
           return;
         }
         if (it.kind === "link") {
-          state.rich.insertTextAt(range, "[[");
+          rich.insertTextAt(range, "[[");
           return;
         }
-        state.rich.insertBlock(range, it.kind);
+        rich.insertBlock(range, it.kind);
         return;
       }
       if (it.create) {
@@ -4295,18 +4308,18 @@
         }
         if (state.currentId !== noteId) return;
         const typed = "[[" + t.query;
-        const at = state.rich.textAt(range) === typed ? range : null;
-        if (at) state.rich.insertLinkAt(at, it.create, "note://" + created.id);
+        const at = rich.textAt(range) === typed ? range : null;
+        if (at) rich.insertLinkAt(at, it.create, "note://" + created.id);
         else {
-          const r = state.rich.selectionRange();
-          state.rich.insertLinkAt({ from: r.to, to: r.to }, it.create, "note://" + created.id);
+          const r = rich.selectionRange();
+          rich.insertLinkAt({ from: r.to, to: r.to }, it.create, "note://" + created.id);
         }
         inline.notes = null;
         refresh({ keepEditor: true });
         toast('Created "' + import_helpers9.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
-      state.rich.insertLinkAt(range, it.title, "note://" + it.note.id);
+      if (it.note) rich.insertLinkAt(range, it.title, "note://" + it.note.id);
     }
     function syncTextViews(note) {
       const none = lockedNow() || isViewerOnlyFile2(note);
@@ -4371,9 +4384,10 @@
         toast("The rendered editor is unavailable; staying in Markdown source.");
         return;
       }
-      if (!next && state.currentId && !isPlainTextFile3(state.current)) {
-        state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
-        if (state.current && state.current.filePath && state.currentLossless && !state.rich.lastRoundTripExact()) state.currentLossless = false;
+      const rich = state.rich;
+      if (!next && rich && state.currentId && !isPlainTextFile3(state.current)) {
+        state.currentLossless = rich.setMarkdown(el.bodyInput.value);
+        if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
         if (state.currentLossless === false) {
           state.lossyOverride = state.currentId;
           toast("Heads up: editing this note in the rendered view will rewrite formatting it cannot show.");

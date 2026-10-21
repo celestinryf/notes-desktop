@@ -610,9 +610,9 @@
       status: $("#stickyStatus")
     };
     import_icons.default.hydrate(document);
-    const id = new URLSearchParams(location.search).get("id");
+    const id = new URLSearchParams(location.search).get("id") || "";
     const COLORS = ["peach", "cream", "leaf", "sky", "rose", "ink"];
-    const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches, settings: null };
+    const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches, settings: null, shownBody: null, shownOnce: false };
     function effectiveTheme() {
       const t = state.settings && state.settings.theme;
       if (t === "light" || t === "dark") return t;
@@ -657,7 +657,7 @@
     function scheduleSave() {
       if (state.readOnly) return;
       state.dirty = true;
-      clearTimeout(state.saveTimer);
+      if (state.saveTimer) clearTimeout(state.saveTimer);
       state.saveTimer = setTimeout(save, 500);
     }
     async function save() {
@@ -742,7 +742,7 @@
         }
       });
       window.addEventListener("beforeunload", () => {
-        if (state.dirty) {
+        if (state.dirty && state.rich) {
           try {
             api.notes.update(id, { body: state.rich.getMarkdown() });
           } catch (_) {
@@ -753,11 +753,11 @@
         state.rich = window.NotesEditor.create(el.editor, {
           placeholder: "Jot something\u2026 - [ ] makes a checkbox.",
           onUpdate: () => {
-            if (!state.readOnly && state.note && state.rich.getMarkdown() !== state.note.body) scheduleSave();
+            if (!state.readOnly && state.note && state.rich && state.rich.getMarkdown() !== state.note.body) scheduleSave();
           }
         });
         el.editor.addEventListener("click", (e) => {
-          const a = e.target.closest("a[href]");
+          const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
           if (a && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             const href = a.getAttribute("href") || "";
@@ -798,7 +798,7 @@
       });
     }
     async function flush() {
-      clearTimeout(state.saveTimer);
+      if (state.saveTimer) clearTimeout(state.saveTimer);
       await save();
     }
     init();
