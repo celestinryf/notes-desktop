@@ -28,7 +28,12 @@ import { createLiveShare } from './live-share.js';
 import { createSharing } from './sharing.js';
 import { createStickyButton } from './sticky-button.js';
 import { createBotPanel } from './bot-panel.js';
-import { createCodeEditor } from './code-editor.js';
+import { createCodeEditor, src } from './code-editor.js';
+import { createVaultsPanel } from './vaults-panel.js';
+import { createLocking } from './locking.js';
+import { createAttachments } from './attachments.js';
+import { createHistoryDialog } from './history-dialog.js';
+import { createSpeech } from './speech.js';
 import { createImages } from './images.js';
 import { createConvertMenu } from './convert-menu.js';
 import { createEditorText } from './editor-text.js';
@@ -37,9 +42,7 @@ import { createEditorText } from './editor-text.js';
   'use strict';
 
   const api = withPeerNotice(window.notesApi, peerChanged);
-  const { isViewerOnlyFile, isPlainTextFile } = H;
-  // An opened file whose text is not Markdown: plain text, Word, PDF.
-  const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
+  const { isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile } = H;
 
   // ---- theme & settings ----------------------------------------------------
 
@@ -1119,139 +1122,9 @@ import { createEditorText } from './editor-text.js';
     else if (action === 'delete') deleteFolder(id);
   }
 
-  // ---- vaults ----------------------------------------------------------------
+  // ---- vaults: see vaults-panel.js ----
 
-  state.vaultStatus = {};
-
-  async function syncVault(id) {
-    toast('Syncing vault…');
-    const r = await api.vaults.sync(id);
-    if (r.ok) toast('Vault synced.');
-    else if (r.skipped) toast('This vault is a plain folder (' + r.skipped + '). Add a remote in Settings to sync it.');
-    else toast('Vault sync failed: ' + r.error);
-    await refresh({ keepEditor: true });
-    renderVaultList();
-  }
-
-  async function removeVault(id) {
-    if (!window.confirm('Remove this vault from Notes? The folder and its files stay on disk untouched.')) return;
-    await flushSave();
-    await api.vaults.remove(id);
-    if (state.view === 'folder') await setView('all'); else await refresh({ keepEditor: true });
-    renderVaultList();
-    toast('Vault removed. Files kept.');
-  }
-
-  async function addVaultFolder() {
-    const dir = await api.vaults.pickFolder();
-    if (!dir) return;
-    try {
-      const v = await api.vaults.add({ path: dir });
-      await leaveSettings();
-      await setView('folder', v.rootFolderId);
-      await setExpanded(v.rootFolderId, true);
-      toast('Vault "' + v.name + '" added' + (v.status.isRepo ? ' (git repository' + (v.status.remote ? ', syncing with ' + v.status.remote : ', no remote') + ')' : ''));
-    } catch (err) {
-      toast('Could not add vault: ' + (err.message || err));
-    }
-  }
-
-  function openCloneDialog() {
-    el.vaultUrlInput.value = '';
-    el.vaultNameInput.value = '';
-    el.vaultError.textContent = '';
-    if (!el.vaultDestInput.value && state.info && state.info.documentsDir) el.vaultDestInput.value = state.info.documentsDir;
-    el.vaultDialog.showModal();
-    el.vaultUrlInput.focus();
-  }
-
-  async function submitClone() {
-    const url = el.vaultUrlInput.value.trim();
-    const dest = el.vaultDestInput.value.trim();
-    if (!url) { el.vaultError.textContent = 'Enter a repository URL.'; return; }
-    if (!dest) { el.vaultError.textContent = 'Choose where to clone.'; return; }
-    el.vaultCloneSubmitBtn.disabled = true;
-    el.vaultError.textContent = 'Cloning…';
-    try {
-      const r = await api.vaults.clone(url, dest, el.vaultNameInput.value.trim());
-      if (!r.ok) { el.vaultError.textContent = r.error; return; }
-      el.vaultDialog.close();
-      await leaveSettings();
-      await setView('folder', r.vault.rootFolderId);
-      await setExpanded(r.vault.rootFolderId, true);
-      toast('Cloned "' + r.vault.name + '". Changes will sync automatically.');
-    } catch (err) {
-      el.vaultError.textContent = String(err.message || err);
-    } finally {
-      el.vaultCloneSubmitBtn.disabled = false;
-    }
-  }
-
-  async function renderVaultList() {
-    if (!el.settingsDialog.open) return;
-    let list;
-    try { list = await api.vaults.list(); } catch (_) { return; }
-    el.vaultList.innerHTML = '';
-    if (!list.length) {
-      const d = document.createElement('div');
-      d.className = 'vault-empty';
-      d.textContent = 'No vaults yet. Add a folder of Markdown files, or clone a repository.';
-      el.vaultList.append(d);
-      return;
-    }
-    for (const v of list) {
-      state.vaultStatus[v.id] = v.status;
-      const item = document.createElement('div');
-      item.className = 'vault-item';
-      item.dataset.id = v.id;
-      const head = document.createElement('div');
-      head.className = 'vault-head';
-      head.innerHTML = '<span></span><span class="vault-path"></span>';
-      head.firstChild.textContent = v.name;
-      head.lastChild.textContent = v.path;
-      head.lastChild.title = v.path;
-      item.append(head);
-      const st = document.createElement('div');
-      st.className = 'vault-status' + (v.status.lastError || v.status.conflict ? ' is-error' : '');
-      st.textContent = describeVaultStatus(v);
-      item.append(st);
-      const actions = document.createElement('div');
-      actions.className = 'vault-actions';
-      const remote = document.createElement('input');
-      remote.className = 'input';
-      remote.placeholder = v.status.isRepo ? 'Remote URL (origin)' : 'Add a remote URL to turn this folder into a synced repo';
-      remote.value = v.remote || v.status.remote || '';
-      remote.addEventListener('change', async () => { const r = await api.vaults.update(v.id, { remote: remote.value.trim() }); if (r && r.ok === false) toast(r.error); renderVaultList(); });
-      actions.append(remote);
-      const mk = (label, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
-      mk('Sync now', () => syncVault(v.id));
-      mk('Rescan', async () => { const r = await api.vaults.scan(v.id); toast('Rescanned: +' + r.added + ' changed ' + r.updated + ' removed ' + r.removed); await refresh({ keepEditor: true }); });
-      mk('Open folder', () => api.vaults.openFolder(v.id));
-      const auto = document.createElement('label');
-      auto.className = 'field-check';
-      auto.innerHTML = '<input type="checkbox"><span>Auto-sync</span>';
-      auto.firstChild.checked = v.autoSync;
-      auto.firstChild.addEventListener('change', async () => { await api.vaults.update(v.id, { autoSync: auto.firstChild.checked }); renderVaultList(); });
-      actions.append(auto);
-      mk('Remove', () => removeVault(v.id), 'btn-danger');
-      item.append(actions);
-      el.vaultList.append(item);
-    }
-  }
-
-  function describeVaultStatus(v) {
-    const s = v.status || {};
-    if (!s.isRepo) return 'Plain folder: notes mirror the files, no git. Add a remote URL to start syncing.';
-    const parts = ['git on ' + (s.branch || '?')];
-    if (s.remote) parts.push(s.ahead || s.behind ? (s.ahead + ' ahead, ' + s.behind + ' behind') : 'in sync with remote');
-    else parts.push('no remote (local history only)');
-    if (s.dirty) parts.push('uncommitted changes');
-    if (s.syncing) parts.push('syncing…');
-    if (s.lastSyncAt) parts.push('last sync ' + H.relativeTime(s.lastSyncAt));
-    if (s.conflict) parts.push('CONFLICT: resolve in the folder');
-    if (s.lastError) parts.push('error: ' + s.lastError);
-    return parts.join(' · ');
-  }
+  const { syncVault, removeVault, addVaultFolder, openCloneDialog, submitClone, renderVaultList, describeVaultStatus } = createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded });
 
   // ---- tabs and split view ---------------------------------------------------
   // Each side of the editor pane has its own row of tabs, and selectNote shows a note in the side's current tab.
@@ -2286,123 +2159,13 @@ import { createEditorText } from './editor-text.js';
 
   const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
 
-  // ---- locking -----------------------------------------------------------------
+  // ---- desktop stickies: see sticky-button.js ----
 
-  const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
+  const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
 
-  function renderLockState(note) {
-    const locked = !!(note && note.locked);
-    const open = !!(note && note.unlocked);
-    el.lockScreen.classList.toggle('hidden', !(locked && !open));
-    el.lockScreenError.textContent = '';
-    el.lockScreenPassword.value = '';
-    el.lockBtn.classList.toggle('is-on', locked);
-    setLabel(el.lockBtn, !locked ? 'Lock' : (open ? 'Unlocked' : 'Locked'));
-    setIcon(el.lockBtn, locked && open ? 'lock-open' : 'lock');
-    el.lockBtn.title = !locked ? 'Lock this note with a password (Ctrl+L)' : (open ? 'Unlocked for now: lock again or remove the lock (Ctrl+L)' : 'Locked. Enter the password below to read it (Ctrl+L)');
-    if (locked && !open) {
-      el.richEditor.classList.add('hidden');
-      el.bodyInput.classList.add('hidden');
-      if (state.rich) state.rich.setEditable(false);
-    } else if (note) {
-      renderFileRow(note); // restores the right editor for the mode
-      if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note) && !isPlainTextFile(note));
-    }
-  }
+  // ---- locking: see locking.js ----
 
-  function onLockButton() {
-    const note = state.current;
-    if (!note || note.trashedAt || note.filePath) return;
-    if (!note.locked) { openLockDialog('set'); return; }
-    if (!note.unlocked) { el.lockScreenPassword.focus(); return; }
-    placePopover(el.lockMenu, el.moreMenu.contains(el.lockBtn) ? el.moreBtn : el.lockBtn);
-  }
-
-  function openLockDialog(mode) {
-    el.lockDialog.dataset.mode = mode;
-    el.lockDialogTitle.textContent = mode === 'set' ? 'Lock note' : 'Remove lock';
-    el.lockDialogHint.textContent = mode === 'set'
-      ? 'The text is encrypted with this password. There is no recovery: if you forget it, the note stays locked.'
-      : 'Enter the password to store this note in clear again.';
-    el.lockConfirmRow.classList.toggle('hidden', mode !== 'set');
-    el.lockSubmitBtn.textContent = mode === 'set' ? 'Lock' : 'Remove lock';
-    el.lockPassword.value = ''; el.lockPassword2.value = ''; el.lockError.textContent = '';
-    el.lockDialog.showModal();
-    el.lockPassword.focus();
-  }
-
-  async function submitLockDialog() {
-    const note = state.current;
-    if (!note) return;
-    const mode = el.lockDialog.dataset.mode;
-    const pw = el.lockPassword.value;
-    if (!pw) { el.lockError.textContent = 'Enter a password.'; return; }
-    if (mode === 'set' && pw !== el.lockPassword2.value) { el.lockError.textContent = 'The two passwords differ.'; return; }
-    await flushSave();
-    try {
-      const updated = mode === 'set' ? await api.lock.set(note.id, pw) : await api.lock.remove(note.id, pw);
-      el.lockDialog.close();
-      applyLockedNote(updated);
-      toast(mode === 'set' ? 'Locked. It stays readable until you hide the app or choose Lock now.' : 'Lock removed.');
-    } catch (err) {
-      el.lockError.textContent = ipcErrorText(err);
-    }
-  }
-
-  async function unlockFromScreen() {
-    const note = state.current;
-    if (!note) return;
-    const pw = el.lockScreenPassword.value;
-    if (!pw) { el.lockScreenError.textContent = 'Enter the password.'; return; }
-    try {
-      const updated = await api.lock.unlock(note.id, pw);
-      applyLockedNote(updated);
-      focusBody();
-    } catch (err) {
-      el.lockScreenError.textContent = /wrong password/i.test(String(err.message)) ? 'Wrong password.' : ipcErrorText(err);
-      el.lockScreenPassword.select();
-    }
-  }
-
-  // Swaps the open note for its fresh view after a lock change: body, editor, button, card.
-  function applyLockedNote(updated) {
-    if (!updated || updated.id !== state.currentId) return;
-    state.current = updated;
-    // Keystrokes that landed while the lock call ran (scrypt takes a moment) are kept and saved again;
-    // a relocked note, on the other hand, must show no plaintext at all.
-    const keepTyping = state.dirty && updated.unlocked;
-    if (!keepTyping) {
-      state.dirty = false;
-      src.reload(updated.body);
-      if (state.rich) {
-        state.currentLossless = state.rich.setMarkdown(updated.body);
-        // Same rule as opening a note: text the rendered view would rewrite opens as source.
-        if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) { applyEditorMode(true); toast('Switched to source: this note contains formatting the rendered view would change.'); }
-      }
-      state.pending.delete(updated.id);
-      autoGrow();
-      if (find.open) runFind(true, true, true);
-    } else scheduleSave();
-    renderLockState(updated);
-    renderStickyButton(updated);
-    updateStatus(updated);
-    const idx = state.notes.findIndex((n) => n.id === updated.id);
-    if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
-  }
-
-  async function lockMenuAction(action) {
-    el.lockMenu.classList.add('hidden');
-    const note = state.current;
-    if (!note || !note.locked) return;
-    if (action === 'relock') {
-      const saved = await flushSave();
-      if (!saved) { toast('Your latest typing could not be saved yet, so the note was not locked. Try again in a moment.'); return; }
-      state.pending.delete(note.id);
-      applyLockedNote(await api.lock.relock(note.id));
-      toast('Locked.');
-    }
-    else if (action === 'remove') openLockDialog('remove');
-  }
+  const { lockedNow, renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
 
   // ---- reminders: see reminders.js ----
 
@@ -2412,186 +2175,15 @@ import { createEditorText } from './editor-text.js';
 
   const { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive });
 
-  // ---- attachments and voice memos --------------------------------------------
+  // ---- attachments and voice memos: see attachments.js ----
 
-  function insertAttachmentLinks(items) {
-    const ok = items.filter((x) => x && !x.error);
-    const bad = items.filter((x) => x && x.error);
-    for (const it of ok) insertLinkIntoNote('📎 ' + it.name, it.href);
-    if (ok.length) toast(ok.length === 1 ? 'Attached ' + ok[0].name : 'Attached ' + ok.length + ' files');
-    for (const b of bad) toast('Could not attach ' + b.name + ': ' + b.error);
-  }
+  const { attachFiles, toggleRecording } = createAttachments({ api, tableShown, lockedNow, flushSave, refresh });
 
-  // Puts a Markdown link at the caret in whichever view is up, and saves.
-  // A CSV's table is read-only: adding a link, an attachment or a recording waits for its text view. Checked before a
-  // file is picked or recorded, so nothing is copied for a link that cannot go in.
-  function refuseInTable() {
-    if (!tableShown()) return false;
-    toast('Switch to Text (Ctrl+E) to add this to the file.');
-    return true;
-  }
+  // ---- earlier versions: see history-dialog.js ----
 
-  function insertLinkIntoNote(text, href) {
-    if (!state.current || lockedNow()) return;
-    if (refuseInTable()) return;
-    if (state.sourceMode || !state.rich) {
-      const ta = src;
-      if (ta.readOnly) return;
-      const at = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
-      const end = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : at;
-      const md = '[' + text.replace(/[\[\]]/g, '') + '](' + href + ')';
-      const before = ta.value.slice(0, at), after = ta.value.slice(end);
-      const sep = before && !/\s$/.test(before) ? ' ' : '';
-      ta.value = before + sep + md + ' ' + after;
-      const pos = (before + sep + md + ' ').length;
-      ta.setSelectionRange(pos, pos);
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-      state.rich.insertLink(text, href);
-    }
-  }
-
-  async function attachFiles() {
-    if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
-    if (refuseInTable()) return;
-    const forNote = state.current.id;
-    await flushSave();
-    const items = await api.attachments.pick();
-    if (state.currentId === forNote) { insertAttachmentLinks(items); return; }
-    // The person moved to another note while the picker was open: the files belong to the note they chose.
-    const ok = items.filter((x) => x && !x.error);
-    if (!ok.length) { insertAttachmentLinks(items); return; }
-    const target = await api.notes.get(forNote);
-    if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
-      const links = ok.map((it) => '[📎 ' + it.name.replace(/[[\]]/g, '') + '](' + it.href + ')').join('\n');
-      await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + links + '\n' });
-      toast('Attached to "' + H.truncate(H.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
-      refresh({ keepEditor: true });
-    } else toast('Attached files are kept in the attachments folder; that note can no longer take them.');
-  }
-
-  const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
-
-  async function toggleRecording() {
-    if (rec.recorder) { rec.recorder.stop(); return; }
-    if (rec.starting) return; // the microphone prompt is still up
-    if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
-    if (refuseInTable()) return;
-    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
-    rec.noteId = state.current.id;
-    rec.starting = true;
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (err) { rec.starting = false; toast('Microphone not available: ' + (err.message || err)); return; }
-    rec.starting = false;
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
-    rec.recorder = recorder; rec.chunks = []; rec.startedAt = Date.now();
-    recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) rec.chunks.push(ev.data); };
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      clearInterval(rec.timer);
-      el.recordBtn.classList.remove('is-recording');
-      setLabel(el.recordBtn, 'Record a voice memo');
-      setActivity('record', null);
-      const seconds = Math.max(1, Math.round((Date.now() - rec.startedAt) / 1000));
-      rec.recorder = null;
-      const blob = new Blob(rec.chunks, { type: 'audio/webm' });
-      if (!blob.size) { toast('Nothing was recorded.'); return; }
-      try {
-        const saved = await api.attachments.saveRecording(new Uint8Array(await blob.arrayBuffer()), 'webm');
-        const mm = String(Math.floor(seconds / 60)).padStart(2, '0'), ss = String(seconds % 60).padStart(2, '0');
-        const label = '🎙 Voice memo ' + mm + ':' + ss;
-        if (state.currentId === rec.noteId && !lockedNow()) {
-          insertLinkIntoNote(label, saved.href);
-          toast('Voice memo saved (' + mm + ':' + ss + '). Ctrl+click the link to play it.');
-        } else {
-          // The person moved to another note meanwhile: the memo still belongs to the note it was recorded in.
-          const target = await api.notes.get(rec.noteId);
-          if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
-            await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + '[' + label + '](' + saved.href + ')\n' });
-            toast('Voice memo saved into "' + H.truncate(H.deriveTitle(target), 30) + '", the note it was recorded in.');
-            refresh({ keepEditor: true });
-          } else toast('Voice memo saved as ' + saved.name + ' (that note can no longer take it; Attach it where you want it).');
-        }
-      } catch (err) { toast('Could not save the recording: ' + (err.message || err)); }
-    };
-    recorder.start(250);
-    el.recordBtn.classList.add('is-recording');
-    const tick = () => {
-      const s = Math.round((Date.now() - rec.startedAt) / 1000);
-      const clock = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-      setLabel(el.recordBtn, 'Stop recording (' + clock + ')');
-      setActivity('record', { text: 'Recording ' + clock, icon: 'audio-lines', stop: toggleRecording, stopLabel: 'Stop recording (Ctrl+Shift+G)' });
-    };
-    tick(); rec.timer = setInterval(tick, 500);
-  }
-
-  // ---- earlier versions ----------------------------------------------------------
-
-  const hist = { versions: [], index: -1, noteId: null };
-
-  async function openHistory() {
-    const note = state.current;
-    if (!note) return;
-    if (note.trashedAt) { toast('Restore the note from the trash first; then its earlier versions can be restored.'); return; }
-    await flushSave();
-    el.historyList.innerHTML = '';
-    el.historyPreview.textContent = '';
-    el.historyRestoreBtn.disabled = true;
-    el.historyStatus.textContent = 'Loading…';
-    el.historyDialog.showModal();
-    const r = await api.app.historyVersions(note.id, 80);
-    if (!r.ok) { el.historyStatus.textContent = r.error; return; }
-    hist.noteId = note.id; // Restore only ever writes into the note these versions belong to
-    hist.versions = r.versions.filter((v) => v.body !== r.current); // what differs from now
-    hist.index = -1;
-    el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : 'No earlier version differs from the current text yet.';
-    hist.versions.forEach((v, i) => {
-      const li = document.createElement('li');
-      li.setAttribute('role', 'option');
-      li.dataset.index = i;
-      const first = (v.body.split('\n').find((l) => l.trim()) || '(empty)').replace(/^#+\s*/, '');
-      li.innerHTML = '<span class="when"></span><span class="first"></span>';
-      li.querySelector('.when').textContent = new Date(v.at).toLocaleString() + ' · ' + v.chars + ' chars';
-      li.querySelector('.first').textContent = H.truncate(first, 48);
-      li.addEventListener('click', () => showVersion(i));
-      el.historyList.append(li);
-    });
-    if (hist.versions.length) showVersion(0);
-  }
-
-  function showVersion(i) {
-    hist.index = i;
-    for (const li of el.historyList.children) li.classList.toggle('is-active', Number(li.dataset.index) === i);
-    el.historyPreview.textContent = hist.versions[i].body;
-    el.historyRestoreBtn.disabled = false;
-  }
-
-  async function restoreVersion() {
-    const v = hist.versions[hist.index];
-    const note = state.current;
-    if (!v || !note) return;
-    el.historyDialog.close();
-    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile(note)) { toast('This note cannot take the restored text right now.'); return; }
-    src.value = v.body;
-    if (state.rich) {
-      let lossless = state.rich.setMarkdown(v.body);
-      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false; // a real file gets the strict test
-      state.currentLossless = lossless;
-      state.lossyOverride = null;
-      if (!lossless && !state.sourceMode) applyEditorMode(true); // text the rendered view would rewrite opens as source
-    }
-    autoGrow();
-    if (find.open) runFind(true, true, true); // the text changed under the find bar
-    scheduleSave();
-    const ok = await flushSave();
-    if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
-    else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
-  }
+  const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, lockedNow, applyEditorMode, autoGrow, runFind, scheduleSave });
 
   // ---- find in note, print ---------------------------------------------------
-
 
   function openFind() {
     if (!state.current) return;
@@ -2844,10 +2436,6 @@ import { createEditorText } from './editor-text.js';
     return { name: title, html: (state.current.title ? '<h1>' + escapeHtml(state.current.title) + '</h1>' : '') + currentHtml() };
   }
 
-  // ---- desktop stickies: see sticky-button.js ----
-
-  const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
-
   // Re-reads the open note's metadata (not its body) after something outside the editor changed it.
   async function refreshCurrentMeta() {
     if (!state.currentId) return;
@@ -2868,97 +2456,9 @@ import { createEditorText } from './editor-text.js';
 
   const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
 
-  // ---- speech: read aloud and dictate --------------------------------------
+  // ---- speech: read aloud and dictate: see speech.js ----
 
-  const tts = { active: false, queue: [], index: 0 };
-
-  function selectedTextForSpeech() {
-    if (state.sourceMode) {
-      const ta = src;
-      if (ta.selectionStart !== ta.selectionEnd) return ta.value.slice(ta.selectionStart, ta.selectionEnd);
-      return '';
-    }
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && el.richEditor.contains(sel.anchorNode)) return sel.toString();
-    return '';
-  }
-
-  function textForSpeech() {
-    const selected = selectedTextForSpeech().trim();
-    if (selected) return selected;
-    const title = el.titleInput.value.trim();
-    // Only Markdown has marks to strip; a plain-text or Word file is read as the text it is.
-    const note = state.current;
-    const body = isNonMarkdownFile(note) ? el.bodyInput.value : H.plainTextFromMarkdown(el.bodyInput.value);
-    return (title ? title + '.\n' : '') + body;
-  }
-
-  function pickVoice() {
-    const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-    const wanted = state.settings && state.settings.ttsVoice;
-    return voices.find((v) => v.name === wanted) || null;
-  }
-
-  function setReadAloudState(active) {
-    tts.active = active;
-    setLabel(el.readAloudBtn, active ? 'Stop reading' : 'Read aloud');
-    el.readAloudBtn.classList.toggle('is-on', active);
-    setActivity('read', active ? { text: 'Reading aloud', icon: 'volume-2', stop: stopReadAloud, stopLabel: 'Stop reading (Ctrl+Shift+R)' } : null);
-  }
-
-  function stopReadAloud() {
-    tts.queue = [];
-    tts.index = 0;
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    setReadAloudState(false);
-  }
-
-  function speakNext() {
-    if (!tts.active || tts.index >= tts.queue.length) { setReadAloudState(false); return; }
-    const u = new SpeechSynthesisUtterance(tts.queue[tts.index++]);
-    const voice = pickVoice();
-    if (voice) u.voice = voice;
-    u.rate = (state.settings && state.settings.ttsRate) || 1;
-    u.onend = () => speakNext();
-    u.onerror = (e) => { if (e.error !== 'interrupted' && e.error !== 'canceled') toast('Read aloud stopped: ' + e.error); setReadAloudState(false); };
-    if (state.info && state.info.drySpeech) return; // tests and screenshots: the mode runs, nothing is said out loud
-    window.speechSynthesis.speak(u);
-  }
-
-  function toggleReadAloud() {
-    if (!window.speechSynthesis) { toast('Speech is not available on this system.'); return; }
-    if (tts.active) { stopReadAloud(); return; }
-    if (!state.current) return;
-    const text = textForSpeech();
-    if (!text.trim()) { toast('Nothing to read yet.'); return; }
-    tts.queue = H.speechChunks(text);
-    tts.index = 0;
-    setReadAloudState(true);
-    window.speechSynthesis.cancel();
-    speakNext();
-  }
-
-  function populateVoices() {
-    if (!window.speechSynthesis) return;
-    const voices = window.speechSynthesis.getVoices().slice().sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
-    const current = state.settings ? state.settings.ttsVoice : '';
-    el.ttsVoiceSelect.innerHTML = '<option value="">System default</option>';
-    for (const v of voices) {
-      const o = document.createElement('option');
-      o.value = v.name;
-      o.textContent = v.name + ' (' + v.lang + ')' + (v.default ? ' • default' : '');
-      el.ttsVoiceSelect.append(o);
-    }
-    el.ttsVoiceSelect.value = voices.some((v) => v.name === current) ? current : '';
-  }
-
-  async function startDictation() {
-    if (!state.current || isViewerOnlyFile(state.current) || state.current.trashedAt) { toast('Open an editable note first.'); return; }
-    focusBody();
-    const res = await api.app.dictate();
-    if (!res.ok) toast(res.error || 'Dictation could not start.');
-    else toast('Windows dictation opened: speak now. Say "stop dictating" or press Win+H to finish.');
-  }
+  const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api, focusBody });
 
   // ---- file-backed notes ---------------------------------------------------
 
@@ -4201,7 +3701,7 @@ import { createEditorText } from './editor-text.js';
     }
     updateStatus(note);
   }
-  const tableShown = () => !el.csvView.classList.contains('hidden');
+  function tableShown() { return !el.csvView.classList.contains('hidden'); }
   // A table or an image takes the rest of the pane, with its own scrolling, rather than a box scrolling in a page.
   function fillPane(on) {
     el.editorColumn.classList.toggle('fills-pane', on);
@@ -4308,7 +3808,7 @@ import { createEditorText } from './editor-text.js';
 
   // ---- the code editor: see code-editor.js ----
 
-  const { src, showCode, renderCodePosition } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+  const { showCode, renderCodePosition } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
 
   // ---- editor text helpers: see editor-text.js ----
 

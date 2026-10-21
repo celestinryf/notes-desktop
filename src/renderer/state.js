@@ -20,4 +20,5 @@ export const state = {
   savingFor: null,
   lastTypedAt: 0,
   liveStatus: {},
+  vaultStatus: {},
 };

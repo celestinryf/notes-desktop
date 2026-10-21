@@ -310,6 +310,9 @@
         function isPlainTextFile(note) {
           return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
         }
+        function isNonMarkdownFile(note) {
+          return isPlainTextFile(note) || isViewerOnlyFile(note);
+        }
         const WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
         const OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
         const WORD_TO_DOCX_EXT = /* @__PURE__ */ new Set(["doc", "dot", "rtf", "odt"]);
@@ -439,6 +442,7 @@
           extOf,
           isViewerOnlyFile,
           isPlainTextFile,
+          isNonMarkdownFile,
           isTableFile,
           isOoxmlWordFile,
           imageBaseFor,
