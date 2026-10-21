@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +12,7 @@ const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
+/** @type {Readonly<Settings>} */
 const DEFAULT_SETTINGS = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
   theme: 'system',          // system | light | dark
@@ -67,8 +69,14 @@ function cleanFolderName(name) {
 // The longest reading order a book keeps, and so the most pages a split may make.
 const MAX_BOOK_PAGES = 5000;
 
+/** @returns {Folder | null} */
 function sanitizeFolder(raw, now) {
   if (!raw || typeof raw !== 'object') return null;
+  return folderFrom(raw, now);
+}
+
+/** @param {Record<string, any>} raw @returns {Folder} */
+function folderFrom(raw, now) {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name),
@@ -148,6 +156,7 @@ const TABS_MAX = 50;
 
 // The editor's tabs: { split, ratio (left side's share), active ('left' | 'right'), left, right }, each side
 // { ids: note ids in tab order, current: the id shown }. Unknown ids are dropped when a tab is opened.
+/** @returns {Panes} */
 function sanitizePanes(raw) {
   const p = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const side = (v) => {
@@ -171,9 +180,10 @@ function sanitizePanes(raw) {
 
 function sanitizeSettings(input) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  /** @type {Settings} */
   const s = Object.assign({}, DEFAULT_SETTINGS, src);
   const acc = H.parseAccelerator(s.hotkey);
-  s.hotkey = acc.ok ? acc.value : DEFAULT_SETTINGS.hotkey;
+  s.hotkey = acc.ok && acc.value ? acc.value : DEFAULT_SETTINGS.hotkey;
   s.theme = ['system', 'light', 'dark'].includes(s.theme) ? s.theme : 'system';
   s.customColors = Themes.cleanCustom(s.customColors);
   s.colorScheme = Themes.cleanSchemeId(s.colorScheme, s.customColors);
@@ -232,13 +242,20 @@ function sanitizeSticky(raw) {
 }
 
 // A live-share session recorded on a note so it can be resumed after a restart.
+/** @returns {Live | null} */
 function sanitizeLive(raw) {
   if (!raw || typeof raw !== 'object' || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
   return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
 }
 
+/** @returns {Note | null} */
 function sanitizeNote(raw, now) {
   if (!raw || typeof raw !== 'object') return null;
+  return noteFrom(raw, now);
+}
+
+/** @param {Record<string, any>} raw @returns {Note} */
+function noteFrom(raw, now) {
   const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
@@ -277,9 +294,13 @@ class Store {
     this.keys = new Map();  // noteId -> derived key, so edits can be re-encrypted without the password
     this.folders = [];
     this.vaults = [];
+    /** @type {Settings} */
     this.settings = Object.assign({}, DEFAULT_SETTINGS);
     this.lastBackupAt = 0;
+    /** @type {Error | null} */
     this.loadError = null;
+    /** @type {((id: string) => void) | null} */
+    this.onFileText = null;
   }
 
   load() {
@@ -376,9 +397,7 @@ class Store {
 
   save() {
     if (this.saveBlocked) {
-      const err = new Error('Your notes file could not be read when Notes started (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once the file is free.');
-      err.code = 'ESAVEBLOCKED';
-      throw err;
+      throw Object.assign(new Error('Your notes file could not be read when Notes started (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once the file is free.'), { code: 'ESAVEBLOCKED' });
     }
     fs.mkdirSync(this.dir, { recursive: true });
     this._maybeBackup();
@@ -400,7 +419,7 @@ class Store {
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
     // Pruning must never block the note write itself; a backup held open by another program can wait.
-    while (files.length > MAX_BACKUPS) { try { fs.unlinkSync(path.join(this.backupDir, files.shift())); } catch (_) { break; } }
+    while (files.length > MAX_BACKUPS) { const oldest = files.shift(); if (!oldest) break; try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) { break; } }
   }
 
   // ---- notes -------------------------------------------------------------
@@ -439,7 +458,7 @@ class Store {
   create(data) {
     data = data || {};
     const now = this.now();
-    const note = sanitizeNote(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
+    const note = noteFrom(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
     if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
     this.notes.unshift(note);
     try {
@@ -764,8 +783,8 @@ class Store {
     const now = this.now();
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
     const parentId = parent && !parent.vaultId ? parent.id : null; // a vault folder holds files; the book sits at the top
-    const folder = { id: crypto.randomUUID(), name: cleanFolderName(String(opts.name || '').trim() || plan.name), parentId, createdAt: now, book: true, pageOrder: [] };
-    const pages = plan.pages.map((p) => sanitizeNote({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
+    const folder = folderFrom({ name: String(opts.name || '').trim() || plan.name, parentId, createdAt: now, book: true }, now);
+    const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
     const originalTrashed = !opts.keepOriginal;
     return this._commit(() => {
@@ -850,7 +869,7 @@ class Store {
     if (overlap) throw Object.assign(new Error('That folder overlaps the vault "' + overlap.name + '"; one vault cannot sit inside another.'), { code: 'EOVERLAP' });
     return this._commit(() => {
       this.vaults.push(vault);
-      this.folders.push({ id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: vault.id, dirPath: vault.path });
+      this.folders.push(folderFrom({ name: vault.name, vaultId: vault.id, dirPath: vault.path }, this.now()));
       return vault;
     });
   }
@@ -1251,6 +1270,7 @@ class Store {
       if (!by.has(k)) by.set(k, []);
       by.get(k).push(n);
     }
+    /** @type {Record<string, OutlineRow[]>} */
     const out = {};
     for (const [k, list] of by) {
       const f = k ? this.getFolder(k) : null;
@@ -1292,7 +1312,7 @@ class Store {
   createFolder(data) {
     data = data || {};
     const parentId = data.parentId && this.getFolder(data.parentId) ? data.parentId : null;
-    const folder = { id: crypto.randomUUID(), name: cleanFolderName(data.name), parentId, createdAt: this.now() };
+    const folder = folderFrom({ name: data.name, parentId }, this.now());
     const parent = parentId ? this.getFolder(parentId) : null;
     if (parent && parent.vaultId && parent.dirPath) {
       // A subfolder of a vault folder is a directory. Dot-directories are skipped by the scan (.git, .trash,

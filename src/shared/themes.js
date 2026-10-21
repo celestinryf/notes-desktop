@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Color schemes: the groundwork for Settings > Appearance (premade schemes, and colours the person picks).
 
@@ -10,7 +11,7 @@
    Shared by the main process (the window's background before the page paints), the store (settings) and the page. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.NotesThemes = factory();
+  else /** @type {any} */ (root).NotesThemes = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   const BUILT_IN = 'notes';
   const CUSTOM = 'custom';

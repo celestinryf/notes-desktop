@@ -37,6 +37,7 @@ function unlock(blob, password) {
   try { return { body: decrypt(blob, key), key }; } catch (_) { return null; }
 }
 
+/** @returns {Lock | null} */
 function sanitizeLock(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const ok = ['salt', 'iv', 'tag', 'ct'].every((k) => typeof raw[k] === 'string' && raw[k].length > 0);

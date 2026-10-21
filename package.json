@@ -11,21 +11,24 @@
     "icon": "electron scripts/make-icon.js",
     "install:shortcuts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcuts.ps1",
     "test:ui": "node --test --test-timeout=25000 test/ui.test.js",
-    "test:all": "npm test && npm run test:ui && npm run test:e2e",
+    "test:all": "npm run typecheck && npm test && npm run test:ui && npm run test:e2e",
     "build": "npm run build:editor && npm run build:docx && npm run build:pdf && npm run build:code",
     "build:editor": "esbuild src/editor/index.js --bundle --format=iife --global-name=NotesEditor --target=chrome120 --minify --outfile=src/renderer/vendor/editor.bundle.js",
     "build:docx": "esbuild src/docx-view/index.js --bundle --format=iife --global-name=DocxView --target=chrome120 --minify --outfile=src/renderer/vendor/docx.bundle.js",
     "build:pdf": "esbuild src/pdf-view/index.js --bundle --format=iife --global-name=PdfView --target=chrome120 --minify --outfile=src/renderer/vendor/pdf.bundle.js",
     "shots": "node scripts/shots.js",
     "icons": "node scripts/make-icons.js",
-    "build:code": "esbuild src/code/index.js --bundle --format=iife --global-name=NotesCode --target=chrome120 --minify --outfile=src/renderer/vendor/code.bundle.js"
+    "build:code": "esbuild src/code/index.js --bundle --format=iife --global-name=NotesCode --target=chrome120 --minify --outfile=src/renderer/vendor/code.bundle.js",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "electron": "^44.7.2",
     "esbuild": "^0.28.2",
     "lucide-static": "1.51.0",
-    "playwright-core": "^1.49.1"
+    "playwright-core": "^1.49.1",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
