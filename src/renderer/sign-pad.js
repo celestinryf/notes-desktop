@@ -1,6 +1,6 @@
 /* A pad to draw a signature on, exposed as window.NotesSignPad. The picture it gives back is cropped to the strokes,
    on a transparent background, so it sits on a PDF page like ink. */
-(function () {
+export const NotesSignPad = (function () {
   'use strict';
   const INK = '#1b1f4a';
   const PAD = 6; // px kept around the strokes when cropping
@@ -121,5 +121,5 @@
     return { fit, clear, load, writeName, toBlob, isEmpty: () => !box };
   }
 
-  window.NotesSignPad = { create };
+  return { create };
 })();

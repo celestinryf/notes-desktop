@@ -19,7 +19,7 @@
    was the document's own (ok: it reached the file; own: it is the document, not a copy under another name).
    onUnavailable: the frame never said it was ready (a build without hosted mode, or one that fails to load); nothing more
    is shown in it. */
-(function () {
+export const NotesCraftFrame = (function () {
   function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
     let ready = false;
     let loaded = false;
@@ -131,5 +131,5 @@
     return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
   }
 
-  window.NotesCraftFrame = { create };
+  return { create };
 })();

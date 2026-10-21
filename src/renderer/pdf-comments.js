@@ -1,7 +1,7 @@
 /* The comments panel beside an open PDF, exposed as window.NotesPdfComments. It lists the PDF's sticky notes, and
    other marks that carry a comment, and adds, retypes and deletes sticky notes. Those are standard PDF "Text"
    annotations, which main writes into the file, so other PDF apps show them as comments too. */
-(function () {
+export const NotesPdfComments = (function () {
   'use strict';
   const KIND_NAMES = { Text: 'Note', Highlight: 'Highlight', Underline: 'Underline', Squiggly: 'Squiggly underline', StrikeOut: 'Strikethrough',
     Ink: 'Drawing', Stamp: 'Stamp', Square: 'Rectangle', Circle: 'Oval', Line: 'Line', Polygon: 'Shape', PolyLine: 'Lines',
@@ -190,5 +190,5 @@
     };
   }
 
-  window.NotesPdfComments = { create };
+  return { create };
 })();

@@ -1,14 +1,16 @@
 'use strict';
 /* Sticky window page: one note, rendered editor, autosave. Talks to main through the same notesApi bridge. */
+import H from '../shared/helpers.js';
+import NotesIcons from './icons.js';
+
 (function () {
   const api = window.notesApi;
-  const H = window.NotesHelpers;
   const $ = (s) => document.querySelector(s);
   const el = {
     title: $('#stickyTitle'), colors: $('#stickyColors'), topBtn: $('#stickyTopBtn'), openBtn: $('#stickyOpenBtn'),
     closeBtn: $('#stickyCloseBtn'), editor: $('#stickyEditor'), missing: $('#stickyMissing'), status: $('#stickyStatus'),
   };
-  window.NotesIcons.hydrate(document);
+  NotesIcons.hydrate(document);
   const id = new URLSearchParams(location.search).get('id');
   const COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
   const state = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches, settings: null };
