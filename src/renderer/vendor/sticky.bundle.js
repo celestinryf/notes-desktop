@@ -303,7 +303,7 @@
           return !!(note && note.filePath && note.fileKind !== "text");
         }
         function extOf(filePath) {
-          const base = String(filePath || "").split(/[\\/]/).pop().toLowerCase();
+          const base = (String(filePath || "").split(/[\\/]/).pop() || "").toLowerCase();
           if (!base.includes(".")) return base;
           return base.slice(base.lastIndexOf(".") + 1);
         }

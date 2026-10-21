@@ -1385,7 +1385,7 @@ function main() {
   });
 
   // ---- per-note version history (from the git snapshots of notes.json) ------------
-  handle('history:versions', async (_e, id, limit) => {
+  handle('history:versions', /** @returns {Promise<HistoryVersions>} */ async (_e, id, limit) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };

@@ -303,7 +303,7 @@
           return !!(note && note.filePath && note.fileKind !== "text");
         }
         function extOf(filePath) {
-          const base = String(filePath || "").split(/[\\/]/).pop().toLowerCase();
+          const base = (String(filePath || "").split(/[\\/]/).pop() || "").toLowerCase();
           if (!base.includes(".")) return base;
           return base.slice(base.lastIndexOf(".") + 1);
         }
@@ -3143,9 +3143,13 @@
         tab.setAttribute("aria-selected", String(p.id === note.id));
         tab.dataset.id = p.id;
         tab.draggable = true;
-        tab.innerHTML = '<span class="no"></span><span class="t"></span>';
-        tab.querySelector(".no").textContent = String(i + 1);
-        tab.querySelector(".t").textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(p) || "Untitled", 28);
+        const no = document.createElement("span");
+        no.className = "no";
+        no.textContent = String(i + 1);
+        const t = document.createElement("span");
+        t.className = "t";
+        t.textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(p) || "Untitled", 28);
+        tab.append(no, t);
         tab.title = import_helpers4.default.deriveTitle(p) || "Untitled";
         tab.addEventListener("click", () => {
           if (p.id !== state.currentId) selectNote(p.id);
@@ -3156,8 +3160,10 @@
         });
         tab.addEventListener("dragstart", (e) => {
           book.dragId = p.id;
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", "page");
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", "page");
+          }
         });
         tab.addEventListener("dragover", (e) => {
           if (!book.dragId || book.dragId === p.id) return;
@@ -3227,7 +3233,7 @@
     async function openSplitDialog() {
       const note = state.current;
       if (!note || note.trashedAt) return;
-      if (note.locked || note.lock) {
+      if (note.locked) {
         toast("Unlock and remove the lock first: a locked note cannot be split.");
         return;
       }
@@ -4523,10 +4529,13 @@
         item.dataset.id = v.id;
         const head = document.createElement("div");
         head.className = "vault-head";
-        head.innerHTML = '<span></span><span class="vault-path"></span>';
-        head.firstChild.textContent = v.name;
-        head.lastChild.textContent = v.path;
-        head.lastChild.title = v.path;
+        const name = document.createElement("span");
+        name.textContent = v.name;
+        const where = document.createElement("span");
+        where.className = "vault-path";
+        where.textContent = v.path;
+        where.title = v.path;
+        head.append(name, where);
         item.append(head);
         const st = document.createElement("div");
         st.className = "vault-status" + (v.status.lastError || v.status.conflict ? " is-error" : "");
@@ -4561,12 +4570,16 @@
         mk("Open folder", () => api.vaults.openFolder(v.id));
         const auto = document.createElement("label");
         auto.className = "field-check";
-        auto.innerHTML = '<input type="checkbox"><span>Auto-sync</span>';
-        auto.firstChild.checked = v.autoSync;
-        auto.firstChild.addEventListener("change", async () => {
-          await api.vaults.update(v.id, { autoSync: auto.firstChild.checked });
+        const autoBox = document.createElement("input");
+        autoBox.type = "checkbox";
+        autoBox.checked = v.autoSync;
+        autoBox.addEventListener("change", async () => {
+          await api.vaults.update(v.id, { autoSync: autoBox.checked });
           renderVaultList();
         });
+        const autoLabel = document.createElement("span");
+        autoLabel.textContent = "Auto-sync";
+        auto.append(autoBox, autoLabel);
         actions.append(auto);
         mk("Remove", () => removeVault(v.id), "btn-danger");
         item.append(actions);
@@ -4894,11 +4907,15 @@
       hist.versions.forEach((v, i) => {
         const li = document.createElement("li");
         li.setAttribute("role", "option");
-        li.dataset.index = i;
+        li.dataset.index = String(i);
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
-        li.innerHTML = '<span class="when"></span><span class="first"></span>';
-        li.querySelector(".when").textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        li.querySelector(".first").textContent = import_helpers13.default.truncate(first, 48);
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
+        const firstLine = document.createElement("span");
+        firstLine.className = "first";
+        firstLine.textContent = import_helpers13.default.truncate(first, 48);
+        li.append(when, firstLine);
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
@@ -5067,7 +5084,8 @@
       if (!state.current) return;
       find.open = true;
       el.findBar.classList.remove("hidden");
-      const sel = String(window.getSelection && window.getSelection().toString() || "").trim();
+      const selection = window.getSelection();
+      const sel = (selection ? selection.toString() : "").trim();
       if (!sel && src.hasFocus()) {
         const t = src.value.slice(src.selectionStart, src.selectionEnd).trim();
         if (t) el.findInput.value = t;
@@ -5151,8 +5169,8 @@
       if (window.CSS && CSS.highlights) CSS.highlights.set("notes-find-active", new Highlight(...find.active >= 0 && find.ranges[find.active] ? [find.ranges[find.active]] : []));
       const r = find.ranges[find.active];
       if (r) {
-        const node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-        if (node && node.scrollIntoView) node.scrollIntoView({ block: "center", behavior: "smooth" });
+        const node = r.startContainer instanceof Element ? r.startContainer : r.startContainer.parentElement;
+        if (node) node.scrollIntoView({ block: "center", behavior: "smooth" });
       }
       el.findCount.textContent = find.ranges.length ? find.active + 1 + "/" + find.ranges.length : "No matches";
     }
@@ -5222,7 +5240,7 @@
       };
       let lastBlock = null;
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        if (n.nodeType === 1) {
+        if (n instanceof Element) {
           if (n.tagName === "BR" || n.tagName === "IMG") text += "\n";
           continue;
         }
@@ -5248,12 +5266,11 @@
         if (!s || !e) return null;
         const r = document.createRange();
         r.setStart(s.node, s.offset);
-        if (e.offset === 0 && pos + q.length > 0) {
-          const prev = locate(pos + q.length - 1);
-          r.setEnd(prev.node, prev.offset + 1);
-        } else r.setEnd(e.node, e.offset);
+        const prev = e.offset === 0 && pos + q.length > 0 ? locate(pos + q.length - 1) : null;
+        if (prev) r.setEnd(prev.node, prev.offset + 1);
+        else r.setEnd(e.node, e.offset);
         return r;
-      }).filter(Boolean);
+      }).flatMap((r) => r ? [r] : []);
     }
     function runFind(forward, fresh, quiet) {
       const q = el.findInput.value;
@@ -5297,8 +5314,8 @@
       const n = find.ranges.length;
       if (n && find.active >= 0 && !quiet) {
         const r = find.ranges[find.active];
-        const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-        if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: "center", behavior: "smooth" });
+        const elNode = r.startContainer instanceof Element ? r.startContainer : r.startContainer.parentElement;
+        if (elNode) elNode.scrollIntoView({ block: "center", behavior: "smooth" });
       }
       el.findCount.textContent = n ? find.active + 1 + "/" + n : "No matches";
       el.findCount.classList.toggle("is-none", !n);
@@ -5334,8 +5351,9 @@
       else if (r.dry) toast("Print: dry run");
     }
     function exportOfCurrent() {
-      const title = import_helpers15.default.deriveTitle(state.current);
-      return { name: title, html: (state.current.title ? "<h1>" + escapeHtml(state.current.title) + "</h1>" : "") + currentHtml() };
+      const note = state.current;
+      if (!note) return { name: "Note", html: "" };
+      return { name: import_helpers15.default.deriveTitle(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() };
     }
     return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }

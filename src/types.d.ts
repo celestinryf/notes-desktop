@@ -108,6 +108,8 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null;
 }
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
+interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
+type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string } | { ok: false; error: string };
 
 type Ok<T = {}> = { ok: boolean; error?: string; canceled?: boolean } & Partial<T>;
 
@@ -158,7 +160,7 @@ interface IpcContract {
   'app:exportHtml': (id: string, bodyHtml: string) => unknown;
   'app:exportAll': () => unknown;
   'app:importMarkdown': () => { canceled?: boolean; count: number; firstId?: string | null; failed?: string[] };
-  'history:versions': (id: string, limit?: number) => unknown;
+  'history:versions': (id: string, limit?: number) => HistoryVersions;
   'lock:set': (id: string, password: string) => unknown;
   'lock:unlock': (id: string, password: string) => unknown;
   'lock:relock': (id: string) => PublicNote | null;

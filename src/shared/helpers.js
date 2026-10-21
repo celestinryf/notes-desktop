@@ -1,8 +1,9 @@
+// @ts-check
 /* Pure helpers shared by the main process, the renderer, and the tests.
    UMD-style so the same file loads with require() and with a <script> tag. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.NotesHelpers = factory();
+  else /** @type {{ NotesHelpers?: unknown }} */ (root).NotesHelpers = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
@@ -65,6 +66,7 @@
     if (d < 7) return d + (d === 1 ? ' day ago' : ' days ago');
     const date = new Date(ts);
     const sameYear = date.getFullYear() === new Date(now).getFullYear();
+    /** @type {Intl.DateTimeFormatOptions} */
     const opts = sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' };
     return date.toLocaleDateString(undefined, opts);
   }
@@ -310,7 +312,7 @@
 
   // A file's extension in lower case, or its whole name when it has none (Makefile, Dockerfile).
   function extOf(filePath) {
-    const base = String(filePath || '').split(/[\\/]/).pop().toLowerCase();
+    const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
     if (!base.includes('.')) return base;
     return base.slice(base.lastIndexOf('.') + 1);
   }

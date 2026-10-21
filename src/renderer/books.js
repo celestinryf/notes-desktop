@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import { markdownToHtml } from './note-html.js';
@@ -9,6 +10,7 @@ import { placePopover } from './popover.js';
 const { isNonMarkdownFile } = H;
 
 export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar }) {
+  /** @type {{ id: string | null, pages: PublicNote[], dragId: string | null, seq: number }} */
   const book = { id: null, pages: [], dragId: null, seq: 0 };
 
   function bookOf(note) {
@@ -38,13 +40,17 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
       tab.setAttribute('aria-selected', String(p.id === note.id));
       tab.dataset.id = p.id;
       tab.draggable = true;
-      tab.innerHTML = '<span class="no"></span><span class="t"></span>';
-      tab.querySelector('.no').textContent = String(i + 1);
-      tab.querySelector('.t').textContent = H.truncate(H.deriveTitle(p) || 'Untitled', 28);
+      const no = document.createElement('span');
+      no.className = 'no';
+      no.textContent = String(i + 1);
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = H.truncate(H.deriveTitle(p) || 'Untitled', 28);
+      tab.append(no, t);
       tab.title = H.deriveTitle(p) || 'Untitled';
       tab.addEventListener('click', () => { if (p.id !== state.currentId) selectNote(p.id); });
       tab.addEventListener('contextmenu', (e) => { e.preventDefault(); openPageMenu(p.id, tab, e); });
-      tab.addEventListener('dragstart', (e) => { book.dragId = p.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'page'); });
+      tab.addEventListener('dragstart', (e) => { book.dragId = p.id; if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'page'); } });
       tab.addEventListener('dragover', (e) => { if (!book.dragId || book.dragId === p.id) return; e.preventDefault(); tab.classList.add('drop-before'); });
       tab.addEventListener('dragleave', () => tab.classList.remove('drop-before'));
       tab.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); tab.classList.remove('drop-before'); movePage(book.dragId, p.id); });
@@ -102,7 +108,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   async function openSplitDialog() {
     const note = state.current;
     if (!note || note.trashedAt) return;
-    if (note.locked || note.lock) { toast('Unlock and remove the lock first: a locked note cannot be split.'); return; }
+    if (note.locked) { toast('Unlock and remove the lock first: a locked note cannot be split.'); return; }
     if (note.filePath) { toast('This note is a file on disk; only notes kept in the app can be split.'); return; }
     await flushSave();
     if (!state.current || state.current.id !== note.id) return;
@@ -328,6 +334,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   // ---- the reading view: the whole book on one page ----
 
   // The reading view is a snapshot of one book; reader.bookId says which.
+  /** @type {{ bookId: string | null, seq: number }} */
   const reader = { bookId: null, seq: 0 };
 
   async function openReader() {
