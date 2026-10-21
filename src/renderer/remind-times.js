@@ -1,3 +1,4 @@
+// @ts-check
 export function toLocalInputValue(ts) {
   const d = new Date(ts);
   const pad = (n) => String(n).padStart(2, '0');

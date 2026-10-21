@@ -1849,7 +1849,7 @@
             }
             if (nextScan && !nextScan.prefix) block = "it is not a standard Word document";
           }
-          if (!block && nextScan.paragraphs.some((p) => p.editable)) {
+          if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
             zip.file("word/document.xml", X.markForDisplay(nextXml, nextScan));
             display = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
           }
@@ -2322,7 +2322,8 @@
     }
     function parse(text, delim, limit) {
       const rows = [];
-      let row = [], field = "", quoted = false, total = 0, line = 1, rowLine = 1;
+      let row = [];
+      let field = "", quoted = false, total = 0, line = 1, rowLine = 1;
       const endRow = () => {
         row.push(field);
         field = "";
@@ -2525,7 +2526,9 @@
         const out = document.createElement("canvas");
         out.width = x1 - x0;
         out.height = y1 - y0;
-        out.getContext("2d").drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+        const ctx2 = out.getContext("2d");
+        if (!ctx2) return Promise.resolve(null);
+        ctx2.drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
         return new Promise((resolve) => out.toBlob(resolve, "image/png"));
       }
       return { fit, clear, load, writeName, toBlob, isEmpty: () => !box };
@@ -2841,14 +2844,12 @@
   var lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
   var state = {
     view: "all",
-    // all | pinned | trash | tag | folder
     tag: null,
     folderId: null,
     tree: [],
     folderPath: [],
     menuFolderId: null,
     editingFolder: null,
-    // { mode: 'create' | 'rename', id, parentId }
     query: "",
     notes: [],
     currentId: null,
@@ -2865,7 +2866,9 @@
     savingFor: null,
     lastTypedAt: 0,
     liveStatus: {},
-    vaultStatus: {}
+    vaultStatus: {},
+    pending: /* @__PURE__ */ new Map(),
+    inflight: /* @__PURE__ */ new Map()
   };
 
   // src/renderer/find-state.js
@@ -2933,7 +2936,7 @@
     }
     if (had) {
       had.a = a;
-      had.chip.querySelector(".activity-text").textContent = a.text;
+      had.text.textContent = a.text;
       had.chip.title = a.stopLabel;
       return;
     }
@@ -2942,8 +2945,12 @@
     chip.className = "activity-chip";
     chip.title = a.stopLabel;
     chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I("x");
-    chip.querySelector(".activity-text").textContent = a.text;
-    const entry = { chip, a };
+    const text = document.createElement("span");
+    text.className = "activity-text";
+    text.textContent = a.text;
+    chip.innerHTML = chip.innerHTML.replace('<span class="activity-text"></span>', "");
+    chip.insertBefore(text, chip.lastElementChild);
+    const entry = { chip, text, a };
     chip.addEventListener("click", () => entry.a.stop());
     activities.set(key, entry);
     el.activityBar.append(chip);
@@ -2971,7 +2978,7 @@
   }
   function treeFocusKey(root) {
     const a = document.activeElement;
-    return a && root.contains(a) && a.classList.contains("tree-row") ? a.dataset.key : null;
+    return a instanceof HTMLElement && root.contains(a) && a.classList.contains("tree-row") ? a.dataset.key : null;
   }
   function restoreTreeFocus(root, key) {
     const rows = visibleRows(root);
@@ -3057,12 +3064,12 @@
   }
   function bindMenuKeys() {
     document.addEventListener("keydown", (e) => {
-      const menu = e.target.closest && e.target.closest('.popover[role="menu"]');
+      const menu = e.target instanceof Element ? e.target.closest('.popover[role="menu"]') : null;
       if (!menu || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
       const items = [...menu.querySelectorAll("button")].filter((b) => b.offsetParent && !b.disabled);
       if (!items.length) return;
       e.preventDefault();
-      const i = items.indexOf(document.activeElement);
+      const i = items.findIndex((b) => b === document.activeElement);
       const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       items[next].focus();
     }, true);
@@ -3086,7 +3093,8 @@
       try {
         ed = window.NotesEditor.create(host, { imageBase: () => import_helpers3.default.imageBaseFor(note) });
         ed.setMarkdown(String(md || ""));
-        return host.querySelector(".rich-editor-content").innerHTML;
+        const content = host.querySelector(".rich-editor-content");
+        return content ? content.innerHTML : "";
       } finally {
         if (ed) ed.destroy();
       }
@@ -4030,7 +4038,7 @@
   var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
   var isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(import_helpers8.default.extOf(note.filePath));
   function codeEditor() {
-    if (!code) {
+    if (!code && window.NotesCode) {
       code = window.NotesCode.create({
         parent: el.codeHost,
         onChange: (text) => {
@@ -4302,11 +4310,11 @@
       el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
       el.csvView.classList.toggle("hidden", !table);
       fillPane(table || !!note && note.fileKind === "image" && !lockedNow());
-      if (table) renderTable2(note);
+      if (table) renderTable(note);
     }
     let tableDrawn = null;
     let tableStats = null;
-    function renderTable2(note) {
+    function renderTable(note) {
       const text = el.bodyInput.value;
       if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
         tableStats = NotesCsv.render(el.csvView, text, import_helpers9.default.extOf(note.filePath));
@@ -4417,7 +4425,7 @@
     function tableStatsNow() {
       return tableStats;
     }
-    return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
+    return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
   }
 
   // src/renderer/vaults-panel.js
@@ -4812,7 +4820,7 @@
       };
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        clearInterval(rec.timer);
+        if (rec.timer) clearInterval(rec.timer);
         el.recordBtn.classList.remove("is-recording");
         setLabel(el.recordBtn, "Record a voice memo");
         setActivity("record", null);
@@ -8029,7 +8037,7 @@
     const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, openReader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
     const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
-    const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
@@ -8233,7 +8241,6 @@
       state.saveTimer = setTimeout(flushSave, 350);
       if (state.current) updateStatus(state.current);
     }
-    state.pending = /* @__PURE__ */ new Map();
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
       if (isViewerOnlyFile8(state.current)) delete patch.body;
@@ -8327,7 +8334,6 @@
       if (typeof p.body === "string" && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body;
       return true;
     }
-    state.inflight = /* @__PURE__ */ new Map();
     async function flushSave(opts) {
       const docsSaved = await flushDocuments({ commit: !(opts && opts.fromBlur === true) });
       const textSaved = await flushTextSave();

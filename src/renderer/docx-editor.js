@@ -1,3 +1,4 @@
+// @ts-check
 /* Editing an opened Word document in place, exposed as window.NotesDocxEditor. The document is shown by docx-preview
    inside the sandboxed frame (nothing in it runs); this page makes its paragraphs editable and listens from outside.
 
@@ -165,7 +166,7 @@ export const NotesDocxEditor = (function () {
           try { nextScan = X.scanDocument(nextXml); } catch (err) { block = err.message; }
           if (nextScan && !nextScan.prefix) block = 'it is not a standard Word document';
         }
-        if (!block && nextScan.paragraphs.some((p) => p.editable)) {
+        if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
           zip.file('word/document.xml', X.markForDisplay(nextXml, nextScan));
           display = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
         }

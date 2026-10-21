@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state, lockedNow } from './state.js';
 import { currentHtml } from './note-html.js';

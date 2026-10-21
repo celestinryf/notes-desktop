@@ -1,3 +1,4 @@
+// @ts-check
 /* A pad to draw a signature on, exposed as window.NotesSignPad. The picture it gives back is cropped to the strokes,
    on a transparent background, so it sits on a PDF page like ink. */
 export const NotesSignPad = (function () {
@@ -114,7 +115,9 @@ export const NotesSignPad = (function () {
       const out = document.createElement('canvas');
       out.width = x1 - x0;
       out.height = y1 - y0;
-      out.getContext('2d').drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+      const ctx = out.getContext('2d');
+      if (!ctx) return Promise.resolve(null);
+      ctx.drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
       return new Promise((resolve) => out.toBlob(resolve, 'image/png'));
     }
 

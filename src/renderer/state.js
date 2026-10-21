@@ -1,14 +1,16 @@
+// @ts-check
 // The open note is locked and not unlocked for now: its text is hidden and nothing may write it.
 export const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
 
+/** @type {RendererState} */
 export const state = {
-  view: 'all',          // all | pinned | trash | tag | folder
+  view: 'all',
   tag: null,
   folderId: null,
   tree: [],
   folderPath: [],
   menuFolderId: null,
-  editingFolder: null,  // { mode: 'create' | 'rename', id, parentId }
+  editingFolder: null,
   query: '',
   notes: [],
   currentId: null,
@@ -24,4 +26,6 @@ export const state = {
   lastTypedAt: 0,
   liveStatus: {},
   vaultStatus: {},
+  pending: new Map(),
+  inflight: new Map(),
 };

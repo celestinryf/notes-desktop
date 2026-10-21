@@ -1,3 +1,4 @@
+// @ts-check
 // Positions of every case-insensitive occurrence of q in text.
 // Case-insensitive, but measured on the ORIGINAL text: lower-casing can change string length ("İ" becomes
 // two code units), which would shift every offset after it and make a replace hit the wrong characters.

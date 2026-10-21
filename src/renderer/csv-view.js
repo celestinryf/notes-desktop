@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* CSV and TSV files as a table. Read-only: editing is in the text view (Ctrl+E), so the file is never rewritten by
    looking at it. Parsing follows RFC 4180 (quoted fields may hold the delimiter, line breaks and doubled quotes) and is
@@ -26,9 +27,13 @@ export const NotesCsv = (function () {
 
   // Rows of fields, the first `limit` kept; total counts them all. Each row knows the text line it starts on (a quoted
   // field can span lines), so the table's numbers are the text view's line numbers.
+  /** @typedef {string[] & { line?: number }} Row */
   function parse(text, delim, limit) {
+    /** @type {Row[]} */
     const rows = [];
-    let row = [], field = '', quoted = false, total = 0, line = 1, rowLine = 1;
+    /** @type {Row} */
+    let row = [];
+    let field = '', quoted = false, total = 0, line = 1, rowLine = 1;
     const endRow = () => { row.push(field); field = ''; total++; if (rows.length < limit) { row.line = rowLine; rows.push(row); } row = []; rowLine = line; };
     for (let i = 0; i < text.length; i++) {
       const c = text[i];

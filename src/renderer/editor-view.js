@@ -300,5 +300,5 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   // The table's rows and columns, for the status line while a table shows.
   function tableStatsNow() { return tableStats; }
 
-  return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
+  return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
 }

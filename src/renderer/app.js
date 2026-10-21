@@ -1866,7 +1866,7 @@ import { createEditorText } from './editor-text.js';
 
   // ---- the editor view: see editor-view.js ----
 
-  const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
 
   // ---- related notes: see related.js ----
 
@@ -2130,7 +2130,6 @@ import { createEditorText } from './editor-text.js';
 
   // Patches that failed to save are kept per note (state.pending: id -> patch) and retried until they land,
   // even after the user has switched notes, so a locked or full disk never discards an edit.
-  state.pending = new Map();
 
   function currentPatch() {
     const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
@@ -2222,7 +2221,6 @@ import { createEditorText } from './editor-text.js';
     return true;
   }
 
-  state.inflight = new Map(); // id -> promise of a write in progress, so a reselect can wait for it
 
   // Resolves true when the open note is saved (or had nothing to save), false when the write failed.
   // Saves the open note: a PDF's or Word document's edits, then the text. opts.fromBlur: the window only lost focus (see flushPdf).

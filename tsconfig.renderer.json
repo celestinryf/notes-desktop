@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": []
+  },
+  "include": [
+    "src/types.d.ts",
+    "src/renderer/globals.d.ts",
+    "src/renderer/*.js",
+    "src/shared/*.js",
+    "src/editor/index.js",
+    "src/code/index.js",
+    "src/docx-view/index.js",
+    "src/pdf-view/index.js"
+  ]
+}

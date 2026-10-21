@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import { NotesPdfEditor } from './pdf-editor.js';

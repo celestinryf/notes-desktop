@@ -1,3 +1,4 @@
+// @ts-check
 import { el, setLabel } from './dom.js';
 import { state, lockedNow } from './state.js';
 import { src } from './code-editor.js';
@@ -65,6 +66,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     } else toast('Attached files are kept in the attachments folder; that note can no longer take them.');
   }
 
+  /** @type {{ recorder: MediaRecorder | null, chunks: Blob[], startedAt: number, timer: ReturnType<typeof setInterval> | null, noteId: string | null, starting: boolean }} */
   const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
 
   async function toggleRecording() {
@@ -85,7 +87,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) rec.chunks.push(ev.data); };
     recorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
-      clearInterval(rec.timer);
+      if (rec.timer) clearInterval(rec.timer);
       el.recordBtn.classList.remove('is-recording');
       setLabel(el.recordBtn, 'Record a voice memo');
       setActivity('record', null);

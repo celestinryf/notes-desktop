@@ -1,3 +1,4 @@
+// @ts-check
 import { el, I } from './dom.js';
 import { state } from './state.js';
 import { escapeHtml } from './text.js';

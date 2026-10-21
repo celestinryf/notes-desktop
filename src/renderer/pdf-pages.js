@@ -1,3 +1,4 @@
+// @ts-check
 /* The page organizer for an open PDF, exposed as window.NotesPdfPages: turn, move and remove pages, and add pages
    from another PDF. Changes are only a plan until Apply; then pdf.js builds the new page order and main turns the
    pages and writes the file. */

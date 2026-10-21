@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import { find } from './find-state.js';
@@ -11,6 +12,7 @@ let codeOn = false;   // it is showing the open note's text
 let codeFailed = false; // it could not start: files use the textarea until Notes restarts
 
 // What the rest of the app lends the editor: set once by createCodeEditor.
+/** @type {{ runFind: (forward?: boolean) => void, autoGrow: () => void, scrollTextareaToSelection: (at: number) => void }} */
 let hooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {} };
 
 // The source text and its selection, in whichever of the textarea and the code editor is showing it. Code that
@@ -49,7 +51,7 @@ const PROSE_EXT = new Set(['txt', 'text']);
 const isProseFile = (note) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
 
 function codeEditor() {
-  if (!code) {
+  if (!code && window.NotesCode) {
     code = window.NotesCode.create({
       parent: el.codeHost,
       onChange: (text) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
