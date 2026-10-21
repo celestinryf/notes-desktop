@@ -14,7 +14,7 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 // Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
-const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
+const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } = require('./shared/helpers.ts');
 const markitdown = require('./markitdown');
 
 // Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |

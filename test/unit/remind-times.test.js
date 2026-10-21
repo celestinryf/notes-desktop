@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { quickPick, toLocalInputValue } = require('../../src/renderer/remind-times.js');
+const { quickPick, toLocalInputValue } = require('../../src/renderer/remind-times.ts');
 
 const local = (y, mo, d, h = 0, mi = 0, s = 0, ms = 0) => new Date(y, mo - 1, d, h, mi, s, ms);
 const enabled = new WeakSet();

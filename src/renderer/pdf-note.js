@@ -1,13 +1,13 @@
 // @ts-check
-import { el } from './dom.js';
-import { state } from './state.js';
+import { el } from './dom.ts';
+import { state } from './state.ts';
 import { NotesPdfEditor } from './pdf-editor.js';
-import { NotesPdfPages } from './pdf-pages.js';
+import { NotesPdfPages } from './pdf-pages.ts';
 import { NotesPdfComments } from './pdf-comments.js';
-import { NotesSignPad } from './sign-pad.js';
-import { oneAtATime } from './one-at-a-time.js';
-import { ipcErrorText } from './text.js';
-import { toast } from './toast.js';
+import { NotesSignPad } from './sign-pad.ts';
+import { oneAtATime } from './one-at-a-time.ts';
+import { ipcErrorText } from './text.ts';
+import { toast } from './toast.ts';
 
 export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }) {
   // pdf.js shows the PDF and holds the edits; saving writes them into the file through main, which backs up the
@@ -331,5 +331,5 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
     });
   }
 
-  return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, closePdfPages, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
+  return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
 }

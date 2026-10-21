@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { withPeerNotice } = require('../../src/renderer/peer-notice.js');
+const { withPeerNotice } = require('../../src/renderer/peer-notice.ts');
 
 const tick = () => new Promise((r) => setImmediate(r));
 

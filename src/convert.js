@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { runWorker } = require('./run-worker');
 const { extOf, readText, readDocumentBuffer, readDocxText } = require('./files');
-const { OOXML_EXT, ZIP_DOC_EXT } = require('./shared/helpers');
+const { OOXML_EXT, ZIP_DOC_EXT } = require('./shared/helpers.ts');
 const markitdown = require('./markitdown');
 
 const FORMATS = {

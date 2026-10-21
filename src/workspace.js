@@ -4,7 +4,7 @@
    so a coding agent can read and edit them with ordinary file tools. Export before a run, import after. */
 const fs = require('fs');
 const path = require('path');
-const H = require('./shared/helpers');
+const H = require('./shared/helpers.ts');
 
 const MANIFEST = '.notes-manifest.json';
 // Office files among the notes (Word documents, spreadsheets, presentations) go along as read-only Markdown copies of

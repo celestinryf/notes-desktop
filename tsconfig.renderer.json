@@ -3,7 +3,11 @@
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
-    "lib": ["es2022", "dom", "dom.iterable"],
+    "lib": [
+      "es2022",
+      "dom",
+      "dom.iterable"
+    ],
     "types": []
   },
   "include": [
@@ -14,6 +18,8 @@
     "src/editor/index.js",
     "src/code/index.js",
     "src/docx-view/index.js",
-    "src/pdf-view/index.js"
+    "src/pdf-view/index.js",
+    "src/renderer/*.ts",
+    "src/shared/*.ts"
   ]
 }

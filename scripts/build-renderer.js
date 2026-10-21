@@ -1,5 +1,5 @@
 'use strict';
-/* Bundles the renderer pages, src/renderer/app.js and sticky.js with the modules they import, into
+/* Bundles the renderer pages, src/renderer/app.ts and sticky.ts with the modules they import, into
    src/renderer/vendor/<name>.bundle.js. The vendor bundles from `npm run build` stay separate scripts. */
 const path = require('path');
 const esbuild = require('esbuild');
@@ -10,7 +10,7 @@ const OUT_DIR = path.join(RENDERER, 'vendor');
 
 function buildRenderer({ write }) {
   return esbuild.buildSync({
-    entryPoints: ENTRIES.map((name) => path.join(RENDERER, name + '.js')),
+    entryPoints: ENTRIES.map((name) => path.join(RENDERER, name + '.ts')),
     bundle: true,
     format: 'iife',
     target: 'chrome120',

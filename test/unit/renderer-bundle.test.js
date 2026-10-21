@@ -34,7 +34,7 @@ test('the sticky bundle carries helpers and icons and still reads the editor fro
   const sticky = freshText('sticky');
   assert.ok(!readsGlobal(sticky, 'NotesHelpers') && !readsGlobal(sticky, 'NotesIcons'));
   assert.ok(sticky.includes('window.NotesEditor') && sticky.includes('window.notesApi'));
-  assert.ok(sticky.includes('function hydrate(') && sticky.includes('PANE_LIMITS'));
+  assert.ok(sticky.includes('function hydrate(') && sticky.includes('function isPlainTextFile('));
 });
 
 test('each page loads its vendor bundles and then one page bundle, no loose scripts', () => {
@@ -43,7 +43,7 @@ test('each page loads its vendor bundles and then one page bundle, no loose scri
 });
 
 test('no renderer source assigns a Notes global on window', () => {
-  for (const f of fs.readdirSync(RENDERER).filter((f) => f.endsWith('.js') && f !== 'icons.js')) {
+  for (const f of fs.readdirSync(RENDERER).filter((f) => (f.endsWith('.js') || f.endsWith('.ts')) && f !== 'icons.js')) {
     assert.ok(!/^\s*window\.Notes\w+ = /m.test(fs.readFileSync(path.join(RENDERER, f), 'utf8')), f + ' assigns a window global');
   }
 });
