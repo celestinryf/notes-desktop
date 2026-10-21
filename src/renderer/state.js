@@ -1,3 +1,6 @@
+// The open note is locked and not unlocked for now: its text is hidden and nothing may write it.
+export const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
+
 export const state = {
   view: 'all',          // all | pinned | trash | tag | folder
   tag: null,

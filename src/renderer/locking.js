@@ -10,8 +10,6 @@ import { placePopover } from './popover.js';
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
 export function createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
-  const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
-
   function renderLockState(note) {
     const locked = !!(note && note.locked);
     const open = !!(note && note.unlocked);
@@ -126,5 +124,5 @@ export function createLocking({ api, renderFileRow, flushSave, focusBody, applyE
     else if (action === 'remove') openLockDialog('remove');
   }
 
-  return { lockedNow, renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction };
+  return { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction };
 }

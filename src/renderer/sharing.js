@@ -1,12 +1,13 @@
 import { el } from './dom.js';
-import { state } from './state.js';
+import { state, lockedNow } from './state.js';
+import { currentHtml } from './note-html.js';
 import { find } from './find-state.js';
 import H from '../shared/helpers.js';
 import { escapeHtml } from './text.js';
 import { toast } from './toast.js';
 import { placePopover } from './popover.js';
 
-export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
+export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
   // Which share actions apply to the open note; the share menu and the command palette both use it.
   function syncShareMenu() {
     const n = state.current;
@@ -24,30 +25,6 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
 
   function closeShareMenu() {
     el.shareMenu.classList.add('hidden');
-  }
-
-  // The note as HTML: what the rendered view shows, or a one-off render when the source view is up.
-  function currentHtml() {
-    const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
-    if (live) return live.innerHTML;
-    return markdownToHtml(el.bodyInput.value, state.current);
-  }
-
-  // Renders Markdown with the editor itself, off screen, so exports look like the rendered view. note: whose
-  // relative pictures these are (an opened file's are read from its folder).
-  function markdownToHtml(md, note) {
-    if (!window.NotesEditor) return '<pre>' + escapeHtml(md) + '</pre>';
-    const host = document.createElement('div');
-    host.style.position = 'absolute'; host.style.left = '-99999px';
-    document.body.append(host);
-    try {
-      let ed = null;
-      try {
-        ed = window.NotesEditor.create(host, { imageBase: () => H.imageBaseFor(note) });
-        ed.setMarkdown(String(md || ''));
-        return host.querySelector('.rich-editor-content').innerHTML;
-      } finally { if (ed) ed.destroy(); }
-    } finally { host.remove(); }
   }
 
   async function shareAction(action) {
@@ -91,5 +68,5 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
     }
   }
 
-  return { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction };
+  return { syncShareMenu, openShareMenu, closeShareMenu, shareAction };
 }
