@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 let oneAtATime;
-test.before(async () => { ({ oneAtATime } = await import('../../src/renderer/one-at-a-time.js')); });
+test.before(async () => { ({ oneAtATime } = await import('../../src/renderer/one-at-a-time.ts')); });
 
 const later = (ms, value) => new Promise((r) => setTimeout(() => r(value), ms));
 

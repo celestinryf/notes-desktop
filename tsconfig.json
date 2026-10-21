@@ -15,7 +15,8 @@
     "types": [
       "node"
     ],
-    "useUnknownInCatchVariables": false
+    "useUnknownInCatchVariables": false,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src/types.d.ts",
@@ -25,6 +26,8 @@
     "src/shared/themes.js",
     "src/*.js",
     "src/shared/*.js",
-    "src/docx-edit/*.js"
+    "src/docx-edit/*.js",
+    "src/shared/*.ts",
+    "src/renderer/globals.d.ts"
   ]
 }

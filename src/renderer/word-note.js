@@ -1,11 +1,11 @@
 // @ts-check
-import { el } from './dom.js';
-import { state } from './state.js';
+import { el } from './dom.ts';
+import { state } from './state.ts';
 import { NotesDocxEditor } from './docx-editor.js';
-import { oneAtATime } from './one-at-a-time.js';
-import H from '../shared/helpers.js';
-import { ipcErrorText } from './text.js';
-import { toast } from './toast.js';
+import { oneAtATime } from './one-at-a-time.ts';
+import * as H from '../shared/helpers.ts';
+import { ipcErrorText } from './text.ts';
+import { toast } from './toast.ts';
 
 export function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
   // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed

@@ -13,6 +13,10 @@
       throw mod = 0, e;
     }
   };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
   var __copyProps = (to, from, except, desc) => {
     if (from && typeof from === "object" || typeof from === "function") {
       for (let key of __getOwnPropNames(from))
@@ -29,669 +33,6 @@
     isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
     mod
   ));
-
-  // src/shared/helpers.js
-  var require_helpers = __commonJS({
-    "src/shared/helpers.js"(exports, module) {
-      "use strict";
-      (function(root, factory) {
-        if (typeof module === "object" && module.exports) module.exports = factory();
-        else root.NotesHelpers = factory();
-      })(typeof self !== "undefined" ? self : exports, function() {
-        "use strict";
-        const UNTITLED = "Untitled";
-        function firstLine(text) {
-          const lines = String(text || "").split(/\r?\n/);
-          for (const line of lines) {
-            const t = line.replace(/^#+\s*/, "").trim();
-            if (t) return t;
-          }
-          return "";
-        }
-        function truncate(text, max) {
-          const s = String(text || "");
-          if (s.length <= max) return s;
-          const points = Array.from(s);
-          if (points.length <= max) return s;
-          return points.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "\u2026";
-        }
-        function deriveTitle(note) {
-          if (!note) return UNTITLED;
-          const explicit = String(note.title || "").trim();
-          if (explicit) return explicit;
-          const fromBody = firstLine(note.body);
-          return fromBody ? truncate(fromBody, 60) : UNTITLED;
-        }
-        function snippet(note, max) {
-          max = max || 100;
-          const body = String(note && note.body || "").slice(0, Math.max(600, max * 8));
-          const title = String(note && note.title || "").trim();
-          const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-          const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
-          const kept = lines.slice(start);
-          const isItem = (l) => /^([-*+]|\d+[.)])\s/.test(l);
-          const listed = kept.map((l, i) => isItem(l) && isItem(kept[i + 1] || "") && !/[.,;:!?]$/.test(l) ? l + "," : l);
-          const text = plainTextFromMarkdown(listed.join("\n")).replace(/\bcode block omitted\.\s*/g, "").replace(/\s+/g, " ").trim();
-          return truncate(text, max);
-        }
-        function relativeTime(ts, now) {
-          now = now == null ? Date.now() : now;
-          const diff = Math.max(0, now - ts);
-          const s = Math.floor(diff / 1e3);
-          if (s < 45) return "just now";
-          const m = Math.floor(s / 60);
-          if (m < 60) return m + " min ago";
-          const h = Math.floor(m / 60);
-          if (h < 24) return h + (h === 1 ? " hour ago" : " hours ago");
-          const d = Math.floor(h / 24);
-          if (d < 7) return d + (d === 1 ? " day ago" : " days ago");
-          const date = new Date(ts);
-          const sameYear = date.getFullYear() === new Date(now).getFullYear();
-          const opts = sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" };
-          return date.toLocaleDateString(void 0, opts);
-        }
-        function parseTags(input) {
-          if (Array.isArray(input)) input = input.join(",");
-          const seen = /* @__PURE__ */ new Set();
-          const out = [];
-          for (const raw of String(input || "").split(/[,\s]+/)) {
-            const t = raw.replace(/^#+/, "").trim().toLowerCase();
-            if (!t || seen.has(t)) continue;
-            seen.add(t);
-            out.push(t);
-          }
-          return out;
-        }
-        const TASK_RE = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/;
-        function toggleTaskAt(body, index) {
-          const lines = String(body || "").split("\n");
-          let seen = 0;
-          for (let i = 0; i < lines.length; i++) {
-            const m = TASK_RE.exec(lines[i]);
-            if (!m) continue;
-            if (seen === index) {
-              const checked = m[2].toLowerCase() === "x";
-              lines[i] = lines[i].replace(TASK_RE, m[1] + (checked ? "[ ]" : "[x]"));
-              return lines.join("\n");
-            }
-            seen++;
-          }
-          return String(body || "");
-        }
-        function countWords(text) {
-          const t = String(text || "").trim();
-          if (!t) return 0;
-          return t.split(/\s+/).length;
-        }
-        function tokenize(query) {
-          return String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
-        }
-        function matchesQuery(note, query) {
-          const tokens = tokenize(query);
-          if (!tokens.length) return true;
-          const hay = (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
-          return tokens.every((t) => hay.indexOf(t) !== -1);
-        }
-        const SORTS = {
-          updated: (a, b) => b.updatedAt - a.updatedAt,
-          created: (a, b) => b.createdAt - a.createdAt,
-          title: (a, b) => deriveTitle(a).localeCompare(deriveTitle(b), void 0, { sensitivity: "base" })
-        };
-        function sortNotes(notes, sort) {
-          const cmp = SORTS[sort] || SORTS.updated;
-          return notes.slice().sort((a, b) => {
-            if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-            return cmp(a, b) || b.updatedAt - a.updatedAt;
-          });
-        }
-        const MODIFIERS = /* @__PURE__ */ new Set(["commandorcontrol", "cmdorctrl", "control", "ctrl", "alt", "option", "shift", "super", "meta", "command", "cmd", "altgr"]);
-        const NAMED_KEYS = /* @__PURE__ */ new Set(["space", "tab", "backspace", "delete", "insert", "return", "enter", "up", "down", "left", "right", "home", "end", "pageup", "pagedown", "escape", "esc", "plus", "numadd", "numsub", "nummult", "numdiv", "numdec"]);
-        const SINGLE_KEY_RE = /^[a-z0-9`~!@#$%^&*()\-_=+[\]{};:'",.<>/?\\|]$/i;
-        const FKEY_RE = /^f([1-9]|1[0-9]|2[0-4])$/i;
-        const NUMPAD_RE = /^num[0-9]$/i;
-        function isBindableKey(key) {
-          return SINGLE_KEY_RE.test(key) || FKEY_RE.test(key) || NUMPAD_RE.test(key) || NAMED_KEYS.has(key.toLowerCase());
-        }
-        function parseAccelerator(str) {
-          const parts = String(str || "").split("+").map((p) => p.trim()).filter(Boolean);
-          if (parts.length < 2) return { ok: false, reason: "A hotkey needs at least one modifier and a key, like Ctrl+Alt+N." };
-          const key = parts[parts.length - 1];
-          const mods = parts.slice(0, -1);
-          if (!mods.every((m) => MODIFIERS.has(m.toLowerCase()))) return { ok: false, reason: 'Unknown modifier in "' + str + '".' };
-          if (!mods.some((m) => m.toLowerCase() !== "shift")) return { ok: false, reason: "Use Ctrl, Alt, or Win together with the key (Shift alone would block normal typing)." };
-          if (!isBindableKey(key)) return { ok: false, reason: '"' + key + '" is not a key that can be bound.' };
-          const normMods = mods.map((m) => {
-            const l = m.toLowerCase();
-            if (l === "ctrl" || l === "control") return "Control";
-            if (l === "cmdorctrl" || l === "commandorcontrol") return "CommandOrControl";
-            return m.charAt(0).toUpperCase() + m.slice(1).toLowerCase();
-          });
-          const normKey = key.length === 1 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
-          return { ok: true, value: normMods.join("+") + "+" + normKey };
-        }
-        function displayAccelerator(str) {
-          return String(str || "").replace(/CommandOrControl|CmdOrCtrl/gi, "Ctrl").replace(/Control/gi, "Ctrl").replace(/\+/g, " + ");
-        }
-        function noteToMarkdown(note) {
-          const title = deriveTitle(note);
-          const tags = (note.tags || []).length ? "\n\nTags: " + note.tags.map((t) => "#" + t).join(" ") : "";
-          return "# " + title + "\n\n" + String(note.body || "").replace(/\s+$/, "") + tags + "\n";
-        }
-        function markdownToNote(filename, content) {
-          const text = String(content || "").replace(/\r\n/g, "\n");
-          let title = String(filename || "").replace(/\.(md|markdown|txt)$/i, "").trim();
-          let body = text;
-          const m = /^#\s+(.+)\n+/.exec(text);
-          if (m) {
-            title = m[1].trim();
-            body = text.slice(m[0].length);
-          }
-          const tags = [];
-          body = body.replace(/\n*Tags:\s*((?:#[\p{L}\p{N}_-]+\s*)+)\s*$/iu, (_, t) => {
-            tags.push(...parseTags(t));
-            return "";
-          });
-          return { title, body: body.replace(/\s+$/, ""), tags };
-        }
-        const PANE_LIMITS = {
-          sidebarWidth: { min: 160, max: 420, def: 232 },
-          listWidth: { min: 220, max: 560, def: 300 }
-        };
-        const EDITOR_MIN = 320;
-        function clampPane(name, value) {
-          const lim = PANE_LIMITS[name];
-          const v = Number(value);
-          if (!lim) return value;
-          if (!Number.isFinite(v)) return lim.def;
-          return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
-        }
-        function formatWhen(ts, now) {
-          now = now == null ? Date.now() : now;
-          const d = new Date(ts), n = new Date(now);
-          const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          const dayOf = (x) => x.toDateString();
-          const shift = (days) => {
-            const c = new Date(n);
-            c.setDate(n.getDate() + days);
-            return dayOf(c);
-          };
-          if (dayOf(d) === dayOf(n)) return "today " + time;
-          if (dayOf(d) === shift(1)) return "tomorrow " + time;
-          if (dayOf(d) === shift(-1)) return "yesterday " + time;
-          const sameYear = d.getFullYear() === n.getFullYear();
-          return d.toLocaleDateString([], sameYear ? { weekday: "short", month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }) + " " + time;
-        }
-        function mailtoFor(note, limit) {
-          limit = limit || 1900;
-          const subject = truncate(deriveTitle(note) || "Note", 120);
-          const body = String(note.body || "");
-          const notice = "\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]";
-          const head = "mailto:?subject=" + encodeURIComponent(subject) + "&body=";
-          const full = head + encodeURIComponent(body);
-          if (full.length <= limit) return { url: full, truncated: false };
-          const points = Array.from(body);
-          let lo = 0, hi = points.length;
-          const budget = Math.max(0, limit - head.length - encodeURIComponent(notice).length);
-          while (lo < hi) {
-            const mid = lo + hi + 1 >> 1;
-            if (encodeURIComponent(points.slice(0, mid).join("")).length <= budget) lo = mid;
-            else hi = mid - 1;
-          }
-          return { url: head + encodeURIComponent(points.slice(0, lo).join("") + notice), truncated: true };
-        }
-        function plainTextFromMarkdown(md) {
-          let s = String(md || "").replace(/\r\n/g, "\n");
-          s = s.replace(/```[\s\S]*?```/g, " code block omitted. ");
-          s = s.replace(/`([^`\n]+)`/g, "$1");
-          s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + ". " : "");
-          s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-          s = s.replace(/^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*$/gm, (_, h) => /[.!?:;]$/.test(h) ? h : h + ".");
-          s = s.replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, "");
-          s = s.replace(/^\s*[-*+]\s+/gm, "");
-          s = s.replace(/^\s*\d+[.)]\s+/gm, "");
-          s = s.replace(/^\s*>\s?/gm, "");
-          s = s.replace(/^\s*([-*_])\s*(\1\s*){2,}$/gm, "");
-          s = s.replace(/\|/g, " ");
-          s = s.replace(/(\*\*|__)(.*?)\1/g, "$2").replace(/(\*|_)(.*?)\1/g, "$2").replace(/~~(.*?)~~/g, "$1");
-          s = s.replace(/<[^>\n]+>/g, "");
-          s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-          s = s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-          return s;
-        }
-        function speechChunks(text, max) {
-          max = max || 220;
-          const out = [];
-          for (const para of String(text || "").split(/\n+/)) {
-            const sentences = para.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [];
-            let cur = "";
-            for (const sRaw of sentences) {
-              const s = sRaw.trim();
-              if (!s) continue;
-              if (s.length > max) {
-                if (cur) {
-                  out.push(cur);
-                  cur = "";
-                }
-                for (let i = 0; i < s.length; i += max) out.push(s.slice(i, i + max));
-                continue;
-              }
-              if ((cur + " " + s).trim().length > max && cur) {
-                out.push(cur);
-                cur = s;
-              } else cur = (cur + " " + s).trim();
-            }
-            if (cur.trim()) out.push(cur.trim());
-          }
-          return out;
-        }
-        function noteLinkIds(body) {
-          const out = [];
-          const re = /note:\/\/([0-9a-f][0-9a-f-]{7,})/gi;
-          let m;
-          while ((m = re.exec(String(body || ""))) !== null) {
-            const id = m[1].toLowerCase();
-            if (!out.includes(id)) out.push(id);
-          }
-          return out;
-        }
-        function safeFilename(name) {
-          let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim()).slice(0, 80).join("").replace(/[. ]+$/, "");
-          if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = "note-" + s;
-          return s || UNTITLED;
-        }
-        function isViewerOnlyFile8(note) {
-          return !!(note && note.filePath && note.fileKind !== "text");
-        }
-        function extOf(filePath) {
-          const base = (String(filePath || "").split(/[\\/]/).pop() || "").toLowerCase();
-          if (!base.includes(".")) return base;
-          return base.slice(base.lastIndexOf(".") + 1);
-        }
-        function isPlainTextFile5(note) {
-          return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
-        }
-        function isNonMarkdownFile3(note) {
-          return isPlainTextFile5(note) || isViewerOnlyFile8(note);
-        }
-        const WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
-        const OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
-        const WORD_TO_DOCX_EXT = /* @__PURE__ */ new Set(["doc", "dot", "rtf", "odt"]);
-        const IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"]);
-        const IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", avif: "image/avif" };
-        const SHEET_EXT = /* @__PURE__ */ new Set(["xlsx", "xlsm", "xls", "xlsb", "ods"]);
-        const SHEET_TO_XLSX_EXT = /* @__PURE__ */ new Set(["xlsm", "xls", "xlsb", "ods"]);
-        const CRAFT_OF = { docx: "wordcraft", sheet: "gridcraft" };
-        const ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
-        function isTableFile(note) {
-          return isPlainTextFile5(note) && ["csv", "tsv"].includes(extOf(note.filePath));
-        }
-        function isOoxmlWordFile(note) {
-          return !!(note && note.filePath && note.fileKind === "docx" && OOXML_EXT.has(extOf(note.filePath)));
-        }
-        function headingTitle(md) {
-          const escaped = [];
-          let s = String(md || "").replace(/\\([!-/:-@[-`{-~])/g, (_, c) => {
-            escaped.push(c);
-            return "\0" + (escaped.length - 1) + "";
-          });
-          s = s.replace(/`([^`]+)`/g, "$1");
-          s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-          s = s.replace(/<[^>\n]+>/g, "");
-          s = s.replace(/(\*\*|~~)(\S(?:.*?\S)?)\1/g, "$2").replace(/\*(\S(?:.*?\S)?)\*/g, "$1");
-          s = s.replace(/(^|\W)(__?)(\S(?:.*?\S)?)\2(?!\w)/g, "$1$3");
-          s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
-          s = s.replace(/\u0000(\d+)\u0001/g, (_, i) => escaped[Number(i)]);
-          return s.replace(/\s+/g, " ").trim();
-        }
-        function splitAtHeadings(markdown, fallbackName) {
-          const lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
-          const heads = [];
-          let fence = null;
-          lines.forEach((line, i) => {
-            const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-            if (f) {
-              const ch = f[1][0], len = f[1].length;
-              if (!fence) {
-                fence = { ch, len };
-                return;
-              }
-              if (ch === fence.ch && len >= fence.len && !f[2].trim()) {
-                fence = null;
-                return;
-              }
-            }
-            if (fence) return;
-            const h = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
-            if (!h) return;
-            const text = headingTitle(String(h[2] || "").replace(/[ \t]+#+$/, "").replace(/^#+$/, ""));
-            heads.push({ i, level: h[1].length, text });
-          });
-          let name = String(fallbackName || "").trim();
-          let usable = heads;
-          if (heads.length) {
-            const top = Math.min(...heads.map((h) => h.level));
-            const atTop = heads.filter((h) => h.level === top);
-            const firstText = lines.findIndex((l) => l.trim());
-            if (atTop.length === 1 && atTop[0].i === firstText) {
-              if (atTop[0].text) name = atTop[0].text;
-              usable = heads.filter((h) => h !== atTop[0]);
-            }
-          }
-          const titleLine = usable === heads ? -1 : heads.find((h) => !usable.includes(h)).i;
-          if (!usable.length) return { name: name || "Book", level: 0, pages: [] };
-          const level = Math.min(...usable.map((h) => h.level));
-          const cuts = usable.filter((h) => h.level === level);
-          const trimBlank = (arr) => {
-            let a = 0, b = arr.length;
-            while (a < b && !arr[a].trim()) a++;
-            while (b > a && !arr[b - 1].trim()) b--;
-            return arr.slice(a, b).join("\n");
-          };
-          const pages = [];
-          const intro = trimBlank(lines.slice(0, cuts[0].i).filter((_, i) => i !== titleLine));
-          if (intro) pages.push({ title: "Introduction", body: intro });
-          cuts.forEach((c, k) => {
-            const end = k + 1 < cuts.length ? cuts[k + 1].i : lines.length;
-            pages.push({ title: c.text || "Untitled", body: trimBlank(lines.slice(c.i + 1, end)) });
-          });
-          return { name: name || "Book", level, pages };
-        }
-        function imageBaseFor(note) {
-          const p = note && note.filePath ? String(note.filePath).replace(/\\/g, "/") : "";
-          if (!p || p.startsWith("//")) return null;
-          const parts = p.split("/");
-          parts.pop();
-          return "file:///" + parts.map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s)).join("/").replace(/^\/+/, "") + "/";
-        }
-        function fileStamp(date) {
-          return new Date(date === void 0 ? Date.now() : date).toISOString().replace(/[:.]/g, "-");
-        }
-        function fuzzyScore(query, text) {
-          const q = String(query || "").toLowerCase().replace(/\s+/g, " ").trim();
-          const t = String(text || "").toLowerCase();
-          if (!q) return 1;
-          if (t.startsWith(q)) return 1e3 - t.length;
-          const wordStart = (i) => i === 0 || /[\s\-_/.(#:"'“]/.test(t[i - 1]);
-          for (let at = t.indexOf(q); at > 0; at = t.indexOf(q, at + 1)) {
-            if (wordStart(at)) return 700 - at - t.length / 10;
-          }
-          let score = 0, ti = 0, run = 0;
-          for (const ch of q) {
-            if (ch === " ") {
-              run = 0;
-              continue;
-            }
-            let found = -1;
-            for (let i = t.indexOf(ch, ti); i >= 0; i = t.indexOf(ch, i + 1)) {
-              if (i === ti && ti > 0 && run > 0 || wordStart(i)) {
-                found = i;
-                break;
-              }
-            }
-            if (found < 0) return 0;
-            run = found === ti && run > 0 ? run + 1 : 1;
-            score += 10 + (wordStart(found) ? 25 : 0) + run * 8;
-            ti = found + 1;
-          }
-          return Math.max(1, score - t.length / 20);
-        }
-        return {
-          fuzzyScore,
-          splitAtHeadings,
-          headingTitle,
-          extOf,
-          isViewerOnlyFile: isViewerOnlyFile8,
-          isPlainTextFile: isPlainTextFile5,
-          isNonMarkdownFile: isNonMarkdownFile3,
-          isTableFile,
-          isOoxmlWordFile,
-          imageBaseFor,
-          fileStamp,
-          WORD_EXT,
-          OOXML_EXT,
-          WORD_TO_DOCX_EXT,
-          IMAGE_EXT,
-          IMAGE_MIME,
-          SHEET_EXT,
-          SHEET_TO_XLSX_EXT,
-          CRAFT_OF,
-          ZIP_DOC_EXT,
-          UNTITLED,
-          deriveTitle,
-          firstLine,
-          truncate,
-          snippet,
-          relativeTime,
-          parseTags,
-          toggleTaskAt,
-          countWords,
-          tokenize,
-          matchesQuery,
-          sortNotes,
-          parseAccelerator,
-          displayAccelerator,
-          noteToMarkdown,
-          markdownToNote,
-          safeFilename,
-          PANE_LIMITS,
-          EDITOR_MIN,
-          clampPane,
-          plainTextFromMarkdown,
-          speechChunks,
-          formatWhen,
-          mailtoFor,
-          noteLinkIds
-        };
-      });
-    }
-  });
-
-  // src/shared/themes.js
-  var require_themes = __commonJS({
-    "src/shared/themes.js"(exports, module) {
-      "use strict";
-      (function(root, factory) {
-        if (typeof module === "object" && module.exports) module.exports = factory();
-        else root.NotesThemes = factory();
-      })(typeof self !== "undefined" ? self : exports, function() {
-        const BUILT_IN = "notes";
-        const CUSTOM = "custom";
-        const SCHEMES = {
-          notes: { name: "Notes", builtIn: true },
-          paper: { name: "Paper", light: { background: "#fafafa", text: "#1f1f1f", accent: "#3c6fd1" }, dark: { background: "#1c1c1e", text: "#ebebeb", accent: "#7aa2f7" } },
-          slate: { name: "Slate", light: { background: "#f3f5f8", text: "#1d2430", accent: "#2f6fd6" }, dark: { background: "#1b2028", text: "#e3e8ef", accent: "#8ab4f8" } },
-          forest: { name: "Forest", light: { background: "#f3f6ee", text: "#1f2a1a", accent: "#3f7a3a" }, dark: { background: "#1a2219", text: "#e3ebdc", accent: "#8cc46e" } },
-          ocean: { name: "Ocean", light: { background: "#eef5f8", text: "#14262e", accent: "#1c7a9c" }, dark: { background: "#15222a", text: "#dde9ef", accent: "#5fc0dc" } },
-          rose: { name: "Rose", light: { background: "#fbf3f4", text: "#2c1a1f", accent: "#c2375a" }, dark: { background: "#241a1e", text: "#f3e6ea", accent: "#e8809a" } },
-          sepia: { name: "Sepia", light: { background: "#f4ecd8", text: "#3b2f1e", accent: "#8a5a2b" }, dark: { background: "#2a2318", text: "#ead9bd", accent: "#d19a5a" } }
-        };
-        const BUILT_IN_SEEDS = { light: { background: "#fffaf3", text: "#2a1a12", accent: "#f47b3e" }, dark: { background: "#211710", text: "#f6eadb", accent: "#f47b3e" } };
-        const TOKENS = [
-          "chrome",
-          "base",
-          "paper",
-          "raised",
-          "fg",
-          "fg-2",
-          "fg-3",
-          "hover",
-          "pressed",
-          "selected",
-          "selected-fg",
-          "well",
-          "line",
-          "line-2",
-          "field",
-          "field-bg",
-          "float-line",
-          "float-shadow",
-          "scroll-thumb",
-          "accent",
-          "accent-fg",
-          "accent-hover",
-          "accent-text",
-          "focus",
-          "danger",
-          "ok",
-          "document-bg",
-          "syn-keyword",
-          "syn-string",
-          "syn-atom",
-          "syn-comment",
-          "syn-punct",
-          "cream",
-          "peach",
-          "tangerine",
-          "ember",
-          "leaf",
-          "ink"
-        ];
-        const BUILT_IN_WINDOW = { light: { background: "#fffaf3", foreground: "#2a1a12" }, dark: { background: "#211710", foreground: "#f6eadb" } };
-        const HEX = /^#[0-9a-f]{6}$/i;
-        const isHex = (v) => typeof v === "string" && HEX.test(v);
-        const parse = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-        const toHex = (rgb) => "#" + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
-        const mix = (a, b, t) => {
-          const x = parse(a), y = parse(b);
-          return toHex(x.map((v, i) => v + (y[i] - v) * t));
-        };
-        const rgba = (hex, alpha) => "rgba(" + parse(hex).join(", ") + ", " + alpha + ")";
-        const over = (hex, alpha, bg) => mix(bg, hex, alpha);
-        function luminance(hex) {
-          const [r, g, b] = parse(hex).map((v) => {
-            const c = v / 255;
-            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-          });
-          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        }
-        function contrast(a, b) {
-          const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
-          return (x + 0.05) / (y + 0.05);
-        }
-        const worstContrast = (color, surfaces) => Math.min(...surfaces.map((s) => contrast(color, s)));
-        function legible(color, surfaces, min, towardDark) {
-          const end = towardDark ? "#000000" : "#ffffff";
-          for (let t = 0; t <= 1.0001; t += 0.04) {
-            const c = mix(color, end, Math.min(1, t));
-            if (worstContrast(c, surfaces) >= min) return c;
-          }
-          return end;
-        }
-        function readableBackground(bg) {
-          const light = luminance(bg) > 0.179;
-          const end = light ? "#ffffff" : "#000000", ink = light ? "#000000" : "#ffffff";
-          for (let t = 0; t <= 1.0001; t += 0.02) {
-            const c = mix(bg, end, Math.min(1, t));
-            if (contrast(c, ink) >= 8) return c;
-          }
-          return end;
-        }
-        function derive(seed) {
-          const bg = readableBackground(seed.background), light = luminance(bg) > 0.179;
-          const towardDark = light;
-          const paper = bg;
-          const base = light ? mix(bg, seed.text, 0.04) : mix(bg, "#000000", 0.22);
-          const chrome = light ? mix(bg, seed.text, 0.07) : mix(bg, "#000000", 0.36);
-          const raised = light ? mix(bg, "#ffffff", 0.5) : mix(bg, seed.text, 0.1);
-          const surfaces = [chrome, base, paper, raised];
-          const fg = legible(seed.text, surfaces, 7, towardDark);
-          const grounds = surfaces.concat(surfaces.map((s) => over(fg, 0.1, s)));
-          const fg2 = legible(mix(fg, bg, 0.25), grounds, 4.5, towardDark);
-          const fg3 = legible(mix(fg, bg, 0.38), grounds, 4.5, towardDark);
-          const accent = seed.accent;
-          const accentText = legible(accent, grounds, 4.5, towardDark);
-          const onAccent = [fg, bg].sort((a, b) => contrast(b, accent) - contrast(a, accent))[0];
-          const accentFg = legible(onAccent, [accent], 4.5, luminance(accent) > 0.179);
-          const selected = light ? mix(bg, accent, 0.28) : over(accent, 0.22, paper);
-          const selectedFg = legible(fg, [selected], 4.5, luminance(selected) > 0.179);
-          const ok = legible(light ? "#3f6a2c" : "#9ccf80", grounds, 4.5, towardDark);
-          return {
-            chrome,
-            base,
-            paper,
-            raised,
-            fg,
-            "fg-2": fg2,
-            "fg-3": fg3,
-            hover: rgba(fg, 0.06),
-            pressed: rgba(fg, 0.1),
-            selected,
-            "selected-fg": selectedFg,
-            well: rgba(fg, light ? 0.05 : 0.06),
-            // Lines are darker than the surfaces they sit on, never light (the user's rule); none round floating layers in dark.
-            line: light ? rgba(fg, 0.1) : "rgba(0, 0, 0, 0.42)",
-            "line-2": light ? rgba(fg, 0.16) : "rgba(0, 0, 0, 0.55)",
-            field: light ? rgba(fg, 0.45) : "rgba(0, 0, 0, 0.6)",
-            "field-bg": light ? raised : mix(bg, "#000000", 0.35),
-            "float-line": light ? rgba(fg, 0.16) : "transparent",
-            "float-shadow": light ? "0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14)" : "none",
-            // not a colour: the lift under a floating layer, light only
-            "scroll-thumb": rgba(fg, light ? 0.2 : 0.16),
-            accent,
-            "accent-fg": accentFg,
-            "accent-hover": mix(accent, "#ffffff", 0.12),
-            "accent-text": accentText,
-            focus: accentText,
-            danger: legible(light ? "#a8340c" : "#ff8a66", grounds, 4.5, towardDark),
-            ok,
-            "document-bg": light ? mix(bg, fg, 0.1) : mix(bg, "#000000", 0.45),
-            "syn-keyword": accentText,
-            "syn-string": legible(light ? "#8a5200" : "#e8b860", grounds, 4.5, towardDark),
-            "syn-atom": legible(light ? "#3f6a2c" : "#9ccf80", grounds, 4.5, towardDark),
-            "syn-comment": fg3,
-            "syn-punct": fg2,
-            cream: paper,
-            peach: selected,
-            tangerine: accent,
-            ember: accentText,
-            leaf: ok,
-            ink: fg
-          };
-        }
-        const cleanSeed = (s) => s && typeof s === "object" && isHex(s.background) && isHex(s.text) && isHex(s.accent) ? { background: s.background.toLowerCase(), text: s.text.toLowerCase(), accent: s.accent.toLowerCase() } : null;
-        function cleanCustom(input) {
-          if (!input || typeof input !== "object") return null;
-          const out = {};
-          for (const mode of ["light", "dark"]) {
-            const s = cleanSeed(input[mode]);
-            if (s) out[mode] = s;
-          }
-          return Object.keys(out).length ? out : null;
-        }
-        function cleanSchemeId(id, customColors) {
-          if (id === CUSTOM) return customColors ? CUSTOM : BUILT_IN;
-          return Object.prototype.hasOwnProperty.call(SCHEMES, id) ? id : BUILT_IN;
-        }
-        function seedFor(settings, mode) {
-          const id = settings && settings.colorScheme;
-          if (id === CUSTOM) return settings.customColors && settings.customColors[mode] || null;
-          const scheme = SCHEMES[id];
-          return scheme && !scheme.builtIn ? scheme[mode] || null : null;
-        }
-        function resolve(settings, mode) {
-          const seed = seedFor(settings, mode);
-          return seed ? derive(seed) : null;
-        }
-        function windowColors(settings, mode) {
-          const tokens = resolve(settings, mode);
-          return tokens ? { background: tokens.paper, foreground: tokens.fg } : BUILT_IN_WINDOW[mode === "dark" ? "dark" : "light"];
-        }
-        function seedsOf(id, customColors, mode) {
-          const m = mode === "dark" ? "dark" : "light";
-          if (id === CUSTOM) return customColors && customColors[m] || BUILT_IN_SEEDS[m];
-          const scheme = SCHEMES[id];
-          return scheme && !scheme.builtIn ? scheme[m] : BUILT_IN_SEEDS[m];
-        }
-        function swatch(id, customColors, mode) {
-          const seed = seedsOf(id, customColors, mode);
-          if (id === BUILT_IN || id !== CUSTOM && !(SCHEMES[id] && !SCHEMES[id].builtIn)) return { paper: seed.background, text: seed.text, accent: seed.accent };
-          const t = derive(seed);
-          return { paper: t.paper, text: t.fg, accent: t.accent };
-        }
-        return { BUILT_IN, CUSTOM, SCHEMES, TOKENS, BUILT_IN_SEEDS, derive, resolve, windowColors, seedsOf, swatch, cleanCustom, cleanSchemeId, contrast, isHex };
-      });
-    }
-  });
 
   // src/renderer/icons.js
   var require_icons = __commonJS({
@@ -800,17 +141,692 @@
     }
   });
 
-  // src/renderer/app.js
-  var import_helpers18 = __toESM(require_helpers());
-  var import_themes = __toESM(require_themes());
+  // src/shared/helpers.ts
+  var helpers_exports = {};
+  __export(helpers_exports, {
+    CRAFT_OF: () => CRAFT_OF,
+    EDITOR_MIN: () => EDITOR_MIN,
+    IMAGE_EXT: () => IMAGE_EXT,
+    IMAGE_MIME: () => IMAGE_MIME,
+    OOXML_EXT: () => OOXML_EXT,
+    PANE_LIMITS: () => PANE_LIMITS,
+    SHEET_EXT: () => SHEET_EXT,
+    SHEET_TO_XLSX_EXT: () => SHEET_TO_XLSX_EXT,
+    UNTITLED: () => UNTITLED,
+    WORD_EXT: () => WORD_EXT,
+    WORD_TO_DOCX_EXT: () => WORD_TO_DOCX_EXT,
+    ZIP_DOC_EXT: () => ZIP_DOC_EXT,
+    clampPane: () => clampPane,
+    countWords: () => countWords,
+    deriveTitle: () => deriveTitle,
+    displayAccelerator: () => displayAccelerator,
+    extOf: () => extOf,
+    fileStamp: () => fileStamp,
+    firstLine: () => firstLine,
+    formatWhen: () => formatWhen,
+    fuzzyScore: () => fuzzyScore,
+    headingTitle: () => headingTitle,
+    imageBaseFor: () => imageBaseFor,
+    isNonMarkdownFile: () => isNonMarkdownFile,
+    isOoxmlWordFile: () => isOoxmlWordFile,
+    isPlainTextFile: () => isPlainTextFile,
+    isTableFile: () => isTableFile,
+    isViewerOnlyFile: () => isViewerOnlyFile,
+    mailtoFor: () => mailtoFor,
+    markdownToNote: () => markdownToNote,
+    matchesQuery: () => matchesQuery,
+    noteLinkIds: () => noteLinkIds,
+    noteToMarkdown: () => noteToMarkdown,
+    parseAccelerator: () => parseAccelerator,
+    parseTags: () => parseTags,
+    plainTextFromMarkdown: () => plainTextFromMarkdown,
+    relativeTime: () => relativeTime,
+    safeFilename: () => safeFilename,
+    snippet: () => snippet,
+    sortNotes: () => sortNotes,
+    speechChunks: () => speechChunks,
+    splitAtHeadings: () => splitAtHeadings,
+    toggleTaskAt: () => toggleTaskAt,
+    tokenize: () => tokenize,
+    truncate: () => truncate
+  });
+  var UNTITLED = "Untitled";
+  function firstLine(text) {
+    const lines = String(text || "").split(/\r?\n/);
+    for (const line of lines) {
+      const t = line.replace(/^#+\s*/, "").trim();
+      if (t) return t;
+    }
+    return "";
+  }
+  function truncate(text, max) {
+    const s = String(text || "");
+    if (s.length <= max) return s;
+    const points = Array.from(s);
+    if (points.length <= max) return s;
+    return points.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "\u2026";
+  }
+  function deriveTitle(note) {
+    if (!note) return UNTITLED;
+    const explicit = String(note.title || "").trim();
+    if (explicit) return explicit;
+    const fromBody = firstLine(note.body);
+    return fromBody ? truncate(fromBody, 60) : UNTITLED;
+  }
+  function snippet(note, max) {
+    max = max || 100;
+    const body = String(note && note.body || "").slice(0, Math.max(600, max * 8));
+    const title = String(note && note.title || "").trim();
+    const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
+    const kept = lines.slice(start);
+    const isItem = (l) => /^([-*+]|\d+[.)])\s/.test(l);
+    const listed = kept.map((l, i) => isItem(l) && isItem(kept[i + 1] || "") && !/[.,;:!?]$/.test(l) ? l + "," : l);
+    const text = plainTextFromMarkdown(listed.join("\n")).replace(/\bcode block omitted\.\s*/g, "").replace(/\s+/g, " ").trim();
+    return truncate(text, max);
+  }
+  function relativeTime(ts, now) {
+    now = now == null ? Date.now() : now;
+    const diff = Math.max(0, now - ts);
+    const s = Math.floor(diff / 1e3);
+    if (s < 45) return "just now";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + " min ago";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + (h === 1 ? " hour ago" : " hours ago");
+    const d = Math.floor(h / 24);
+    if (d < 7) return d + (d === 1 ? " day ago" : " days ago");
+    const date = new Date(ts);
+    const sameYear = date.getFullYear() === new Date(now).getFullYear();
+    const opts = sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" };
+    return date.toLocaleDateString(void 0, opts);
+  }
+  function parseTags(input) {
+    if (Array.isArray(input)) input = input.join(",");
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const raw of String(input || "").split(/[,\s]+/)) {
+      const t = raw.replace(/^#+/, "").trim().toLowerCase();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+    return out;
+  }
+  var TASK_RE = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/;
+  function toggleTaskAt(body, index) {
+    const lines = String(body || "").split("\n");
+    let seen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const m = TASK_RE.exec(lines[i]);
+      if (!m) continue;
+      if (seen === index) {
+        const checked = m[2].toLowerCase() === "x";
+        lines[i] = lines[i].replace(TASK_RE, m[1] + (checked ? "[ ]" : "[x]"));
+        return lines.join("\n");
+      }
+      seen++;
+    }
+    return String(body || "");
+  }
+  function countWords(text) {
+    const t = String(text || "").trim();
+    if (!t) return 0;
+    return t.split(/\s+/).length;
+  }
+  function tokenize(query) {
+    return String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+  }
+  function matchesQuery(note, query) {
+    const tokens = tokenize(query);
+    if (!tokens.length) return true;
+    const hay = (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
+    return tokens.every((t) => hay.indexOf(t) !== -1);
+  }
+  var SORTS = {
+    updated: (a, b) => b.updatedAt - a.updatedAt,
+    created: (a, b) => b.createdAt - a.createdAt,
+    title: (a, b) => deriveTitle(a).localeCompare(deriveTitle(b), void 0, { sensitivity: "base" })
+  };
+  function sortNotes(notes, sort) {
+    const cmp = SORTS[sort] || SORTS.updated;
+    return notes.slice().sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      return cmp(a, b) || b.updatedAt - a.updatedAt;
+    });
+  }
+  var MODIFIERS = /* @__PURE__ */ new Set(["commandorcontrol", "cmdorctrl", "control", "ctrl", "alt", "option", "shift", "super", "meta", "command", "cmd", "altgr"]);
+  var NAMED_KEYS = /* @__PURE__ */ new Set(["space", "tab", "backspace", "delete", "insert", "return", "enter", "up", "down", "left", "right", "home", "end", "pageup", "pagedown", "escape", "esc", "plus", "numadd", "numsub", "nummult", "numdiv", "numdec"]);
+  var SINGLE_KEY_RE = /^[a-z0-9`~!@#$%^&*()\-_=+[\]{};:'",.<>/?\\|]$/i;
+  var FKEY_RE = /^f([1-9]|1[0-9]|2[0-4])$/i;
+  var NUMPAD_RE = /^num[0-9]$/i;
+  function isBindableKey(key) {
+    return SINGLE_KEY_RE.test(key) || FKEY_RE.test(key) || NUMPAD_RE.test(key) || NAMED_KEYS.has(key.toLowerCase());
+  }
+  function parseAccelerator(str) {
+    const parts = String(str || "").split("+").map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) return { ok: false, reason: "A hotkey needs at least one modifier and a key, like Ctrl+Alt+N." };
+    const key = parts[parts.length - 1];
+    const mods = parts.slice(0, -1);
+    if (!mods.every((m) => MODIFIERS.has(m.toLowerCase()))) return { ok: false, reason: 'Unknown modifier in "' + str + '".' };
+    if (!mods.some((m) => m.toLowerCase() !== "shift")) return { ok: false, reason: "Use Ctrl, Alt, or Win together with the key (Shift alone would block normal typing)." };
+    if (!isBindableKey(key)) return { ok: false, reason: '"' + key + '" is not a key that can be bound.' };
+    const normMods = mods.map((m) => {
+      const l = m.toLowerCase();
+      if (l === "ctrl" || l === "control") return "Control";
+      if (l === "cmdorctrl" || l === "commandorcontrol") return "CommandOrControl";
+      return m.charAt(0).toUpperCase() + m.slice(1).toLowerCase();
+    });
+    const normKey = key.length === 1 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
+    return { ok: true, value: normMods.join("+") + "+" + normKey };
+  }
+  function displayAccelerator(str) {
+    return String(str || "").replace(/CommandOrControl|CmdOrCtrl/gi, "Ctrl").replace(/Control/gi, "Ctrl").replace(/\+/g, " + ");
+  }
+  function noteToMarkdown(note) {
+    const title = deriveTitle(note);
+    const tags = (note.tags || []).length ? "\n\nTags: " + note.tags.map((t) => "#" + t).join(" ") : "";
+    return "# " + title + "\n\n" + String(note.body || "").replace(/\s+$/, "") + tags + "\n";
+  }
+  function markdownToNote(filename, content) {
+    const text = String(content || "").replace(/\r\n/g, "\n");
+    let title = String(filename || "").replace(/\.(md|markdown|txt)$/i, "").trim();
+    let body = text;
+    const m = /^#\s+(.+)\n+/.exec(text);
+    if (m) {
+      title = m[1].trim();
+      body = text.slice(m[0].length);
+    }
+    const tags = [];
+    body = body.replace(/\n*Tags:\s*((?:#[\p{L}\p{N}_-]+\s*)+)\s*$/iu, (_, t) => {
+      tags.push(...parseTags(t));
+      return "";
+    });
+    return { title, body: body.replace(/\s+$/, ""), tags };
+  }
+  var PANE_LIMITS = {
+    sidebarWidth: { min: 160, max: 420, def: 232 },
+    listWidth: { min: 220, max: 560, def: 300 }
+  };
+  var EDITOR_MIN = 320;
+  function clampPane(name, value) {
+    const lim = PANE_LIMITS[name];
+    const v = Number(value);
+    if (!lim) return value;
+    if (!Number.isFinite(v)) return lim.def;
+    return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
+  }
+  function formatWhen(ts, now) {
+    now = now == null ? Date.now() : now;
+    const d = new Date(ts), n = new Date(now);
+    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const dayOf = (x) => x.toDateString();
+    const shift = (days) => {
+      const c = new Date(n);
+      c.setDate(n.getDate() + days);
+      return dayOf(c);
+    };
+    if (dayOf(d) === dayOf(n)) return "today " + time;
+    if (dayOf(d) === shift(1)) return "tomorrow " + time;
+    if (dayOf(d) === shift(-1)) return "yesterday " + time;
+    const sameYear = d.getFullYear() === n.getFullYear();
+    return d.toLocaleDateString([], sameYear ? { weekday: "short", month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }) + " " + time;
+  }
+  function mailtoFor(note, limit) {
+    limit = limit || 1900;
+    const subject = truncate(deriveTitle(note) || "Note", 120);
+    const body = String(note.body || "");
+    const notice = "\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]";
+    const head = "mailto:?subject=" + encodeURIComponent(subject) + "&body=";
+    const full = head + encodeURIComponent(body);
+    if (full.length <= limit) return { url: full, truncated: false };
+    const points = Array.from(body);
+    let lo = 0, hi = points.length;
+    const budget = Math.max(0, limit - head.length - encodeURIComponent(notice).length);
+    while (lo < hi) {
+      const mid = lo + hi + 1 >> 1;
+      if (encodeURIComponent(points.slice(0, mid).join("")).length <= budget) lo = mid;
+      else hi = mid - 1;
+    }
+    return { url: head + encodeURIComponent(points.slice(0, lo).join("") + notice), truncated: true };
+  }
+  function plainTextFromMarkdown(md) {
+    let s = String(md || "").replace(/\r\n/g, "\n");
+    s = s.replace(/```[\s\S]*?```/g, " code block omitted. ");
+    s = s.replace(/`([^`\n]+)`/g, "$1");
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + ". " : "");
+    s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    s = s.replace(/^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*$/gm, (_, h) => /[.!?:;]$/.test(h) ? h : h + ".");
+    s = s.replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, "");
+    s = s.replace(/^\s*[-*+]\s+/gm, "");
+    s = s.replace(/^\s*\d+[.)]\s+/gm, "");
+    s = s.replace(/^\s*>\s?/gm, "");
+    s = s.replace(/^\s*([-*_])\s*(\1\s*){2,}$/gm, "");
+    s = s.replace(/\|/g, " ");
+    s = s.replace(/(\*\*|__)(.*?)\1/g, "$2").replace(/(\*|_)(.*?)\1/g, "$2").replace(/~~(.*?)~~/g, "$1");
+    s = s.replace(/<[^>\n]+>/g, "");
+    s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    s = s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    return s;
+  }
+  function speechChunks(text, max) {
+    max = max || 220;
+    const out = [];
+    for (const para of String(text || "").split(/\n+/)) {
+      const sentences = para.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [];
+      let cur = "";
+      for (const sRaw of sentences) {
+        const s = sRaw.trim();
+        if (!s) continue;
+        if (s.length > max) {
+          if (cur) {
+            out.push(cur);
+            cur = "";
+          }
+          for (let i = 0; i < s.length; i += max) out.push(s.slice(i, i + max));
+          continue;
+        }
+        if ((cur + " " + s).trim().length > max && cur) {
+          out.push(cur);
+          cur = s;
+        } else cur = (cur + " " + s).trim();
+      }
+      if (cur.trim()) out.push(cur.trim());
+    }
+    return out;
+  }
+  function noteLinkIds(body) {
+    const out = [];
+    const re = /note:\/\/([0-9a-f][0-9a-f-]{7,})/gi;
+    let m;
+    while ((m = re.exec(String(body || ""))) !== null) {
+      const id = m[1].toLowerCase();
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+  function safeFilename(name) {
+    let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim()).slice(0, 80).join("").replace(/[. ]+$/, "");
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = "note-" + s;
+    return s || UNTITLED;
+  }
+  function isViewerOnlyFile(note) {
+    return !!(note && note.filePath && note.fileKind !== "text");
+  }
+  function extOf(filePath) {
+    const base = (String(filePath || "").split(/[\\/]/).pop() || "").toLowerCase();
+    if (!base.includes(".")) return base;
+    return base.slice(base.lastIndexOf(".") + 1);
+  }
+  function isPlainTextFile(note) {
+    return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
+  }
+  function isNonMarkdownFile(note) {
+    return isPlainTextFile(note) || isViewerOnlyFile(note);
+  }
+  var WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
+  var OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
+  var WORD_TO_DOCX_EXT = /* @__PURE__ */ new Set(["doc", "dot", "rtf", "odt"]);
+  var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"]);
+  var IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", avif: "image/avif" };
+  var SHEET_EXT = /* @__PURE__ */ new Set(["xlsx", "xlsm", "xls", "xlsb", "ods"]);
+  var SHEET_TO_XLSX_EXT = /* @__PURE__ */ new Set(["xlsm", "xls", "xlsb", "ods"]);
+  var CRAFT_OF = { docx: "wordcraft", sheet: "gridcraft" };
+  var ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
+  function isTableFile(note) {
+    return isPlainTextFile(note) && ["csv", "tsv"].includes(extOf(note.filePath));
+  }
+  function isOoxmlWordFile(note) {
+    return !!(note && note.filePath && note.fileKind === "docx" && OOXML_EXT.has(extOf(note.filePath)));
+  }
+  function headingTitle(md) {
+    const escaped = [];
+    let s = String(md || "").replace(/\\([!-/:-@[-`{-~])/g, (_, c) => {
+      escaped.push(c);
+      return "\0" + (escaped.length - 1) + "";
+    });
+    s = s.replace(/`([^`]+)`/g, "$1");
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    s = s.replace(/<[^>\n]+>/g, "");
+    s = s.replace(/(\*\*|~~)(\S(?:.*?\S)?)\1/g, "$2").replace(/\*(\S(?:.*?\S)?)\*/g, "$1");
+    s = s.replace(/(^|\W)(__?)(\S(?:.*?\S)?)\2(?!\w)/g, "$1$3");
+    s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+    s = s.replace(/\u0000(\d+)\u0001/g, (_, i) => escaped[Number(i)]);
+    return s.replace(/\s+/g, " ").trim();
+  }
+  function splitAtHeadings(markdown, fallbackName) {
+    const lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
+    const heads = [];
+    let fence = null;
+    lines.forEach((line, i) => {
+      const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (f) {
+        const ch = f[1][0], len = f[1].length;
+        if (!fence) {
+          fence = { ch, len };
+          return;
+        }
+        if (ch === fence.ch && len >= fence.len && !f[2].trim()) {
+          fence = null;
+          return;
+        }
+      }
+      if (fence) return;
+      const h = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
+      if (!h) return;
+      const text = headingTitle(String(h[2] || "").replace(/[ \t]+#+$/, "").replace(/^#+$/, ""));
+      heads.push({ i, level: h[1].length, text });
+    });
+    let name = String(fallbackName || "").trim();
+    let usable = heads;
+    if (heads.length) {
+      const top = Math.min(...heads.map((h) => h.level));
+      const atTop = heads.filter((h) => h.level === top);
+      const firstText = lines.findIndex((l) => l.trim());
+      if (atTop.length === 1 && atTop[0].i === firstText) {
+        if (atTop[0].text) name = atTop[0].text;
+        usable = heads.filter((h) => h !== atTop[0]);
+      }
+    }
+    const titleHead = usable === heads ? null : heads.find((h) => !usable.includes(h));
+    const titleLine = titleHead ? titleHead.i : -1;
+    if (!usable.length) return { name: name || "Book", level: 0, pages: [] };
+    const level = Math.min(...usable.map((h) => h.level));
+    const cuts = usable.filter((h) => h.level === level);
+    const trimBlank = (arr) => {
+      let a = 0, b = arr.length;
+      while (a < b && !arr[a].trim()) a++;
+      while (b > a && !arr[b - 1].trim()) b--;
+      return arr.slice(a, b).join("\n");
+    };
+    const pages = [];
+    const intro = trimBlank(lines.slice(0, cuts[0].i).filter((_, i) => i !== titleLine));
+    if (intro) pages.push({ title: "Introduction", body: intro });
+    cuts.forEach((c, k) => {
+      const end = k + 1 < cuts.length ? cuts[k + 1].i : lines.length;
+      pages.push({ title: c.text || "Untitled", body: trimBlank(lines.slice(c.i + 1, end)) });
+    });
+    return { name: name || "Book", level, pages };
+  }
+  function imageBaseFor(note) {
+    const p = note && note.filePath ? String(note.filePath).replace(/\\/g, "/") : "";
+    if (!p || p.startsWith("//")) return null;
+    const parts = p.split("/");
+    parts.pop();
+    return "file:///" + parts.map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s)).join("/").replace(/^\/+/, "") + "/";
+  }
+  function fileStamp(date) {
+    return new Date(date === void 0 ? Date.now() : date).toISOString().replace(/[:.]/g, "-");
+  }
+  function fuzzyScore(query, text) {
+    const q = String(query || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const t = String(text || "").toLowerCase();
+    if (!q) return 1;
+    if (t.startsWith(q)) return 1e3 - t.length;
+    const wordStart = (i) => i === 0 || /[\s\-_/.(#:"'“]/.test(t[i - 1]);
+    for (let at = t.indexOf(q); at > 0; at = t.indexOf(q, at + 1)) {
+      if (wordStart(at)) return 700 - at - t.length / 10;
+    }
+    let score = 0, ti = 0, run = 0;
+    for (const ch of q) {
+      if (ch === " ") {
+        run = 0;
+        continue;
+      }
+      let found = -1;
+      for (let i = t.indexOf(ch, ti); i >= 0; i = t.indexOf(ch, i + 1)) {
+        if (i === ti && ti > 0 && run > 0 || wordStart(i)) {
+          found = i;
+          break;
+        }
+      }
+      if (found < 0) return 0;
+      run = found === ti && run > 0 ? run + 1 : 1;
+      score += 10 + (wordStart(found) ? 25 : 0) + run * 8;
+      ti = found + 1;
+    }
+    return Math.max(1, score - t.length / 20);
+  }
+
+  // src/shared/themes.ts
+  var themes_exports = {};
+  __export(themes_exports, {
+    BUILT_IN: () => BUILT_IN,
+    BUILT_IN_SEEDS: () => BUILT_IN_SEEDS,
+    CUSTOM: () => CUSTOM,
+    SCHEMES: () => SCHEMES,
+    TOKENS: () => TOKENS,
+    cleanCustom: () => cleanCustom,
+    cleanSchemeId: () => cleanSchemeId,
+    contrast: () => contrast,
+    derive: () => derive,
+    isHex: () => isHex,
+    resolve: () => resolve,
+    seedsOf: () => seedsOf,
+    swatch: () => swatch,
+    windowColors: () => windowColors
+  });
+  var BUILT_IN = "notes";
+  var CUSTOM = "custom";
+  var SCHEMES = {
+    notes: { name: "Notes", builtIn: true },
+    paper: { name: "Paper", light: { background: "#fafafa", text: "#1f1f1f", accent: "#3c6fd1" }, dark: { background: "#1c1c1e", text: "#ebebeb", accent: "#7aa2f7" } },
+    slate: { name: "Slate", light: { background: "#f3f5f8", text: "#1d2430", accent: "#2f6fd6" }, dark: { background: "#1b2028", text: "#e3e8ef", accent: "#8ab4f8" } },
+    forest: { name: "Forest", light: { background: "#f3f6ee", text: "#1f2a1a", accent: "#3f7a3a" }, dark: { background: "#1a2219", text: "#e3ebdc", accent: "#8cc46e" } },
+    ocean: { name: "Ocean", light: { background: "#eef5f8", text: "#14262e", accent: "#1c7a9c" }, dark: { background: "#15222a", text: "#dde9ef", accent: "#5fc0dc" } },
+    rose: { name: "Rose", light: { background: "#fbf3f4", text: "#2c1a1f", accent: "#c2375a" }, dark: { background: "#241a1e", text: "#f3e6ea", accent: "#e8809a" } },
+    sepia: { name: "Sepia", light: { background: "#f4ecd8", text: "#3b2f1e", accent: "#8a5a2b" }, dark: { background: "#2a2318", text: "#ead9bd", accent: "#d19a5a" } }
+  };
+  var BUILT_IN_SEEDS = { light: { background: "#fffaf3", text: "#2a1a12", accent: "#f47b3e" }, dark: { background: "#211710", text: "#f6eadb", accent: "#f47b3e" } };
+  var TOKENS = [
+    "chrome",
+    "base",
+    "paper",
+    "raised",
+    "fg",
+    "fg-2",
+    "fg-3",
+    "hover",
+    "pressed",
+    "selected",
+    "selected-fg",
+    "well",
+    "line",
+    "line-2",
+    "field",
+    "field-bg",
+    "float-line",
+    "float-shadow",
+    "scroll-thumb",
+    "accent",
+    "accent-fg",
+    "accent-hover",
+    "accent-text",
+    "focus",
+    "danger",
+    "ok",
+    "document-bg",
+    "syn-keyword",
+    "syn-string",
+    "syn-atom",
+    "syn-comment",
+    "syn-punct",
+    "cream",
+    "peach",
+    "tangerine",
+    "ember",
+    "leaf",
+    "ink"
+  ];
+  var BUILT_IN_WINDOW = { light: { background: "#fffaf3", foreground: "#2a1a12" }, dark: { background: "#211710", foreground: "#f6eadb" } };
+  var HEX = /^#[0-9a-f]{6}$/i;
+  var isHex = (v) => typeof v === "string" && HEX.test(v);
+  var parse = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  var toHex = (rgb) => "#" + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+  var mix = (a, b, t) => {
+    const x = parse(a), y = parse(b);
+    return toHex(x.map((v, i) => v + (y[i] - v) * t));
+  };
+  var rgba = (hex, alpha) => "rgba(" + parse(hex).join(", ") + ", " + alpha + ")";
+  var over = (hex, alpha, bg) => mix(bg, hex, alpha);
+  function luminance(hex) {
+    const [r, g, b] = parse(hex).map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function contrast(a, b) {
+    const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  }
+  var worstContrast = (color, surfaces) => Math.min(...surfaces.map((s) => contrast(color, s)));
+  function legible(color, surfaces, min, towardDark) {
+    const end = towardDark ? "#000000" : "#ffffff";
+    for (let t = 0; t <= 1.0001; t += 0.04) {
+      const c = mix(color, end, Math.min(1, t));
+      if (worstContrast(c, surfaces) >= min) return c;
+    }
+    return end;
+  }
+  function readableBackground(bg) {
+    const light = luminance(bg) > 0.179;
+    const end = light ? "#ffffff" : "#000000", ink = light ? "#000000" : "#ffffff";
+    for (let t = 0; t <= 1.0001; t += 0.02) {
+      const c = mix(bg, end, Math.min(1, t));
+      if (contrast(c, ink) >= 8) return c;
+    }
+    return end;
+  }
+  function derive(seed) {
+    const bg = readableBackground(seed.background), light = luminance(bg) > 0.179;
+    const towardDark = light;
+    const paper = bg;
+    const base = light ? mix(bg, seed.text, 0.04) : mix(bg, "#000000", 0.22);
+    const chrome = light ? mix(bg, seed.text, 0.07) : mix(bg, "#000000", 0.36);
+    const raised = light ? mix(bg, "#ffffff", 0.5) : mix(bg, seed.text, 0.1);
+    const surfaces = [chrome, base, paper, raised];
+    const fg = legible(seed.text, surfaces, 7, towardDark);
+    const grounds = surfaces.concat(surfaces.map((s) => over(fg, 0.1, s)));
+    const fg2 = legible(mix(fg, bg, 0.25), grounds, 4.5, towardDark);
+    const fg3 = legible(mix(fg, bg, 0.38), grounds, 4.5, towardDark);
+    const accent = seed.accent;
+    const accentText = legible(accent, grounds, 4.5, towardDark);
+    const onAccent = [fg, bg].sort((a, b) => contrast(b, accent) - contrast(a, accent))[0];
+    const accentFg = legible(onAccent, [accent], 4.5, luminance(accent) > 0.179);
+    const selected = light ? mix(bg, accent, 0.28) : over(accent, 0.22, paper);
+    const selectedFg = legible(fg, [selected], 4.5, luminance(selected) > 0.179);
+    const ok = legible(light ? "#3f6a2c" : "#9ccf80", grounds, 4.5, towardDark);
+    return {
+      chrome,
+      base,
+      paper,
+      raised,
+      fg,
+      "fg-2": fg2,
+      "fg-3": fg3,
+      hover: rgba(fg, 0.06),
+      pressed: rgba(fg, 0.1),
+      selected,
+      "selected-fg": selectedFg,
+      well: rgba(fg, light ? 0.05 : 0.06),
+      // Lines are darker than the surfaces they sit on, never light (the user's rule); none round floating layers in dark.
+      line: light ? rgba(fg, 0.1) : "rgba(0, 0, 0, 0.42)",
+      "line-2": light ? rgba(fg, 0.16) : "rgba(0, 0, 0, 0.55)",
+      field: light ? rgba(fg, 0.45) : "rgba(0, 0, 0, 0.6)",
+      "field-bg": light ? raised : mix(bg, "#000000", 0.35),
+      "float-line": light ? rgba(fg, 0.16) : "transparent",
+      "float-shadow": light ? "0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14)" : "none",
+      // not a colour: the lift under a floating layer, light only
+      "scroll-thumb": rgba(fg, light ? 0.2 : 0.16),
+      accent,
+      "accent-fg": accentFg,
+      "accent-hover": mix(accent, "#ffffff", 0.12),
+      "accent-text": accentText,
+      focus: accentText,
+      danger: legible(light ? "#a8340c" : "#ff8a66", grounds, 4.5, towardDark),
+      ok,
+      "document-bg": light ? mix(bg, fg, 0.1) : mix(bg, "#000000", 0.45),
+      "syn-keyword": accentText,
+      "syn-string": legible(light ? "#8a5200" : "#e8b860", grounds, 4.5, towardDark),
+      "syn-atom": legible(light ? "#3f6a2c" : "#9ccf80", grounds, 4.5, towardDark),
+      "syn-comment": fg3,
+      "syn-punct": fg2,
+      cream: paper,
+      peach: selected,
+      tangerine: accent,
+      ember: accentText,
+      leaf: ok,
+      ink: fg
+    };
+  }
+  var cleanSeed = (s) => s && typeof s === "object" && isHex(s.background) && isHex(s.text) && isHex(s.accent) ? { background: s.background.toLowerCase(), text: s.text.toLowerCase(), accent: s.accent.toLowerCase() } : null;
+  function cleanCustom(input) {
+    if (!input || typeof input !== "object") return null;
+    const out = {};
+    for (const mode of ["light", "dark"]) {
+      const s = cleanSeed(input[mode]);
+      if (s) out[mode] = s;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  function cleanSchemeId(id, customColors) {
+    if (id === CUSTOM) return customColors ? CUSTOM : BUILT_IN;
+    return Object.prototype.hasOwnProperty.call(SCHEMES, id) ? id : BUILT_IN;
+  }
+  function seedFor(settings, mode) {
+    const id = settings && settings.colorScheme;
+    if (id === CUSTOM) return settings.customColors && settings.customColors[mode] || null;
+    const scheme = SCHEMES[id];
+    return scheme && !scheme.builtIn ? scheme[mode] || null : null;
+  }
+  function resolve(settings, mode) {
+    const seed = seedFor(settings, mode);
+    return seed ? derive(seed) : null;
+  }
+  function windowColors(settings, mode) {
+    const tokens = resolve(settings, mode);
+    return tokens ? { background: tokens.paper, foreground: tokens.fg } : BUILT_IN_WINDOW[mode === "dark" ? "dark" : "light"];
+  }
+  function seedsOf(id, customColors, mode) {
+    const m = mode === "dark" ? "dark" : "light";
+    if (id === CUSTOM) return customColors && customColors[m] || BUILT_IN_SEEDS[m];
+    const scheme = SCHEMES[id];
+    return scheme && !scheme.builtIn ? scheme[m] : BUILT_IN_SEEDS[m];
+  }
+  function swatch(id, customColors, mode) {
+    const seed = seedsOf(id, customColors, mode);
+    if (id === BUILT_IN || id !== CUSTOM && !(SCHEMES[id] && !SCHEMES[id].builtIn)) return { paper: seed.background, text: seed.text, accent: seed.accent };
+    const t = derive(seed);
+    return { paper: t.paper, text: t.fg, accent: t.accent };
+  }
+
+  // src/renderer/app.ts
   var import_icons5 = __toESM(require_icons());
 
-  // src/renderer/palette.js
-  var import_helpers = __toESM(require_helpers());
+  // src/renderer/palette.ts
   var import_icons = __toESM(require_icons());
+
+  // src/renderer/text.ts
+  var HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+  }
+  function highlight(text, query) {
+    const raw = String(text);
+    const tokens = tokenize(query);
+    if (!tokens.length) return escapeHtml(raw);
+    const re = new RegExp("(" + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
+    return raw.split(re).map((part, i) => i % 2 ? '<span class="mark">' + escapeHtml(part) + "</span>" : escapeHtml(part)).join("");
+  }
+  function ipcErrorText(err) {
+    return String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+  }
+
+  // src/renderer/palette.ts
   var NotesPalette = /* @__PURE__ */ (function() {
     const I2 = (name) => name ? import_icons.default.svg(name) : "";
-    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const esc = (s) => escapeHtml(s == null ? "" : s);
     function marked(text, query) {
       const q = String(query || "").toLowerCase().replace(/\s+/g, "");
       if (!q) return esc(text);
@@ -915,7 +931,7 @@
           input.select();
           return;
         }
-        returnFocus = document.activeElement;
+        returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         input.value = query || "";
         items = [];
         list.innerHTML = "";
@@ -970,7 +986,7 @@
       const raw = String(query || "");
       const commandsOnly = /^\s*>/.test(raw);
       const q = raw.replace(/^\s*>\s*/, "").trim();
-      const scored = (arr, text) => arr.map((x) => ({ x, s: import_helpers.default.fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
+      const scored = (arr, text) => arr.map((x) => ({ x, s: fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
       const cmds = scored(commands, (c) => c.title + (c.keywords ? " " + c.keywords : ""));
       if (commandsOnly || !notes) return cmds;
       if (!q) return notes.slice(0, 6).concat(cmds);
@@ -978,1568 +994,16 @@
       const seen = new Set(byTitle.map((n) => n.id));
       const byBody = notes.filter((n) => !seen.has(n.id) && n.matches(q)).slice(0, 6);
       const noteHits = byTitle.slice(0, 8).concat(byBody);
-      const strong = cmds.length && import_helpers.default.fuzzyScore(q, cmds[0].title) >= 500;
+      const strong = cmds.length && fuzzyScore(q, cmds[0].title) >= 500;
       return strong ? cmds.slice(0, 10).concat(noteHits) : noteHits.concat(cmds.slice(0, 8));
     }
     return { create, rank };
   })();
 
-  // src/renderer/pdf-editor.js
-  var NotesPdfEditor = (function() {
-    "use strict";
-    const PV = window.PdfView;
-    if (!PV) return;
-    const lib = PV.pdfjsLib;
-    const PKG = new URL("../../node_modules/pdfjs-dist/", document.baseURI).href;
-    lib.GlobalWorkerOptions.workerSrc = PKG + "build/pdf.worker.min.mjs";
-    const T = lib.AnnotationEditorType;
-    const plainFocus = HTMLElement.prototype.focus;
-    HTMLElement.prototype.focus = function(options) {
-      return plainFocus.call(this, options === void 0 && this.closest && this.closest(".pdf-viewport") ? { preventScroll: true } : options);
-    };
-    const LOAD_OPTIONS = {
-      isEvalSupported: false,
-      enableXfa: false,
-      cMapUrl: PKG + "cmaps/",
-      cMapPacked: true,
-      standardFontDataUrl: PKG + "standard_fonts/",
-      wasmUrl: PKG + "wasm/",
-      iccUrl: PKG + "iccs/"
-    };
-    async function drawPage(d, index, canvas, width) {
-      const page = await d.getPage(index + 1);
-      const ratio = window.devicePixelRatio || 1;
-      const viewport = page.getViewport({ scale: width / page.getViewport({ scale: 1 }).width * ratio });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      canvas.style.width = Math.floor(viewport.width / ratio) + "px";
-      await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
-    }
-    const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
-    const MARKUP = /* @__PURE__ */ new Set([
-      "Text",
-      "Line",
-      "Square",
-      "Circle",
-      "Polygon",
-      "PolyLine",
-      "Highlight",
-      "Underline",
-      "Squiggly",
-      "StrikeOut",
-      "Stamp",
-      "Caret",
-      "Ink",
-      "FileAttachment",
-      "Sound"
-    ]);
-    function refOf(id) {
-      const m = /^(\d+)R(\d*)$/.exec(String(id || ""));
-      return m ? [Number(m[1]), Number(m[2] || 0)] : null;
-    }
-    function create(root, hooks2) {
-      const container = root.querySelector(".pdf-viewport");
-      const eventBus = new PV.EventBus();
-      const linkService = new PV.PDFLinkService({ eventBus });
-      const viewer = new PV.PDFViewer({
-        container,
-        eventBus,
-        linkService,
-        annotationMode: lib.AnnotationMode.ENABLE_FORMS,
-        annotationEditorMode: T.NONE,
-        imageResourcesPath: PKG + "web/images/",
-        // pdf.js's default palette (its viewer's highlightEditorColors). Without it the highlight tool throws.
-        annotationEditorHighlightColors: "yellow=#FFFF98,green=#53FFBC,blue=#80EBFF,pink=#FFCBE6,red=#FF4F5F,yellow_HCM=#FFFFCC,green_HCM=#53FFBC,blue_HCM=#80EBFF,pink_HCM=#F6B8FF,red_HCM=#C50043"
-      });
-      linkService.setViewer(viewer);
-      let task = null, doc = null, seq = 0, dirty = false, mode = "select", savedHash = "", modeEpoch = 0;
-      let touched = false;
-      const undo = { canUndo: false, canRedo: false };
-      const report = () => hooks2.onState && hooks2.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
-      let location2 = null, restore = null;
-      eventBus.on("updateviewarea", (e) => {
-        location2 = e.location;
-      });
-      eventBus.on("pagesinit", () => {
-        const at = restore;
-        restore = null;
-        if (!at || !doc) {
-          viewer.currentScaleValue = "page-width";
-          return;
-        }
-        viewer.currentScaleValue = typeof at.scale === "number" ? String(at.scale / 100) : at.scale;
-        viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: "XYZ" }, at.left, at.top, null], allowNegativeOffset: true });
-      });
-      eventBus.on("scalechanging", report);
-      let fittedWidth = 0;
-      new ResizeObserver(() => {
-        const w = container.clientWidth;
-        if (!w || w === fittedWidth) return;
-        fittedWidth = w;
-        requestAnimationFrame(() => {
-          const v = viewer.currentScaleValue;
-          if (doc && (v === "page-width" || v === "page-fit" || v === "auto")) viewer.currentScaleValue = v;
-        });
-      }).observe(container);
-      eventBus.on("annotationlayerrendered", () => {
-        if (!touched && doc) {
-          savedHash = currentHash();
-          refreshDirty();
-        }
-      });
-      eventBus.on("editingstateschanged", ({ details }) => {
-        if ("hasSomethingToUndo" in details) undo.canUndo = details.hasSomethingToUndo;
-        if ("hasSomethingToRedo" in details) undo.canRedo = details.hasSomethingToRedo;
-        refreshDirty();
-        report();
-      });
-      const EDIT_LAYERS = ".annotationLayer, .annotationEditorLayer";
-      for (const type of ["pointerdown", "keydown"]) {
-        container.addEventListener(type, (e) => {
-          if (e.target && e.target.closest && e.target.closest(EDIT_LAYERS)) touched = true;
-        }, true);
-      }
-      for (const type of ["pointerup", "keyup", "input", "change", "focusout"]) container.addEventListener(type, () => setTimeout(refreshDirty, 0));
-      container.addEventListener("click", (e) => {
-        const a = e.target && e.target.closest && e.target.closest("a[href]");
-        if (!a) return;
-        const href = a.getAttribute("href") || "";
-        if (href.startsWith("#")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (hooks2.onLink) hooks2.onLink(e, a.href);
-      }, true);
-      const currentHash = () => doc ? doc.annotationStorage.serializable.hash : "";
-      function refreshDirty() {
-        const v = !!doc && currentHash() !== savedHash;
-        if (dirty === v) return;
-        dirty = v;
-        if (hooks2.onDirty) hooks2.onDirty(v);
-      }
-      const others = /* @__PURE__ */ new Set();
-      async function openOther(bytes) {
-        const own = new Uint8Array(bytes);
-        const t = lib.getDocument(Object.assign({ data: own.slice() }, LOAD_OPTIONS));
-        others.add(t);
-        const d = await t.promise;
-        return { pages: d.numPages, draw: (i, canvas, width) => drawPage(d, i, canvas, width), bytes: own };
-      }
-      function closeOthers() {
-        for (const t of others) t.destroy().catch(() => {
-        });
-        others.clear();
-      }
-      async function unload() {
-        cancelPick();
-        closeOthers();
-        viewer.setDocument(null);
-        linkService.setDocument(null);
-        const t = task;
-        task = null;
-        doc = null;
-        savedHash = "";
-        refreshDirty();
-        undo.canUndo = undo.canRedo = false;
-        if (t) await t.destroy().catch(() => {
-        });
-      }
-      async function open(bytes, opts) {
-        const my = ++seq;
-        const at = opts && opts.keepView ? location2 : null;
-        await unload();
-        if (my !== seq) return false;
-        const t = lib.getDocument(Object.assign({ data: bytes }, LOAD_OPTIONS));
-        task = t;
-        const d = await t.promise;
-        if (my !== seq) return false;
-        if (d.numPages < 1) {
-          task = null;
-          await t.destroy().catch(() => {
-          });
-          throw new Error("this PDF has no pages.");
-        }
-        doc = d;
-        restore = at;
-        location2 = null;
-        touched = false;
-        savedHash = currentHash();
-        doc.annotationStorage.onSetModified = refreshDirty;
-        doc.annotationStorage.onResetModified = refreshDirty;
-        viewer.setDocument(doc);
-        linkService.setDocument(doc, null);
-        mode = "select";
-        report();
-        return true;
-      }
-      async function close() {
-        seq++;
-        await unload();
-      }
-      function setMode(name, internal) {
-        if (!doc || !(name in MODES)) return false;
-        try {
-          viewer.annotationEditorMode = { mode: MODES[name] };
-        } catch (_) {
-          return false;
-        }
-        if (!internal) {
-          modeEpoch++;
-          if (name !== "select") touched = true;
-        }
-        mode = name;
-        report();
-        return true;
-      }
-      function modeSwitched(t) {
-        return new Promise((resolve) => {
-          const done = () => {
-            clearTimeout(timer);
-            eventBus.off("annotationeditormodechanged", onChanged);
-            resolve();
-          };
-          const onChanged = (e) => {
-            if (e.mode === t) done();
-          };
-          const timer = setTimeout(done, 1e3);
-          eventBus.on("annotationeditormodechanged", onChanged);
-        });
-      }
-      async function commit() {
-        if (!doc || mode === "select") return;
-        const m = mode, epoch = modeEpoch;
-        const left = modeSwitched(T.NONE);
-        if (!setMode("select", true)) return;
-        await left;
-        if (modeEpoch !== epoch || !doc) return;
-        const back = modeSwitched(MODES[m]);
-        if (setMode(m, true)) await back;
-      }
-      async function placePicture(file) {
-        if (!doc) return false;
-        if (mode !== "picture") {
-          const switched = modeSwitched(T.STAMP);
-          if (!setMode("picture")) return false;
-          await switched;
-        }
-        eventBus.dispatch("switchannotationeditorparams", { source: null, type: lib.AnnotationEditorParamsType.CREATE, value: { bitmapFile: file } });
-        return true;
-      }
-      let picking = null;
-      function pickPoint() {
-        cancelPick();
-        if (!doc) return Promise.resolve(null);
-        if (mode !== "select") setMode("select");
-        root.classList.add("picking");
-        return new Promise((resolve) => {
-          const onDown = (e) => {
-            const pageEl = e.button === 0 && e.target.closest && e.target.closest(".page[data-page-number]");
-            if (!pageEl) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
-            const r = pageEl.getBoundingClientRect();
-            const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
-            const eat = (c) => {
-              c.preventDefault();
-              c.stopPropagation();
-            };
-            container.addEventListener("click", eat, true);
-            setTimeout(() => container.removeEventListener("click", eat, true), 400);
-            finish({ page: view.id - 1, x, y });
-          };
-          const onKey = (e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              finish(null);
-            }
-          };
-          function finish(value) {
-            container.removeEventListener("pointerdown", onDown, true);
-            window.removeEventListener("keydown", onKey, true);
-            root.classList.remove("picking");
-            picking = null;
-            resolve(value);
-          }
-          container.addEventListener("pointerdown", onDown, true);
-          window.addEventListener("keydown", onKey, true);
-          picking = finish;
-        });
-      }
-      function cancelPick() {
-        if (picking) picking(null);
-      }
-      async function comments() {
-        const d = doc, list = [];
-        if (!d) return null;
-        for (let i = 0; i < d.numPages; i++) {
-          const annots = await (await d.getPage(i + 1)).getAnnotations();
-          if (d !== doc) return null;
-          for (const a of annots) {
-            const text = a.contentsObj && a.contentsObj.str || "";
-            if (!MARKUP.has(a.subtype) || a.subtype !== "Text" && !text.trim() || a.state) continue;
-            list.push({
-              id: a.id,
-              page: i,
-              ref: refOf(a.id),
-              kind: a.subtype,
-              text,
-              author: a.titleObj && a.titleObj.str || "",
-              date: lib.PDFDateString.toDateObject(a.modificationDate || a.creationDate || ""),
-              rect: a.rect,
-              replyTo: a.inReplyTo || null
-            });
-          }
-        }
-        return list;
-      }
-      function goTo(page, rect) {
-        if (!doc || page >= doc.numPages) return;
-        viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: "XYZ" }, rect[0] - 40, rect[3] + 40, null], allowNegativeOffset: true });
-      }
-      async function save() {
-        if (!doc) return null;
-        const hash = currentHash();
-        const bytes = await doc.saveDocument();
-        return { bytes, hash };
-      }
-      return {
-        open,
-        close,
-        setMode,
-        commit,
-        placePicture,
-        pickPoint,
-        cancelPick,
-        comments,
-        goTo,
-        save,
-        pageCount: () => doc ? doc.numPages : 0,
-        drawPage: (i, canvas, width) => doc ? drawPage(doc, i, canvas, width) : Promise.resolve(),
-        openOther,
-        closeOthers,
-        // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
-        // the kept pages use is written, so a removed page leaves nothing behind in the file.
-        extractPages: (pageInfos) => doc.extractPages(pageInfos),
-        markSaved(hash) {
-          if (doc) {
-            savedHash = hash;
-            refreshDirty();
-          }
-        },
-        isOpen: () => !!doc,
-        isDirty: () => !!doc && currentHash() !== savedHash,
-        // Unsaved edits, or a tool in use whose stroke or text is not committed yet.
-        hasPendingWork: () => !!doc && (currentHash() !== savedHash || mode !== "select"),
-        undo: () => eventBus.dispatch("editingaction", { source: null, name: "undo" }),
-        redo: () => eventBus.dispatch("editingaction", { source: null, name: "redo" }),
-        zoomIn: () => viewer.increaseScale(),
-        zoomOut: () => viewer.decreaseScale(),
-        fitWidth: () => {
-          viewer.currentScaleValue = "page-width";
-        }
-      };
-    }
-    return { create, modes: Object.keys(MODES) };
-  })();
-
-  // src/renderer/pdf-pages.js
+  // src/renderer/dom.ts
   var import_icons2 = __toESM(require_icons());
-  var NotesPdfPages = (function() {
-    "use strict";
-    const THUMB_W = 130, THUMB_H = 170;
-    function create(panel, ctl, hooks2) {
-      const grid = panel.querySelector(".pdf-pages-grid");
-      let items = [], sources = /* @__PURE__ */ new Map(), canvases = /* @__PURE__ */ new Map(), added = 0, working = false;
-      function open() {
-        items = [];
-        for (let i = 0; i < ctl.pageCount(); i++) items.push({ src: "self", index: i, turn: 0 });
-        sources = /* @__PURE__ */ new Map([["self", { name: "", draw: ctl.drawPage }]]);
-        canvases = /* @__PURE__ */ new Map();
-        added = 0;
-        render();
-      }
-      function canvasFor(it) {
-        const key = it.src + ":" + it.index;
-        if (!canvases.has(key)) {
-          const c = document.createElement("canvas");
-          canvases.set(key, c);
-          sources.get(it.src).draw(it.index, c, THUMB_W).then(() => fit(c), () => {
-          });
-        }
-        return canvases.get(key);
-      }
-      function fit(c) {
-        const turn = Number(c.dataset.turn || 0);
-        const w = c.offsetWidth || THUMB_W, h = c.offsetHeight || THUMB_H;
-        const scale = turn % 180 ? Math.min(1, THUMB_W / h, THUMB_H / w) : 1;
-        c.style.transform = "rotate(" + turn + "deg) scale(" + scale + ")";
-      }
-      function button(act2, k, icon, title) {
-        const b = document.createElement("button");
-        b.className = "tool-btn icon-only";
-        b.dataset.act = act2;
-        b.dataset.k = k;
-        b.innerHTML = import_icons2.default.svg(icon);
-        b.title = title;
-        b.setAttribute("aria-label", title);
-        return b;
-      }
-      function render() {
-        grid.replaceChildren(...items.map((it, k) => {
-          const card = document.createElement("figure");
-          card.className = "pdf-page-card";
-          const box = document.createElement("div");
-          box.className = "pdf-page-thumb";
-          const c = canvasFor(it);
-          c.dataset.turn = it.turn;
-          fit(c);
-          box.append(c);
-          const cap = document.createElement("figcaption");
-          cap.className = "pdf-page-num";
-          const from = sources.get(it.src).name;
-          cap.textContent = k + 1 + (from ? " \xB7 " + from + " p. " + (it.index + 1) : it.index !== k ? " \xB7 was " + (it.index + 1) : "");
-          cap.title = cap.textContent;
-          const acts = document.createElement("div");
-          acts.className = "pdf-page-acts";
-          acts.append(
-            button("left", k, "chevron-left", "Move earlier"),
-            button("turn-left", k, "rotate-ccw", "Turn left"),
-            button("turn-right", k, "rotate-cw", "Turn right"),
-            button("remove", k, "x", "Remove this page"),
-            button("right", k, "chevron-right", "Move later")
-          );
-          card.append(box, cap, acts);
-          return card;
-        }));
-      }
-      function act(name, k) {
-        const it = items[k];
-        if (!it) return;
-        if (name === "left" && k > 0) [items[k - 1], items[k]] = [items[k], items[k - 1]];
-        else if (name === "right" && k < items.length - 1) [items[k + 1], items[k]] = [items[k], items[k + 1]];
-        else if (name === "turn-left") it.turn = (it.turn + 270) % 360;
-        else if (name === "turn-right") it.turn = (it.turn + 90) % 360;
-        else if (name === "remove") items.splice(k, 1);
-        else return;
-        render();
-      }
-      async function addFromPdf() {
-        const picked = await hooks2.pickPdf();
-        if (!picked) return;
-        let other;
-        try {
-          other = await ctl.openOther(picked.bytes);
-        } catch (err) {
-          hooks2.say("Could not read " + picked.name + ": " + (err.message || err));
-          return;
-        }
-        const src2 = "added-" + ++added;
-        sources.set(src2, { name: picked.name, draw: other.draw, bytes: other.bytes });
-        for (let i = 0; i < other.pages; i++) items.push({ src: src2, index: i, turn: 0 });
-        render();
-        grid.scrollTop = grid.scrollHeight;
-      }
-      async function apply() {
-        if (working) return;
-        if (!items.length) {
-          hooks2.say("A PDF needs at least one page. Use Cancel to keep it as it is.");
-          return;
-        }
-        const reordered = items.length !== ctl.pageCount() || items.some((it, k) => it.src !== "self" || it.index !== k);
-        const rotations = items.map((it) => it.turn);
-        if (!reordered && !rotations.some(Boolean)) {
-          hooks2.close();
-          return;
-        }
-        let pageInfos = null;
-        if (reordered) {
-          const bySrc = /* @__PURE__ */ new Map();
-          items.forEach((it, pos) => {
-            if (!bySrc.has(it.src)) bySrc.set(it.src, []);
-            bySrc.get(it.src).push({ index: it.index, pos });
-          });
-          pageInfos = [...bySrc].map(([src2, list]) => {
-            list.sort((a, b) => a.index - b.index);
-            return { document: src2 === "self" ? null : sources.get(src2).bytes, includePages: list.map((e) => e.index), pageIndices: list.map((e) => e.pos) };
-          });
-        }
-        working = true;
-        panel.classList.add("is-working");
-        try {
-          if (await hooks2.apply({ pageInfos, rotations })) hooks2.close();
-        } finally {
-          working = false;
-          panel.classList.remove("is-working");
-        }
-      }
-      grid.addEventListener("click", (e) => {
-        const b = e.target.closest("button[data-act]");
-        if (b && !working) act(b.dataset.act, Number(b.dataset.k));
-      });
-      panel.querySelector(".pdf-pages-bar").addEventListener("click", (e) => {
-        const b = e.target.closest("button[data-pages-act]");
-        if (!b || working) return;
-        if (b.dataset.pagesAct === "add") addFromPdf();
-        else if (b.dataset.pagesAct === "cancel") hooks2.close();
-        else if (b.dataset.pagesAct === "apply") apply();
-      });
-      return { open };
-    }
-    return { create };
-  })();
-
-  // src/renderer/pdf-comments.js
-  var NotesPdfComments = (function() {
-    "use strict";
-    const KIND_NAMES = {
-      Text: "Note",
-      Highlight: "Highlight",
-      Underline: "Underline",
-      Squiggly: "Squiggly underline",
-      StrikeOut: "Strikethrough",
-      Ink: "Drawing",
-      Stamp: "Stamp",
-      Square: "Rectangle",
-      Circle: "Oval",
-      Line: "Line",
-      Polygon: "Shape",
-      PolyLine: "Lines",
-      Caret: "Insertion",
-      FileAttachment: "Attachment",
-      Sound: "Sound"
-    };
-    const DATE_FORMAT = new Intl.DateTimeFormat(void 0, { dateStyle: "medium", timeStyle: "short" });
-    function create(panel, ctl, hooks2) {
-      const listEl = panel.querySelector(".pdf-comments-list");
-      const addBtn = panel.querySelector('[data-comments-act="add"]');
-      const hint = panel.querySelector(".pdf-comments-hint");
-      let list = [], editing = null, draft = null, picking = false, working = false, readSeq = 0;
-      function el2(tag, cls, text) {
-        const e = document.createElement(tag);
-        if (cls) e.className = cls;
-        if (text !== void 0) e.textContent = text;
-        return e;
-      }
-      function button(act, text, title) {
-        const b = el2("button", "tool-btn", text);
-        b.type = "button";
-        b.dataset.cAct = act;
-        if (title) b.title = title;
-        return b;
-      }
-      function editorCard(value, label) {
-        const card = el2("div", "pdf-comment is-editing");
-        card.append(el2("div", "pdf-comment-meta", label));
-        const box = el2("textarea", "pdf-comment-input");
-        box.value = value;
-        box.rows = 4;
-        box.setAttribute("aria-label", "Comment");
-        box.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && e.ctrlKey) {
-            e.preventDefault();
-            save();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            cancelEdit();
-          }
-        });
-        const acts = el2("div", "pdf-comment-acts");
-        acts.append(button("cancel", "Cancel"), button("save", "Save", "Save (Ctrl+Enter)"));
-        card.append(box, acts);
-        return card;
-      }
-      function commentCard(c, reply) {
-        if (editing === c.id) return editorCard(c.text, "Page " + (c.page + 1));
-        const card = el2("div", "pdf-comment" + (reply ? " is-reply" : ""));
-        card.dataset.id = c.id;
-        const meta = [reply ? "Reply" : "Page " + (c.page + 1)];
-        if (c.kind !== "Text") meta.push(KIND_NAMES[c.kind] || c.kind);
-        if (c.author) meta.push(c.author);
-        if (c.date) meta.push(DATE_FORMAT.format(c.date));
-        card.append(el2("div", "pdf-comment-meta", meta.join(" \xB7 ")));
-        card.append(el2("div", "pdf-comment-text", c.text || "(no text)"));
-        const acts = el2("div", "pdf-comment-acts");
-        if (c.ref) {
-          acts.append(button("edit", "Edit"));
-          if (c.kind === "Text") acts.append(button("delete", "Delete"));
-        } else acts.title = "This comment is stored in a way Notes cannot change.";
-        card.append(acts);
-        return card;
-      }
-      function render() {
-        addBtn.textContent = picking ? "Cancel" : "Add comment";
-        addBtn.dataset.commentsAct = picking ? "cancel-pick" : "add";
-        hint.textContent = picking ? "Click on the page where the comment goes. Esc cancels." : "";
-        addBtn.disabled = working || !picking && !!editing;
-        const cards = [];
-        if (editing === "new") cards.push(editorCard("", "New comment \xB7 page " + (draft.page + 1)));
-        const replies = /* @__PURE__ */ new Map();
-        for (const c of list) if (c.replyTo) {
-          if (!replies.has(c.replyTo)) replies.set(c.replyTo, []);
-          replies.get(c.replyTo).push(c);
-        }
-        const ids = new Set(list.map((c) => c.id));
-        const shown = /* @__PURE__ */ new Set();
-        const withReplies = (c, reply) => {
-          if (shown.has(c.id)) return;
-          shown.add(c.id);
-          cards.push(commentCard(c, reply));
-          for (const r of replies.get(c.id) || []) withReplies(r, true);
-        };
-        for (const c of list) if (!(c.replyTo && ids.has(c.replyTo))) withReplies(c, false);
-        if (!cards.length) cards.push(el2("p", "pdf-comments-empty", "No comments yet. Press Add comment, then click where it goes on the page."));
-        listEl.replaceChildren(...cards);
-        const box = listEl.querySelector(".pdf-comment-input");
-        if (box) box.focus();
-      }
-      async function refresh() {
-        const my = ++readSeq;
-        editing = null;
-        draft = null;
-        listEl.replaceChildren(el2("p", "pdf-comments-empty", "Reading comments\u2026"));
-        let read;
-        try {
-          read = await ctl.comments();
-        } catch (err) {
-          read = null;
-          if (my === readSeq) hooks2.say("Could not read the comments: " + (err.message || err));
-        }
-        if (my !== readSeq || read === null) return;
-        list = read;
-        render();
-      }
-      async function startAdd() {
-        picking = true;
-        render();
-        const at = await ctl.pickPoint();
-        picking = false;
-        if (at) {
-          draft = at;
-          editing = "new";
-        }
-        render();
-      }
-      function cancelEdit() {
-        editing = null;
-        draft = null;
-        render();
-      }
-      async function run(ops) {
-        working = true;
-        panel.classList.add("is-working");
-        try {
-          return await hooks2.change(ops);
-        } finally {
-          working = false;
-          panel.classList.remove("is-working");
-        }
-      }
-      async function save() {
-        if (working) return;
-        const box = listEl.querySelector(".pdf-comment-input");
-        const text = box ? box.value.trim() : "";
-        if (!text) {
-          hooks2.say("Write the comment first, or press Cancel.");
-          return;
-        }
-        let op;
-        if (editing === "new") op = { op: "add", page: draft.page, x: draft.x, y: draft.y, text };
-        else {
-          const c = list.find((x) => x.id === editing);
-          if (!c) {
-            cancelEdit();
-            return;
-          }
-          if (text === c.text.trim()) {
-            cancelEdit();
-            return;
-          }
-          op = { op: "edit", page: c.page, ref: c.ref, text };
-        }
-        await run([op]);
-      }
-      function repliesTo(c) {
-        const found = /* @__PURE__ */ new Set([c.id]);
-        for (let grew = true; grew; ) {
-          grew = false;
-          for (const x of list) if (x.page === c.page && x.replyTo && found.has(x.replyTo) && !found.has(x.id)) {
-            found.add(x.id);
-            grew = true;
-          }
-        }
-        return found.size - 1;
-      }
-      async function remove(c) {
-        const answers = repliesTo(c);
-        if (!window.confirm("Delete this comment" + (answers ? " and its " + answers + (answers === 1 ? " reply" : " replies") : "") + "?")) return;
-        await run([{ op: "delete", page: c.page, ref: c.ref }]);
-      }
-      listEl.addEventListener("click", (e) => {
-        if (working) return;
-        const b = e.target.closest("button[data-c-act]");
-        const card = e.target.closest(".pdf-comment");
-        const c = card && card.dataset.id ? list.find((x) => x.id === card.dataset.id) : null;
-        if (!b) {
-          if (c) ctl.goTo(c.page, c.rect);
-          return;
-        }
-        const act = b.dataset.cAct;
-        if (act === "save") save();
-        else if (act === "cancel") cancelEdit();
-        else if (act === "edit" && c && !editing) {
-          editing = c.id;
-          render();
-        } else if (act === "delete" && c && !editing) remove(c);
-      });
-      addBtn.addEventListener("click", () => {
-        if (working) return;
-        if (addBtn.dataset.commentsAct === "cancel-pick") ctl.cancelPick();
-        else if (!editing) startAdd();
-      });
-      return {
-        refresh,
-        // Stops picking a place (the panel is closing, or another PDF is shown).
-        stop() {
-          ctl.cancelPick();
-          editing = null;
-          draft = null;
-        },
-        // A comment is being written: the PDF must not be reloaded under it.
-        busy: () => !!editing || working
-      };
-    }
-    return { create };
-  })();
-
-  // src/renderer/docx-editor.js
-  var NotesDocxEditor = (function() {
-    "use strict";
-    const DV = window.DocxView;
-    if (!DV || !DV.Ooxml || !DV.JSZip) return;
-    const X = DV.Ooxml;
-    const TAB_SHOWN = "\u2003";
-    const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false };
-    const NOT_TEXT = /* @__PURE__ */ new Set([X.PAGE_BREAK, X.PICTURE]);
-    const PIC = "data-notes-picture";
-    const REAL_BR = "data-notes-br";
-    const ALLOWED = /* @__PURE__ */ new Set([
-      "insertText",
-      "insertReplacementText",
-      "insertCompositionText",
-      "insertParagraph",
-      "insertLineBreak",
-      "deleteContentBackward",
-      "deleteContentForward",
-      "deleteWordBackward",
-      "deleteWordForward",
-      "deleteSoftLineBackward",
-      "deleteSoftLineForward",
-      "deleteHardLineBackward",
-      "deleteHardLineForward",
-      "deleteByCut",
-      "deleteContent",
-      "formatBold",
-      "formatItalic",
-      "formatUnderline"
-    ]);
-    function create(hooks2) {
-      let doc = null, xml = "", scan = null, baselines = /* @__PURE__ */ new Map(), dirty = false, edits = 0, seq = 0;
-      let gen = 0;
-      const SRC = "data-notes-src";
-      const REST = "data-notes-rest";
-      const map = {
-        get(p) {
-          const v = p.getAttribute(SRC);
-          const m = v && /^(\d+):(\d+)$/.exec(v);
-          return m && Number(m[1]) === gen ? Number(m[2]) : void 0;
-        },
-        has(p) {
-          return map.get(p) !== void 0;
-        },
-        set(p, index) {
-          p.setAttribute(SRC, gen + ":" + index);
-        }
-      };
-      let saving = null;
-      let styleCache = /* @__PURE__ */ new WeakMap();
-      function setDirty(v) {
-        if (dirty === v) return;
-        dirty = v;
-        if (hooks2.onDirty) hooks2.onDirty(v);
-      }
-      function fmtOf(el2) {
-        if (styleCache.has(el2)) return styleCache.get(el2);
-        const win = el2.ownerDocument.defaultView;
-        const cs = win.getComputedStyle(el2);
-        let u = false;
-        for (let e = el2; e && !u; e = e.parentElement) {
-          u = /underline/.test(win.getComputedStyle(e).textDecorationLine);
-          if (e.tagName === "P") break;
-        }
-        const f = { b: parseInt(cs.fontWeight, 10) >= 600, i: /italic|oblique/.test(cs.fontStyle), u };
-        styleCache.set(el2, f);
-        return f;
-      }
-      function charsOf(p) {
-        const out = [];
-        styleCache = /* @__PURE__ */ new WeakMap();
-        const walk = (node) => {
-          for (let n = node.firstChild; n; n = n.nextSibling) {
-            if (n.nodeType === 3) {
-              const fmt = fmtOf(n.parentElement);
-              for (let k = 0; k < n.data.length; k++) if (!NOT_TEXT.has(n.data[k])) out.push({ ch: n.data[k] === TAB_SHOWN ? "	" : n.data[k], fmt, br: false });
-            } else if (n.nodeType === 1) {
-              if (n.tagName === "BR") out.push({ ch: "\n", fmt: fmtOf(n.parentElement), br: true, real: n.hasAttribute(REAL_BR) });
-              else if (n.tagName === "DIV") out.push({ ch: X.PICTURE, fmt: fmtOf(n.parentElement), br: false, picture: n.getAttribute(PIC) });
-              else walk(n);
-            }
-          }
-        };
-        walk(p);
-        if (out.length && out[out.length - 1].br) out.pop();
-        for (let k = out.length - 2; k >= 0; k--) if (out[k].br && !out[k].real && out[k + 1].ch === X.PICTURE) out.splice(k, 1);
-        return out;
-      }
-      const textOf = (chars) => chars.map((c) => c.ch).join("");
-      const baselineOf = (chars, empty) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
-      let pictureSeq = 0;
-      function namePictures(p) {
-        for (const d of p.querySelectorAll("div")) {
-          if (d.parentElement.closest("div, p") !== p || d.hasAttribute(PIC)) continue;
-          d.setAttribute(PIC, String(++pictureSeq));
-          d.contentEditable = "false";
-        }
-      }
-      function shownByPage() {
-        return [...doc.querySelectorAll('article[contenteditable="true"]')].map((art) => ({
-          art,
-          list: [...art.querySelectorAll("p")].filter((p) => !p.closest('[contenteditable="false"]'))
-        }));
-      }
-      const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
-      function sources(list) {
-        const out = /* @__PURE__ */ new Map();
-        let last = null;
-        for (const p of list) {
-          if (map.has(p)) last = map.get(p);
-          if (last !== null) out.set(p, last);
-        }
-        const firstKnown = list.find((p) => map.has(p));
-        for (const p of list) if (!out.has(p) && firstKnown) out.set(p, map.get(firstKnown));
-        return out;
-      }
-      async function open(frameDoc, bytes) {
-        const my = ++seq;
-        reset();
-        const zip = await DV.JSZip.loadAsync(bytes);
-        const part = zip.file("word/document.xml");
-        let block = null, display = bytes, nextScan = null, nextXml = "";
-        if (!part) block = "it has no main document part";
-        else {
-          nextXml = await part.async("string");
-          const settings = zip.file("word/settings.xml");
-          block = X.settingsBlock(settings ? await settings.async("string") : "");
-          if (!block) {
-            try {
-              nextScan = X.scanDocument(nextXml);
-            } catch (err) {
-              block = err.message;
-            }
-            if (nextScan && !nextScan.prefix) block = "it is not a standard Word document";
-          }
-          if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
-            zip.file("word/document.xml", X.markForDisplay(nextXml, nextScan));
-            display = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-          }
-        }
-        if (my !== seq) return null;
-        await DV.renderAsync(display, frameDoc.body, frameDoc.body, { useBase64URL: true, renderAltChunks: false });
-        if (my !== seq) return null;
-        doc = frameDoc;
-        xml = nextXml;
-        scan = block ? null : nextScan;
-        const counts = scan ? attach() : { editable: 0, readOnly: 0 };
-        if (scan && !counts.editable) scan = null;
-        return Object.assign(counts, { block });
-      }
-      function attach() {
-        let editable = 0;
-        const pages = [...doc.querySelectorAll("section.docx > article")];
-        const take = (id) => {
-          const mark = doc.getElementById(id);
-          const p = mark && mark.closest("p");
-          if (mark) mark.remove();
-          return p;
-        };
-        for (const para of scan.paragraphs) {
-          if (!para.editable) continue;
-          const p = take(X.MARK + para.index);
-          const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
-          for (const el2 of [p, rest]) {
-            if (!el2) continue;
-            namePictures(el2);
-            for (const br of el2.querySelectorAll("br")) br.setAttribute(REAL_BR, "");
-          }
-          const shown = p && !map.has(p) && shownAs(para, p, rest, pages);
-          if (!shown || textOf(shown.chars) !== para.text) continue;
-          map.set(p, para.index);
-          if (rest) {
-            map.set(rest, para.index);
-            rest.setAttribute(REST, "");
-          }
-          if (shown.mark) shown.mark();
-          baselines.set(para.index, baselineOf(shown.chars, fmtOf(p)));
-          editable++;
-        }
-        X.limitTo(scan, (i) => baselines.has(i));
-        const readOnly = scan.paragraphs.length - editable;
-        if (!editable) return { editable, readOnly };
-        const holders = /* @__PURE__ */ new Set();
-        for (const art of doc.querySelectorAll("section.docx > article")) {
-          for (const p of art.querySelectorAll("p")) if (map.has(p)) for (let e = p.parentElement; e && e !== art; e = e.parentElement) holders.add(e);
-          fix(art, holders);
-          art.contentEditable = "true";
-          art.spellcheck = true;
-        }
-        doc.addEventListener("beforeinput", onBeforeInput, true);
-        doc.addEventListener("input", onInput, true);
-        doc.addEventListener("paste", onPaste, true);
-        doc.addEventListener("drop", (e) => e.preventDefault(), true);
-        doc.addEventListener("keydown", onKeydown, true);
-        doc.defaultView.addEventListener("blur", () => {
-          if (hooks2.onBlur) hooks2.onBlur();
-        });
-        return { editable, readOnly };
-      }
-      function shownAs(para, p, rest, pages) {
-        if (!para.pageBreaks.length) return { chars: charsOf(p) };
-        if (para.pageBreaks.length > 1) return null;
-        const page = p.parentElement, k = pages.indexOf(page);
-        if (k < 0 || page.lastElementChild !== p) return null;
-        if (!rest) return { chars: [...charsOf(p), BREAK], mark: () => {
-          page.dataset.notesEnd = "";
-        } };
-        const next = pages[k + 1];
-        if (!next || rest.parentElement !== next || next.firstElementChild !== rest || map.has(rest)) return null;
-        return { chars: [...charsOf(p), BREAK, ...charsOf(rest)], mark: () => {
-          next.dataset.notesJoin = "";
-        } };
-      }
-      function fix(container, holders) {
-        for (const el2 of container.children) {
-          if (map.has(el2)) continue;
-          if (holders.has(el2)) fix(el2, holders);
-          else el2.contentEditable = "false";
-        }
-      }
-      function close() {
-        seq++;
-        reset();
-      }
-      function reset() {
-        doc = null;
-        saving = null;
-        xml = "";
-        scan = null;
-        gen++;
-        baselines = /* @__PURE__ */ new Map();
-        edits = 0;
-        setDirty(false);
-      }
-      const paraOf = (node) => {
-        const el2 = node && (node.nodeType === 1 ? node : node.parentElement);
-        const p = el2 && el2.closest("p");
-        return p && !p.closest('[contenteditable="false"]') && p.closest('article[contenteditable="true"]') ? p : null;
-      };
-      function rangeAllowed(range) {
-        const a = paraOf(range.startContainer), b = paraOf(range.endContainer);
-        if (!a || !b) return false;
-        if (a === b) return true;
-        const list = shownParagraphs();
-        const src2 = sources(list);
-        const i = list.indexOf(a), j = list.indexOf(b);
-        if (i < 0 || j < 0) return false;
-        const chain = scan.paragraphs[src2.get(a)].chain;
-        for (let k = Math.min(i, j); k <= Math.max(i, j); k++) {
-          if (scan.paragraphs[src2.get(list[k])].chain !== chain) return false;
-          if (k > Math.min(i, j)) {
-            const between = doc.createRange();
-            between.setStartAfter(list[k - 1]);
-            between.setEndBefore(list[k]);
-            const frag = between.cloneContents();
-            if (frag.querySelector && frag.querySelector('[contenteditable="false"]')) return false;
-          }
-        }
-        return true;
-      }
-      function selectionAllowed() {
-        const sel = doc && doc.getSelection();
-        if (!sel || !sel.rangeCount) return false;
-        for (let k = 0; k < sel.rangeCount; k++) if (!rangeAllowed(sel.getRangeAt(k))) return false;
-        return true;
-      }
-      function onBeforeInput(e) {
-        if (!scan) {
-          e.preventDefault();
-          return;
-        }
-        const t = e.inputType;
-        if (t === "historyUndo" || t === "historyRedo") return;
-        if (!ALLOWED.has(t)) {
-          e.preventDefault();
-          if (t !== "insertFromPaste") hooks2.say("That kind of change cannot be saved into a Word document here.");
-          return;
-        }
-        const ranges = e.getTargetRanges ? e.getTargetRanges() : [];
-        const ok = ranges.length ? ranges.every((r) => rangeAllowed(r)) : selectionAllowed();
-        if (!ok) {
-          e.preventDefault();
-          hooks2.say("That part of the document cannot be changed here (a table, picture, link or similar is in the way).");
-        }
-      }
-      function onInput(e) {
-        edits++;
-        setDirty(true);
-        if (e.inputType === "insertLineBreak") {
-          const sel = doc.getSelection();
-          const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
-          if (p) {
-            const caret = sel.getRangeAt(0);
-            const typed = [...p.querySelectorAll("br")].filter((br) => caret.comparePoint(br, 0) <= 0).pop();
-            if (typed) typed.setAttribute(REAL_BR, "");
-          }
-        }
-      }
-      function onPaste(e) {
-        e.preventDefault();
-        if (!scan) return;
-        const text = e.clipboardData && e.clipboardData.getData("text/plain") || "";
-        if (!text) return;
-        if (!selectionAllowed()) {
-          hooks2.say("That part of the document cannot be changed here.");
-          return;
-        }
-        const lines = text.replace(/\r\n?/g, "\n").split("\n");
-        lines.forEach((line, k) => {
-          if (k) doc.execCommand("insertParagraph");
-          if (line) doc.execCommand("insertText", false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ""));
-        });
-      }
-      function onKeydown(e) {
-        if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
-          e.preventDefault();
-          if (selectionAllowed()) doc.execCommand("insertText", false, TAB_SHOWN);
-          return;
-        }
-        if (hooks2.onKey) hooks2.onKey(e);
-      }
-      function exec(cmd) {
-        if (!doc || !scan) return false;
-        if (cmd === "undo" || cmd === "redo") return doc.execCommand(cmd);
-        if (!selectionAllowed()) {
-          hooks2.say("Select text in a paragraph you can edit first.");
-          return false;
-        }
-        return doc.execCommand(cmd);
-      }
-      const sameChars = (chars, base, text) => chars.length === base.chars.length && X.sameShownText(text, textOf(chars)) && chars.every((c, k) => !c.fmt.b === !base.chars[k].b && !c.fmt.i === !base.chars[k].i && !c.fmt.u === !base.chars[k].u && (c.picture || null) === base.pictures[k]);
-      function changes() {
-        if (!scan || !dirty) return null;
-        const list = shownParagraphs();
-        const src2 = sources(list);
-        for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
-          for (const n of art.childNodes) if (n.nodeType === 3 && n.data.trim()) throw new Error("some text is outside any paragraph");
-        }
-        const pieces = [];
-        const lost = () => new Error("a page break could not be placed");
-        const endWithBreak = (last) => {
-          if (last.chars.includes(BREAK)) pieces.push({ els: [], source: last.source, chars: [BREAK] });
-          else last.chars.push(BREAK);
-        };
-        for (const { art, list: here } of shownByPage()) {
-          const join = "notesJoin" in art.dataset, end = "notesEnd" in art.dataset;
-          if ((join || end) && !here.length) throw lost();
-          here.forEach((p, k) => {
-            const chars = charsOf(p);
-            const prev = pieces[pieces.length - 1];
-            if (k === 0 && join && !prev) throw lost();
-            if (k === 0 && join && p.hasAttribute(REST) && !prev.chars.includes(BREAK)) {
-              prev.chars.push(BREAK, ...chars);
-              prev.els.push(p);
-              return;
-            }
-            if (k === 0 && join) endWithBreak(prev);
-            pieces.push({ els: [p], source: src2.get(p), chars });
-          });
-          if (end) endWithBreak(pieces[pieces.length - 1]);
-        }
-        if (pieces.some((pc) => pc.source === void 0)) throw new Error("a paragraph could not be matched to the file");
-        const known = new Set([...baselines.values()].flatMap((b) => b.pictures).filter(Boolean));
-        if (pieces.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture)))) {
-          throw new Error("a picture deleted in an earlier save cannot be brought back with Undo");
-        }
-        const bySource = /* @__PURE__ */ new Map();
-        for (const pc of pieces) {
-          if (!bySource.has(pc.source)) bySource.set(pc.source, []);
-          bySource.get(pc.source).push(pc);
-        }
-        const spans = /* @__PURE__ */ new Map();
-        for (const para of scan.paragraphs) {
-          if (!baselines.has(para.index)) continue;
-          const pcs = bySource.get(para.index) || [];
-          if (pcs.length === 1 && sameChars(pcs[0].chars, baselines.get(para.index), para.text)) continue;
-          const sp = spans.get(para.chain);
-          spans.set(para.chain, sp ? { first: sp.first, last: para.index } : { first: para.index, last: para.index });
-        }
-        if (!spans.size) return null;
-        const patches = [], plan = [];
-        for (const { first, last } of spans.values()) {
-          const group = pieces.filter((pc) => pc.source >= first && pc.source <= last);
-          const start = scan.paragraphs[first].start, end = scan.paragraphs[last].end;
-          const out = X.rewriteParagraphs(xml, scan, first, last, group.map((pc) => ({ source: pc.source, chars: pc.chars })), baselines);
-          patches.push({ start, end, old: xml.slice(start, end), xml: out });
-          plan.push({ first, last, pieces: group });
-        }
-        return { patches, plan };
-      }
-      function save() {
-        const c = changes();
-        if (!c) {
-          if (dirty && !saving) setDirty(false);
-          return null;
-        }
-        saving = { plan: c.plan, patches: c.patches, edits };
-        return { patches: c.patches };
-      }
-      function markSaved() {
-        const s = saving;
-        saving = null;
-        if (!s || !scan) return { ok: false, lost: false };
-        try {
-          if (rebase(s)) return { ok: true, lost: false };
-        } catch (_) {
-        }
-        return { ok: false, lost: edits !== s.edits };
-      }
-      function rebase(s) {
-        const nextXml = X.applyPatches(xml, s.patches);
-        const next = X.scanDocument(nextXml);
-        const nextMap = /* @__PURE__ */ new Map(), nextBase = /* @__PURE__ */ new Map();
-        const byFirst = new Map(s.plan.map((g) => [g.first, g]));
-        let ni = 0;
-        for (let i = 0; i < scan.paragraphs.length; ) {
-          const g = byFirst.get(i);
-          if (g) {
-            for (const pc of g.pieces) {
-              const para = next.paragraphs[ni];
-              if (!para || !para.editable || !X.sameShownText(para.text, textOf(pc.chars))) return false;
-              for (const el2 of pc.els) nextMap.set(el2, ni);
-              nextBase.set(ni, baselineOf(pc.chars, (baselines.get(pc.source) || {}).empty || {}));
-              ni++;
-            }
-            i = g.last + 1;
-            continue;
-          }
-          if (baselines.has(i)) nextBase.set(ni, baselines.get(i));
-          i++;
-          ni++;
-        }
-        if (ni !== next.paragraphs.length) return false;
-        const shift = /* @__PURE__ */ new Map();
-        let at = 0;
-        for (let i = 0; i < scan.paragraphs.length; ) {
-          const g = byFirst.get(i);
-          if (g) {
-            at += g.pieces.length;
-            i = g.last + 1;
-            continue;
-          }
-          shift.set(i, at);
-          at++;
-          i++;
-        }
-        for (const p of shownParagraphs()) if (map.has(p) && shift.has(map.get(p)) && !nextMap.has(p)) nextMap.set(p, shift.get(map.get(p)));
-        X.limitTo(next, (i) => nextBase.has(i));
-        xml = nextXml;
-        scan = next;
-        gen++;
-        for (const [p, index] of nextMap) map.set(p, index);
-        baselines = nextBase;
-        setDirty(edits !== s.edits);
-        return true;
-      }
-      function saveFailed() {
-        saving = null;
-      }
-      return {
-        open,
-        close,
-        exec,
-        save,
-        markSaved,
-        saveFailed,
-        isOpen: () => !!doc,
-        isEditable: () => !!scan,
-        isDirty: () => dirty
-      };
-    }
-    return { create };
-  })();
-
-  // src/renderer/craft-frame.js
-  var NotesCraftFrame = /* @__PURE__ */ (function() {
-    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
-      let ready = false;
-      let loaded = false;
-      let gaveUp = false;
-      let readyTimer = null;
-      let queued = null;
-      let current = null;
-      let dirty = false;
-      let unsaved = false;
-      let waiters = [];
-      let saving = Promise.resolve();
-      function post(msg, transfer) {
-        if (frame.contentWindow) frame.contentWindow.postMessage(msg, origin, transfer || []);
-      }
-      window.addEventListener("message", (e) => {
-        if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !e.data || typeof e.data !== "object") return;
-        const m = e.data;
-        if (gaveUp) return;
-        if (m.type === "ready") {
-          clearTimeout(readyTimer);
-          ready = true;
-          if (theme) post({ type: "theme", value: theme });
-          if (typeof darkPage === "boolean") post({ type: "page", dark: darkPage });
-          if (queued) {
-            const q = queued;
-            queued = null;
-            open(q.name, q.bytes, q.context);
-          }
-          return;
-        }
-        if (!current || m.doc !== current.doc) return;
-        if (m.type === "opened") {
-          if (m.ok) {
-            if (onOpened) onOpened();
-          } else if (onOpenFailed) onOpenFailed(String(m.error || "the app could not open it"));
-        } else if (m.type === "dirty") {
-          dirty = !!m.dirty;
-          if (onDirty) onDirty(dirty || unsaved);
-        } else if (m.type === "save" && m.bytes instanceof Uint8Array && typeof m.name === "string") {
-          const editedBefore = dirty || unsaved;
-          const doc = current.doc;
-          const context = current.context;
-          saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
-            if (!current || current.doc !== doc) return;
-            if (res.own) {
-              unsaved = !res.ok;
-              if (onDirty) onDirty(dirty || unsaved);
-              const done = waiters;
-              waiters = [];
-              done.forEach((w) => w(res.ok));
-            } else if (editedBefore) {
-              unsaved = true;
-              if (onDirty) onDirty(true);
-            }
-          });
-        }
-      });
-      function load() {
-        if (loaded) return;
-        loaded = true;
-        frame.src = url;
-        readyTimer = setTimeout(() => {
-          if (ready) return;
-          gaveUp = true;
-          close();
-          if (onUnavailable) onUnavailable();
-        }, readyMs || 3e4);
-      }
-      const token = () => window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
-      function open(name, bytes, context) {
-        load();
-        if (gaveUp) return;
-        dirty = false;
-        unsaved = false;
-        waiters.forEach((w) => w(false));
-        waiters = [];
-        current = { doc: token(), name, context };
-        if (!ready) {
-          queued = { name, bytes, context };
-          return;
-        }
-        const copy = new Uint8Array(bytes);
-        post({ type: "open", doc: current.doc, name, bytes: copy }, [copy.buffer]);
-      }
-      function requestSave(ms) {
-        if (!ready || !current || !(dirty || unsaved)) return Promise.resolve(true);
-        return new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            waiters = waiters.filter((w) => w !== finish);
-            resolve(false);
-          }, ms || 15e3);
-          function finish(ok) {
-            clearTimeout(timer);
-            resolve(ok);
-          }
-          waiters.push(finish);
-          post({ type: "command", doc: current.doc, id: "file.save" });
-        });
-      }
-      function close() {
-        waiters.forEach((w) => w(false));
-        waiters = [];
-        current = null;
-        dirty = false;
-        unsaved = false;
-        queued = null;
-      }
-      return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
-    }
-    return { create };
-  })();
-
-  // src/renderer/csv-view.js
-  var NotesCsv = /* @__PURE__ */ (function() {
-    const MAX_ROWS = 2e3;
-    const MAX_COLS = 200;
-    const MAX_CELLS = 6e4;
-    const NUMBER = /^[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?%?$/;
-    function detectDelimiter(text, ext) {
-      if (ext === "tsv") return "	";
-      const counts = { ",": 0, ";": 0, "	": 0 };
-      let quoted = false;
-      for (let i = 0; i < text.length; i++) {
-        const c = text[i];
-        if (c === '"') quoted = !quoted;
-        else if (!quoted && (c === "\n" || c === "\r")) break;
-        else if (!quoted && c in counts) counts[c]++;
-      }
-      return Object.keys(counts).reduce((best, d) => counts[d] > counts[best] ? d : best, ",");
-    }
-    function parse(text, delim, limit) {
-      const rows = [];
-      let row = [];
-      let field = "", quoted = false, total = 0, line = 1, rowLine = 1;
-      const endRow = () => {
-        row.push(field);
-        field = "";
-        total++;
-        if (rows.length < limit) {
-          row.line = rowLine;
-          rows.push(row);
-        }
-        row = [];
-        rowLine = line;
-      };
-      for (let i = 0; i < text.length; i++) {
-        const c = text[i];
-        if (c === "\n") line++;
-        if (quoted) {
-          if (c === "\r" && text[i + 1] !== "\n") line++;
-          if (c !== '"') field += c;
-          else if (text[i + 1] === '"') {
-            field += '"';
-            i++;
-          } else quoted = false;
-          continue;
-        }
-        if (c === '"' && field === "") quoted = true;
-        else if (c === delim) {
-          row.push(field);
-          field = "";
-        } else if (c === "\r") {
-          if (text[i + 1] === "\n") {
-            i++;
-            line++;
-          } else line++;
-          endRow();
-        } else if (c === "\n") endRow();
-        else field += c;
-      }
-      if (field !== "" || row.length) endRow();
-      return { rows, total };
-    }
-    const note = (text) => Object.assign(document.createElement("p"), { className: "csv-note", textContent: text });
-    const cell = (tag, text, className) => {
-      const c = document.createElement(tag);
-      c.textContent = text;
-      if (className) c.className = className;
-      if (text.length > 30) c.title = text;
-      return c;
-    };
-    function render(container, text, ext) {
-      container.replaceChildren();
-      const src2 = String(text || "");
-      const { rows, total } = parse(src2, detectDelimiter(src2, ext), MAX_ROWS + 1);
-      if (!rows.length || rows.length === 1 && rows[0].length === 1 && rows[0][0] === "") {
-        container.append(note("This file is empty. Switch to Text (Ctrl+E) to write in it."));
-        return { rows: 0, cols: 0 };
-      }
-      const widest = rows.reduce((n, r) => Math.max(n, r.length), 0);
-      const cols = Math.min(widest, MAX_COLS);
-      const shown = rows.slice(1, 1 + Math.max(1, Math.floor(MAX_CELLS / Math.max(cols, 1))));
-      const numeric = Array.from({ length: cols }, (_, c) => {
-        let filled = 0, nums = 0;
-        for (const r of shown) {
-          const v = (r[c] || "").trim();
-          if (!v) continue;
-          filled++;
-          if (NUMBER.test(v)) nums++;
-        }
-        return filled > 0 && nums / filled >= 0.8;
-      });
-      const table = document.createElement("table");
-      table.className = "csv-table";
-      const head = document.createElement("tr");
-      const corner = cell("th", String(rows[0].line), "rownum");
-      head.append(corner);
-      for (let c = 0; c < cols; c++) {
-        const th = cell("th", rows[0][c] || "", numeric[c] ? "num" : "");
-        th.scope = "col";
-        head.append(th);
-      }
-      const thead = document.createElement("thead");
-      thead.append(head);
-      const tbody = document.createElement("tbody");
-      for (const r of shown) {
-        const tr = document.createElement("tr");
-        const num = cell("th", String(r.line), "rownum");
-        num.scope = "row";
-        tr.append(num);
-        for (let c = 0; c < cols; c++) tr.append(cell("td", r[c] || "", numeric[c] ? "num" : ""));
-        tbody.append(tr);
-      }
-      table.append(thead, tbody);
-      container.append(table);
-      const rest = [];
-      if (total - 1 > shown.length) rest.push("the first " + shown.length.toLocaleString() + " rows of " + (total - 1).toLocaleString());
-      if (widest > cols) rest.push("the first " + cols + " columns of " + widest);
-      if (rest.length) container.append(note("Showing " + rest.join(", and ") + ". Switch to Text (Ctrl+E) to see and edit all of it."));
-      return { rows: total - 1, cols: widest };
-    }
-    return { detectDelimiter, parse, render };
-  })();
-
-  // src/renderer/sign-pad.js
-  var NotesSignPad = (function() {
-    "use strict";
-    const INK = "#1b1f4a";
-    const PAD = 6;
-    function create(canvas) {
-      const ctx = canvas.getContext("2d");
-      let drawing = false, last = null, box = null, scale = 1;
-      function fit() {
-        const r = canvas.getBoundingClientRect();
-        scale = window.devicePixelRatio || 1;
-        canvas.width = Math.round((r.width || 600) * scale);
-        canvas.height = Math.round((r.height || 220) * scale);
-        box = null;
-      }
-      function point(e) {
-        const r = canvas.getBoundingClientRect();
-        return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
-      }
-      function grow(p) {
-        box = box ? { x0: Math.min(box.x0, p.x), y0: Math.min(box.y0, p.y), x1: Math.max(box.x1, p.x), y1: Math.max(box.y1, p.y) } : { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
-      }
-      function pen() {
-        ctx.strokeStyle = INK;
-        ctx.fillStyle = INK;
-        ctx.lineWidth = 3 * scale;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-      }
-      function dot(p) {
-        pen();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 1.5 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        grow(p);
-      }
-      function line(a, b) {
-        pen();
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-        grow(a);
-        grow(b);
-      }
-      canvas.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        drawing = true;
-        canvas.setPointerCapture(e.pointerId);
-        last = point(e);
-        dot(last);
-      });
-      canvas.addEventListener("pointermove", (e) => {
-        if (!drawing) return;
-        const p = point(e);
-        line(last, p);
-        last = p;
-      });
-      const stop = () => {
-        drawing = false;
-        last = null;
-      };
-      canvas.addEventListener("pointerup", stop);
-      canvas.addEventListener("pointercancel", stop);
-      function clear() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        box = null;
-      }
-      async function load(blob) {
-        clear();
-        const img = await createImageBitmap(blob);
-        const s = Math.min(1, canvas.width / img.width, canvas.height / img.height);
-        const w = img.width * s, h = img.height * s, x = (canvas.width - w) / 2, y = (canvas.height - h) / 2;
-        ctx.drawImage(img, x, y, w, h);
-        img.close();
-        box = { x0: x, y0: y, x1: x + w, y1: y + h };
-      }
-      function writeName(name) {
-        clear();
-        const text = String(name || "").trim();
-        if (!text) return false;
-        let size = canvas.height * 0.45;
-        ctx.fillStyle = INK;
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "center";
-        const font = (px) => "italic 500 " + px + "px Fraunces, Georgia, serif";
-        ctx.font = font(size);
-        while (size > 8 && ctx.measureText(text).width > canvas.width * 0.9) ctx.font = font(size *= 0.9);
-        const w = ctx.measureText(text).width;
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-        box = { x0: (canvas.width - w) / 2, y0: canvas.height / 2 - size * 0.7, x1: (canvas.width + w) / 2, y1: canvas.height / 2 + size * 0.7 };
-        return true;
-      }
-      function toBlob() {
-        if (!box) return Promise.resolve(null);
-        const pad = PAD * scale;
-        const x0 = Math.max(0, Math.floor(box.x0 - pad)), y0 = Math.max(0, Math.floor(box.y0 - pad));
-        const x1 = Math.min(canvas.width, Math.ceil(box.x1 + pad)), y1 = Math.min(canvas.height, Math.ceil(box.y1 + pad));
-        const out = document.createElement("canvas");
-        out.width = x1 - x0;
-        out.height = y1 - y0;
-        const ctx2 = out.getContext("2d");
-        if (!ctx2) return Promise.resolve(null);
-        ctx2.drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
-        return new Promise((resolve) => out.toBlob(resolve, "image/png"));
-      }
-      return { fit, clear, load, writeName, toBlob, isEmpty: () => !box };
-    }
-    return { create };
-  })();
-
-  // src/renderer/dom.js
-  var import_icons3 = __toESM(require_icons());
   var $ = (sel) => document.querySelector(sel);
-  var I = (name) => import_icons3.default.svg(name);
+  var I = (name) => import_icons2.default.svg(name);
   function setLabel(btn, text) {
     const l = btn.querySelector(".lbl");
     if (l) l.textContent = text;
@@ -2548,7 +1012,7 @@
   function setIcon(btn, name) {
     if (btn.dataset.icon === name) return;
     btn.dataset.icon = name;
-    import_icons3.default.hydrate(btn.parentElement);
+    import_icons2.default.hydrate(btn.parentElement);
   }
   function setPressed(btn, on) {
     btn.classList.toggle("is-on", !!on);
@@ -2840,7 +1304,7 @@
     settingsEmpty: $("#settingsEmpty")
   };
 
-  // src/renderer/state.js
+  // src/renderer/state.ts
   var lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
   function settingsNow() {
     if (!state.settings) throw new Error("settings are read before they were loaded");
@@ -2876,27 +1340,11 @@
     selecting: Promise.resolve()
   };
 
-  // src/renderer/find-state.js
+  // src/renderer/find-state.ts
   var find = { open: false, query: "", ranges: [], active: -1, sourceHits: [] };
 
-  // src/renderer/text.js
-  var import_helpers2 = __toESM(require_helpers());
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  }
-  function highlight(text, query) {
-    const raw = String(text);
-    const tokens = import_helpers2.default.tokenize(query);
-    if (!tokens.length) return escapeHtml(raw);
-    const re = new RegExp("(" + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
-    return raw.split(re).map((part, i) => i % 2 ? '<span class="mark">' + escapeHtml(part) + "</span>" : escapeHtml(part)).join("");
-  }
-  function ipcErrorText(err) {
-    return String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
-  }
-
-  // src/renderer/toast.js
-  var toastTimer = null;
+  // src/renderer/toast.ts
+  var toastTimer;
   var toastMs = 0;
   el.toast.addEventListener("mouseenter", () => clearTimeout(toastTimer));
   el.toast.addEventListener("mouseleave", () => {
@@ -2928,48 +1376,15 @@
     el.toast.classList.add("hidden");
   }
 
-  // src/renderer/activity.js
-  var activities = /* @__PURE__ */ new Map();
-  function setActivity(key, a) {
-    const had = activities.get(key);
-    if (!a) {
-      if (had) {
-        had.chip.remove();
-        activities.delete(key);
-      }
-      return;
-    }
-    if (had) {
-      had.a = a;
-      had.text.textContent = a.text;
-      had.chip.title = a.stopLabel;
-      return;
-    }
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "activity-chip";
-    chip.title = a.stopLabel;
-    chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I("x");
-    const text = document.createElement("span");
-    text.className = "activity-text";
-    text.textContent = a.text;
-    chip.innerHTML = chip.innerHTML.replace('<span class="activity-text"></span>', "");
-    chip.insertBefore(text, chip.lastElementChild);
-    const entry = { chip, text, a };
-    chip.addEventListener("click", () => entry.a.stop());
-    activities.set(key, entry);
-    el.activityBar.append(chip);
-  }
-
-  // src/renderer/tree.js
-  var import_icons4 = __toESM(require_icons());
+  // src/renderer/tree.ts
+  var import_icons3 = __toESM(require_icons());
   var toggles = /* @__PURE__ */ new WeakMap();
   function setRowToggle(row, fn) {
     if (fn) toggles.set(row, fn);
     else toggles.delete(row);
   }
   function bookMark() {
-    return '<span class="row-mark book-mark" title="Book: its notes are pages">' + import_icons4.default.svg("book") + "</span>";
+    return '<span class="row-mark book-mark" title="Book: its notes are pages">' + import_icons3.default.svg("book") + "</span>";
   }
   function treeGroup(parentDepth, isHere) {
     const group = document.createElement("div");
@@ -2982,7 +1397,7 @@
     return Array.from(root.querySelectorAll(".tree-row")).filter((r) => r.offsetParent);
   }
   function focusRow(root, row) {
-    for (const r of root.querySelectorAll('.tree-row[tabindex="0"]')) r.tabIndex = -1;
+    for (const r of Array.from(root.querySelectorAll('.tree-row[tabindex="0"]'))) r.tabIndex = -1;
     row.tabIndex = 0;
     row.focus();
   }
@@ -3046,7 +1461,7 @@
     });
   }
 
-  // src/renderer/popover.js
+  // src/renderer/popover.ts
   function placePopover(menu, anchor, ev) {
     menu.classList.remove("hidden");
     const rect = anchor.getBoundingClientRect();
@@ -3063,7 +1478,7 @@
     if (first) first.focus();
   }
 
-  // src/renderer/more-menu.js
+  // src/renderer/more-menu.ts
   function openMoreMenu() {
     if (!state.current) return;
     placePopover(el.moreMenu, el.moreBtn);
@@ -3086,8 +1501,7 @@
     }, true);
   }
 
-  // src/renderer/note-html.js
-  var import_helpers3 = __toESM(require_helpers());
+  // src/renderer/note-html.ts
   function currentHtml() {
     const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
     if (live) return live.innerHTML;
@@ -3102,7 +1516,7 @@
     try {
       let ed = null;
       try {
-        ed = window.NotesEditor.create(host, { imageBase: () => import_helpers3.default.imageBaseFor(note) });
+        ed = window.NotesEditor.create(host, { imageBase: () => imageBaseFor(note) });
         ed.setMarkdown(String(md || ""));
         const content = host.querySelector(".rich-editor-content");
         return content ? content.innerHTML : "";
@@ -3114,9 +1528,8 @@
     }
   }
 
-  // src/renderer/books.js
-  var import_helpers4 = __toESM(require_helpers());
-  var { isNonMarkdownFile } = import_helpers4.default;
+  // src/renderer/books.ts
+  var { isNonMarkdownFile: isNonMarkdownFile2 } = helpers_exports;
   function createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar }) {
     const book = { id: null, pages: [], dragId: null, seq: 0 };
     function bookOf(note) {
@@ -3159,9 +1572,9 @@
         no.textContent = String(i + 1);
         const t = document.createElement("span");
         t.className = "t";
-        t.textContent = import_helpers4.default.truncate(import_helpers4.default.deriveTitle(p) || "Untitled", 28);
+        t.textContent = truncate(deriveTitle(p) || "Untitled", 28);
         tab.append(no, t);
-        tab.title = import_helpers4.default.deriveTitle(p) || "Untitled";
+        tab.title = deriveTitle(p) || "Untitled";
         tab.addEventListener("click", () => {
           if (p.id !== state.currentId) selectNote(p.id);
         });
@@ -3254,7 +1667,7 @@
       }
       await flushSave();
       if (!state.current || state.current.id !== note.id) return;
-      const plan = import_helpers4.default.splitAtHeadings(state.current.body, import_helpers4.default.deriveTitle(state.current));
+      const plan = splitAtHeadings(state.current.body, deriveTitle(state.current));
       if (plan.pages.length < 2) {
         toast("Add at least two headings (lines starting with #) to split this note into pages.");
         return;
@@ -3294,7 +1707,7 @@
       if (r.originalTrashed && state.currentId === id) clearEditor();
       await setView("folder", r.folder.id, { keepEditor: true });
       await selectNoteNow(r.pageIds[0]);
-      toast('Made the book "' + import_helpers4.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
+      toast('Made the book "' + truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
         label: "Undo",
         run: async () => {
           await flushSave();
@@ -3378,18 +1791,18 @@
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
         } else if (action === "copy-link") {
-          await api.app.copy({ text: "[" + (import_helpers4.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
+          await api.app.copy({ text: "[" + (deriveTitle(page) || "Page") + "](note://" + id + ")" });
           toast("Copied. Paste it into another note to link to this page.");
         } else if (action === "delete") {
           if (id === state.currentId) {
             await trashCurrent();
             return;
           }
-          const title = import_helpers4.default.deriveTitle(page) || "Untitled";
+          const title = deriveTitle(page) || "Untitled";
           await api.notes.trash(id);
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
-          toast('Moved "' + import_helpers4.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+          toast('Moved "' + truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
             await api.notes.restore(id);
             await refresh({ keepEditor: true });
             if (state.current) renderBookStrip(state.current);
@@ -3458,12 +1871,12 @@
         pages: pages.map((p, i) => {
           const locked = !!(p.locked && !p.unlocked);
           const body = locked ? "" : bodies[i];
-          return { id: p.id, no: i + 1, title: import_helpers4.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
+          return { id: p.id, no: i + 1, title: deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
         })
       };
     }
     async function pageMarkdown(p) {
-      if (!isNonMarkdownFile(p)) return String(p.body || "");
+      if (!isNonMarkdownFile2(p)) return String(p.body || "");
       try {
         const r = await api.files.asMarkdown(p.id);
         return r.ok ? r.markdown : "*Could not show this file: " + r.error + "*";
@@ -3519,12 +1932,12 @@
     function readerOpen() {
       return !el.bookReader.classList.contains("hidden");
     }
-    return { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, openReader, closeReader, readerOpen };
+    return { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen };
   }
 
-  // src/renderer/related.js
+  // src/renderer/related.ts
   function createRelated({ api, followLink }) {
-    let relatedTimer = null;
+    let relatedTimer;
     function renderRelatedSoon() {
       clearTimeout(relatedTimer);
       relatedTimer = setTimeout(() => {
@@ -3583,10 +1996,7 @@
     return { renderRelated, renderRelatedSoon };
   }
 
-  // src/renderer/reminders.js
-  var import_helpers5 = __toESM(require_helpers());
-
-  // src/renderer/remind-times.js
+  // src/renderer/remind-times.ts
   function toLocalInputValue(ts) {
     const d = new Date(ts);
     const pad = (n) => String(n).padStart(2, "0");
@@ -3618,21 +2028,21 @@
     return null;
   }
 
-  // src/renderer/reminders.js
+  // src/renderer/reminders.ts
   function createReminders({ api, flushSave, refreshCurrentMeta }) {
     function renderRemindButton(note) {
       const on = !!(note && note.remindAt);
       el.remindBtn.classList.toggle("hidden", !note || !!note.trashedAt);
       el.remindBtn.classList.toggle("is-on", on);
-      setLabel(el.remindBtn, on ? "Reminder: " + import_helpers5.default.formatWhen(note.remindAt) : "Remind me\u2026");
-      el.remindBtn.title = on ? "Reminder set for " + import_helpers5.default.formatWhen(note.remindAt) + " (Ctrl+Shift+M to change)" : "Remind me about this note (Ctrl+Shift+M)";
+      setLabel(el.remindBtn, on ? "Reminder: " + formatWhen(note.remindAt) : "Remind me\u2026");
+      el.remindBtn.title = on ? "Reminder set for " + formatWhen(note.remindAt) + " (Ctrl+Shift+M to change)" : "Remind me about this note (Ctrl+Shift+M)";
     }
     function openRemindDialog() {
       const note = state.current;
       if (!note || note.trashedAt) return;
       const base = note.remindAt || Math.ceil(Date.now() / (3600 * 1e3)) * 3600 * 1e3;
       el.remindInput.value = toLocalInputValue(base);
-      el.remindCurrent.textContent = note.remindAt ? "Currently: " + import_helpers5.default.formatWhen(note.remindAt) + (note.remindedAt ? " (went off)" : "") : "No reminder on this note.";
+      el.remindCurrent.textContent = note.remindAt ? "Currently: " + formatWhen(note.remindAt) + (note.remindedAt ? " (went off)" : "") : "No reminder on this note.";
       el.remindClearBtn.classList.toggle("hidden", !note.remindAt);
       el.remindDialog.showModal();
       el.remindInput.focus();
@@ -3645,7 +2055,7 @@
       try {
         await api.notes.update(note.id, { remindAt: at });
         await refreshCurrentMeta();
-        toast(at ? "Reminder set for " + import_helpers5.default.formatWhen(at) : "Reminder cleared");
+        toast(at ? "Reminder set for " + formatWhen(at) : "Reminder cleared");
       } catch (err) {
         toast("Could not save the reminder: " + (err.message || err));
       }
@@ -3653,7 +2063,7 @@
     return { renderRemindButton, openRemindDialog, setReminder };
   }
 
-  // src/renderer/peer-notice.js
+  // src/renderer/peer-notice.ts
   function withPeerNotice(raw, onWrite) {
     const WRITES = {
       notes: ["create", "update", "togglePin", "duplicate", "splitIntoBook", "undoSplit", "trash", "restore", "destroy", "emptyTrash"],
@@ -3690,7 +2100,7 @@
     return out;
   }
 
-  // src/renderer/live-share.js
+  // src/renderer/live-share.ts
   function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow }) {
     function renderLiveRow(note) {
       const live = note && note.live;
@@ -3768,8 +2178,7 @@
     return { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog };
   }
 
-  // src/renderer/sharing.js
-  var import_helpers6 = __toESM(require_helpers());
+  // src/renderer/sharing.ts
   function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
     function syncShareMenu() {
       const n = state.current;
@@ -3800,16 +2209,16 @@
       const titleLine = note.title ? note.title + "\n\n" : "";
       try {
         if (action === "copy-md") {
-          await api.app.copy({ text: import_helpers6.default.noteToMarkdown(note) });
+          await api.app.copy({ text: noteToMarkdown(note) });
           toast("Copied as Markdown");
         } else if (action === "copy-text") {
-          await api.app.copy({ text: titleLine + import_helpers6.default.plainTextFromMarkdown(el.bodyInput.value) });
+          await api.app.copy({ text: titleLine + plainTextFromMarkdown(el.bodyInput.value) });
           toast("Copied as plain text");
         } else if (action === "copy-html") {
-          await api.app.copy({ text: import_helpers6.default.noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
+          await api.app.copy({ text: noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
           toast("Copied as rich text");
         } else if (action === "copy-note-link") {
-          await api.app.copy({ text: "[" + (import_helpers6.default.deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
+          await api.app.copy({ text: "[" + (deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
           toast("Copied. Paste it into another note to link here.");
         } else if (action === "email") {
           const r = await api.app.emailNote(note.id);
@@ -3857,16 +2266,15 @@
     return { syncShareMenu, openShareMenu, closeShareMenu, shareAction };
   }
 
-  // src/renderer/sticky-button.js
-  var import_helpers7 = __toESM(require_helpers());
-  var { isViewerOnlyFile, isPlainTextFile } = import_helpers7.default;
+  // src/renderer/sticky-button.ts
+  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile2 } = helpers_exports;
   function createStickyButton({ api, flushSave, refreshCurrentMeta }) {
     function renderStickyButton(note) {
       const on = !!(note && note.sticky);
       el.stickyBtn.classList.toggle("is-on", on);
       setLabel(el.stickyBtn, on ? "Take off the desktop" : "Stick to the desktop");
       el.stickyBtn.title = on ? "Remove this note from the desktop (Ctrl+Shift+T)" : "Put this note on the desktop as a sticky (Ctrl+Shift+T)";
-      const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
+      const notMarkdown = isViewerOnlyFile2(note) || isPlainTextFile2(note);
       el.stickyBtn.disabled = !note || !!note.trashedAt || notMarkdown && !on || !!note.locked;
       el.stickyBtn.title = note && note.locked ? "Locked notes cannot be stickies" : el.stickyBtn.title;
     }
@@ -3890,7 +2298,7 @@
     return { renderStickyButton, toggleSticky };
   }
 
-  // src/renderer/bot-panel.js
+  // src/renderer/bot-panel.ts
   function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) {
     const bot = { open: false, running: false };
     function toggleBot(force) {
@@ -3990,9 +2398,8 @@
     return { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal };
   }
 
-  // src/renderer/code-editor.js
-  var import_helpers8 = __toESM(require_helpers());
-  var { isPlainTextFile: isPlainTextFile2 } = import_helpers8.default;
+  // src/renderer/code-editor.ts
+  var { isPlainTextFile: isPlainTextFile3 } = helpers_exports;
   var code = null;
   var codeOn = false;
   var codeFailed = false;
@@ -4000,42 +2407,51 @@
   }, autoGrow: () => {
   }, scrollTextareaToSelection: () => {
   } };
+  var shown = () => codeOn ? code : null;
   var src = {
     get value() {
       return el.bodyInput.value;
     },
     set value(text) {
       el.bodyInput.value = text;
-      if (codeOn) code.setValue(el.bodyInput.value);
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value);
     },
     // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
     reload(text) {
       el.bodyInput.value = text;
-      if (codeOn) code.setValue(el.bodyInput.value, { history: false });
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value, { history: false });
     },
     get readOnly() {
       return el.bodyInput.readOnly;
     },
     get selectionStart() {
-      return codeOn ? code.selectionStart : el.bodyInput.selectionStart;
+      const c = shown();
+      return c ? c.selectionStart : el.bodyInput.selectionStart;
     },
     get selectionEnd() {
-      return codeOn ? code.selectionEnd : el.bodyInput.selectionEnd;
+      const c = shown();
+      return c ? c.selectionEnd : el.bodyInput.selectionEnd;
     },
     setSelectionRange(from, to) {
-      if (codeOn) code.setSelectionRange(from, to);
+      const c = shown();
+      if (c) c.setSelectionRange(from, to);
       else el.bodyInput.setSelectionRange(from, to);
     },
     focus() {
-      if (codeOn) code.focus();
+      const c = shown();
+      if (c) c.focus();
       else el.bodyInput.focus();
     },
     hasFocus() {
-      return codeOn ? code.hasFocus() : document.activeElement === el.bodyInput;
+      const c = shown();
+      return c ? c.hasFocus() : document.activeElement === el.bodyInput;
     },
     // Scrolls a position into view (a find match, a heading).
     reveal(at) {
-      if (codeOn) code.reveal(at);
+      const c = shown();
+      if (c) c.reveal(at);
       else hooks.scrollTextareaToSelection(at);
     },
     // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
@@ -4043,19 +2459,21 @@
       return el.bodyInput.dispatchEvent(event);
     },
     get codeOn() {
-      return codeOn;
+      return !!shown();
     },
     // Undo or redo in the code editor when the keyboard is in it; false when it is not.
     undoRedo(cmd) {
-      if (!codeOn || !code.contains(document.activeElement)) return false;
-      code[cmd === "redo" ? "redo" : "undo"]();
+      const c = shown();
+      if (!c || !c.contains(document.activeElement)) return false;
+      c[cmd === "redo" ? "redo" : "undo"]();
       return true;
     }
   };
   var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
-  var isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(import_helpers8.default.extOf(note.filePath));
+  var isProseFile = (note) => isPlainTextFile3(note) && PROSE_EXT.has(extOf(note.filePath));
   function codeEditor() {
-    if (!code && window.NotesCode) {
+    if (!code) {
+      if (!window.NotesCode) throw new Error("the code editor bundle did not load");
       code = window.NotesCode.create({
         parent: el.codeHost,
         onChange: (text) => {
@@ -4074,10 +2492,10 @@
     return code;
   }
   function showCode(note, readOnly) {
-    codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile2(note) && !isProseFile(note);
+    codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile3(note) && !isProseFile(note);
     if (codeOn) {
       try {
-        codeEditor().load(el.bodyInput.value, { ext: import_helpers8.default.extOf(note.filePath), readOnly, placeholder: "Plain text.", label: import_helpers8.default.deriveTitle(note) });
+        codeEditor().load(el.bodyInput.value, { ext: extOf(note.filePath), readOnly, placeholder: "Plain text.", label: deriveTitle(note) });
       } catch (err) {
         console.error("The code editor could not start:", err);
         codeFailed = true;
@@ -4097,10 +2515,10 @@
     hooks.autoGrow();
   }
   function renderCodePosition() {
-    const shown = codeOn && state.sourceMode;
-    el.statusCode.classList.toggle("hidden", !shown);
-    if (!shown) return;
-    const at = code.position();
+    const c = state.sourceMode ? shown() : null;
+    el.statusCode.classList.toggle("hidden", !c);
+    if (!c) return;
+    const at = c.position();
     el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
   }
   function createCodeEditor({ runFind, autoGrow: autoGrow2, scrollTextareaToSelection }) {
@@ -4108,9 +2526,130 @@
     return { showCode };
   }
 
-  // src/renderer/editor-view.js
-  var import_helpers9 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers9.default;
+  // src/renderer/csv-view.ts
+  var NotesCsv = /* @__PURE__ */ (function() {
+    const MAX_ROWS = 2e3;
+    const MAX_COLS = 200;
+    const MAX_CELLS = 6e4;
+    const NUMBER = /^[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?%?$/;
+    function detectDelimiter(text, ext) {
+      if (ext === "tsv") return "	";
+      const counts = { ",": 0, ";": 0, "	": 0 };
+      let quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') quoted = !quoted;
+        else if (!quoted && (c === "\n" || c === "\r")) break;
+        else if (!quoted && c in counts) counts[c]++;
+      }
+      return Object.keys(counts).reduce((best, d) => counts[d] > counts[best] ? d : best, ",");
+    }
+    function parse2(text, delim, limit) {
+      const rows = [];
+      let row = [];
+      let field = "", quoted = false, total = 0, line = 1, rowLine = 1;
+      const endRow = () => {
+        row.push(field);
+        field = "";
+        total++;
+        if (rows.length < limit) {
+          row.line = rowLine;
+          rows.push(row);
+        }
+        row = [];
+        rowLine = line;
+      };
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === "\n") line++;
+        if (quoted) {
+          if (c === "\r" && text[i + 1] !== "\n") line++;
+          if (c !== '"') field += c;
+          else if (text[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else quoted = false;
+          continue;
+        }
+        if (c === '"' && field === "") quoted = true;
+        else if (c === delim) {
+          row.push(field);
+          field = "";
+        } else if (c === "\r") {
+          if (text[i + 1] === "\n") {
+            i++;
+            line++;
+          } else line++;
+          endRow();
+        } else if (c === "\n") endRow();
+        else field += c;
+      }
+      if (field !== "" || row.length) endRow();
+      return { rows, total };
+    }
+    const note = (text) => Object.assign(document.createElement("p"), { className: "csv-note", textContent: text });
+    const cell = (tag, text, className) => {
+      const c = document.createElement(tag);
+      c.textContent = text;
+      if (className) c.className = className;
+      if (text.length > 30) c.title = text;
+      return c;
+    };
+    function render(container, text, ext) {
+      container.replaceChildren();
+      const src2 = String(text || "");
+      const { rows, total } = parse2(src2, detectDelimiter(src2, ext), MAX_ROWS + 1);
+      if (!rows.length || rows.length === 1 && rows[0].length === 1 && rows[0][0] === "") {
+        container.append(note("This file is empty. Switch to Text (Ctrl+E) to write in it."));
+        return { rows: 0, cols: 0 };
+      }
+      const widest = rows.reduce((n, r) => Math.max(n, r.length), 0);
+      const cols = Math.min(widest, MAX_COLS);
+      const shown2 = rows.slice(1, 1 + Math.max(1, Math.floor(MAX_CELLS / Math.max(cols, 1))));
+      const numeric = Array.from({ length: cols }, (_, c) => {
+        let filled = 0, nums = 0;
+        for (const r of shown2) {
+          const v = (r[c] || "").trim();
+          if (!v) continue;
+          filled++;
+          if (NUMBER.test(v)) nums++;
+        }
+        return filled > 0 && nums / filled >= 0.8;
+      });
+      const table = document.createElement("table");
+      table.className = "csv-table";
+      const head = document.createElement("tr");
+      const corner = cell("th", String(rows[0].line), "rownum");
+      head.append(corner);
+      for (let c = 0; c < cols; c++) {
+        const th = cell("th", rows[0][c] || "", numeric[c] ? "num" : "");
+        th.scope = "col";
+        head.append(th);
+      }
+      const thead = document.createElement("thead");
+      thead.append(head);
+      const tbody = document.createElement("tbody");
+      for (const r of shown2) {
+        const tr = document.createElement("tr");
+        const num = cell("th", String(r.line), "rownum");
+        num.scope = "row";
+        tr.append(num);
+        for (let c = 0; c < cols; c++) tr.append(cell("td", r[c] || "", numeric[c] ? "num" : ""));
+        tbody.append(tr);
+      }
+      table.append(thead, tbody);
+      container.append(table);
+      const rest = [];
+      if (total - 1 > shown2.length) rest.push("the first " + shown2.length.toLocaleString() + " rows of " + (total - 1).toLocaleString());
+      if (widest > cols) rest.push("the first " + cols + " columns of " + widest);
+      if (rest.length) container.append(note("Showing " + rest.join(", and ") + ". Switch to Text (Ctrl+E) to see and edit all of it."));
+      return { rows: total - 1, cols: widest };
+    }
+    return { detectDelimiter, parse: parse2, render };
+  })();
+
+  // src/renderer/editor-view.ts
+  var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile4 } = helpers_exports;
   function tableShown() {
     return !el.csvView.classList.contains("hidden");
   }
@@ -4141,11 +2680,11 @@
       }
       state.rich = window.NotesEditor.create(el.richEditor, {
         placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
-        imageBase: () => import_helpers9.default.imageBaseFor(state.current),
+        imageBase: () => imageBaseFor(state.current),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),
         onUpdate: (md) => {
-          if (state.sourceMode || !state.currentId || isPlainTextFile3(state.current)) return;
+          if (state.sourceMode || !state.currentId || isPlainTextFile4(state.current)) return;
           if (md === el.bodyInput.value) return;
           el.bodyInput.value = md;
           scheduleSave();
@@ -4189,7 +2728,7 @@
       }
       let items;
       if (t.kind === "slash") {
-        items = SLASH.map((b) => ({ b, s: import_helpers9.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
+        items = SLASH.map((b) => ({ b, s: fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
         if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
       } else {
         const known = !inline.notes || !inline.trigger || inline.trigger.kind !== "link" ? await api.notes.list({ sort: "updated" }) : inline.notes;
@@ -4197,9 +2736,9 @@
         if (seq !== inline.seq) return;
         const q = t.query.trim();
         const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
-        const scored = q ? notes.map((n) => ({ n, s: import_helpers9.default.fuzzyScore(q, import_helpers9.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers9.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers9.default.relativeTime(n.updatedAt), note: n }));
-        if (q) items.push({ id: "new", title: 'New note "' + import_helpers9.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
+        const scored = q ? notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
+        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: relativeTime(n.updatedAt), note: n }));
+        if (q) items.push({ id: "new", title: 'New note "' + truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
       }
       inline.trigger = t;
       inline.items = items;
@@ -4327,14 +2866,14 @@
         }
         inline.notes = null;
         refresh({ keepEditor: true });
-        toast('Created "' + import_helpers9.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
+        toast('Created "' + truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
       if (it.note) rich.insertLinkAt(range, it.title, "note://" + it.note.id);
     }
     function syncTextViews(note) {
-      const none = lockedNow() || isViewerOnlyFile2(note);
-      const isTable = import_helpers9.default.isTableFile(note);
+      const none = lockedNow() || isViewerOnlyFile3(note);
+      const isTable = isTableFile(note);
       const table = isTable && !state.sourceMode && !none;
       el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
       el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
@@ -4347,7 +2886,7 @@
     function renderTable(note) {
       const text = el.bodyInput.value;
       if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
-        tableStats = NotesCsv.render(el.csvView, text, import_helpers9.default.extOf(note.filePath));
+        tableStats = NotesCsv.render(el.csvView, text, extOf(note.filePath));
         tableDrawn = { id: note.id, text };
       }
       updateStatus(note);
@@ -4357,7 +2896,7 @@
       el.editor.classList.toggle("fills-pane", on);
     }
     function syncSourceButton() {
-      const table = import_helpers9.default.isTableFile(state.current);
+      const table = isTableFile(state.current);
       const label = state.sourceMode ? table ? "Table" : "Rendered" : table ? "Text" : "Source";
       const what = state.sourceMode ? table ? "Show as a table" : "Back to the rendered view" : table ? "Edit as text" : "Show Markdown source";
       setLabel(el.sourceBtn, label);
@@ -4378,25 +2917,25 @@
       syncTextViews(state.current);
       renderCodePosition();
       if (state.sourceMode) autoGrow();
-      else if (state.rich && state.currentId && !isViewerOnlyFile2(state.current) && !isPlainTextFile3(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      else if (state.rich && state.currentId && !isViewerOnlyFile3(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
     }
     function toggleSource(force) {
       const next = typeof force === "boolean" ? force : !state.sourceMode;
-      if (isViewerOnlyFile2(state.current)) {
+      if (isViewerOnlyFile3(state.current)) {
         toast("This file is shown as it is; it has no Markdown view to switch to.");
         return;
       }
       if (next === state.sourceMode) return;
-      if (!next && isPlainTextFile3(state.current) && !import_helpers9.default.isTableFile(state.current)) {
+      if (!next && isPlainTextFile4(state.current) && !isTableFile(state.current)) {
         toast("This is a plain-text file, so it is edited as the text it is.");
         return;
       }
-      if (!next && !state.rich && !import_helpers9.default.isTableFile(state.current)) {
+      if (!next && !state.rich && !isTableFile(state.current)) {
         toast("The rendered editor is unavailable; staying in Markdown source.");
         return;
       }
       const rich = state.rich;
-      if (!next && rich && state.currentId && !isPlainTextFile3(state.current)) {
+      if (!next && rich && state.currentId && !isPlainTextFile4(state.current)) {
         state.currentLossless = rich.setMarkdown(el.bodyInput.value);
         if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
         if (state.currentLossless === false) {
@@ -4405,7 +2944,7 @@
         }
       }
       applyEditorMode(next);
-      if (!import_helpers9.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
+      if (!isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
       focusBody();
     }
     async function followLink(href) {
@@ -4442,7 +2981,7 @@
           if (n.id === state.currentId) continue;
           const o = document.createElement("option");
           o.value = "note://" + n.id;
-          o.textContent = import_helpers9.default.truncate(import_helpers9.default.deriveTitle(n), 60);
+          o.textContent = truncate(deriveTitle(n), 60);
           el.linkNoteSelect.append(o);
         }
         if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
@@ -4456,11 +2995,10 @@
     function tableStatsNow() {
       return tableStats;
     }
-    return { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
+    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
   }
 
-  // src/renderer/vaults-panel.js
-  var import_helpers10 = __toESM(require_helpers());
+  // src/renderer/vaults-panel.ts
   function createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded }) {
     async function syncVault(id) {
       toast("Syncing vault\u2026");
@@ -4619,7 +3157,7 @@
       else parts.push("no remote (local history only)");
       if (s.dirty) parts.push("uncommitted changes");
       if (s.syncing) parts.push("syncing\u2026");
-      if (s.lastSyncAt) parts.push("last sync " + import_helpers10.default.relativeTime(s.lastSyncAt));
+      if (s.lastSyncAt) parts.push("last sync " + relativeTime(s.lastSyncAt));
       if (s.conflict) parts.push("CONFLICT: resolve in the folder");
       if (s.lastError) parts.push("error: " + s.lastError);
       return parts.join(" \xB7 ");
@@ -4627,9 +3165,8 @@
     return { syncVault, removeVault, addVaultFolder, openCloneDialog, submitClone, renderVaultList, describeVaultStatus };
   }
 
-  // src/renderer/locking.js
-  var import_helpers11 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile4 } = import_helpers11.default;
+  // src/renderer/locking.ts
+  var { isViewerOnlyFile: isViewerOnlyFile4, isPlainTextFile: isPlainTextFile5 } = helpers_exports;
   function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
     function renderLockState(note) {
       const locked = !!(note && note.locked);
@@ -4647,7 +3184,7 @@
         if (state.rich) state.rich.setEditable(false);
       } else if (note) {
         renderFileRow(note);
-        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile3(note) && !isPlainTextFile4(note));
+        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile4(note) && !isPlainTextFile5(note));
       }
     }
     function onLockButton() {
@@ -4760,9 +3297,41 @@
     return { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction };
   }
 
-  // src/renderer/attachments.js
-  var import_helpers12 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile4 } = import_helpers12.default;
+  // src/renderer/activity.ts
+  var activities = /* @__PURE__ */ new Map();
+  function setActivity(key, a) {
+    const had = activities.get(key);
+    if (!a) {
+      if (had) {
+        had.chip.remove();
+        activities.delete(key);
+      }
+      return;
+    }
+    if (had) {
+      had.a = a;
+      had.text.textContent = a.text;
+      had.chip.title = a.stopLabel;
+      return;
+    }
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "activity-chip";
+    chip.title = a.stopLabel;
+    chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I("x");
+    const text = document.createElement("span");
+    text.className = "activity-text";
+    text.textContent = a.text;
+    chip.innerHTML = chip.innerHTML.replace('<span class="activity-text"></span>', "");
+    chip.insertBefore(text, chip.lastElementChild);
+    const entry = { chip, text, a };
+    chip.addEventListener("click", () => entry.a.stop());
+    activities.set(key, entry);
+    el.activityBar.append(chip);
+  }
+
+  // src/renderer/attachments.ts
+  var { isViewerOnlyFile: isViewerOnlyFile5 } = helpers_exports;
   function createAttachments({ api, flushSave, refresh }) {
     function insertAttachmentLinks(items) {
       const ok = items.filter((x) => x && !x.error);
@@ -4796,7 +3365,7 @@
       }
     }
     async function attachFiles() {
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile4(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile5(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -4814,10 +3383,10 @@
         return;
       }
       const target = await api.notes.get(forNote);
-      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile4(target)) {
+      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile5(target)) {
         const links = ok.map((it) => "[\u{1F4CE} " + it.name.replace(/[[\]]/g, "") + "](" + it.href + ")").join("\n");
         await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + links + "\n" });
-        toast('Attached to "' + import_helpers12.default.truncate(import_helpers12.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
+        toast('Attached to "' + truncate(deriveTitle(target), 30) + '", the note that was open when you chose the files.');
         refresh({ keepEditor: true });
       } else toast("Attached files are kept in the attachments folder; that note can no longer take them.");
     }
@@ -4828,7 +3397,7 @@
         return;
       }
       if (rec.starting) return;
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile4(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile5(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -4878,9 +3447,9 @@
             toast("Voice memo saved (" + mm + ":" + ss + "). Ctrl+click the link to play it.");
           } else {
             const target = await api.notes.get(rec.noteId);
-            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile4(target)) {
+            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile5(target)) {
               await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + "[" + label + "](" + saved.href + ")\n" });
-              toast('Voice memo saved into "' + import_helpers12.default.truncate(import_helpers12.default.deriveTitle(target), 30) + '", the note it was recorded in.');
+              toast('Voice memo saved into "' + truncate(deriveTitle(target), 30) + '", the note it was recorded in.');
               refresh({ keepEditor: true });
             } else toast("Voice memo saved as " + saved.name + " (that note can no longer take it; Attach it where you want it).");
           }
@@ -4902,9 +3471,8 @@
     return { attachFiles, toggleRecording };
   }
 
-  // src/renderer/history-dialog.js
-  var import_helpers13 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile5 } = import_helpers13.default;
+  // src/renderer/history-dialog.ts
+  var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
     const hist = { versions: [], index: -1, noteId: null };
     async function openHistory() {
@@ -4937,10 +3505,10 @@
         const when = document.createElement("span");
         when.className = "when";
         when.textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        const firstLine = document.createElement("span");
-        firstLine.className = "first";
-        firstLine.textContent = import_helpers13.default.truncate(first, 48);
-        li.append(when, firstLine);
+        const firstLine2 = document.createElement("span");
+        firstLine2.className = "first";
+        firstLine2.textContent = truncate(first, 48);
+        li.append(when, firstLine2);
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
@@ -4957,7 +3525,7 @@
       const note = state.current;
       if (!v || !note) return;
       el.historyDialog.close();
-      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile5(note)) {
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile6(note)) {
         toast("This note cannot take the restored text right now.");
         return;
       }
@@ -4979,9 +3547,8 @@
     return { openHistory, restoreVersion };
   }
 
-  // src/renderer/speech.js
-  var import_helpers14 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile6, isNonMarkdownFile: isNonMarkdownFile2 } = import_helpers14.default;
+  // src/renderer/speech.ts
+  var { isViewerOnlyFile: isViewerOnlyFile7, isNonMarkdownFile: isNonMarkdownFile3 } = helpers_exports;
   function createSpeech({ api }) {
     const tts = { active: false, queue: [], index: 0 };
     function selectedTextForSpeech() {
@@ -4999,7 +3566,7 @@
       if (selected) return selected;
       const title = el.titleInput.value.trim();
       const note = state.current;
-      const body = isNonMarkdownFile2(note) ? el.bodyInput.value : import_helpers14.default.plainTextFromMarkdown(el.bodyInput.value);
+      const body = isNonMarkdownFile3(note) ? el.bodyInput.value : plainTextFromMarkdown(el.bodyInput.value);
       return (title ? title + ".\n" : "") + body;
     }
     function pickVoice() {
@@ -5051,7 +3618,7 @@
         toast("Nothing to read yet.");
         return;
       }
-      tts.queue = import_helpers14.default.speechChunks(text);
+      tts.queue = speechChunks(text);
       tts.index = 0;
       setReadAloudState(true);
       window.speechSynthesis.cancel();
@@ -5071,7 +3638,7 @@
       el.ttsVoiceSelect.value = voices.some((v) => v.name === current) ? current : "";
     }
     async function startDictation() {
-      if (!state.current || isViewerOnlyFile6(state.current) || state.current.trashedAt) {
+      if (!state.current || isViewerOnlyFile7(state.current) || state.current.trashedAt) {
         toast("Open an editable note first.");
         return;
       }
@@ -5083,10 +3650,7 @@
     return { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation };
   }
 
-  // src/renderer/find-bar.js
-  var import_helpers15 = __toESM(require_helpers());
-
-  // src/renderer/find-text.js
+  // src/renderer/find-text.ts
   function isQueryText(text, q) {
     return new RegExp("^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i").test(text);
   }
@@ -5102,8 +3666,8 @@
     return hits;
   }
 
-  // src/renderer/find-bar.js
-  var { isViewerOnlyFile: isViewerOnlyFile7 } = import_helpers15.default;
+  // src/renderer/find-bar.ts
+  var { isViewerOnlyFile: isViewerOnlyFile8 } = helpers_exports;
   function createFindBar({ api, flushSave, GUEST }) {
     function openFind() {
       if (!state.current) return;
@@ -5128,7 +3692,7 @@
     function replaceCurrent() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile7(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile8(state.current)) return;
       if (state.sourceMode) {
         const wanted = find.active;
         runFind(true, true, true);
@@ -5202,7 +3766,7 @@
     function replaceAll() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile7(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile8(state.current)) return;
       let n = 0;
       if (state.sourceMode) {
         const ta = src;
@@ -5284,7 +3848,7 @@
         }
         if (!nodes.length) return null;
         const node = nodes[lo].node;
-        return { node, offset: Math.min(pos - nodes[lo].start, node.nodeValue.length) };
+        return { node, offset: Math.min(pos - nodes[lo].start, (node.nodeValue || "").length) };
       };
       return findOffsets(text, q).map((pos) => {
         const s = locate(pos), e = locate(pos + q.length);
@@ -5378,12 +3942,853 @@
     function exportOfCurrent() {
       const note = state.current;
       if (!note) return { name: "Note", html: "" };
-      return { name: import_helpers15.default.deriveTitle(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() };
+      return { name: deriveTitle(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() };
     }
     return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }
 
-  // src/renderer/one-at-a-time.js
+  // src/renderer/pdf-editor.js
+  var NotesPdfEditor = (function() {
+    "use strict";
+    const PV = window.PdfView;
+    if (!PV) return;
+    const lib = PV.pdfjsLib;
+    const PKG = new URL("../../node_modules/pdfjs-dist/", document.baseURI).href;
+    lib.GlobalWorkerOptions.workerSrc = PKG + "build/pdf.worker.min.mjs";
+    const T = lib.AnnotationEditorType;
+    const plainFocus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function(options) {
+      return plainFocus.call(this, options === void 0 && this.closest && this.closest(".pdf-viewport") ? { preventScroll: true } : options);
+    };
+    const LOAD_OPTIONS = {
+      isEvalSupported: false,
+      enableXfa: false,
+      cMapUrl: PKG + "cmaps/",
+      cMapPacked: true,
+      standardFontDataUrl: PKG + "standard_fonts/",
+      wasmUrl: PKG + "wasm/",
+      iccUrl: PKG + "iccs/"
+    };
+    async function drawPage(d, index, canvas, width) {
+      const page = await d.getPage(index + 1);
+      const ratio = window.devicePixelRatio || 1;
+      const viewport = page.getViewport({ scale: width / page.getViewport({ scale: 1 }).width * ratio });
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = Math.floor(viewport.width / ratio) + "px";
+      await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
+    }
+    const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
+    const MARKUP = /* @__PURE__ */ new Set([
+      "Text",
+      "Line",
+      "Square",
+      "Circle",
+      "Polygon",
+      "PolyLine",
+      "Highlight",
+      "Underline",
+      "Squiggly",
+      "StrikeOut",
+      "Stamp",
+      "Caret",
+      "Ink",
+      "FileAttachment",
+      "Sound"
+    ]);
+    function refOf(id) {
+      const m = /^(\d+)R(\d*)$/.exec(String(id || ""));
+      return m ? [Number(m[1]), Number(m[2] || 0)] : null;
+    }
+    function create(root, hooks2) {
+      const container = root.querySelector(".pdf-viewport");
+      const eventBus = new PV.EventBus();
+      const linkService = new PV.PDFLinkService({ eventBus });
+      const viewer = new PV.PDFViewer({
+        container,
+        eventBus,
+        linkService,
+        annotationMode: lib.AnnotationMode.ENABLE_FORMS,
+        annotationEditorMode: T.NONE,
+        imageResourcesPath: PKG + "web/images/",
+        // pdf.js's default palette (its viewer's highlightEditorColors). Without it the highlight tool throws.
+        annotationEditorHighlightColors: "yellow=#FFFF98,green=#53FFBC,blue=#80EBFF,pink=#FFCBE6,red=#FF4F5F,yellow_HCM=#FFFFCC,green_HCM=#53FFBC,blue_HCM=#80EBFF,pink_HCM=#F6B8FF,red_HCM=#C50043"
+      });
+      linkService.setViewer(viewer);
+      let task = null, doc = null, seq = 0, dirty = false, mode = "select", savedHash = "", modeEpoch = 0;
+      let touched = false;
+      const undo = { canUndo: false, canRedo: false };
+      const report = () => hooks2.onState && hooks2.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
+      let location2 = null, restore = null;
+      eventBus.on("updateviewarea", (e) => {
+        location2 = e.location;
+      });
+      eventBus.on("pagesinit", () => {
+        const at = restore;
+        restore = null;
+        if (!at || !doc) {
+          viewer.currentScaleValue = "page-width";
+          return;
+        }
+        viewer.currentScaleValue = typeof at.scale === "number" ? String(at.scale / 100) : at.scale;
+        viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: "XYZ" }, at.left, at.top, null], allowNegativeOffset: true });
+      });
+      eventBus.on("scalechanging", report);
+      let fittedWidth = 0;
+      new ResizeObserver(() => {
+        const w = container.clientWidth;
+        if (!w || w === fittedWidth) return;
+        fittedWidth = w;
+        requestAnimationFrame(() => {
+          const v = viewer.currentScaleValue;
+          if (doc && (v === "page-width" || v === "page-fit" || v === "auto")) viewer.currentScaleValue = v;
+        });
+      }).observe(container);
+      eventBus.on("annotationlayerrendered", () => {
+        if (!touched && doc) {
+          savedHash = currentHash();
+          refreshDirty();
+        }
+      });
+      eventBus.on("editingstateschanged", ({ details }) => {
+        if ("hasSomethingToUndo" in details) undo.canUndo = details.hasSomethingToUndo;
+        if ("hasSomethingToRedo" in details) undo.canRedo = details.hasSomethingToRedo;
+        refreshDirty();
+        report();
+      });
+      const EDIT_LAYERS = ".annotationLayer, .annotationEditorLayer";
+      for (const type of ["pointerdown", "keydown"]) {
+        container.addEventListener(type, (e) => {
+          if (e.target && e.target.closest && e.target.closest(EDIT_LAYERS)) touched = true;
+        }, true);
+      }
+      for (const type of ["pointerup", "keyup", "input", "change", "focusout"]) container.addEventListener(type, () => setTimeout(refreshDirty, 0));
+      container.addEventListener("click", (e) => {
+        const a = e.target && e.target.closest && e.target.closest("a[href]");
+        if (!a) return;
+        const href = a.getAttribute("href") || "";
+        if (href.startsWith("#")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (hooks2.onLink) hooks2.onLink(e, a.href);
+      }, true);
+      const currentHash = () => doc ? doc.annotationStorage.serializable.hash : "";
+      function refreshDirty() {
+        const v = !!doc && currentHash() !== savedHash;
+        if (dirty === v) return;
+        dirty = v;
+        if (hooks2.onDirty) hooks2.onDirty(v);
+      }
+      const others = /* @__PURE__ */ new Set();
+      async function openOther(bytes) {
+        const own = new Uint8Array(bytes);
+        const t = lib.getDocument(Object.assign({ data: own.slice() }, LOAD_OPTIONS));
+        others.add(t);
+        const d = await t.promise;
+        return { pages: d.numPages, draw: (i, canvas, width) => drawPage(d, i, canvas, width), bytes: own };
+      }
+      function closeOthers() {
+        for (const t of others) t.destroy().catch(() => {
+        });
+        others.clear();
+      }
+      async function unload() {
+        cancelPick();
+        closeOthers();
+        viewer.setDocument(null);
+        linkService.setDocument(null);
+        const t = task;
+        task = null;
+        doc = null;
+        savedHash = "";
+        refreshDirty();
+        undo.canUndo = undo.canRedo = false;
+        if (t) await t.destroy().catch(() => {
+        });
+      }
+      async function open(bytes, opts) {
+        const my = ++seq;
+        const at = opts && opts.keepView ? location2 : null;
+        await unload();
+        if (my !== seq) return false;
+        const t = lib.getDocument(Object.assign({ data: bytes }, LOAD_OPTIONS));
+        task = t;
+        const d = await t.promise;
+        if (my !== seq) return false;
+        if (d.numPages < 1) {
+          task = null;
+          await t.destroy().catch(() => {
+          });
+          throw new Error("this PDF has no pages.");
+        }
+        doc = d;
+        restore = at;
+        location2 = null;
+        touched = false;
+        savedHash = currentHash();
+        doc.annotationStorage.onSetModified = refreshDirty;
+        doc.annotationStorage.onResetModified = refreshDirty;
+        viewer.setDocument(doc);
+        linkService.setDocument(doc, null);
+        mode = "select";
+        report();
+        return true;
+      }
+      async function close() {
+        seq++;
+        await unload();
+      }
+      function setMode(name, internal) {
+        if (!doc || !(name in MODES)) return false;
+        try {
+          viewer.annotationEditorMode = { mode: MODES[name] };
+        } catch (_) {
+          return false;
+        }
+        if (!internal) {
+          modeEpoch++;
+          if (name !== "select") touched = true;
+        }
+        mode = name;
+        report();
+        return true;
+      }
+      function modeSwitched(t) {
+        return new Promise((resolve2) => {
+          const done = () => {
+            clearTimeout(timer);
+            eventBus.off("annotationeditormodechanged", onChanged);
+            resolve2();
+          };
+          const onChanged = (e) => {
+            if (e.mode === t) done();
+          };
+          const timer = setTimeout(done, 1e3);
+          eventBus.on("annotationeditormodechanged", onChanged);
+        });
+      }
+      async function commit() {
+        if (!doc || mode === "select") return;
+        const m = mode, epoch = modeEpoch;
+        const left = modeSwitched(T.NONE);
+        if (!setMode("select", true)) return;
+        await left;
+        if (modeEpoch !== epoch || !doc) return;
+        const back = modeSwitched(MODES[m]);
+        if (setMode(m, true)) await back;
+      }
+      async function placePicture(file) {
+        if (!doc) return false;
+        if (mode !== "picture") {
+          const switched = modeSwitched(T.STAMP);
+          if (!setMode("picture")) return false;
+          await switched;
+        }
+        eventBus.dispatch("switchannotationeditorparams", { source: null, type: lib.AnnotationEditorParamsType.CREATE, value: { bitmapFile: file } });
+        return true;
+      }
+      let picking = null;
+      function pickPoint() {
+        cancelPick();
+        if (!doc) return Promise.resolve(null);
+        if (mode !== "select") setMode("select");
+        root.classList.add("picking");
+        return new Promise((resolve2) => {
+          const onDown = (e) => {
+            const pageEl = e.button === 0 && e.target.closest && e.target.closest(".page[data-page-number]");
+            if (!pageEl) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
+            const r = pageEl.getBoundingClientRect();
+            const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
+            const eat = (c) => {
+              c.preventDefault();
+              c.stopPropagation();
+            };
+            container.addEventListener("click", eat, true);
+            setTimeout(() => container.removeEventListener("click", eat, true), 400);
+            finish({ page: view.id - 1, x, y });
+          };
+          const onKey = (e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              finish(null);
+            }
+          };
+          function finish(value) {
+            container.removeEventListener("pointerdown", onDown, true);
+            window.removeEventListener("keydown", onKey, true);
+            root.classList.remove("picking");
+            picking = null;
+            resolve2(value);
+          }
+          container.addEventListener("pointerdown", onDown, true);
+          window.addEventListener("keydown", onKey, true);
+          picking = finish;
+        });
+      }
+      function cancelPick() {
+        if (picking) picking(null);
+      }
+      async function comments() {
+        const d = doc, list = [];
+        if (!d) return null;
+        for (let i = 0; i < d.numPages; i++) {
+          const annots = await (await d.getPage(i + 1)).getAnnotations();
+          if (d !== doc) return null;
+          for (const a of annots) {
+            const text = a.contentsObj && a.contentsObj.str || "";
+            if (!MARKUP.has(a.subtype) || a.subtype !== "Text" && !text.trim() || a.state) continue;
+            list.push({
+              id: a.id,
+              page: i,
+              ref: refOf(a.id),
+              kind: a.subtype,
+              text,
+              author: a.titleObj && a.titleObj.str || "",
+              date: lib.PDFDateString.toDateObject(a.modificationDate || a.creationDate || ""),
+              rect: a.rect,
+              replyTo: a.inReplyTo || null
+            });
+          }
+        }
+        return list;
+      }
+      function goTo(page, rect) {
+        if (!doc || page >= doc.numPages) return;
+        viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: "XYZ" }, rect[0] - 40, rect[3] + 40, null], allowNegativeOffset: true });
+      }
+      async function save() {
+        if (!doc) return null;
+        const hash = currentHash();
+        const bytes = await doc.saveDocument();
+        return { bytes, hash };
+      }
+      return {
+        open,
+        close,
+        setMode,
+        commit,
+        placePicture,
+        pickPoint,
+        cancelPick,
+        comments,
+        goTo,
+        save,
+        pageCount: () => doc ? doc.numPages : 0,
+        drawPage: (i, canvas, width) => doc ? drawPage(doc, i, canvas, width) : Promise.resolve(),
+        openOther,
+        closeOthers,
+        // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
+        // the kept pages use is written, so a removed page leaves nothing behind in the file.
+        extractPages: (pageInfos) => doc.extractPages(pageInfos),
+        markSaved(hash) {
+          if (doc) {
+            savedHash = hash;
+            refreshDirty();
+          }
+        },
+        isOpen: () => !!doc,
+        isDirty: () => !!doc && currentHash() !== savedHash,
+        // Unsaved edits, or a tool in use whose stroke or text is not committed yet.
+        hasPendingWork: () => !!doc && (currentHash() !== savedHash || mode !== "select"),
+        undo: () => eventBus.dispatch("editingaction", { source: null, name: "undo" }),
+        redo: () => eventBus.dispatch("editingaction", { source: null, name: "redo" }),
+        zoomIn: () => viewer.increaseScale(),
+        zoomOut: () => viewer.decreaseScale(),
+        fitWidth: () => {
+          viewer.currentScaleValue = "page-width";
+        }
+      };
+    }
+    return { create, modes: Object.keys(MODES) };
+  })();
+
+  // src/renderer/pdf-pages.ts
+  var import_icons4 = __toESM(require_icons());
+  var NotesPdfPages = (function() {
+    "use strict";
+    const THUMB_W = 130, THUMB_H = 170;
+    function create(panel, ctl, hooks2) {
+      const grid = panel.querySelector(".pdf-pages-grid");
+      let items = [], sources = /* @__PURE__ */ new Map(), canvases = /* @__PURE__ */ new Map(), added = 0, working = false;
+      function open() {
+        items = [];
+        for (let i = 0; i < ctl.pageCount(); i++) items.push({ src: "self", index: i, turn: 0 });
+        sources = /* @__PURE__ */ new Map([["self", { name: "", draw: ctl.drawPage }]]);
+        canvases = /* @__PURE__ */ new Map();
+        added = 0;
+        render();
+      }
+      function canvasFor(it) {
+        const key = it.src + ":" + it.index;
+        if (!canvases.has(key)) {
+          const c = document.createElement("canvas");
+          canvases.set(key, c);
+          sources.get(it.src).draw(it.index, c, THUMB_W).then(() => fit(c), () => {
+          });
+        }
+        return canvases.get(key);
+      }
+      function fit(c) {
+        const turn = Number(c.dataset.turn || 0);
+        const w = c.offsetWidth || THUMB_W, h = c.offsetHeight || THUMB_H;
+        const scale = turn % 180 ? Math.min(1, THUMB_W / h, THUMB_H / w) : 1;
+        c.style.transform = "rotate(" + turn + "deg) scale(" + scale + ")";
+      }
+      function button(act2, k, icon, title) {
+        const b = document.createElement("button");
+        b.className = "tool-btn icon-only";
+        b.dataset.act = act2;
+        b.dataset.k = k;
+        b.innerHTML = import_icons4.default.svg(icon);
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        return b;
+      }
+      function render() {
+        grid.replaceChildren(...items.map((it, k) => {
+          const card = document.createElement("figure");
+          card.className = "pdf-page-card";
+          const box = document.createElement("div");
+          box.className = "pdf-page-thumb";
+          const c = canvasFor(it);
+          c.dataset.turn = it.turn;
+          fit(c);
+          box.append(c);
+          const cap = document.createElement("figcaption");
+          cap.className = "pdf-page-num";
+          const from = sources.get(it.src).name;
+          cap.textContent = k + 1 + (from ? " \xB7 " + from + " p. " + (it.index + 1) : it.index !== k ? " \xB7 was " + (it.index + 1) : "");
+          cap.title = cap.textContent;
+          const acts = document.createElement("div");
+          acts.className = "pdf-page-acts";
+          acts.append(
+            button("left", k, "chevron-left", "Move earlier"),
+            button("turn-left", k, "rotate-ccw", "Turn left"),
+            button("turn-right", k, "rotate-cw", "Turn right"),
+            button("remove", k, "x", "Remove this page"),
+            button("right", k, "chevron-right", "Move later")
+          );
+          card.append(box, cap, acts);
+          return card;
+        }));
+      }
+      function act(name, k) {
+        const it = items[k];
+        if (!it) return;
+        if (name === "left" && k > 0) [items[k - 1], items[k]] = [items[k], items[k - 1]];
+        else if (name === "right" && k < items.length - 1) [items[k + 1], items[k]] = [items[k], items[k + 1]];
+        else if (name === "turn-left") it.turn = (it.turn + 270) % 360;
+        else if (name === "turn-right") it.turn = (it.turn + 90) % 360;
+        else if (name === "remove") items.splice(k, 1);
+        else return;
+        render();
+      }
+      async function addFromPdf() {
+        const picked = await hooks2.pickPdf();
+        if (!picked) return;
+        let other;
+        try {
+          other = await ctl.openOther(picked.bytes);
+        } catch (err) {
+          hooks2.say("Could not read " + picked.name + ": " + (err.message || err));
+          return;
+        }
+        const src2 = "added-" + ++added;
+        sources.set(src2, { name: picked.name, draw: other.draw, bytes: other.bytes });
+        for (let i = 0; i < other.pages; i++) items.push({ src: src2, index: i, turn: 0 });
+        render();
+        grid.scrollTop = grid.scrollHeight;
+      }
+      async function apply() {
+        if (working) return;
+        if (!items.length) {
+          hooks2.say("A PDF needs at least one page. Use Cancel to keep it as it is.");
+          return;
+        }
+        const reordered = items.length !== ctl.pageCount() || items.some((it, k) => it.src !== "self" || it.index !== k);
+        const rotations = items.map((it) => it.turn);
+        if (!reordered && !rotations.some(Boolean)) {
+          hooks2.close();
+          return;
+        }
+        let pageInfos = null;
+        if (reordered) {
+          const bySrc = /* @__PURE__ */ new Map();
+          items.forEach((it, pos) => {
+            if (!bySrc.has(it.src)) bySrc.set(it.src, []);
+            bySrc.get(it.src).push({ index: it.index, pos });
+          });
+          pageInfos = [...bySrc].map(([src2, list]) => {
+            list.sort((a, b) => a.index - b.index);
+            return { document: src2 === "self" ? null : sources.get(src2).bytes, includePages: list.map((e) => e.index), pageIndices: list.map((e) => e.pos) };
+          });
+        }
+        working = true;
+        panel.classList.add("is-working");
+        try {
+          if (await hooks2.apply({ pageInfos, rotations })) hooks2.close();
+        } finally {
+          working = false;
+          panel.classList.remove("is-working");
+        }
+      }
+      grid.addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-act]");
+        if (b && !working) act(b.dataset.act, Number(b.dataset.k));
+      });
+      panel.querySelector(".pdf-pages-bar").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-pages-act]");
+        if (!b || working) return;
+        if (b.dataset.pagesAct === "add") addFromPdf();
+        else if (b.dataset.pagesAct === "cancel") hooks2.close();
+        else if (b.dataset.pagesAct === "apply") apply();
+      });
+      return { open };
+    }
+    return { create };
+  })();
+
+  // src/renderer/pdf-comments.js
+  var NotesPdfComments = (function() {
+    "use strict";
+    const KIND_NAMES = {
+      Text: "Note",
+      Highlight: "Highlight",
+      Underline: "Underline",
+      Squiggly: "Squiggly underline",
+      StrikeOut: "Strikethrough",
+      Ink: "Drawing",
+      Stamp: "Stamp",
+      Square: "Rectangle",
+      Circle: "Oval",
+      Line: "Line",
+      Polygon: "Shape",
+      PolyLine: "Lines",
+      Caret: "Insertion",
+      FileAttachment: "Attachment",
+      Sound: "Sound"
+    };
+    const DATE_FORMAT = new Intl.DateTimeFormat(void 0, { dateStyle: "medium", timeStyle: "short" });
+    function create(panel, ctl, hooks2) {
+      const listEl = panel.querySelector(".pdf-comments-list");
+      const addBtn = panel.querySelector('[data-comments-act="add"]');
+      const hint = panel.querySelector(".pdf-comments-hint");
+      let list = [], editing = null, draft = null, picking = false, working = false, readSeq = 0;
+      function el2(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== void 0) e.textContent = text;
+        return e;
+      }
+      function button(act, text, title) {
+        const b = el2("button", "tool-btn", text);
+        b.type = "button";
+        b.dataset.cAct = act;
+        if (title) b.title = title;
+        return b;
+      }
+      function editorCard(value, label) {
+        const card = el2("div", "pdf-comment is-editing");
+        card.append(el2("div", "pdf-comment-meta", label));
+        const box = el2("textarea", "pdf-comment-input");
+        box.value = value;
+        box.rows = 4;
+        box.setAttribute("aria-label", "Comment");
+        box.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && e.ctrlKey) {
+            e.preventDefault();
+            save();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            cancelEdit();
+          }
+        });
+        const acts = el2("div", "pdf-comment-acts");
+        acts.append(button("cancel", "Cancel"), button("save", "Save", "Save (Ctrl+Enter)"));
+        card.append(box, acts);
+        return card;
+      }
+      function commentCard(c, reply) {
+        if (editing === c.id) return editorCard(c.text, "Page " + (c.page + 1));
+        const card = el2("div", "pdf-comment" + (reply ? " is-reply" : ""));
+        card.dataset.id = c.id;
+        const meta = [reply ? "Reply" : "Page " + (c.page + 1)];
+        if (c.kind !== "Text") meta.push(KIND_NAMES[c.kind] || c.kind);
+        if (c.author) meta.push(c.author);
+        if (c.date) meta.push(DATE_FORMAT.format(c.date));
+        card.append(el2("div", "pdf-comment-meta", meta.join(" \xB7 ")));
+        card.append(el2("div", "pdf-comment-text", c.text || "(no text)"));
+        const acts = el2("div", "pdf-comment-acts");
+        if (c.ref) {
+          acts.append(button("edit", "Edit"));
+          if (c.kind === "Text") acts.append(button("delete", "Delete"));
+        } else acts.title = "This comment is stored in a way Notes cannot change.";
+        card.append(acts);
+        return card;
+      }
+      function render() {
+        addBtn.textContent = picking ? "Cancel" : "Add comment";
+        addBtn.dataset.commentsAct = picking ? "cancel-pick" : "add";
+        hint.textContent = picking ? "Click on the page where the comment goes. Esc cancels." : "";
+        addBtn.disabled = working || !picking && !!editing;
+        const cards = [];
+        if (editing === "new") cards.push(editorCard("", "New comment \xB7 page " + (draft.page + 1)));
+        const replies = /* @__PURE__ */ new Map();
+        for (const c of list) if (c.replyTo) {
+          if (!replies.has(c.replyTo)) replies.set(c.replyTo, []);
+          replies.get(c.replyTo).push(c);
+        }
+        const ids = new Set(list.map((c) => c.id));
+        const shown2 = /* @__PURE__ */ new Set();
+        const withReplies = (c, reply) => {
+          if (shown2.has(c.id)) return;
+          shown2.add(c.id);
+          cards.push(commentCard(c, reply));
+          for (const r of replies.get(c.id) || []) withReplies(r, true);
+        };
+        for (const c of list) if (!(c.replyTo && ids.has(c.replyTo))) withReplies(c, false);
+        if (!cards.length) cards.push(el2("p", "pdf-comments-empty", "No comments yet. Press Add comment, then click where it goes on the page."));
+        listEl.replaceChildren(...cards);
+        const box = listEl.querySelector(".pdf-comment-input");
+        if (box) box.focus();
+      }
+      async function refresh() {
+        const my = ++readSeq;
+        editing = null;
+        draft = null;
+        listEl.replaceChildren(el2("p", "pdf-comments-empty", "Reading comments\u2026"));
+        let read;
+        try {
+          read = await ctl.comments();
+        } catch (err) {
+          read = null;
+          if (my === readSeq) hooks2.say("Could not read the comments: " + (err.message || err));
+        }
+        if (my !== readSeq || read === null) return;
+        list = read;
+        render();
+      }
+      async function startAdd() {
+        picking = true;
+        render();
+        const at = await ctl.pickPoint();
+        picking = false;
+        if (at) {
+          draft = at;
+          editing = "new";
+        }
+        render();
+      }
+      function cancelEdit() {
+        editing = null;
+        draft = null;
+        render();
+      }
+      async function run(ops) {
+        working = true;
+        panel.classList.add("is-working");
+        try {
+          return await hooks2.change(ops);
+        } finally {
+          working = false;
+          panel.classList.remove("is-working");
+        }
+      }
+      async function save() {
+        if (working) return;
+        const box = listEl.querySelector(".pdf-comment-input");
+        const text = box ? box.value.trim() : "";
+        if (!text) {
+          hooks2.say("Write the comment first, or press Cancel.");
+          return;
+        }
+        let op;
+        if (editing === "new") op = { op: "add", page: draft.page, x: draft.x, y: draft.y, text };
+        else {
+          const c = list.find((x) => x.id === editing);
+          if (!c) {
+            cancelEdit();
+            return;
+          }
+          if (text === c.text.trim()) {
+            cancelEdit();
+            return;
+          }
+          op = { op: "edit", page: c.page, ref: c.ref, text };
+        }
+        await run([op]);
+      }
+      function repliesTo(c) {
+        const found = /* @__PURE__ */ new Set([c.id]);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const x of list) if (x.page === c.page && x.replyTo && found.has(x.replyTo) && !found.has(x.id)) {
+            found.add(x.id);
+            grew = true;
+          }
+        }
+        return found.size - 1;
+      }
+      async function remove(c) {
+        const answers = repliesTo(c);
+        if (!window.confirm("Delete this comment" + (answers ? " and its " + answers + (answers === 1 ? " reply" : " replies") : "") + "?")) return;
+        await run([{ op: "delete", page: c.page, ref: c.ref }]);
+      }
+      listEl.addEventListener("click", (e) => {
+        if (working) return;
+        const b = e.target.closest("button[data-c-act]");
+        const card = e.target.closest(".pdf-comment");
+        const c = card && card.dataset.id ? list.find((x) => x.id === card.dataset.id) : null;
+        if (!b) {
+          if (c) ctl.goTo(c.page, c.rect);
+          return;
+        }
+        const act = b.dataset.cAct;
+        if (act === "save") save();
+        else if (act === "cancel") cancelEdit();
+        else if (act === "edit" && c && !editing) {
+          editing = c.id;
+          render();
+        } else if (act === "delete" && c && !editing) remove(c);
+      });
+      addBtn.addEventListener("click", () => {
+        if (working) return;
+        if (addBtn.dataset.commentsAct === "cancel-pick") ctl.cancelPick();
+        else if (!editing) startAdd();
+      });
+      return {
+        refresh,
+        // Stops picking a place (the panel is closing, or another PDF is shown).
+        stop() {
+          ctl.cancelPick();
+          editing = null;
+          draft = null;
+        },
+        // A comment is being written: the PDF must not be reloaded under it.
+        busy: () => !!editing || working
+      };
+    }
+    return { create };
+  })();
+
+  // src/renderer/sign-pad.ts
+  var NotesSignPad = (function() {
+    "use strict";
+    const INK = "#1b1f4a";
+    const PAD = 6;
+    function create(canvas) {
+      const ctx = canvas.getContext("2d");
+      let drawing = false, last = null, box = null, scale = 1;
+      function fit() {
+        const r = canvas.getBoundingClientRect();
+        scale = window.devicePixelRatio || 1;
+        canvas.width = Math.round((r.width || 600) * scale);
+        canvas.height = Math.round((r.height || 220) * scale);
+        box = null;
+      }
+      function point(e) {
+        const r = canvas.getBoundingClientRect();
+        return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+      }
+      function grow(p) {
+        box = box ? { x0: Math.min(box.x0, p.x), y0: Math.min(box.y0, p.y), x1: Math.max(box.x1, p.x), y1: Math.max(box.y1, p.y) } : { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+      }
+      function pen() {
+        ctx.strokeStyle = INK;
+        ctx.fillStyle = INK;
+        ctx.lineWidth = 3 * scale;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+      }
+      function dot(p) {
+        pen();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.5 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        grow(p);
+      }
+      function line(a, b) {
+        pen();
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        grow(a);
+        grow(b);
+      }
+      canvas.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        drawing = true;
+        canvas.setPointerCapture(e.pointerId);
+        last = point(e);
+        dot(last);
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drawing) return;
+        const p = point(e);
+        line(last, p);
+        last = p;
+      });
+      const stop = () => {
+        drawing = false;
+        last = null;
+      };
+      canvas.addEventListener("pointerup", stop);
+      canvas.addEventListener("pointercancel", stop);
+      function clear() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        box = null;
+      }
+      async function load(blob) {
+        clear();
+        const img = await createImageBitmap(blob);
+        const s = Math.min(1, canvas.width / img.width, canvas.height / img.height);
+        const w = img.width * s, h = img.height * s, x = (canvas.width - w) / 2, y = (canvas.height - h) / 2;
+        ctx.drawImage(img, x, y, w, h);
+        img.close();
+        box = { x0: x, y0: y, x1: x + w, y1: y + h };
+      }
+      function writeName(name) {
+        clear();
+        const text = String(name || "").trim();
+        if (!text) return false;
+        let size = canvas.height * 0.45;
+        ctx.fillStyle = INK;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "center";
+        const font = (px) => "italic 500 " + px + "px Fraunces, Georgia, serif";
+        ctx.font = font(size);
+        while (size > 8 && ctx.measureText(text).width > canvas.width * 0.9) ctx.font = font(size *= 0.9);
+        const w = ctx.measureText(text).width;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        box = { x0: (canvas.width - w) / 2, y0: canvas.height / 2 - size * 0.7, x1: (canvas.width + w) / 2, y1: canvas.height / 2 + size * 0.7 };
+        return true;
+      }
+      function toBlob() {
+        if (!box) return Promise.resolve(null);
+        const pad = PAD * scale;
+        const x0 = Math.max(0, Math.floor(box.x0 - pad)), y0 = Math.max(0, Math.floor(box.y0 - pad));
+        const x1 = Math.min(canvas.width, Math.ceil(box.x1 + pad)), y1 = Math.min(canvas.height, Math.ceil(box.y1 + pad));
+        const out = document.createElement("canvas");
+        out.width = x1 - x0;
+        out.height = y1 - y0;
+        const ctx2 = out.getContext("2d");
+        if (!ctx2) return Promise.resolve(null);
+        ctx2.drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+        return new Promise((resolve2) => out.toBlob(resolve2, "image/png"));
+      }
+      return { fit, clear, load, writeName, toBlob, isEmpty: () => !box };
+    }
+    return { create };
+  })();
+
+  // src/renderer/one-at-a-time.ts
   function oneAtATime(fn) {
     let queue = Promise.resolve(true);
     return (opts) => {
@@ -5752,11 +5157,125 @@
         signSay("The saved signature is gone from this PC.");
       });
     }
-    return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, closePdfPages, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
+    return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
   }
 
-  // src/renderer/craft-notes.js
-  var import_helpers16 = __toESM(require_helpers());
+  // src/renderer/craft-frame.ts
+  var NotesCraftFrame = /* @__PURE__ */ (function() {
+    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
+      let ready = false;
+      let loaded = false;
+      let gaveUp = false;
+      let readyTimer;
+      let queued = null;
+      let current = null;
+      let dirty = false;
+      let unsaved = false;
+      let waiters = [];
+      let saving = Promise.resolve();
+      function post(msg, transfer) {
+        if (frame.contentWindow) frame.contentWindow.postMessage(msg, origin, transfer || []);
+      }
+      window.addEventListener("message", (e) => {
+        if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !e.data || typeof e.data !== "object") return;
+        const m = e.data;
+        if (gaveUp) return;
+        if (m.type === "ready") {
+          clearTimeout(readyTimer);
+          ready = true;
+          if (theme) post({ type: "theme", value: theme });
+          if (typeof darkPage === "boolean") post({ type: "page", dark: darkPage });
+          if (queued) {
+            const q = queued;
+            queued = null;
+            open(q.name, q.bytes, q.context);
+          }
+          return;
+        }
+        if (!current || m.doc !== current.doc) return;
+        if (m.type === "opened") {
+          if (m.ok) {
+            if (onOpened) onOpened();
+          } else if (onOpenFailed) onOpenFailed(String(m.error || "the app could not open it"));
+        } else if (m.type === "dirty") {
+          dirty = !!m.dirty;
+          if (onDirty) onDirty(dirty || unsaved);
+        } else if (m.type === "save" && m.bytes instanceof Uint8Array && typeof m.name === "string") {
+          const editedBefore = dirty || unsaved;
+          const doc = current.doc;
+          const context = current.context;
+          saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
+            if (!current || current.doc !== doc) return;
+            if (res.own) {
+              unsaved = !res.ok;
+              if (onDirty) onDirty(dirty || unsaved);
+              const done = waiters;
+              waiters = [];
+              done.forEach((w) => w(res.ok));
+            } else if (editedBefore) {
+              unsaved = true;
+              if (onDirty) onDirty(true);
+            }
+          });
+        }
+      });
+      function load() {
+        if (loaded) return;
+        loaded = true;
+        frame.src = url;
+        readyTimer = setTimeout(() => {
+          if (ready) return;
+          gaveUp = true;
+          close();
+          if (onUnavailable) onUnavailable();
+        }, readyMs || 3e4);
+      }
+      const token = () => window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+      function open(name, bytes, context) {
+        load();
+        if (gaveUp) return;
+        dirty = false;
+        unsaved = false;
+        waiters.forEach((w) => w(false));
+        waiters = [];
+        current = { doc: token(), name, context };
+        if (!ready) {
+          queued = { name, bytes, context };
+          return;
+        }
+        const copy = new Uint8Array(bytes);
+        post({ type: "open", doc: current.doc, name, bytes: copy }, [copy.buffer]);
+      }
+      function requestSave(ms) {
+        const doc = current && current.doc;
+        if (!ready || !doc || !(dirty || unsaved)) return Promise.resolve(true);
+        return new Promise((resolve2) => {
+          const timer = setTimeout(() => {
+            waiters = waiters.filter((w) => w !== finish);
+            resolve2(false);
+          }, ms || 15e3);
+          function finish(ok) {
+            clearTimeout(timer);
+            resolve2(ok);
+          }
+          waiters.push(finish);
+          post({ type: "command", doc, id: "file.save" });
+        });
+      }
+      function close() {
+        waiters.forEach((w) => w(false));
+        waiters = [];
+        current = null;
+        dirty = false;
+        unsaved = false;
+        queued = null;
+      }
+      return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
+    }
+    return { create };
+  })();
+
+  // src/renderer/craft-notes.ts
   function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow }) {
     const CRAFT_UI = {
       wordcraft: { label: "WordCraft", what: "Word document", frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: "Word", without: "Word documents open in the simple editor for now." },
@@ -5794,7 +5313,7 @@
               down = true;
               clear();
               const n = state.current;
-              if (n && n.filePath && import_helpers16.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
+              if (n && n.filePath && n.fileKind && CRAFT_OF[n.fileKind] === key) renderFileRow(n);
               toast(ui.label + " did not start, so " + ui.without);
             }
           });
@@ -5868,7 +5387,7 @@
         }, 0);
       }
       const dirty = () => !!(fc && note && fc.isDirty());
-      const flush = async () => dirty() ? fc.requestSave(15e3) : true;
+      const flush = async () => fc && dirty() ? fc.requestSave(15e3) : true;
       const forget = () => {
         shownKey = null;
       };
@@ -5876,7 +5395,10 @@
     }
     const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
     const useWordCraft = () => crafts.wordcraft.usable();
-    const craftFor = (n) => n && n.filePath && import_helpers16.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers16.default.CRAFT_OF[n.fileKind]] : null;
+    const craftFor = (n) => {
+      const key = n && n.filePath && n.fileKind ? CRAFT_OF[n.fileKind] : void 0;
+      return key ? crafts[key] : null;
+    };
     const craftDirty = () => Object.values(crafts).some((c) => c.dirty());
     async function flushCrafts() {
       let ok = true;
@@ -5884,19 +5406,493 @@
       return ok;
     }
     function showCraftOnly(n) {
-      const key = import_helpers16.default.CRAFT_OF[n.fileKind];
+      const key = CRAFT_OF[n.fileKind];
       if (crafts[key].usable()) {
         showBanner("");
         crafts[key].show(n);
         return;
       }
-      showBanner("Notes shows ." + import_helpers16.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
+      showBanner("Notes shows ." + extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
     }
     return { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly };
   }
 
+  // src/renderer/docx-editor.js
+  var NotesDocxEditor = (function() {
+    "use strict";
+    const DV = window.DocxView;
+    if (!DV || !DV.Ooxml || !DV.JSZip) return;
+    const X = DV.Ooxml;
+    const TAB_SHOWN = "\u2003";
+    const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false };
+    const NOT_TEXT = /* @__PURE__ */ new Set([X.PAGE_BREAK, X.PICTURE]);
+    const PIC = "data-notes-picture";
+    const REAL_BR = "data-notes-br";
+    const ALLOWED = /* @__PURE__ */ new Set([
+      "insertText",
+      "insertReplacementText",
+      "insertCompositionText",
+      "insertParagraph",
+      "insertLineBreak",
+      "deleteContentBackward",
+      "deleteContentForward",
+      "deleteWordBackward",
+      "deleteWordForward",
+      "deleteSoftLineBackward",
+      "deleteSoftLineForward",
+      "deleteHardLineBackward",
+      "deleteHardLineForward",
+      "deleteByCut",
+      "deleteContent",
+      "formatBold",
+      "formatItalic",
+      "formatUnderline"
+    ]);
+    function create(hooks2) {
+      let doc = null, xml = "", scan = null, baselines = /* @__PURE__ */ new Map(), dirty = false, edits = 0, seq = 0;
+      let gen = 0;
+      const SRC = "data-notes-src";
+      const REST = "data-notes-rest";
+      const map = {
+        get(p) {
+          const v = p.getAttribute(SRC);
+          const m = v && /^(\d+):(\d+)$/.exec(v);
+          return m && Number(m[1]) === gen ? Number(m[2]) : void 0;
+        },
+        has(p) {
+          return map.get(p) !== void 0;
+        },
+        set(p, index) {
+          p.setAttribute(SRC, gen + ":" + index);
+        }
+      };
+      let saving = null;
+      let styleCache = /* @__PURE__ */ new WeakMap();
+      function setDirty(v) {
+        if (dirty === v) return;
+        dirty = v;
+        if (hooks2.onDirty) hooks2.onDirty(v);
+      }
+      function fmtOf(el2) {
+        if (styleCache.has(el2)) return styleCache.get(el2);
+        const win = el2.ownerDocument.defaultView;
+        const cs = win.getComputedStyle(el2);
+        let u = false;
+        for (let e = el2; e && !u; e = e.parentElement) {
+          u = /underline/.test(win.getComputedStyle(e).textDecorationLine);
+          if (e.tagName === "P") break;
+        }
+        const f = { b: parseInt(cs.fontWeight, 10) >= 600, i: /italic|oblique/.test(cs.fontStyle), u };
+        styleCache.set(el2, f);
+        return f;
+      }
+      function charsOf(p) {
+        const out = [];
+        styleCache = /* @__PURE__ */ new WeakMap();
+        const walk = (node) => {
+          for (let n = node.firstChild; n; n = n.nextSibling) {
+            if (n.nodeType === 3) {
+              const fmt = fmtOf(n.parentElement);
+              for (let k = 0; k < n.data.length; k++) if (!NOT_TEXT.has(n.data[k])) out.push({ ch: n.data[k] === TAB_SHOWN ? "	" : n.data[k], fmt, br: false });
+            } else if (n.nodeType === 1) {
+              if (n.tagName === "BR") out.push({ ch: "\n", fmt: fmtOf(n.parentElement), br: true, real: n.hasAttribute(REAL_BR) });
+              else if (n.tagName === "DIV") out.push({ ch: X.PICTURE, fmt: fmtOf(n.parentElement), br: false, picture: n.getAttribute(PIC) });
+              else walk(n);
+            }
+          }
+        };
+        walk(p);
+        if (out.length && out[out.length - 1].br) out.pop();
+        for (let k = out.length - 2; k >= 0; k--) if (out[k].br && !out[k].real && out[k + 1].ch === X.PICTURE) out.splice(k, 1);
+        return out;
+      }
+      const textOf = (chars) => chars.map((c) => c.ch).join("");
+      const baselineOf = (chars, empty) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
+      let pictureSeq = 0;
+      function namePictures(p) {
+        for (const d of p.querySelectorAll("div")) {
+          if (d.parentElement.closest("div, p") !== p || d.hasAttribute(PIC)) continue;
+          d.setAttribute(PIC, String(++pictureSeq));
+          d.contentEditable = "false";
+        }
+      }
+      function shownByPage() {
+        return [...doc.querySelectorAll('article[contenteditable="true"]')].map((art) => ({
+          art,
+          list: [...art.querySelectorAll("p")].filter((p) => !p.closest('[contenteditable="false"]'))
+        }));
+      }
+      const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
+      function sources(list) {
+        const out = /* @__PURE__ */ new Map();
+        let last = null;
+        for (const p of list) {
+          if (map.has(p)) last = map.get(p);
+          if (last !== null) out.set(p, last);
+        }
+        const firstKnown = list.find((p) => map.has(p));
+        for (const p of list) if (!out.has(p) && firstKnown) out.set(p, map.get(firstKnown));
+        return out;
+      }
+      async function open(frameDoc, bytes) {
+        const my = ++seq;
+        reset();
+        const zip = await DV.JSZip.loadAsync(bytes);
+        const part = zip.file("word/document.xml");
+        let block = null, display = bytes, nextScan = null, nextXml = "";
+        if (!part) block = "it has no main document part";
+        else {
+          nextXml = await part.async("string");
+          const settings = zip.file("word/settings.xml");
+          block = X.settingsBlock(settings ? await settings.async("string") : "");
+          if (!block) {
+            try {
+              nextScan = X.scanDocument(nextXml);
+            } catch (err) {
+              block = err.message;
+            }
+            if (nextScan && !nextScan.prefix) block = "it is not a standard Word document";
+          }
+          if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
+            zip.file("word/document.xml", X.markForDisplay(nextXml, nextScan));
+            display = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
+          }
+        }
+        if (my !== seq) return null;
+        await DV.renderAsync(display, frameDoc.body, frameDoc.body, { useBase64URL: true, renderAltChunks: false });
+        if (my !== seq) return null;
+        doc = frameDoc;
+        xml = nextXml;
+        scan = block ? null : nextScan;
+        const counts = scan ? attach() : { editable: 0, readOnly: 0 };
+        if (scan && !counts.editable) scan = null;
+        return Object.assign(counts, { block });
+      }
+      function attach() {
+        let editable = 0;
+        const pages = [...doc.querySelectorAll("section.docx > article")];
+        const take = (id) => {
+          const mark = doc.getElementById(id);
+          const p = mark && mark.closest("p");
+          if (mark) mark.remove();
+          return p;
+        };
+        for (const para of scan.paragraphs) {
+          if (!para.editable) continue;
+          const p = take(X.MARK + para.index);
+          const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
+          for (const el2 of [p, rest]) {
+            if (!el2) continue;
+            namePictures(el2);
+            for (const br of el2.querySelectorAll("br")) br.setAttribute(REAL_BR, "");
+          }
+          const shown2 = p && !map.has(p) && shownAs(para, p, rest, pages);
+          if (!shown2 || textOf(shown2.chars) !== para.text) continue;
+          map.set(p, para.index);
+          if (rest) {
+            map.set(rest, para.index);
+            rest.setAttribute(REST, "");
+          }
+          if (shown2.mark) shown2.mark();
+          baselines.set(para.index, baselineOf(shown2.chars, fmtOf(p)));
+          editable++;
+        }
+        X.limitTo(scan, (i) => baselines.has(i));
+        const readOnly = scan.paragraphs.length - editable;
+        if (!editable) return { editable, readOnly };
+        const holders = /* @__PURE__ */ new Set();
+        for (const art of doc.querySelectorAll("section.docx > article")) {
+          for (const p of art.querySelectorAll("p")) if (map.has(p)) for (let e = p.parentElement; e && e !== art; e = e.parentElement) holders.add(e);
+          fix(art, holders);
+          art.contentEditable = "true";
+          art.spellcheck = true;
+        }
+        doc.addEventListener("beforeinput", onBeforeInput, true);
+        doc.addEventListener("input", onInput, true);
+        doc.addEventListener("paste", onPaste, true);
+        doc.addEventListener("drop", (e) => e.preventDefault(), true);
+        doc.addEventListener("keydown", onKeydown, true);
+        doc.defaultView.addEventListener("blur", () => {
+          if (hooks2.onBlur) hooks2.onBlur();
+        });
+        return { editable, readOnly };
+      }
+      function shownAs(para, p, rest, pages) {
+        if (!para.pageBreaks.length) return { chars: charsOf(p) };
+        if (para.pageBreaks.length > 1) return null;
+        const page = p.parentElement, k = pages.indexOf(page);
+        if (k < 0 || page.lastElementChild !== p) return null;
+        if (!rest) return { chars: [...charsOf(p), BREAK], mark: () => {
+          page.dataset.notesEnd = "";
+        } };
+        const next = pages[k + 1];
+        if (!next || rest.parentElement !== next || next.firstElementChild !== rest || map.has(rest)) return null;
+        return { chars: [...charsOf(p), BREAK, ...charsOf(rest)], mark: () => {
+          next.dataset.notesJoin = "";
+        } };
+      }
+      function fix(container, holders) {
+        for (const el2 of container.children) {
+          if (map.has(el2)) continue;
+          if (holders.has(el2)) fix(el2, holders);
+          else el2.contentEditable = "false";
+        }
+      }
+      function close() {
+        seq++;
+        reset();
+      }
+      function reset() {
+        doc = null;
+        saving = null;
+        xml = "";
+        scan = null;
+        gen++;
+        baselines = /* @__PURE__ */ new Map();
+        edits = 0;
+        setDirty(false);
+      }
+      const paraOf = (node) => {
+        const el2 = node && (node.nodeType === 1 ? node : node.parentElement);
+        const p = el2 && el2.closest("p");
+        return p && !p.closest('[contenteditable="false"]') && p.closest('article[contenteditable="true"]') ? p : null;
+      };
+      function rangeAllowed(range) {
+        const a = paraOf(range.startContainer), b = paraOf(range.endContainer);
+        if (!a || !b) return false;
+        if (a === b) return true;
+        const list = shownParagraphs();
+        const src2 = sources(list);
+        const i = list.indexOf(a), j = list.indexOf(b);
+        if (i < 0 || j < 0) return false;
+        const chain = scan.paragraphs[src2.get(a)].chain;
+        for (let k = Math.min(i, j); k <= Math.max(i, j); k++) {
+          if (scan.paragraphs[src2.get(list[k])].chain !== chain) return false;
+          if (k > Math.min(i, j)) {
+            const between = doc.createRange();
+            between.setStartAfter(list[k - 1]);
+            between.setEndBefore(list[k]);
+            const frag = between.cloneContents();
+            if (frag.querySelector && frag.querySelector('[contenteditable="false"]')) return false;
+          }
+        }
+        return true;
+      }
+      function selectionAllowed() {
+        const sel = doc && doc.getSelection();
+        if (!sel || !sel.rangeCount) return false;
+        for (let k = 0; k < sel.rangeCount; k++) if (!rangeAllowed(sel.getRangeAt(k))) return false;
+        return true;
+      }
+      function onBeforeInput(e) {
+        if (!scan) {
+          e.preventDefault();
+          return;
+        }
+        const t = e.inputType;
+        if (t === "historyUndo" || t === "historyRedo") return;
+        if (!ALLOWED.has(t)) {
+          e.preventDefault();
+          if (t !== "insertFromPaste") hooks2.say("That kind of change cannot be saved into a Word document here.");
+          return;
+        }
+        const ranges = e.getTargetRanges ? e.getTargetRanges() : [];
+        const ok = ranges.length ? ranges.every((r) => rangeAllowed(r)) : selectionAllowed();
+        if (!ok) {
+          e.preventDefault();
+          hooks2.say("That part of the document cannot be changed here (a table, picture, link or similar is in the way).");
+        }
+      }
+      function onInput(e) {
+        edits++;
+        setDirty(true);
+        if (e.inputType === "insertLineBreak") {
+          const sel = doc.getSelection();
+          const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
+          if (p) {
+            const caret = sel.getRangeAt(0);
+            const typed = [...p.querySelectorAll("br")].filter((br) => caret.comparePoint(br, 0) <= 0).pop();
+            if (typed) typed.setAttribute(REAL_BR, "");
+          }
+        }
+      }
+      function onPaste(e) {
+        e.preventDefault();
+        if (!scan) return;
+        const text = e.clipboardData && e.clipboardData.getData("text/plain") || "";
+        if (!text) return;
+        if (!selectionAllowed()) {
+          hooks2.say("That part of the document cannot be changed here.");
+          return;
+        }
+        const lines = text.replace(/\r\n?/g, "\n").split("\n");
+        lines.forEach((line, k) => {
+          if (k) doc.execCommand("insertParagraph");
+          if (line) doc.execCommand("insertText", false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ""));
+        });
+      }
+      function onKeydown(e) {
+        if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          if (selectionAllowed()) doc.execCommand("insertText", false, TAB_SHOWN);
+          return;
+        }
+        if (hooks2.onKey) hooks2.onKey(e);
+      }
+      function exec(cmd) {
+        if (!doc || !scan) return false;
+        if (cmd === "undo" || cmd === "redo") return doc.execCommand(cmd);
+        if (!selectionAllowed()) {
+          hooks2.say("Select text in a paragraph you can edit first.");
+          return false;
+        }
+        return doc.execCommand(cmd);
+      }
+      const sameChars = (chars, base, text) => chars.length === base.chars.length && X.sameShownText(text, textOf(chars)) && chars.every((c, k) => !c.fmt.b === !base.chars[k].b && !c.fmt.i === !base.chars[k].i && !c.fmt.u === !base.chars[k].u && (c.picture || null) === base.pictures[k]);
+      function changes() {
+        if (!scan || !dirty) return null;
+        const list = shownParagraphs();
+        const src2 = sources(list);
+        for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
+          for (const n of art.childNodes) if (n.nodeType === 3 && n.data.trim()) throw new Error("some text is outside any paragraph");
+        }
+        const pieces = [];
+        const lost = () => new Error("a page break could not be placed");
+        const endWithBreak = (last) => {
+          if (last.chars.includes(BREAK)) pieces.push({ els: [], source: last.source, chars: [BREAK] });
+          else last.chars.push(BREAK);
+        };
+        for (const { art, list: here } of shownByPage()) {
+          const join = "notesJoin" in art.dataset, end = "notesEnd" in art.dataset;
+          if ((join || end) && !here.length) throw lost();
+          here.forEach((p, k) => {
+            const chars = charsOf(p);
+            const prev = pieces[pieces.length - 1];
+            if (k === 0 && join && !prev) throw lost();
+            if (k === 0 && join && p.hasAttribute(REST) && !prev.chars.includes(BREAK)) {
+              prev.chars.push(BREAK, ...chars);
+              prev.els.push(p);
+              return;
+            }
+            if (k === 0 && join) endWithBreak(prev);
+            pieces.push({ els: [p], source: src2.get(p), chars });
+          });
+          if (end) endWithBreak(pieces[pieces.length - 1]);
+        }
+        if (pieces.some((pc) => pc.source === void 0)) throw new Error("a paragraph could not be matched to the file");
+        const known = new Set([...baselines.values()].flatMap((b) => b.pictures).filter(Boolean));
+        if (pieces.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture)))) {
+          throw new Error("a picture deleted in an earlier save cannot be brought back with Undo");
+        }
+        const bySource = /* @__PURE__ */ new Map();
+        for (const pc of pieces) {
+          if (!bySource.has(pc.source)) bySource.set(pc.source, []);
+          bySource.get(pc.source).push(pc);
+        }
+        const spans = /* @__PURE__ */ new Map();
+        for (const para of scan.paragraphs) {
+          if (!baselines.has(para.index)) continue;
+          const pcs = bySource.get(para.index) || [];
+          if (pcs.length === 1 && sameChars(pcs[0].chars, baselines.get(para.index), para.text)) continue;
+          const sp = spans.get(para.chain);
+          spans.set(para.chain, sp ? { first: sp.first, last: para.index } : { first: para.index, last: para.index });
+        }
+        if (!spans.size) return null;
+        const patches = [], plan = [];
+        for (const { first, last } of spans.values()) {
+          const group = pieces.filter((pc) => pc.source >= first && pc.source <= last);
+          const start = scan.paragraphs[first].start, end = scan.paragraphs[last].end;
+          const out = X.rewriteParagraphs(xml, scan, first, last, group.map((pc) => ({ source: pc.source, chars: pc.chars })), baselines);
+          patches.push({ start, end, old: xml.slice(start, end), xml: out });
+          plan.push({ first, last, pieces: group });
+        }
+        return { patches, plan };
+      }
+      function save() {
+        const c = changes();
+        if (!c) {
+          if (dirty && !saving) setDirty(false);
+          return null;
+        }
+        saving = { plan: c.plan, patches: c.patches, edits };
+        return { patches: c.patches };
+      }
+      function markSaved() {
+        const s = saving;
+        saving = null;
+        if (!s || !scan) return { ok: false, lost: false };
+        try {
+          if (rebase(s)) return { ok: true, lost: false };
+        } catch (_) {
+        }
+        return { ok: false, lost: edits !== s.edits };
+      }
+      function rebase(s) {
+        const nextXml = X.applyPatches(xml, s.patches);
+        const next = X.scanDocument(nextXml);
+        const nextMap = /* @__PURE__ */ new Map(), nextBase = /* @__PURE__ */ new Map();
+        const byFirst = new Map(s.plan.map((g) => [g.first, g]));
+        let ni = 0;
+        for (let i = 0; i < scan.paragraphs.length; ) {
+          const g = byFirst.get(i);
+          if (g) {
+            for (const pc of g.pieces) {
+              const para = next.paragraphs[ni];
+              if (!para || !para.editable || !X.sameShownText(para.text, textOf(pc.chars))) return false;
+              for (const el2 of pc.els) nextMap.set(el2, ni);
+              nextBase.set(ni, baselineOf(pc.chars, (baselines.get(pc.source) || {}).empty || {}));
+              ni++;
+            }
+            i = g.last + 1;
+            continue;
+          }
+          if (baselines.has(i)) nextBase.set(ni, baselines.get(i));
+          i++;
+          ni++;
+        }
+        if (ni !== next.paragraphs.length) return false;
+        const shift = /* @__PURE__ */ new Map();
+        let at = 0;
+        for (let i = 0; i < scan.paragraphs.length; ) {
+          const g = byFirst.get(i);
+          if (g) {
+            at += g.pieces.length;
+            i = g.last + 1;
+            continue;
+          }
+          shift.set(i, at);
+          at++;
+          i++;
+        }
+        for (const p of shownParagraphs()) if (map.has(p) && shift.has(map.get(p)) && !nextMap.has(p)) nextMap.set(p, shift.get(map.get(p)));
+        X.limitTo(next, (i) => nextBase.has(i));
+        xml = nextXml;
+        scan = next;
+        gen++;
+        for (const [p, index] of nextMap) map.set(p, index);
+        baselines = nextBase;
+        setDirty(edits !== s.edits);
+        return true;
+      }
+      function saveFailed() {
+        saving = null;
+      }
+      return {
+        open,
+        close,
+        exec,
+        save,
+        markSaved,
+        saveFailed,
+        isOpen: () => !!doc,
+        isEditable: () => !!scan,
+        isDirty: () => dirty
+      };
+    }
+    return { create };
+  })();
+
   // src/renderer/word-note.js
-  var import_helpers17 = __toESM(require_helpers());
   function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
     const DOCX_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"><style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>`;
     let docxShownKey = null;
@@ -5912,12 +5908,12 @@
       el.docxView.removeAttribute("srcdoc");
     }
     function freshDocxFrame() {
-      return new Promise((resolve) => {
+      return new Promise((resolve2) => {
         const onLoad = () => {
           const doc = el.docxView.contentDocument;
           if (!doc || !doc.querySelector('meta[name="notes-docx-frame"]')) return;
           el.docxView.removeEventListener("load", onLoad);
-          resolve(doc);
+          resolve2(doc);
         };
         el.docxView.addEventListener("load", onLoad);
         el.docxView.srcdoc = DOCX_FRAME;
@@ -5969,9 +5965,9 @@
         crafts.wordcraft.show(note);
         return;
       }
-      if (!import_helpers17.default.isOoxmlWordFile(note)) {
+      if (!isOoxmlWordFile(note)) {
         el.docxEditor.classList.add("hidden");
-        showBanner("Notes shows ." + import_helpers17.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
+        showBanner("Notes shows ." + extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
         return;
       }
       const key = note.id + ":" + note.fileMtime;
@@ -6065,7 +6061,7 @@
     return { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents };
   }
 
-  // src/renderer/images.js
+  // src/renderer/images.ts
   function createImages({ api, showBanner }) {
     let imageUrl = null, imageSeq = 0;
     async function showImage(note) {
@@ -6112,7 +6108,7 @@
     return { showImage, clearImage, toggleImageSize, syncImageToggle };
   }
 
-  // src/renderer/convert-menu.js
+  // src/renderer/convert-menu.ts
   function createConvertMenu({ api, flushSave, openFiles }) {
     async function openConvertMenu() {
       const note = state.current;
@@ -6175,7 +6171,7 @@
     return { openConvertMenu, closeConvertMenu, convertCurrent };
   }
 
-  // src/renderer/editor-text.js
+  // src/renderer/editor-text.ts
   function createEditorText({ runFind, scheduleSave }) {
     function wrapSelection(before, after) {
       const ta = el.bodyInput;
@@ -6239,11 +6235,11 @@
     return { wrapSelection, handleEditorKeydown };
   }
 
-  // src/renderer/app.js
+  // src/renderer/app.ts
   (function() {
     "use strict";
     const api = withPeerNotice(window.notesApi, peerChanged);
-    const { isViewerOnlyFile: isViewerOnlyFile8, isPlainTextFile: isPlainTextFile5, isNonMarkdownFile: isNonMarkdownFile3 } = import_helpers18.default;
+    const { isViewerOnlyFile: isViewerOnlyFile9, isPlainTextFile: isPlainTextFile6, isNonMarkdownFile: isNonMarkdownFile4 } = helpers_exports;
     function effectiveTheme(settings) {
       const s = settings || state.settings;
       const t = s ? s.theme : "system";
@@ -6257,9 +6253,9 @@
       syncTitleBar();
     }
     function applyColorScheme(mode, settings) {
-      const tokens = import_themes.default.resolve(settings, mode);
+      const tokens = resolve(settings, mode);
       const style = document.documentElement.style;
-      for (const name of import_themes.default.TOKENS) {
+      for (const name of TOKENS) {
         if (tokens) style.setProperty("--" + name, tokens[name]);
         else style.removeProperty("--" + name);
       }
@@ -6278,8 +6274,8 @@
       applyEditorLayout(settings);
       if (el.settingsDialog.open && settingsDirty()) previewSettings();
       if (opts && opts.fromPeer) return;
-      if (import_helpers18.default.isTableFile(state.current)) return;
-      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile5(state.current);
+      if (isTableFile(state.current)) return;
+      const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile6(state.current);
       const wantSource = settings.editorMode === "source" || forcedSource;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     }
@@ -6309,7 +6305,7 @@
     const NARROW_W = 1e3;
     const PEEK_EDGE_PX = 24;
     let sidebarPeek = null;
-    let peekTimer = null;
+    let peekTimer;
     const isNarrow = () => window.innerWidth < NARROW_W;
     function sidebarLayout() {
       if (settingsNow().sidebarCollapsed) return "float";
@@ -6337,7 +6333,7 @@
       sidebarPeek = how;
       applySidebar();
       if (fromKeyboard) {
-        peekReturn = document.activeElement;
+        peekReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         const target = el.sidebar.querySelector(".nav-item.is-active, .folder-row.is-active") || el.newNoteBtn;
         setTimeout(() => {
           if (!state.editingFolder && !el.sidebar.contains(document.activeElement)) target.focus();
@@ -6415,18 +6411,18 @@
       }, true);
     }
     function paneBudget() {
-      return Math.max(0, window.innerWidth - import_helpers18.default.EDITOR_MIN);
+      return Math.max(0, window.innerWidth - EDITOR_MIN);
     }
     function fitPaneWidths(sidebar, list) {
-      sidebar = import_helpers18.default.clampPane("sidebarWidth", sidebar);
-      list = import_helpers18.default.clampPane("listWidth", list);
+      sidebar = clampPane("sidebarWidth", sidebar);
+      list = clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
-      const over = sidebarShown + list - paneBudget();
-      if (over > 0) {
-        const listGive = Math.min(over, list - import_helpers18.default.PANE_LIMITS.listWidth.min);
+      const over2 = sidebarShown + list - paneBudget();
+      if (over2 > 0) {
+        const listGive = Math.min(over2, list - PANE_LIMITS.listWidth.min);
         list -= listGive;
-        const rest = over - listGive;
-        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers18.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
+        const rest = over2 - listGive;
+        if (rest > 0 && sidebarShown) sidebar = Math.max(PANE_LIMITS.sidebarWidth.min, sidebar - rest);
       }
       return { sidebar, list };
     }
@@ -6438,8 +6434,8 @@
     }
     function currentPaneWidths() {
       return {
-        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers18.default.PANE_LIMITS.sidebarWidth.def,
-        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers18.default.PANE_LIMITS.listWidth.def
+        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || PANE_LIMITS.sidebarWidth.def,
+        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || PANE_LIMITS.listWidth.def
       };
     }
     function setupResizer(handle, key) {
@@ -6453,12 +6449,10 @@
         handle.setPointerCapture(e.pointerId);
         handle.classList.add("is-dragging");
         document.body.classList.add("is-resizing");
-        let latest = start[mine];
         const onMove = (ev) => {
           const widths = { sidebar: start.sidebar, list: start.list };
           widths[mine] = start[mine] + (ev.clientX - startX);
           const fit = applyPaneWidths(widths.sidebar, widths.list);
-          latest = fit[mine];
           if (fit[other] !== start[other]) start[other] = fit[other];
         };
         const onUp = () => {
@@ -6476,7 +6470,7 @@
       });
       handle.addEventListener("dblclick", () => {
         const patch = {};
-        patch[key] = import_helpers18.default.PANE_LIMITS[key].def;
+        patch[key] = PANE_LIMITS[key].def;
         updateSettings(patch);
       });
     }
@@ -6504,7 +6498,7 @@
       else if (state.query) {
       } else if (state.view === "pinned") listOpts.pinned = true;
       else if (state.view === "reminders") listOpts.reminders = true;
-      else if (state.view === "tag") listOpts.tag = state.tag;
+      else if (state.view === "tag") listOpts.tag = state.tag || void 0;
       else if (state.view === "folder") listOpts.folderId = state.folderId;
       const wantTree = settingsNow().listMode === "tree" && !state.query && (state.view === "all" || state.view === "folder");
       const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
@@ -6613,7 +6607,7 @@
         li.className = "note-row" + (n.id === state.currentId ? " is-active" : "");
         li.dataset.id = n.id;
         li.setAttribute("role", "option");
-        li.title = import_helpers18.default.deriveTitle(n);
+        li.title = deriveTitle(n);
         li.innerHTML = rowInner(n, q);
         if (viewingBook && !q) {
           const no = document.createElement("span");
@@ -6661,21 +6655,21 @@
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
       const overdue = n.remindAt <= Date.now();
-      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers18.default.formatWhen(n.remindAt)) + "</span>";
+      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(formatWhen(n.remindAt)) + "</span>";
     }
     function rowInner(n, q) {
-      const title = n.body === void 0 ? n.title : import_helpers18.default.deriveTitle(n);
+      const title = n.body === void 0 ? n.title : deriveTitle(n);
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "") + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
-      const inTitle = !q || import_helpers18.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
+      const inTitle = !q || tokenize(q).some((t) => title.toLowerCase().includes(t));
       const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
       return '<span class="row-name">' + highlight(title, q) + "</span>" + why + marks + fileMark + reminderMark(n) + whereMark(n);
     }
     function matchExcerpt(n, q) {
       const body = String(n.body || "").replace(/\s+/g, " ");
       const low = body.toLowerCase();
-      const at = import_helpers18.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-      if (at === void 0) return (n.tags || []).filter((t) => import_helpers18.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers18.default.snippet(n, 80);
+      const at = tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (at === void 0) return (n.tags || []).filter((t) => tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || snippet(n, 80);
       const start = Math.max(0, at - 30);
       let text = body.slice(start, start + 80);
       if (start > 0) text = "\u2026" + text.replace(/^\S*\s/, "");
@@ -6689,11 +6683,11 @@
     }
     function refreshRow(note) {
       if (tabs.ids.includes(note.id)) {
-        tabs.titles.set(note.id, import_helpers18.default.deriveTitle(note));
+        tabs.titles.set(note.id, deriveTitle(note));
         renderActiveTabTitle();
       }
       if (state.outline) {
-        const title = import_helpers18.default.deriveTitle(note);
+        const title = deriveTitle(note);
         for (const list of Object.values(state.outline)) {
           const e = list.find((x) => x.id === note.id);
           if (e) {
@@ -6711,7 +6705,7 @@
       if (!li) return;
       const pageNo = li.querySelector(".page-no");
       li.innerHTML = rowInner(note, state.query);
-      li.title = import_helpers18.default.deriveTitle(note);
+      li.title = deriveTitle(note);
       if (pageNo) li.prepend(pageNo);
     }
     async function setView(view, arg, refreshOpts) {
@@ -6736,7 +6730,7 @@
       }
       if (state.view === "folder" || state.view === "trash") await setView("all", null, { keepEditor: true });
     }
-    let searchTimer = null;
+    let searchTimer;
     async function endSearchStep() {
       const had = !!state.query;
       state.query = el.searchInput.value.trim();
@@ -6959,9 +6953,9 @@
     }
     function currentHeadings() {
       const n = state.current;
-      if (!n || n.locked || isNonMarkdownFile3(n)) return [];
+      if (!n || n.locked || isNonMarkdownFile4(n)) return [];
       if (!state.sourceMode && state.rich) {
-        return Array.from(el.richEditor.querySelectorAll(".rich-editor-content :is(h1, h2, h3, h4, h5, h6)")).slice(0, 60).map((h) => ({ level: Number(h.tagName.slice(1)), text: h.textContent.trim() })).filter((h) => h.text);
+        return Array.from(el.richEditor.querySelectorAll(".rich-editor-content :is(h1, h2, h3, h4, h5, h6)")).slice(0, 60).map((h) => ({ level: Number(h.tagName.slice(1)), text: (h.textContent || "").trim() })).filter((h) => h.text);
       }
       const md = state.currentId === n.id ? el.bodyInput.value : n.body;
       return headingsOf(md).slice(0, 60);
@@ -7133,7 +7127,7 @@
       if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
       else renderNoteTree();
     }
-    let outlineTimer = null, outlineSig = "";
+    let outlineTimer, outlineSig = "";
     function scheduleOutline() {
       if (!treeModeActive()) return;
       clearTimeout(outlineTimer);
@@ -7215,11 +7209,11 @@
             await setView("folder", folder.id, { keepEditor: true });
             await selectNoteNow(page.id);
             el.titleInput.focus();
-            toast('Book "' + import_helpers18.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
+            toast('Book "' + truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
             return;
           }
           await setView("folder", folder.id);
-          toast('Folder "' + import_helpers18.default.truncate(folder.name, 30) + '" created');
+          toast('Folder "' + truncate(folder.name, 30) + '" created');
         } else {
           if (name) await api.folders.rename(edit.id, name);
           await refresh({ keepEditor: true });
@@ -7263,7 +7257,7 @@
       if (state.currentId === noteId && updated) state.current = updated;
       await refresh({ keepEditor: true });
       const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
-      toast(name ? "Moved to " + import_helpers18.default.truncate(name, 30) : "Moved out of folders");
+      toast(name ? "Moved to " + truncate(name, 30) : "Moved out of folders");
     }
     async function moveFolderTo(folderId, parentId) {
       const res = await api.folders.move(folderId, parentId || null);
@@ -7396,7 +7390,7 @@
     function peerHas(id) {
       return !!id && hasPeer() && tabs.peerIds.includes(id);
     }
-    let peerChangedTimer = null;
+    let peerChangedTimer;
     function peerChanged() {
       if (!hasPeer()) return;
       clearTimeout(peerChangedTimer);
@@ -7433,7 +7427,7 @@
     }
     function tabTitle(id) {
       if (!id) return "New tab";
-      if (id === state.currentId && state.current) return import_helpers18.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
+      if (id === state.currentId && state.current) return deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
       return tabs.titles.get(id) || "\u2026";
     }
     function renderTabs() {
@@ -7482,7 +7476,7 @@
       try {
         const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => void 0)));
         notes.forEach((n, i) => {
-          if (n) tabs.titles.set(ids[i], import_helpers18.default.deriveTitle(n));
+          if (n) tabs.titles.set(ids[i], deriveTitle(n));
           else if (n === null) gone.push(ids[i]);
         });
       } finally {
@@ -7517,7 +7511,7 @@
       toPeer({ type: "tabs", ids: openIds(), current: state.currentId });
       if (!GUEST) saveLayoutSoon();
     }
-    let layoutTimer = null;
+    let layoutTimer;
     function saveLayoutSoon() {
       if (GUEST) return;
       clearTimeout(layoutTimer);
@@ -7684,15 +7678,15 @@
     const peerWaits = /* @__PURE__ */ new Map();
     function askPeer(msg, ms) {
       const seq = ++flushSeq;
-      return new Promise((resolve) => {
+      return new Promise((resolve2) => {
         const timer = setTimeout(() => {
           peerWaits.delete(seq);
-          resolve(null);
+          resolve2(null);
         }, ms);
         peerWaits.set(seq, (reply) => {
           clearTimeout(timer);
           peerWaits.delete(seq);
-          resolve(reply);
+          resolve2(reply);
         });
         toPeer(Object.assign({ seq }, msg));
       });
@@ -7836,12 +7830,12 @@
         tabs.dragIndex = null;
         if (at === from || at === from + 1) return;
         const moving = tabs.ids[from];
-        const shown = tabs.ids[tabs.at];
+        const shown2 = tabs.ids[tabs.at];
         const wasShown = from === tabs.at;
         tabs.ids.splice(from, 1);
         const to = at > from ? at - 1 : at;
         tabs.ids.splice(to, 0, moving);
-        tabs.at = wasShown ? to : tabs.ids.indexOf(shown);
+        tabs.at = wasShown ? to : tabs.ids.indexOf(shown2);
         tabsChanged();
         return;
       }
@@ -8004,8 +7998,8 @@
       el.tagsInput.value = note.tags.join(", ");
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
-      const plainFile = isPlainTextFile5(note);
-      const markdown = !plainFile && !isViewerOnlyFile8(note);
+      const plainFile = isPlainTextFile6(note);
+      const markdown = !plainFile && !isViewerOnlyFile9(note);
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
@@ -8014,7 +8008,7 @@
       state.currentLossless = lossless;
       state.lossyOverride = null;
       el.bodyInput.placeholder = plainFile ? "Plain text." : "Markdown source. Ctrl+E switches back to the rendered view.";
-      const wantSource = import_helpers18.default.isTableFile(note) ? false : plainFile || settingsNow().editorMode === "source" || !lossless || !state.rich;
+      const wantSource = isTableFile(note) ? false : plainFile || settingsNow().editorMode === "source" || !lossless || !state.rich;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
@@ -8022,8 +8016,8 @@
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
-      const fileReadOnly = isViewerOnlyFile8(note);
-      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers18.default.isTableFile(note) || fileReadOnly);
+      const fileReadOnly = isViewerOnlyFile9(note);
+      el.sourceBtn.classList.toggle("hidden", plainFile && !isTableFile(note) || fileReadOnly);
       syncSourceButton();
       [el.titleInput, el.tagsInput].forEach((i) => {
         i.readOnly = inTrash;
@@ -8088,21 +8082,21 @@
         el.statusWords.textContent = stats.rows.toLocaleString() + (stats.rows === 1 ? " row" : " rows");
         el.statusChars.textContent = stats.cols + (stats.cols === 1 ? " column" : " columns");
       } else {
-        const words = import_helpers18.default.countWords(body);
+        const words = countWords(body);
         el.statusWords.textContent = words + (words === 1 ? " word" : " words");
         el.statusChars.textContent = body.length + (body.length === 1 ? " character" : " characters");
       }
-      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers18.default.relativeTime(note.trashedAt) : "Edited " + import_helpers18.default.relativeTime(note.updatedAt);
+      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + relativeTime(note.trashedAt) : "Edited " + relativeTime(note.updatedAt);
     }
     function setSaved(label) {
       el.statusSaved.textContent = label;
       el.statusSaved.classList.toggle("is-saving", label === "Saving\u2026");
       el.statusSaved.classList.toggle("is-saved", label === "Saved");
     }
-    const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, openReader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
+    const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
     const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
-    const { createRichEditor, inline, showInlineMenu, inlineMenuKey, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
@@ -8126,7 +8120,7 @@
     }
     const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
     const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api });
-    const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, closePdfPages, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
+    const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
     const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow });
     const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
     function externalLinkClick(e, href) {
@@ -8136,22 +8130,22 @@
     }
     const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
     function fileBadge(note) {
-      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers18.default.extOf(note.filePath).toUpperCase();
+      if (["docx", "sheet", "image"].includes(note.fileKind)) return extOf(note.filePath).toUpperCase();
       if (note.fileKind !== "text") return (note.fileKind || "file").toUpperCase();
-      if (!isPlainTextFile5(note)) return "Markdown";
-      if (import_helpers18.default.isTableFile(note)) return import_helpers18.default.extOf(note.filePath).toUpperCase();
-      return window.NotesCode ? window.NotesCode.languageFor(import_helpers18.default.extOf(note.filePath)).name : "Plain text";
+      if (!isPlainTextFile6(note)) return "Markdown";
+      if (isTableFile(note)) return extOf(note.filePath).toUpperCase();
+      return window.NotesCode ? window.NotesCode.languageFor(extOf(note.filePath)).name : "Plain text";
     }
     function renderFileRow(note) {
       const isFile = !!(note && note.filePath);
       el.fileRow.classList.toggle("hidden", !isFile);
       el.fileBanner.classList.add("hidden");
       if (!(isFile && note.fileKind === "docx")) clearDocx();
-      for (const [kind, key] of Object.entries(import_helpers18.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
+      for (const [kind, key] of Object.entries(CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
-      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers18.default.CRAFT_OF[note.fileKind]));
+      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!CRAFT_OF[note.fileKind]));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const craft = isFile ? craftFor(note) : null;
       const inCraft = !!craft && craft.usable();
@@ -8249,14 +8243,14 @@
       state.current = fresh;
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
-      if (isViewerOnlyFile8(fresh)) {
+      if (isViewerOnlyFile9(fresh)) {
         showCode2(fresh, true);
         renderFileRow(fresh);
         updateStatus(fresh);
         return;
       }
-      if (import_helpers18.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
-      if (state.rich && !isPlainTextFile5(fresh)) {
+      if (isTableFile(fresh) && tableShown()) renderTable(fresh);
+      if (state.rich && !isPlainTextFile6(fresh)) {
         let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
         if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
         state.currentLossless = lossless;
@@ -8309,7 +8303,7 @@
     }
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
-      if (isViewerOnlyFile8(state.current)) delete patch.body;
+      if (isViewerOnlyFile9(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
     }
@@ -8375,7 +8369,7 @@
               state.notes[idx] = updated;
               refreshRow(updated);
             }
-            toast('Saved earlier changes to "' + import_helpers18.default.truncate(import_helpers18.default.deriveTitle(updated), 30) + '"');
+            toast('Saved earlier changes to "' + truncate(deriveTitle(updated), 30) + '"');
           }
         } catch (err) {
           if (/changed on disk/i.test(String(err && err.message))) {
@@ -8441,7 +8435,7 @@
         renderRelatedSoon();
         if (book.id && patch.title !== void 0) {
           const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t');
-          if (t) t.textContent = import_helpers18.default.truncate(import_helpers18.default.deriveTitle(updated) || "Untitled", 28);
+          if (t) t.textContent = truncate(deriveTitle(updated) || "Untitled", 28);
         }
         if (updated.filePath && el.filePath.textContent !== updated.filePath) {
           el.filePath.textContent = updated.filePath;
@@ -8501,13 +8495,13 @@
     async function trashCurrent() {
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
-      const title = import_helpers18.default.deriveTitle(state.current);
+      const title = deriveTitle(state.current);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
       await api.notes.trash(id);
       clearEditor();
       await refresh();
-      toast('Moved "' + import_helpers18.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+      toast('Moved "' + truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
         await api.notes.restore(id);
         await refresh({ keepEditor: true });
         await selectNote(id);
@@ -8523,7 +8517,7 @@
     }
     async function destroyCurrent() {
       if (!state.current) return;
-      if (!window.confirm('Delete "' + import_helpers18.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
+      if (!window.confirm('Delete "' + deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
       if (state.currentId) state.pending.delete(state.currentId);
       state.dirty = false;
       await api.notes.destroy(state.currentId);
@@ -8573,7 +8567,7 @@
     function openSettings() {
       const s = settingsNow();
       draft = {};
-      el.hotkeyInput.value = import_helpers18.default.displayAccelerator(s.hotkey).replace(/ /g, "");
+      el.hotkeyInput.value = displayAccelerator(s.hotkey).replace(/ /g, "");
       el.hotkeyError.textContent = "";
       el.themeSelect.value = s.theme;
       renderSchemeGrid();
@@ -8603,10 +8597,7 @@
       el.settingsSearch.focus();
     }
     let draft = {};
-    const settingKeys = (o) => (
-      /** @type {(keyof Settings)[]} */
-      Object.keys(o)
-    );
+    const settingKeys = (o) => Object.keys(o);
     const same = (a, b) => JSON.stringify(a === void 0 ? null : a) === JSON.stringify(b === void 0 ? null : b);
     const draftSettings = () => Object.assign({}, state.settings, draft);
     function settingsDirty() {
@@ -8646,7 +8637,7 @@
       draft = {};
       if (res.error) {
         el.hotkeyError.textContent = res.error;
-        el.hotkeyInput.value = import_helpers18.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
+        el.hotkeyInput.value = displayAccelerator(res.settings.hotkey).replace(/ /g, "");
         syncSettingsDirty();
         el.hotkeyInput.focus();
         return false;
@@ -8694,7 +8685,7 @@
       gitEnabled: "Git history",
       gitRemote: "Git remote"
     };
-    const T = () => import_themes.default;
+    const T = () => themes_exports;
     function renderSchemeGrid() {
       const s = draftSettings();
       const mode = effectiveTheme(s);
@@ -8813,7 +8804,7 @@
       });
     }
     function filterSettings() {
-      const tokens = import_helpers18.default.tokenize(el.settingsSearch.value);
+      const tokens = tokenize(el.settingsSearch.value);
       const ranges = [];
       let any = false;
       for (const sec of el.settingsScroll.querySelectorAll(".settings-section")) {
@@ -8877,7 +8868,7 @@
       if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
       else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
       else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers18.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers18.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
+      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + relativeTime(s.lastPushAt) : ", not pushed yet" : "");
       if (s.lastError) text += "  Error: " + s.lastError;
       el.gitStatus.textContent = text;
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -8907,13 +8898,13 @@
       return { partial: null, value: mods.concat(key).join("+") };
     }
     function commitHotkey(value) {
-      const parsed = import_helpers18.default.parseAccelerator(value);
+      const parsed = parseAccelerator(value);
       if (!parsed.ok) {
         el.hotkeyError.textContent = parsed.reason;
         return;
       }
       el.hotkeyError.textContent = "";
-      el.hotkeyInput.value = import_helpers18.default.displayAccelerator(parsed.value).replace(/ /g, "");
+      el.hotkeyInput.value = displayAccelerator(parsed.value).replace(/ /g, "");
       setDraft({ hotkey: parsed.value });
     }
     let palette = null;
@@ -8962,7 +8953,7 @@
         ...flattenTree(state.tree).map((f) => cmd("folder-" + f.id, "Go to", (f.book ? "Book: " : "Folder: ") + f.name, f.book ? "book-open" : "folder", "", () => setView("folder", f.id), !GUEST)),
         ...[...el.tagList.querySelectorAll(".nav-item")].map((b) => cmd("tag-" + b.firstChild.textContent, "Go to", "Tag: #" + b.firstChild.textContent, "hash", "", () => b.click(), !GUEST)),
         cmd("settings", "App", "Settings", "settings", "Ctrl+,", side("settings", openSettings), true, "preferences options hotkey font search"),
-        ...Object.keys(import_themes.default.SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + import_themes.default.SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && settingsNow().colorScheme !== id, "theme colors appearance")),
+        ...Object.keys(SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && settingsNow().colorScheme !== id, "theme colors appearance")),
         cmd("scheme-custom", "View", "Colour scheme: custom colours\u2026", "palette", "", side("settings", () => {
           openSettings();
           document.getElementById("set-appearance")?.scrollIntoView({ block: "start" });
@@ -8984,16 +8975,16 @@
         notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
           id: "note-" + n.id,
           group: "Notes",
-          title: import_helpers18.default.deriveTitle(n),
+          title: deriveTitle(n),
           icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
-          hint: n.folderId && folders.get(n.folderId) || import_helpers18.default.relativeTime(n.updatedAt),
-          matches: (q) => !n.locked && import_helpers18.default.matchesQuery(n, q),
+          hint: n.folderId && folders.get(n.folderId) || relativeTime(n.updatedAt),
+          matches: (q) => !n.locked && matchesQuery(n, q),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));
       }
       const out = NotesPalette.rank(query, commands, notes);
       const title = query.replace(/^\s*>\s*/, "").trim();
-      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers18.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
+      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
       return out;
     }
     function onKeydown(e) {
@@ -9150,20 +9141,20 @@
             return;
           // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
           case "b":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile5(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile6(state.current)) {
               e.preventDefault();
               wrapSelection("**", "**");
             }
             return;
           case "i":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile5(state.current)) {
+            if (document.activeElement === el.bodyInput && !isPlainTextFile6(state.current)) {
               e.preventDefault();
               wrapSelection("_", "_");
             }
             return;
           case "k":
             if (document.activeElement === el.bodyInput) {
-              if (!isPlainTextFile5(state.current)) {
+              if (!isPlainTextFile6(state.current)) {
                 e.preventDefault();
                 wrapSelection("[", "](url)");
               }
@@ -9727,8 +9718,8 @@
       });
       el.hotkeyInput.addEventListener("blur", () => {
         const v = el.hotkeyInput.value.trim();
-        if (v && !v.endsWith("+") && v !== import_helpers18.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
-        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers18.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
+        if (v && !v.endsWith("+") && v !== displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
+        else if (!v || v.endsWith("+")) el.hotkeyInput.value = displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
       });
       el.themeSelect.addEventListener("change", () => setDraft({ theme: el.themeSelect.value }));
       el.fontSizeInput.addEventListener("input", () => {
@@ -9844,7 +9835,7 @@
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && state.current && isViewerOnlyFile8(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && state.current && isViewerOnlyFile9(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {
@@ -9906,8 +9897,8 @@
     window.addEventListener("error", (e) => console.error("Uncaught: " + e.message));
     window.addEventListener("unhandledrejection", (e) => console.error("Unhandled rejection: " + (e.reason && e.reason.message || e.reason)));
     let markInitDone;
-    state.initDone = new Promise((resolve) => {
-      markInitDone = resolve;
+    state.initDone = new Promise((resolve2) => {
+      markInitDone = resolve2;
     });
     init().catch((err) => {
       console.error(err);

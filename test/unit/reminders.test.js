@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { Store } = require('../../src/store');
 const { ReminderScheduler } = require('../../src/reminders');
-const H = require('../../src/shared/helpers');
+const H = require('../../src/shared/helpers.ts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-rem-'); // removed when the test process exits

@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 let findOffsets, isQueryText;
-test.before(async () => { ({ findOffsets, isQueryText } = await import('../../src/renderer/find-text.js')); });
+test.before(async () => { ({ findOffsets, isQueryText } = await import('../../src/renderer/find-text.ts')); });
 
 test('findOffsets finds every occurrence, case-insensitively, measured on the original text', () => {
   assert.deepEqual(findOffsets('Cat cat CAT', 'cat'), [0, 4, 8]);

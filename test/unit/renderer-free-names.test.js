@@ -12,7 +12,7 @@ test('every renderer module names only what it imports or receives, checked or n
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (d) => { throw new Error(ts.flattenDiagnosticMessageText(d.messageText, ' ')); },
   });
-  assert.ok(cfg && cfg.fileNames.some((f) => /[\\/]renderer[\\/]app\.js$/.test(f)), 'the renderer config lists app.js');
+  assert.ok(cfg && cfg.fileNames.some((f) => /[\\/]renderer[\\/]app\.ts$/.test(f)), 'the renderer config lists app.ts');
   const program = ts.createProgram(cfg.fileNames, cfg.options);
   const bad = ts.getPreEmitDiagnostics(program)
     .filter((d) => UNDEFINED_NAME_CODES.has(d.code) && d.file && /[\\/]src[\\/]renderer[\\/]/.test(d.file.fileName))

@@ -10,7 +10,7 @@ const { VaultManager } = require('./vaults');
 const { drawIconBitmap } = require('./icon');
 const crypto = require('crypto');
 const os = require('os');
-const H = require('./shared/helpers');
+const H = require('./shared/helpers.ts');
 const convert = require('./convert');
 const { runWorker } = require('./run-worker');
 const crafts = require('./craft-host');
@@ -22,7 +22,7 @@ const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
-const Themes = require('./shared/themes');
+const Themes = require('./shared/themes.ts');
 const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');

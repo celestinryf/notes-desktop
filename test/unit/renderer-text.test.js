@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, highlight, ipcErrorText } = require('../../src/renderer/text.js');
+const { escapeHtml, highlight, ipcErrorText } = require('../../src/renderer/text.ts');
 
 test('escapeHtml escapes the five characters and nothing else', () => {
   assert.equal(escapeHtml('<a href="x">Tom & Jerry\'s</a>'), '&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;');

@@ -3,8 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const H = require('./shared/helpers');
-const Themes = require('./shared/themes');
+const H = require('./shared/helpers.ts');
+const Themes = require('./shared/themes.ts');
 const F = require('./files');
 const L = require('./lock');
 
