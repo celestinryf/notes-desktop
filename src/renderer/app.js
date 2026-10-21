@@ -16,6 +16,15 @@ import { escapeHtml, highlight, ipcErrorText } from './text.js';
 import { toast } from './toast.js';
 import { setActivity } from './activity.js';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } from './tree.js';
+import { placePopover } from './popover.js';
+import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.js';
+import { createBookReader } from './book-reader.js';
+import { createRelated } from './related.js';
+import { createReminders } from './reminders.js';
+import { quickPick } from './remind-times.js';
+import { createImages } from './images.js';
+import { createConvertMenu } from './convert-menu.js';
+import { createEditorText } from './editor-text.js';
 
 (function () {
   'use strict';
@@ -1082,20 +1091,6 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
 
   // Shows a popover menu at the pointer (right-click) or under its anchor, kept inside the window. Under an anchor
   // it lines up with the anchor's right edge when the anchor sits in the right half, and opens upward if it must.
-  function placePopover(menu, anchor, ev) {
-    menu.classList.remove('hidden');
-    const rect = anchor.getBoundingClientRect();
-    menu.style.left = '0px'; menu.style.top = '0px';
-    const mw = menu.offsetWidth, mh = menu.offsetHeight;
-    let x = ev ? ev.clientX : (rect.left > window.innerWidth / 2 ? rect.right - mw : rect.left);
-    let y = ev ? ev.clientY : rect.bottom + 4;
-    if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
-    if (y + mh > window.innerHeight - 8) y = ev ? window.innerHeight - mh - 8 : rect.top - mh - 4;
-    menu.style.left = Math.max(8, x) + 'px';
-    menu.style.top = Math.max(8, y) + 'px';
-    const first = menu.querySelector('button:not(.hidden):not(:disabled)');
-    if (first) first.focus();
-  }
 
   function closeFolderMenu() {
     state.menuFolderId = null;
@@ -2302,72 +2297,13 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     else if (!r.canceled) toast('Could not export the book: ' + r.error);
   }
 
-  // ---- whole-book reading view ----------------------------------------------------
+  // ---- whole-book reading view: see book-reader.js ----
 
-  // The reading view is a snapshot of one book; reader.bookId says which.
-  const reader = { bookId: null, seq: 0 };
+  const { reader, openReader, closeReader, readerOpen } = createBookReader({ book, collectBook, syncTitleBar });
 
-  async function openReader() {
-    const bookId = book.id;
-    if (!bookId) return;
-    const seq = ++reader.seq;
-    const b = await collectBook(bookId);
-    if (seq !== reader.seq || book.id !== bookId) return; // moved on while the pages loaded
-    reader.bookId = bookId;
-    el.bookReaderTitle.textContent = b.name;
-    el.bookReaderToc.innerHTML = '<h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol>';
-    el.bookReaderBody.innerHTML = b.pages.map((p) => '<article class="book-page" id="reader-page-' + p.no + '">' +
-      '<div class="book-page-head"><span class="no">' + p.no + '</span><h2>' + escapeHtml(p.title) + '</h2><button class="tool-btn" data-edit="' + p.id + '">Edit</button></div>' +
-      (p.locked ? '<p class="book-page-locked">This page is locked. Open it to unlock.</p>' : '<div class="rich-editor-content">' + p.html + '</div>') + '</article>').join('');
-    el.bookReader.classList.remove('hidden');
-    syncTitleBar();
-    el.bookReaderScroll.scrollTop = 0;
-    el.bookReaderCloseBtn.focus();
-  }
+  // ---- related notes: see related.js ----
 
-  function closeReader() {
-    reader.seq++; // an opening still loading must not appear after this
-    reader.bookId = null;
-    el.bookReader.classList.add('hidden');
-    el.bookReaderBody.innerHTML = '';
-    syncTitleBar();
-  }
-
-  function readerOpen() { return !el.bookReader.classList.contains('hidden'); }
-
-  // ---- related notes --------------------------------------------------------------
-
-  let relatedTimer = null;
-  function renderRelatedSoon() { clearTimeout(relatedTimer); relatedTimer = setTimeout(() => { if (state.current) renderRelated(state.current); }, 400); }
-
-  async function renderRelated(note) {
-    if (!note || note.trashedAt) { el.relatedPanel.classList.add('hidden'); return; }
-    const forNote = note.id;
-    let r;
-    try { r = await api.notes.related(note.id); } catch (_) { r = null; }
-    if (state.currentId !== forNote) return;
-    if (!r) { el.relatedPanel.classList.add('hidden'); return; }
-    const fill = (group, items) => {
-      const ul = group.querySelector('ul');
-      ul.innerHTML = '';
-      for (const it of items) {
-        const li = document.createElement('li');
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.innerHTML = (it.locked ? I('lock') : '') + escapeHtml(it.title);
-        if (it.sharedTags && it.sharedTags.length) { const t = document.createElement('span'); t.className = 'tags'; t.textContent = it.sharedTags.map((x) => '#' + x).join(' '); b.append(t); }
-        if (it.missing) { b.classList.add('is-missing'); b.disabled = true; b.title = 'This link points at a note that no longer exists.'; }
-        else { b.title = it.trashed ? 'In the trash' : 'Open'; b.addEventListener('click', () => followLink('note://' + it.id)); }
-        li.append(b);
-        ul.append(li);
-      }
-      group.classList.toggle('hidden', !items.length);
-    };
-    fill(el.relatedOut, r.outgoing);
-    fill(el.relatedIn, r.incoming);
-    fill(el.relatedTags, r.byTags);
-    el.relatedPanel.classList.toggle('hidden', !(r.outgoing.length || r.incoming.length || r.byTags.length));
-  }
+  const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
 
   // ---- live share --------------------------------------------------------------
 
@@ -2562,56 +2498,9 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     else if (action === 'remove') openLockDialog('remove');
   }
 
-  // ---- reminders ---------------------------------------------------------------
+  // ---- reminders: see reminders.js ----
 
-  function renderRemindButton(note) {
-    const on = !!(note && note.remindAt);
-    el.remindBtn.classList.toggle('hidden', !note || !!note.trashedAt);
-    el.remindBtn.classList.toggle('is-on', on);
-    setLabel(el.remindBtn, on ? 'Reminder: ' + H.formatWhen(note.remindAt) : 'Remind me…');
-    el.remindBtn.title = on ? 'Reminder set for ' + H.formatWhen(note.remindAt) + ' (Ctrl+Shift+M to change)' : 'Remind me about this note (Ctrl+Shift+M)';
-  }
-
-  function toLocalInputValue(ts) {
-    const d = new Date(ts);
-    const pad = (n) => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-
-  function quickPick(kind) {
-    const d = new Date();
-    d.setSeconds(0, 0);
-    if (kind === '1h') { d.setTime(d.getTime() + 3600 * 1000); return d.getTime(); }
-    if (kind === 'evening') { if (d.getHours() >= 18) d.setDate(d.getDate() + 1); d.setHours(18, 0, 0, 0); return d.getTime(); }
-    if (kind === 'tomorrow') { d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); }
-    if (kind === 'monday') { const add = ((8 - d.getDay()) % 7) || 7; d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0); return d.getTime(); }
-    return null;
-  }
-
-  function openRemindDialog() {
-    const note = state.current;
-    if (!note || note.trashedAt) return;
-    const base = note.remindAt || (Math.ceil(Date.now() / (3600 * 1000)) * 3600 * 1000);
-    el.remindInput.value = toLocalInputValue(base);
-    el.remindCurrent.textContent = note.remindAt ? ('Currently: ' + H.formatWhen(note.remindAt) + (note.remindedAt ? ' (went off)' : '')) : 'No reminder on this note.';
-    el.remindClearBtn.classList.toggle('hidden', !note.remindAt);
-    el.remindDialog.showModal();
-    el.remindInput.focus();
-  }
-
-  async function setReminder(at) {
-    const note = state.current;
-    if (!note) return;
-    el.remindDialog.close();
-    await flushSave();
-    try {
-      await api.notes.update(note.id, { remindAt: at });
-      await refreshCurrentMeta();
-      toast(at ? 'Reminder set for ' + H.formatWhen(at) : 'Reminder cleared');
-    } catch (err) {
-      toast('Could not save the reminder: ' + (err.message || err));
-    }
-  }
+  const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
 
   // ---- sharing -----------------------------------------------------------------
 
@@ -3448,49 +3337,9 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
   }
 
-  // ---- images -------------------------------------------------------------------------------------
-  // An image file, fitted to the pane; a click (or Enter) shows it at its actual size, and again fits it. The picture
-  // comes from the main process as bytes and is shown from a blob: URL, so the page never reads files itself.
-  let imageUrl = null, imageSeq = 0;
-  async function showImage(note) {
-    const seq = ++imageSeq;
-    el.imageView.removeAttribute('src'); // the last picture never shows under this note's name
-    el.imageViewer.classList.remove('hidden', 'is-actual');
-    syncImageToggle();
-    try {
-      const { bytes, mime } = await api.files.imageBytes(note.id);
-      if (seq !== imageSeq || !state.current || state.current.id !== note.id) return;
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-      imageUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
-      el.imageView.alt = note.title;
-      el.imageView.src = imageUrl;
-    } catch (err) {
-      if (seq !== imageSeq) return;
-      clearImage();
-      showBanner('Could not show this image: ' + ipcErrorText(err) + ' Use "Open with…" to open it.');
-    }
-  }
-  function clearImage() {
-    imageSeq++;
-    el.imageViewer.classList.add('hidden');
-    el.imageView.removeAttribute('src');
-    if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
-  }
-  function toggleImageSize() {
-    el.imageViewer.classList.toggle('is-actual');
-    syncImageToggle();
-  }
-  // The picture is a toggle button (fit, or actual size): it says which, and so does the status line.
-  function syncImageToggle() {
-    const actual = el.imageViewer.classList.contains('is-actual');
-    el.imageView.setAttribute('aria-pressed', String(actual));
-    el.imageView.title = actual ? 'Actual size. Click or press Enter to fit it to the pane.' : 'Fitted to the pane. Click or press Enter for its actual size.';
-    const w = el.imageView.naturalWidth, h = el.imageView.naturalHeight;
-    if (!w || el.imageViewer.classList.contains('hidden')) return;
-    el.statusCode.textContent = w + ' × ' + h + ' px, ' + (actual ? 'actual size' : 'fitted');
-    el.statusCode.classList.remove('hidden');
-    el.imageView.setAttribute('aria-label', (state.current ? state.current.title + ', ' : '') + w + ' by ' + h + ' pixels, ' + (actual ? 'actual size' : 'fitted to the pane'));
-  }
+  // ---- images: see images.js ----
+
+  const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
 
   // ---- Documents in the Craft apps ---------------------------------------------------------------
   // WordCraft (Word documents) and GridCraft (spreadsheets): the user's forks of ArtCraft's Rust office apps, built to
@@ -3764,50 +3613,9 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     }
   }
 
-  // ---- Convert to… (a copy in another format, written next to the file) ------------------------------
+  // ---- Convert to: see convert-menu.js ----
 
-  async function openConvertMenu() {
-    const note = state.current;
-    if (!note || !note.filePath) return;
-    let opts;
-    try { opts = await api.files.convertOptions(note.id); } catch (err) { toast('Could not convert: ' + ipcErrorText(err)); return; }
-    if (state.currentId !== note.id) return;
-    if (!opts.length) { toast('Notes cannot convert this kind of file.'); return; }
-    el.convertMenu.replaceChildren(...opts.map((o) => {
-      const b = document.createElement('button');
-      b.setAttribute('role', 'menuitem');
-      b.dataset.to = o.to;
-      b.append(o.label);
-      if (o.note) { const n = document.createElement('span'); n.className = 'menu-note'; n.textContent = o.note; b.append(n); }
-      return b;
-    }));
-    placePopover(el.convertMenu, el.fileConvertBtn);
-    el.convertMenu.querySelector('button').focus();
-  }
-
-  function closeConvertMenu() { el.convertMenu.classList.add('hidden'); }
-
-  let converting = false;
-  async function convertCurrent(to) {
-    closeConvertMenu();
-    const note = state.current;
-    if (!note || !note.filePath || converting) return;
-    converting = true;
-    el.fileConvertBtn.disabled = true;
-    try {
-      await flushSave(); // a text file converts what is on disk, so unsaved typing goes there first
-      toast('Converting…');
-      const r = await api.files.convert(note.id, to);
-      if (!r.ok) { toast('Could not convert: ' + r.error); return; }
-      const name = r.filePath.split(/[\\/]/).pop();
-      toast('Saved ' + name + ' next to the original.' + (r.warning ? ' ' + r.warning : ''), { label: 'Open', run: () => openFiles([r.filePath]) });
-    } catch (err) {
-      toast('Could not convert: ' + ipcErrorText(err));
-    } finally {
-      converting = false;
-      el.fileConvertBtn.disabled = false;
-    }
-  }
+  const { openConvertMenu, closeConvertMenu, convertCurrent } = createConvertMenu({ api, flushSave, openFiles });
 
   // ---- PDF viewer and editor ------------------------------------------------------------------------
   // pdf.js shows the PDF and holds the edits; saving writes them into the file through main, which backs up the
@@ -4866,69 +4674,9 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     dispatchEvent(event) { return el.bodyInput.dispatchEvent(event); },
   };
 
-  // ---- editor text helpers -------------------------------------------------
+  // ---- editor text helpers: see editor-text.js ----
 
-  function wrapSelection(before, after) {
-    const ta = el.bodyInput;
-    if (ta.readOnly) return;
-    const { selectionStart: s, selectionEnd: e, value } = ta;
-    const selected = value.slice(s, e);
-    const already = value.slice(s - before.length, s) === before && value.slice(e, e + after.length) === after;
-    if (already) {
-      ta.setRangeText(selected, s - before.length, e + after.length, 'select');
-    } else {
-      ta.setRangeText(before + selected + after, s, e, 'select');
-      ta.setSelectionRange(s + before.length, s + before.length + selected.length);
-    }
-    scheduleSave();
-  }
-
-  function handleEditorKeydown(e) {
-    if (e.isComposing || e.keyCode === 229) return; // an IME is composing (CJK input): Enter and Tab belong to it
-    // While the find bar is open, Enter in the text steps between matches instead of replacing the selected
-    // match with a newline (focus lands here after Enter in the bar, so that would eat the match).
-    if (find.open && e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); runFind(!e.shiftKey); return; }
-    const ta = el.bodyInput;
-    if (e.key === 'Tab' && e.shiftKey) {
-      // Outdent the current line when it is indented; otherwise let focus move back to the tags field.
-      const value = ta.value;
-      const lineStart = value.lastIndexOf('\n', ta.selectionStart - 1) + 1;
-      const indent = /^( {1,2}|\t)/.exec(value.slice(lineStart));
-      if (!indent || ta.readOnly) return;
-      e.preventDefault();
-      const caret = ta.selectionStart;
-      ta.setRangeText('', lineStart, lineStart + indent[0].length, 'preserve');
-      ta.setSelectionRange(Math.max(lineStart, caret - indent[0].length), Math.max(lineStart, caret - indent[0].length));
-      scheduleSave();
-      return;
-    }
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      if (ta.readOnly) return;
-      ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end');
-      scheduleSave();
-      return;
-    }
-    if (e.key === 'Enter' && !e.shiftKey && !ta.readOnly) {
-      // Continue lists and checklists on the next line.
-      const value = ta.value;
-      const lineStart = value.lastIndexOf('\n', ta.selectionStart - 1) + 1;
-      const line = value.slice(lineStart, ta.selectionStart);
-      const m = /^(\s*)([-*+]|\d+[.)])\s(\[[ xX]\]\s)?(.*)$/.exec(line);
-      if (!m) return;
-      e.preventDefault();
-      if (!m[4].trim() && !m[3]) {
-        // Empty bullet: end the list.
-        ta.setRangeText('', lineStart, ta.selectionStart, 'end');
-      } else if (!m[4].trim() && m[3]) {
-        ta.setRangeText('', lineStart, ta.selectionStart, 'end');
-      } else {
-        const marker = /^\d+/.test(m[2]) ? (parseInt(m[2], 10) + 1) + m[2].slice(-1) : m[2];
-        ta.setRangeText('\n' + m[1] + marker + ' ' + (m[3] ? '[ ] ' : ''), ta.selectionStart, ta.selectionEnd, 'end');
-      }
-      scheduleSave();
-    }
-  }
+  const { wrapSelection, handleEditorKeydown } = createEditorText({ find, runFind, scheduleSave });
 
   // ---- settings dialog -----------------------------------------------------
 
@@ -5246,33 +4994,6 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } fro
     el.hotkeyError.textContent = '';
     el.hotkeyInput.value = H.displayAccelerator(parsed.value).replace(/ /g, '');
     setDraft({ hotkey: parsed.value });
-  }
-
-  // ---- the More menu --------------------------------------------------------
-
-  function openMoreMenu() {
-    if (!state.current) return;
-    placePopover(el.moreMenu, el.moreBtn);
-    el.moreBtn.setAttribute('aria-expanded', 'true');
-  }
-
-  function closeMoreMenu() {
-    el.moreMenu.classList.add('hidden');
-    el.moreBtn.setAttribute('aria-expanded', 'false');
-  }
-
-  // Arrow keys, Home and End move through any open menu; Tab leaves it.
-  function bindMenuKeys() {
-    document.addEventListener('keydown', (e) => {
-      const menu = e.target.closest && e.target.closest('.popover[role="menu"]');
-      if (!menu || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-      const items = [...menu.querySelectorAll('button')].filter((b) => b.offsetParent && !b.disabled);
-      if (!items.length) return;
-      e.preventDefault();
-      const i = items.indexOf(document.activeElement);
-      const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-      items[next].focus();
-    }, true);
   }
 
   // ---- the command palette (Ctrl+P) -----------------------------------------------------------
