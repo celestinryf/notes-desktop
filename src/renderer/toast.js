@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 
 let toastTimer = null;

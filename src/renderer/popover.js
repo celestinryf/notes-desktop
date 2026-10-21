@@ -1,3 +1,4 @@
+// @ts-check
 export function placePopover(menu, anchor, ev) {
   menu.classList.remove('hidden');
   const rect = anchor.getBoundingClientRect();

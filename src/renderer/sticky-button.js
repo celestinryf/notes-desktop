@@ -1,3 +1,4 @@
+// @ts-check
 import { el, setLabel } from './dom.js';
 import { state } from './state.js';
 import H from '../shared/helpers.js';

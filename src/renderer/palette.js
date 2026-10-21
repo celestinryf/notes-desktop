@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* The command palette (Ctrl+P): one box that finds notes and runs every command the app has.
    It knows nothing about notes or commands itself: app.js hands it a source of items each time it opens.

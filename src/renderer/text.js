@@ -1,3 +1,4 @@
+// @ts-check
 import H from '../shared/helpers.js';
 
 export function escapeHtml(s) {

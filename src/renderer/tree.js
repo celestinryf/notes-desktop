@@ -1,3 +1,4 @@
+// @ts-check
 import NotesIcons from './icons.js';
 
 // Folder rows carry no leading icon (the chevron already says "folder"); a book is told apart by this trailing mark.
@@ -21,7 +22,7 @@ export function focusRow(root, row) {
 // A rebuild must not lose the keyboard: remember which row had focus, and focus it again afterwards.
 export function treeFocusKey(root) {
   const a = document.activeElement;
-  return a && root.contains(a) && a.classList.contains('tree-row') ? a.dataset.key : null;
+  return a instanceof HTMLElement && root.contains(a) && a.classList.contains('tree-row') ? a.dataset.key : null;
 }
 export function restoreTreeFocus(root, key) {
   const rows = visibleRows(root);

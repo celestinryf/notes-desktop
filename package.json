@@ -19,7 +19,7 @@
     "shots": "node scripts/shots.js",
     "icons": "node scripts/make-icons.js",
     "build:code": "esbuild src/code/index.js --bundle --format=iife --global-name=NotesCode --target=chrome120 --minify --outfile=src/renderer/vendor/code.bundle.js",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
     "build:app": "node scripts/build-renderer.js"
   },
   "license": "MIT",

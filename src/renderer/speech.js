@@ -1,3 +1,4 @@
+// @ts-check
 import { el, setLabel } from './dom.js';
 import { state } from './state.js';
 import { src } from './code-editor.js';
@@ -9,6 +10,7 @@ import { focusBody } from './editor-view.js';
 const { isViewerOnlyFile, isNonMarkdownFile } = H;
 
 export function createSpeech({ api }) {
+  /** @type {{ active: boolean, queue: string[], index: number }} */
   const tts = { active: false, queue: [], index: 0 };
 
   function selectedTextForSpeech() {

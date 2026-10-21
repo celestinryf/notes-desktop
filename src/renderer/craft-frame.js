@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* A Craft app in a frame: WordCraft or GridCraft (the user's forks of ArtCraft's Rust office apps, built
    to WebAssembly) editing a document in place of Notes' own editors. One frame per app, loaded once and reused for
@@ -20,6 +21,9 @@
    onUnavailable: the frame never said it was ready (a build without hosted mode, or one that fails to load); nothing more
    is shown in it. */
 export const NotesCraftFrame = (function () {
+  /** @param {{ frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
+   *   onSave: (name: string, bytes: Uint8Array, context: any) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
+   *   onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void }} opts */
   function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
     let ready = false;
     let loaded = false;

@@ -1,3 +1,4 @@
+// @ts-check
 /* The comments panel beside an open PDF, exposed as window.NotesPdfComments. It lists the PDF's sticky notes, and
    other marks that carry a comment, and adds, retypes and deletes sticky notes. Those are standard PDF "Text"
    annotations, which main writes into the file, so other PDF apps show them as comments too. */

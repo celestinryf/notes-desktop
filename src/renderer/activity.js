@@ -1,3 +1,4 @@
+// @ts-check
 import { el, I } from './dom.js';
 
 // A long-running mode must stay visible and stoppable while its menu is closed.
@@ -8,7 +9,7 @@ export function setActivity(key, a) {
   if (!a) { if (had) { had.chip.remove(); activities.delete(key); } return; }
   if (had) {
     had.a = a;
-    had.chip.querySelector('.activity-text').textContent = a.text;
+    had.text.textContent = a.text;
     had.chip.title = a.stopLabel;
     return;
   }
@@ -17,8 +18,12 @@ export function setActivity(key, a) {
   chip.className = 'activity-chip';
   chip.title = a.stopLabel;
   chip.innerHTML = '<span class="activity-dot" aria-hidden="true"></span>' + I(a.icon) + '<span class="activity-text"></span>' + I('x');
-  chip.querySelector('.activity-text').textContent = a.text;
-  const entry = { chip, a };
+  const text = document.createElement('span');
+  text.className = 'activity-text';
+  text.textContent = a.text;
+  chip.innerHTML = chip.innerHTML.replace('<span class="activity-text"></span>', '');
+  chip.insertBefore(text, chip.lastElementChild);
+  const entry = { chip, text, a };
   chip.addEventListener('click', () => entry.a.stop());
   activities.set(key, entry);
   el.activityBar.append(chip);

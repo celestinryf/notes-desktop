@@ -1,3 +1,4 @@
+// @ts-check
 export function withPeerNotice(raw, onWrite) {
   // Writes that change notes, folders or files. After one, the other side reloads its list and its note.
   const WRITES = {

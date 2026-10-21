@@ -1,3 +1,4 @@
+// @ts-check
 import NotesIcons from './icons.js';
 
 export const $ = (sel) => document.querySelector(sel);

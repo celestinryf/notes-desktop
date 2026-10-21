@@ -1,3 +1,4 @@
+// @ts-check
 import { el, setLabel, setIcon } from './dom.js';
 import { state } from './state.js';
 import { find } from './find-state.js';

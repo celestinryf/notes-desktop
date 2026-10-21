@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import { toast } from './toast.js';

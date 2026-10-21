@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import H from '../shared/helpers.js';
@@ -22,7 +23,8 @@ export function markdownToHtml(md, note) {
     try {
       ed = window.NotesEditor.create(host, { imageBase: () => H.imageBaseFor(note) });
       ed.setMarkdown(String(md || ''));
-      return host.querySelector('.rich-editor-content').innerHTML;
+      const content = host.querySelector('.rich-editor-content');
+      return content ? content.innerHTML : '';
     } finally { if (ed) ed.destroy(); }
   } finally { host.remove(); }
 }
