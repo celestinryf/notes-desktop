@@ -7,10 +7,11 @@ import H from '../shared/helpers.js';
 import { escapeHtml } from './text.js';
 import { toast } from './toast.js';
 import { findOffsets, isQueryText } from './find-text.js';
+import { tableShown, focusBody } from './editor-view.js';
 
 const { isViewerOnlyFile } = H;
 
-export function createFindBar({ api, tableShown, focusBody, flushSave, GUEST }) {
+export function createFindBar({ api, flushSave, GUEST }) {
   function openFind() {
     if (!state.current) return;
     find.open = true;
