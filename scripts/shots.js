@@ -247,6 +247,9 @@ const SCENES = {
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
   pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
   'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
+  'settings-appearance': { about: 'Settings > Appearance: theme, the scheme swatches, the custom colour pickers', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await sleep(400); } },
+  'settings-unsaved': { about: 'Settings with an unsaved change (the theme previewed on the page) and the Save changes button live', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await page.click('.scheme-swatch[data-scheme="slate"]'); await sleep(400); } },
+  'settings-save-prompt': { about: 'Closing Settings with unsaved changes: the Save your changes? question', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('.scheme-swatch[data-scheme="forest"]'); await page.keyboard.press('Escape'); await sleep(400); } },
   'settings-search-none': { about: 'A settings search with no match', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('zzqx'); await sleep(400); } },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
   'sidebar-float-resize': { about: 'The floating sidebar widened by dragging its right edge, the handle still under the pointer', settings: { sidebarCollapsed: true }, run: async (page) => {
@@ -295,7 +298,7 @@ async function shoot(theme, name, opts) {
     args: [ROOT],
     env: Object.assign({}, process.env, {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1',
-      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_TERMINAL: '1',
+      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
     }, SCENES[name].env || {}),
   });

@@ -41,7 +41,7 @@ test.before(async () => {
     args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
     // NOTES_APP_INACTIVE keeps the test window from taking keyboard focus from a person using the machine.
     env: Object.assign({}, process.env, {
-      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_REMINDER_TICK_MS: '300',
+      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_REMINDER_TICK_MS: '300',
       // The bot panel is exercised against a fake `claude` so no real agent (or tokens) is involved.
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
       // Must never reach the agent: runs bill the Claude subscription, not API credits.
@@ -1422,9 +1422,8 @@ test('speech: read aloud speaks the note and stops; dictation hands off to Windo
   assert.ok(voices >= 0, 'speechSynthesis exists');
   await clickTool('#readAloudBtn');
   await waitForDom(() => document.getElementById('readAloudBtn').classList.contains('is-on'));
-  if (voices > 0) {
-    await waitForDom(() => window.speechSynthesis.speaking || window.speechSynthesis.pending, 5000);
-  }
+  // NOTES_APP_DRY_SPEECH: the mode runs (the button is on, the chip shows) but nothing is said out loud.
+  assert.equal(await page.evaluate(() => window.speechSynthesis.speaking || window.speechSynthesis.pending), false, 'dry run: nothing spoken');
   await clickTool('#readAloudBtn');
   await waitForDom(() => !document.getElementById('readAloudBtn').classList.contains('is-on'));
   assert.equal(await page.evaluate(() => window.speechSynthesis.speaking), false);
@@ -1437,14 +1436,13 @@ test('speech: read aloud speaks the note and stops; dictation hands off to Windo
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
   await page.$eval('#ttsRateInput', (i) => { i.value = '1.4'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
-  await waitFor('rate persisted', () => readNotes().settings.ttsRate === 1.4);
   const options = await page.$$eval('#ttsVoiceSelect option', (o) => o.map((x) => x.value));
-  if (options.length > 1) {
-    await page.selectOption('#ttsVoiceSelect', options[1]);
-    await waitFor('voice persisted', () => readNotes().settings.ttsVoice === options[1]);
-  }
-  await page.click('#closeSettingsBtn');
+  if (options.length > 1) await page.selectOption('#ttsVoiceSelect', options[1]);
+  assert.notEqual(readNotes().settings.ttsRate, 1.4, 'not written before Save');
+  await page.click('#saveSettingsBtn');
   await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('rate persisted', () => readNotes().settings.ttsRate === 1.4);
+  if (options.length > 1) await waitFor('voice persisted', () => readNotes().settings.ttsVoice === options[1]);
 
   // Dictation is a hand-off to Windows (dry run in tests so no dictation window opens).
   const res = await page.evaluate(() => window.notesApi.app.dictate());
@@ -1468,10 +1466,9 @@ test('writing column: alignment and width settings move and size the block', asy
   await page.waitForSelector('#settingsDialog[open]');
   assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
   await page.uncheck('#editorFullWidthInput');
-  await waitFor('a width persisted', () => readNotes().settings.editorWidth === 760);
-  assert.equal((await col()).maxWidth, '760px');
+  await waitForDom(() => getComputedStyle(document.getElementById('editorColumn')).maxWidth === '760px');
+  assert.equal(readNotes().settings.editorWidth, 0, 'previewed, not written yet');
   await page.click('#alignSeg button[data-align="center"]');
-  await waitFor('center persisted', () => readNotes().settings.editorAlign === 'center');
   const centered = await col();
   assert.match(centered.cls, /align-center/);
   const leftGap = centered.left - centered.paneLeft;
@@ -1479,23 +1476,26 @@ test('writing column: alignment and width settings move and size the block', asy
   assert.ok(Math.abs(leftGap - rightGap) < 2, 'centered within the pane: ' + leftGap + ' vs ' + rightGap);
 
   await page.click('#alignSeg button[data-align="right"]');
-  await waitFor('right persisted', () => readNotes().settings.editorAlign === 'right');
+  await waitForDom(() => /align-right/.test(document.getElementById('editorColumn').className));
   const righted = await col();
   assert.ok(righted.paneLeft + righted.paneWidth - (righted.left + righted.width) < 2, 'flush right');
 
   await page.$eval('#editorWidthInput', (i) => { i.value = '600'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
-  await waitFor('width persisted', () => readNotes().settings.editorWidth === 600);
-  assert.equal((await col()).maxWidth, '600px');
-
-  await page.check('#editorFullWidthInput');
-  await waitFor('full width persisted', () => readNotes().settings.editorWidth === 0);
-  assert.match((await col()).cls, /full-width/);
-  assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
-
-  await page.click('#alignSeg button[data-align="center"]');
-  await waitFor('restored', () => readNotes().settings.editorAlign === 'center' && readNotes().settings.editorWidth === 0);
-  await page.click('#closeSettingsBtn');
+  await waitForDom(() => getComputedStyle(document.getElementById('editorColumn')).maxWidth === '600px');
+  await page.click('#saveSettingsBtn');
   await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('width and alignment persisted', () => readNotes().settings.editorWidth === 600 && readNotes().settings.editorAlign === 'right');
+  assert.equal((await col()).maxWidth, '600px', 'what was saved stays on the page');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.check('#editorFullWidthInput');
+  await waitForDom(() => /full-width/.test(document.getElementById('editorColumn').className));
+  assert.equal(await page.$eval('#editorWidthInput', (i) => i.disabled), true);
+  await page.click('#alignSeg button[data-align="center"]');
+  await page.click('#saveSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('restored', () => readNotes().settings.editorAlign === 'center' && readNotes().settings.editorWidth === 0);
 });
 
 test('git history: edits are committed to a repo in the data folder', async () => {
@@ -1519,7 +1519,8 @@ test('git history: edits are committed to a repo in the data folder', async () =
   await page.click('#gitCommitBtn');
   await waitForDom(() => !document.getElementById('toast').classList.contains('hidden') && /Committed|Nothing new to commit|Commit failed/.test(document.getElementById('toast').textContent));
   assert.match(await page.textContent('#toast'), /Committed|Nothing new to commit/);
-  await page.click('#closeSettingsBtn');
+  assert.equal(await page.$eval('#saveSettingsBtn', (b) => b.disabled), true, 'nothing to save');
+  await page.keyboard.press('Escape');
   await waitForDom(() => !document.getElementById('settingsDialog').open);
 });
 
@@ -1574,35 +1575,111 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
   await page.click('.nav-item[data-view="all"]');
 });
 
-test('settings: theme, font size, always on top, sidebar toggle, hotkey change', async () => {
+test('settings: changes preview on the page and are written by Save changes; theme, font size, always on top, hotkey', async () => {
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.$eval('#saveSettingsBtn', (b) => b.disabled), true, 'nothing to save yet');
 
   await page.selectOption('#themeSelect', 'dark');
   await waitForDom(() => document.documentElement.dataset.theme === 'dark');
-  assert.equal(readNotes().settings.theme, 'dark');
+  assert.equal(readNotes().settings.theme, 'light', 'previewed, not written');
+  assert.equal(await page.$eval('#saveSettingsBtn', (b) => b.disabled), false);
+  assert.equal(await page.textContent('#settingsDirtyNote'), 'Unsaved changes');
 
   await page.$eval('#fontSizeInput', (i) => { i.value = '20'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
-  await waitFor('font size saved', () => readNotes().settings.fontSize === 20);
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--editor-font-size').trim()), '20px');
 
   // Windows refuses topmost changes from a background process while another app holds the foreground, so the
   // OS flag is not assertable from an inactive test window; the setting and the request are.
   await page.check('#alwaysOnTopInput');
-  await waitFor('always on top persisted', () => readNotes().settings.alwaysOnTop === true);
-  console.log('  [settings] OS reports alwaysOnTop =', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
-  await page.uncheck('#alwaysOnTopInput');
-  await waitFor('always on top cleared', () => readNotes().settings.alwaysOnTop === false);
 
   await page.focus('#hotkeyInput');
   await page.keyboard.press('Control+Alt+F10');
-  await waitFor('hotkey re-registered', () => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('Control+Alt+F10')));
-  assert.equal(readNotes().settings.hotkey, 'Control+Alt+F10');
   assert.equal(await page.textContent('#hotkeyError'), '');
-  assert.equal(await page.textContent('#hotkeyHint'), 'Ctrl + Alt + F10');
+  assert.equal(await app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('Control+Alt+F10')), false, 'bound on Save, not before');
 
-  await page.click('#closeSettingsBtn');
+  await page.click('#saveSettingsBtn');
   await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('everything persisted', () => { const t = readNotes().settings; return t.theme === 'dark' && t.fontSize === 20 && t.alwaysOnTop === true && t.hotkey === 'Control+Alt+F10'; });
+  await waitFor('hotkey re-registered', () => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('Control+Alt+F10')));
+  assert.equal(await page.textContent('#hotkeyHint'), 'Ctrl + Alt + F10');
+  console.log('  [settings] OS reports alwaysOnTop =', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isAlwaysOnTop()));
+
+  // Esc with changes asks; Keep editing stays; Discard puts the page back and writes nothing.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.uncheck('#alwaysOnTopInput');
+  await page.selectOption('#themeSelect', 'light');
+  await waitForDom(() => document.documentElement.dataset.theme === 'light');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#settingsSaveDialog[open]');
+  await page.click('#settingsSaveKeepBtn');
+  await waitForDom(() => !document.getElementById('settingsSaveDialog').open && document.getElementById('settingsDialog').open);
+  await page.click('#cancelSettingsBtn');
+  await page.waitForSelector('#settingsSaveDialog[open]');
+  await page.click('#settingsSaveDiscardBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitForDom(() => document.documentElement.dataset.theme === 'dark');
+  await sleep(300);
+  assert.equal(readNotes().settings.theme, 'dark', 'discarded');
+  assert.equal(readNotes().settings.alwaysOnTop, true, 'discarded');
+
+  // A click outside the dialog asks too; Save changes from the question writes and closes.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.uncheck('#alwaysOnTopInput');
+  await page.mouse.click(8, 8);
+  await page.waitForSelector('#settingsSaveDialog[open]');
+  assert.match(await page.textContent('#settingsSaveList'), /Keep above other windows/);
+  await page.click('#settingsSaveYesBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('always on top cleared', () => readNotes().settings.alwaysOnTop === false);
+  await waitForDom(() => /Settings saved/.test(document.getElementById('toast').textContent));
+
+  // With nothing changed, Esc and a click outside go straight out.
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.textContent('#cancelSettingsBtn'), 'Close', 'nothing to cancel');
+  await page.mouse.click(8, 8);
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  assert.equal(await page.evaluate(() => document.getElementById('settingsSaveDialog').open), false);
+
+  // Colour schemes: a swatch previews the scheme, Save keeps it; a picked colour makes it custom; Reset goes back.
+  const accent = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+  const builtInAccent = await accent();
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.$eval('.scheme-swatch[data-scheme="notes"]', (b) => b.getAttribute('aria-checked')), 'true');
+  await page.click('.scheme-swatch[data-scheme="slate"]');
+  await waitForDom(() => document.querySelector('.scheme-swatch[data-scheme="slate"]').getAttribute('aria-checked') === 'true');
+  assert.notEqual(await accent(), builtInAccent, 'previewed on the page');
+  assert.equal(readNotes().settings.colorScheme, 'notes', 'not written before Save');
+  await page.click('#saveSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('scheme persisted', () => readNotes().settings.colorScheme === 'slate');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.keyboard.press('Escape'); // clears nothing: the search is empty, so it closes; nothing changed
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.$eval('.scheme-swatch[data-scheme="custom"] .swatch-sample', (s) => s.style.background), await page.$eval('.scheme-swatch[data-scheme="slate"] .swatch-sample', (s) => s.style.background), 'with nothing picked, Custom shows the chosen scheme as its start');
+  await page.$eval('#customAccentInput', (i) => { i.value = '#aa0000'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await waitForDom(() => document.querySelector('.scheme-swatch[data-scheme="custom"]').getAttribute('aria-checked') === 'true');
+  assert.equal(await accent(), '#aa0000');
+  await page.click('#saveSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('custom persisted', () => readNotes().settings.colorScheme === 'custom' && readNotes().settings.customColors.dark.accent === '#aa0000');
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.click('#schemeResetBtn');
+  await waitForDom(() => document.querySelector('.scheme-swatch[data-scheme="notes"]').getAttribute('aria-checked') === 'true');
+  assert.equal(await accent(), builtInAccent);
+  await page.click('#saveSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('reset persisted', () => readNotes().settings.colorScheme === 'notes' && readNotes().settings.customColors === null);
   await page.click('#toggleSidebarBtn');
   await waitForDom(() => document.getElementById('app').classList.contains('sidebar-collapsed'));
   await page.keyboard.press('Control+\\');

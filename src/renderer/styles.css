@@ -567,9 +567,9 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .tree-outline::before { background: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
 /* The List / Folders switch in the list's title row: two icon buttons, the one in use filled. */
 .seg-icons { padding: 2px; }
-.seg-icons button { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; color: var(--fg-2); }
-.seg-icons button:hover { color: var(--fg); }
-.seg-icons button.is-on { background: var(--pressed); color: var(--fg); }
+.segmented.seg-icons button { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; color: var(--fg-2); }
+.segmented.seg-icons button:hover { color: var(--fg); }
+.segmented.seg-icons button.is-on { background: var(--pressed); color: var(--fg); }
 .seg-icons .icon { width: 16px; height: 16px; }
 
 .page-no { font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
@@ -1117,6 +1117,8 @@ button.book-name:hover { background: var(--hover); }
    (Arial). The check is in the vault note "Notes App - Testing and Gotchas". */
 .modal::backdrop { background: rgba(42, 26, 18, 0.2); }
 :root[data-theme="dark"] .modal::backdrop { background: rgba(0, 0, 0, 0.5); }
+/* Settings previews its changes on the page round it, so nothing dims that page. */
+#settingsDialog::backdrop, :root[data-theme="dark"] #settingsDialog::backdrop { background: transparent; }
 .dialog-small { width: min(420px, 92vw); }
 .dialog-form { padding: var(--s5); display: flex; flex-direction: column; gap: var(--s4); }
 .dialog-title { margin: 0; font-family: var(--font-display); font-size: var(--t-lg); font-weight: 600; letter-spacing: -0.01em; }
@@ -1151,6 +1153,27 @@ button.book-name:hover { background: var(--hover); }
 .settings-section:not(.is-filtered) ~ .settings-section:not(.is-filtered) { border-top: 1px solid var(--line); }
 .settings-section > h3 { margin: 0; font-size: var(--t-md); font-weight: 600; }
 .settings-actions { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s5); border-top: 1px solid var(--line); }
+.settings-actions .field-help { color: var(--fg-3); }
+/* Appearance: the scheme swatches, a radiogroup of samples (paper, text and accent of each scheme in the current
+   mode); the chosen one is ringed in the focus colour (a coloured indicator, not a border). */
+.scheme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s2) var(--s3); }
+.scheme-swatch { display: flex; flex-direction: column; gap: 6px; padding: 0; border: none; border-radius: var(--r-md); background: transparent; color: var(--fg-2); font-size: var(--t-sm); font-weight: 500; text-align: left; cursor: pointer; }
+.scheme-swatch:hover { color: var(--fg); }
+.scheme-swatch[aria-checked="true"] { color: var(--fg); font-weight: 600; }
+.swatch-sample { position: relative; display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-sm); font-family: var(--font-display); font-size: var(--t-lg); font-weight: 600; line-height: 1; }
+.swatch-check { display: none; position: absolute; right: var(--s1); top: var(--s1); width: 16px; height: 16px; }
+.scheme-swatch[aria-checked="true"] .swatch-check { display: block; }
+.scheme-swatch:focus-visible { outline: none; }
+.scheme-swatch:focus-visible .swatch-sample { outline: 2px solid var(--focus); outline-offset: 2px; }
+.swatch-accent { width: 24px; height: 8px; border-radius: var(--r-xs); }
+.swatch-name { padding: 0 2px; }
+/* The custom colour pickers: the browser's own colour input, in the field's shape. */
+.color-row { display: flex; gap: var(--s4); flex-wrap: wrap; }
+.color-field { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); font-weight: 500; }
+.color-field input { width: 48px; height: 32px; padding: 2px; border: 1px solid var(--field); border-radius: var(--r-sm); background: var(--field-bg); cursor: pointer; }
+.color-field input::-webkit-color-swatch-wrapper { padding: 0; }
+.color-field input::-webkit-color-swatch { border: none; border-radius: var(--r-xs); }
+.color-field input:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
 
 /* Segmented control. */
 .segmented { display: inline-flex; align-self: flex-start; padding: 2px; border-radius: var(--r-md); background: var(--well); }

@@ -65,6 +65,9 @@
     statusWords: $('#statusWords'), statusChars: $('#statusChars'), statusUpdated: $('#statusUpdated'), statusSaved: $('#statusSaved'), statusCode: $('#statusCode'),
     settingsDialog: $('#settingsDialog'), settingsForm: $('#settingsForm'),
     hotkeyInput: $('#hotkeyInput'), hotkeyError: $('#hotkeyError'), themeSelect: $('#themeSelect'),
+    schemeGrid: $('#schemeGrid'), customModeNote: $('#customModeNote'), customBgInput: $('#customBgInput'), customTextInput: $('#customTextInput'), customAccentInput: $('#customAccentInput'), schemeResetBtn: $('#schemeResetBtn'),
+    settingsDirtyNote: $('#settingsDirtyNote'), cancelSettingsBtn: $('#cancelSettingsBtn'), saveSettingsBtn: $('#saveSettingsBtn'),
+    settingsSaveDialog: $('#settingsSaveDialog'), settingsSaveKeepBtn: $('#settingsSaveKeepBtn'), settingsSaveDiscardBtn: $('#settingsSaveDiscardBtn'), settingsSaveList: $('#settingsSaveList'),
     fontSizeInput: $('#fontSizeInput'), fontSizeValue: $('#fontSizeValue'),
     openAtLoginInput: $('#openAtLoginInput'), alwaysOnTopInput: $('#alwaysOnTopInput'),
     importBtn: $('#importBtn'), exportAllBtn: $('#exportAllBtn'), dataFolderBtn: $('#dataFolderBtn'),
@@ -168,23 +171,25 @@
 
   // ---- theme & settings ----------------------------------------------------
 
-  function effectiveTheme() {
-    const t = state.settings ? state.settings.theme : 'system';
+  function effectiveTheme(settings) {
+    const s = settings || state.settings;
+    const t = s ? s.theme : 'system';
     if (t === 'light' || t === 'dark') return t;
     return state.systemDark ? 'dark' : 'light';
   }
 
-  function applyTheme() {
-    const theme = effectiveTheme();
+  // Shows a theme and colour scheme on the page: the saved settings, or the Settings dialog's unsaved draft.
+  function applyTheme(settings) {
+    const theme = effectiveTheme(settings);
     document.documentElement.dataset.theme = theme;
-    applyColorScheme(theme);
+    applyColorScheme(theme, settings || state.settings);
     syncTitleBar();
   }
 
   // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.js); the
   // built-in one clears them, so the stylesheet's own colours show.
-  function applyColorScheme(mode) {
-    const tokens = window.NotesThemes.resolve(state.settings, mode);
+  function applyColorScheme(mode, settings) {
+    const tokens = window.NotesThemes.resolve(settings, mode);
     const style = document.documentElement.style;
     for (const name of window.NotesThemes.TOKENS) {
       if (tokens) style.setProperty('--' + name, tokens[name]);
@@ -204,6 +209,7 @@
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
+    if (el.settingsDialog.open && settingsDirty()) previewSettings(); // the dialog's draft stays on top of what was saved
     if (opts && opts.fromPeer) return; // the other side's Ctrl+E is for the note it shows
     // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it; a
     // plain-text file always does.
@@ -1348,7 +1354,7 @@
     if (!dir) return;
     try {
       const v = await api.vaults.add({ path: dir });
-      el.settingsDialog.close();
+      await leaveSettings();
       await setView('folder', v.rootFolderId);
       await setExpanded(v.rootFolderId, true);
       toast('Vault "' + v.name + '" added' + (v.status.isRepo ? ' (git repository' + (v.status.remote ? ', syncing with ' + v.status.remote : ', no remote') + ')' : ''));
@@ -1377,7 +1383,7 @@
       const r = await api.vaults.clone(url, dest, el.vaultNameInput.value.trim());
       if (!r.ok) { el.vaultError.textContent = r.error; return; }
       el.vaultDialog.close();
-      el.settingsDialog.close();
+      await leaveSettings();
       await setView('folder', r.vault.rootFolderId);
       await setExpanded(r.vault.rootFolderId, true);
       toast('Cloned "' + r.vault.name + '". Changes will sync automatically.');
@@ -3526,6 +3532,7 @@
     u.rate = (state.settings && state.settings.ttsRate) || 1;
     u.onend = () => speakNext();
     u.onerror = (e) => { if (e.error !== 'interrupted' && e.error !== 'canceled') toast('Read aloud stopped: ' + e.error); setReadAloudState(false); };
+    if (state.info && state.info.drySpeech) return; // tests and screenshots: the mode runs, nothing is said out loud
     window.speechSynthesis.speak(u);
   }
 
@@ -5136,9 +5143,12 @@
 
   function openSettings() {
     const s = state.settings;
+    draft = {};
     el.hotkeyInput.value = H.displayAccelerator(s.hotkey).replace(/ /g, '');
     el.hotkeyError.textContent = '';
     el.themeSelect.value = s.theme;
+    renderSchemeGrid();
+    syncSettingsDirty();
     el.fontSizeInput.value = s.fontSize;
     el.fontSizeValue.textContent = s.fontSize + 'px';
     el.openAtLoginInput.checked = s.openAtLogin;
@@ -5162,6 +5172,149 @@
     el.settingsScroll.scrollTop = 0;
     markSettingsSection();
     el.settingsSearch.focus(); // Ctrl+, then type: the fastest way to a setting
+  }
+
+  // ---- the settings draft ---------------------------------------------------
+  // Settings changed in the dialog are held here, shown on the page as a preview, and written only by Save changes.
+  // Closing the dialog with changes (Esc, Cancel, a click outside) asks first. Actions in the dialog (Commit now,
+  // Add a folder, Import) are not settings and run at once.
+  let draft = {};
+  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  const draftSettings = () => Object.assign({}, state.settings, draft);
+  function settingsDirty() { return Object.keys(draft).some((k) => !same(draft[k], state.settings[k])); }
+  function setDraft(patch) {
+    for (const k of Object.keys(patch)) { if (same(patch[k], state.settings[k])) delete draft[k]; else draft[k] = patch[k]; }
+    previewSettings();
+    syncSettingsDirty();
+  }
+  // What can be seen changes on the page as it is picked: theme and colours, text size, the writing column.
+  function previewSettings() {
+    const s = draftSettings();
+    applyTheme(s);
+    document.documentElement.style.setProperty('--editor-font-size', s.fontSize + 'px');
+    applyEditorLayout(s);
+    renderSchemeGrid();
+  }
+  function syncSettingsDirty() {
+    const dirty = settingsDirty();
+    el.saveSettingsBtn.disabled = !dirty;
+    el.settingsDirtyNote.textContent = dirty ? 'Unsaved changes' : '';
+    el.cancelSettingsBtn.textContent = dirty ? 'Cancel' : 'Close';
+    // History's buttons act on the saved settings: while those fields are unsaved they wait for Save changes.
+    const gitPending = 'gitEnabled' in draft || 'gitRemote' in draft;
+    el.gitCommitBtn.disabled = gitPending || el.gitCommitBtn.dataset.off === '1';
+    el.gitPushBtn.disabled = gitPending || el.gitPushBtn.dataset.off === '1';
+  }
+  async function saveSettings() {
+    if (!settingsDirty()) { closeSettings(); return true; }
+    const patch = Object.assign({}, draft);
+    const res = await updateSettings(patch);
+    draft = {};
+    if (res.error) {
+      // The hotkey could not be bound: everything else was saved; the dialog stays open on the problem.
+      el.hotkeyError.textContent = res.error;
+      el.hotkeyInput.value = H.displayAccelerator(res.settings.hotkey).replace(/ /g, '');
+      syncSettingsDirty();
+      el.hotkeyInput.focus();
+      return false;
+    }
+    if ('gitEnabled' in patch || 'gitRemote' in patch) refreshGitStatus();
+    closeSettings();
+    toast(patch.hotkey ? 'Settings saved. Hotkey is now ' + res.info.hotkeyDisplay : 'Settings saved');
+    return true;
+  }
+  function discardSettings() {
+    draft = {};
+    applySettings(state.settings); // the preview goes; the page shows what is saved
+    closeSettings();
+  }
+  function closeSettings() {
+    draft = {};
+    el.settingsDialog.close();
+  }
+  // Esc, Cancel or a click outside: straight out when nothing changed, otherwise the question.
+  function requestCloseSettings() {
+    if (!settingsDirty()) { closeSettings(); return; }
+    const names = Object.keys(draft).filter((k) => !same(draft[k], state.settings[k])).map((k) => SETTING_NAMES[k] || k);
+    el.settingsSaveList.textContent = 'Not saved yet: ' + names.join(', ') + '.';
+    el.settingsSaveDialog.showModal();
+  }
+  // An action in the dialog that goes on to close it (a vault added, notes imported) keeps unsaved changes by
+  // saving them: nothing the person set should be lost on the way out.
+  async function leaveSettings() {
+    if (settingsDirty()) await saveSettings(); else closeSettings();
+  }
+
+  // What each setting is called in the "Save your changes?" question.
+  const SETTING_NAMES = {
+    hotkey: 'Global hotkey', theme: 'Theme', colorScheme: 'Colour scheme', customColors: 'Custom colours', sidebarCollapsed: 'Hide the sidebar',
+    openAtLogin: 'Start at sign-in', alwaysOnTop: 'Keep above other windows', fontSize: 'Text size', editorWidth: 'Column width', editorAlign: 'Column position',
+    ttsVoice: 'Read-aloud voice', ttsRate: 'Read-aloud speed', gitEnabled: 'Git history', gitRemote: 'Git remote',
+  };
+
+  // ---- Appearance: scheme swatches and custom colours --------------------------
+  const T = () => window.NotesThemes;
+  function renderSchemeGrid() {
+    const s = draftSettings();
+    const mode = effectiveTheme(s);
+    const ids = Object.keys(T().SCHEMES).concat(T().CUSTOM);
+    if (el.schemeGrid.children.length !== ids.length) {
+      el.schemeGrid.innerHTML = '';
+      for (const id of ids) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'scheme-swatch'; b.dataset.scheme = id; b.setAttribute('role', 'radio');
+        const sample = document.createElement('span'); sample.className = 'swatch-sample'; sample.setAttribute('aria-hidden', 'true');
+        const aa = document.createElement('span'); aa.textContent = 'Aa';
+        const dot = document.createElement('span'); dot.className = 'swatch-accent';
+        sample.append(aa, dot);
+        sample.insertAdjacentHTML('beforeend', I('check'));
+        sample.lastElementChild.classList.add('swatch-check');
+        const name = document.createElement('span'); name.className = 'swatch-name'; name.textContent = id === T().CUSTOM ? 'Custom' : T().SCHEMES[id].name;
+        b.append(sample, name);
+        el.schemeGrid.append(b);
+      }
+    }
+    for (const b of el.schemeGrid.children) {
+      const id = b.dataset.scheme;
+      const picked = s.customColors && s.customColors[mode];
+      const sw = id === T().CUSTOM && !picked ? T().swatch(s.colorScheme, s.customColors, mode) : T().swatch(id, s.customColors, mode);
+      const sample = b.firstChild;
+      sample.style.background = sw.paper; sample.style.color = sw.text; sample.querySelector('.swatch-accent').style.background = sw.accent;
+      const on = id === s.colorScheme;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+    }
+    // The pickers show the colours of the mode on screen: the custom ones, or the chosen scheme's as a start.
+    const seed = T().seedsOf(s.colorScheme, s.customColors, mode);
+    el.customBgInput.value = seed.background; el.customTextInput.value = seed.text; el.customAccentInput.value = seed.accent;
+    el.customModeNote.textContent = '(' + mode + ')';
+    el.schemeResetBtn.disabled = s.colorScheme === T().BUILT_IN;
+  }
+  function chooseScheme(id) { setDraft({ colorScheme: id }); }
+  // A picked colour makes the scheme custom, for the mode on screen, starting from the chosen scheme's colours.
+  function pickCustomColor() {
+    const s = draftSettings();
+    const mode = effectiveTheme(s);
+    const custom = Object.assign({}, s.customColors || {});
+    custom[mode] = { background: el.customBgInput.value, text: el.customTextInput.value, accent: el.customAccentInput.value };
+    setDraft({ colorScheme: T().CUSTOM, customColors: custom });
+  }
+  function bindAppearance() {
+    el.schemeGrid.addEventListener('click', (e) => { const b = e.target.closest('.scheme-swatch'); if (b) chooseScheme(b.dataset.scheme); });
+    el.schemeGrid.addEventListener('keydown', (e) => {
+      const cols = getComputedStyle(el.schemeGrid).gridTemplateColumns.split(' ').length;
+      const step = { ArrowRight: 1, ArrowDown: cols, ArrowLeft: -1, ArrowUp: -cols }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      const all = [...el.schemeGrid.children];
+      const i = all.findIndex((b) => b.getAttribute('aria-checked') === 'true');
+      const next = all[Math.max(0, Math.min(all.length - 1, i + step))];
+      if (next === all[i]) return;
+      chooseScheme(next.dataset.scheme);
+      next.focus();
+    });
+    for (const input of [el.customBgInput, el.customTextInput, el.customAccentInput]) input.addEventListener('input', pickCustomColor);
+    el.schemeResetBtn.addEventListener('click', () => setDraft({ colorScheme: T().BUILT_IN, customColors: null }));
   }
 
   // The settings nav: a link jumps to its section, and the section in view is the one marked.
@@ -5268,8 +5421,9 @@
     else text = s.commits + (s.commits === 1 ? ' commit' : ' commits') + ', last ' + H.relativeTime(s.lastCommitAt) + (s.pending ? ', changes waiting' : '') + (s.remote ? (s.lastPushAt ? ', pushed ' + H.relativeTime(s.lastPushAt) : ', not pushed yet') : '');
     if (s.lastError) text += '  Error: ' + s.lastError;
     el.gitStatus.textContent = text;
-    el.gitPushBtn.disabled = !s.enabled || !s.remote;
-    el.gitCommitBtn.disabled = !s.enabled;
+    el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? '1' : '0';
+    el.gitCommitBtn.dataset.off = !s.enabled ? '1' : '0';
+    syncSettingsDirty();
   }
 
   function acceleratorFromEvent(e) {
@@ -5295,15 +5449,12 @@
     return { partial: null, value: mods.concat(key).join('+') };
   }
 
-  async function commitHotkey(value) {
+  function commitHotkey(value) {
     const parsed = H.parseAccelerator(value);
     if (!parsed.ok) { el.hotkeyError.textContent = parsed.reason; return; }
-    const res = await updateSettings({ hotkey: parsed.value });
-    el.hotkeyError.textContent = res.error || '';
-    if (!res.error) {
-      el.hotkeyInput.value = H.displayAccelerator(res.settings.hotkey).replace(/ /g, '');
-      toast('Hotkey set to ' + res.info.hotkeyDisplay);
-    }
+    el.hotkeyError.textContent = '';
+    el.hotkeyInput.value = H.displayAccelerator(parsed.value).replace(/ /g, '');
+    setDraft({ hotkey: parsed.value });
   }
 
   // ---- the More menu --------------------------------------------------------
@@ -5408,6 +5559,8 @@
       ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
       ...[...el.tagList.querySelectorAll('.nav-item')].map((b) => cmd('tag-' + b.firstChild.textContent, 'Go to', 'Tag: #' + b.firstChild.textContent, 'hash', '', () => b.click(), !GUEST)),
       cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font search'),
+      ...Object.keys(window.NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + window.NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (state.settings && state.settings.colorScheme) !== id, 'theme colors appearance')),
+      cmd('scheme-custom', 'View', 'Colour scheme: custom colours…', 'palette', '', side('settings', () => { openSettings(); document.getElementById('set-appearance').scrollIntoView({ block: 'start' }); }), true, 'theme colors appearance pick'),
       cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
       cmd('export-all', 'App', 'Export all notes…', 'download', '', () => el.exportAllBtn.click(), !GUEST, 'backup json'),
       cmd('data-folder', 'App', 'Open the data folder', 'folder-open', '', () => el.dataFolderBtn.click(), !GUEST),
@@ -5556,7 +5709,7 @@
       const b = e.target.closest('[data-mode]');
       if (b) updateSettings({ listMode: b.dataset.mode }).then(() => { syncListModeSeg(); refresh({ keepEditor: true }); });
     });
-    el.sidebarFloatInput.addEventListener('change', () => { sidebarPeek = null; updateSettings({ sidebarCollapsed: el.sidebarFloatInput.checked }); });
+    el.sidebarFloatInput.addEventListener('change', () => { sidebarPeek = null; setDraft({ sidebarCollapsed: el.sidebarFloatInput.checked }); });
     el.openFileBtn.addEventListener('click', () => openFiles());
     el.fileRevealBtn.addEventListener('click', () => state.currentId && api.files.reveal(state.currentId));
     el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
@@ -5709,9 +5862,9 @@
     el.botPrompt.addEventListener('keydown', (e) => { e.stopPropagation(); if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runBot(); } if (e.key === 'Escape') { e.preventDefault(); toggleBot(false); } });
     api.on.botEvent(onBotEvent);
     if (window.speechSynthesis) { populateVoices(); window.speechSynthesis.addEventListener('voiceschanged', populateVoices); }
-    el.ttsVoiceSelect.addEventListener('change', () => updateSettings({ ttsVoice: el.ttsVoiceSelect.value }));
+    el.ttsVoiceSelect.addEventListener('change', () => setDraft({ ttsVoice: el.ttsVoiceSelect.value }));
     el.ttsRateInput.addEventListener('input', () => { el.ttsRateValue.textContent = Number(el.ttsRateInput.value).toFixed(1) + '×'; });
-    el.ttsRateInput.addEventListener('change', () => updateSettings({ ttsRate: Number(el.ttsRateInput.value) }));
+    el.ttsRateInput.addEventListener('change', () => setDraft({ ttsRate: Number(el.ttsRateInput.value) }));
     setInterval(pollCurrentFile, 3000);
     // Drag files from Explorer onto the window to open them.
     let dragDepth = 0;
@@ -5781,21 +5934,21 @@
     el.linkDialog.addEventListener('close', () => focusBody());
 
     // Writing column layout
-    el.alignSeg.querySelectorAll('button[data-align]').forEach((b) => b.addEventListener('click', () => { updateSettings({ editorAlign: b.dataset.align }); syncAlignSeg(b.dataset.align); }));
+    el.alignSeg.querySelectorAll('button[data-align]').forEach((b) => b.addEventListener('click', () => { setDraft({ editorAlign: b.dataset.align }); syncAlignSeg(b.dataset.align); }));
     el.editorWidthInput.addEventListener('input', () => {
       el.editorWidthValue.textContent = el.editorWidthInput.value + 'px';
       el.editorColumn.style.setProperty('--editor-col-width', el.editorWidthInput.value + 'px');
     });
-    el.editorWidthInput.addEventListener('change', () => updateSettings({ editorWidth: Number(el.editorWidthInput.value) }));
+    el.editorWidthInput.addEventListener('change', () => setDraft({ editorWidth: Number(el.editorWidthInput.value) }));
     el.editorFullWidthInput.addEventListener('change', () => {
       const full = el.editorFullWidthInput.checked;
       el.editorWidthInput.disabled = full;
-      updateSettings({ editorWidth: full ? 0 : Number(el.editorWidthInput.value) || 760 });
+      setDraft({ editorWidth: full ? 0 : Number(el.editorWidthInput.value) || 760 });
     });
 
     // Git history
-    el.gitEnabledInput.addEventListener('change', () => updateSettings({ gitEnabled: el.gitEnabledInput.checked }).then(refreshGitStatus));
-    const commitRemote = () => { const v = el.gitRemoteInput.value.trim(); if (v !== state.settings.gitRemote) updateSettings({ gitRemote: v }).then(refreshGitStatus); };
+    el.gitEnabledInput.addEventListener('change', () => setDraft({ gitEnabled: el.gitEnabledInput.checked }));
+    const commitRemote = () => setDraft({ gitRemote: el.gitRemoteInput.value.trim() });
     el.gitRemoteInput.addEventListener('change', commitRemote);
     el.gitRemoteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemote(); } });
     el.gitCommitBtn.addEventListener('click', async () => { await flushSave(); const r = await api.git.commit(); toast(r.ok ? (r.nothingToCommit ? 'Nothing new to commit' : 'Committed') : 'Commit failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
@@ -5835,23 +5988,23 @@
     });
     el.hotkeyInput.addEventListener('blur', () => {
       const v = el.hotkeyInput.value.trim();
-      if (v && !v.endsWith('+') && v !== H.displayAccelerator(state.settings.hotkey).replace(/ /g, '')) commitHotkey(v);
-      else if (!v || v.endsWith('+')) el.hotkeyInput.value = H.displayAccelerator(state.settings.hotkey).replace(/ /g, '');
+      if (v && !v.endsWith('+') && v !== H.displayAccelerator(draftSettings().hotkey).replace(/ /g, '')) commitHotkey(v);
+      else if (!v || v.endsWith('+')) el.hotkeyInput.value = H.displayAccelerator(draftSettings().hotkey).replace(/ /g, '');
     });
-    el.themeSelect.addEventListener('change', () => updateSettings({ theme: el.themeSelect.value }));
+    el.themeSelect.addEventListener('change', () => setDraft({ theme: el.themeSelect.value }));
     el.fontSizeInput.addEventListener('input', () => {
       el.fontSizeValue.textContent = el.fontSizeInput.value + 'px';
       document.documentElement.style.setProperty('--editor-font-size', el.fontSizeInput.value + 'px');
     });
-    el.fontSizeInput.addEventListener('change', () => updateSettings({ fontSize: Number(el.fontSizeInput.value) }));
-    el.openAtLoginInput.addEventListener('change', () => updateSettings({ openAtLogin: el.openAtLoginInput.checked }));
-    el.alwaysOnTopInput.addEventListener('change', () => updateSettings({ alwaysOnTop: el.alwaysOnTopInput.checked }));
+    el.fontSizeInput.addEventListener('change', () => setDraft({ fontSize: Number(el.fontSizeInput.value) }));
+    el.openAtLoginInput.addEventListener('change', () => setDraft({ openAtLogin: el.openAtLoginInput.checked }));
+    el.alwaysOnTopInput.addEventListener('change', () => setDraft({ alwaysOnTop: el.alwaysOnTopInput.checked }));
     el.importBtn.addEventListener('click', async () => {
       let res;
       try { res = await api.app.importMarkdown(); }
       catch (err) { toast('Import failed: ' + (err.message || err)); return; }
       if (res.canceled) return;
-      if (res.count) { el.settingsDialog.close(); await refresh({ keepEditor: true }); if (res.firstId) await selectNote(res.firstId); }
+      if (res.count) { await leaveSettings(); await refresh({ keepEditor: true }); if (res.firstId) await selectNote(res.firstId); }
       const failed = res.failed && res.failed.length ? '. Could not read: ' + res.failed.join(', ') : '';
       toast((res.count ? 'Imported ' + res.count + (res.count === 1 ? ' note' : ' notes') : 'Nothing imported') + failed);
     });
@@ -5861,6 +6014,15 @@
     });
     el.dataFolderBtn.addEventListener('click', () => api.app.openDataFolder());
     el.settingsDialog.addEventListener('close', () => { if (state.current) focusBody(); });
+    el.settingsForm.addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
+    el.settingsDialog.addEventListener('cancel', (e) => { e.preventDefault(); requestCloseSettings(); }); // Esc
+    el.cancelSettingsBtn.addEventListener('click', requestCloseSettings);
+    el.settingsDialog.addEventListener('mousedown', (e) => { if (e.target === el.settingsDialog) requestCloseSettings(); }); // the backdrop
+    el.settingsSaveDialog.addEventListener('cancel', (e) => { e.preventDefault(); el.settingsSaveDialog.close(); });
+    el.settingsSaveKeepBtn.addEventListener('click', () => el.settingsSaveDialog.close());
+    el.settingsSaveDiscardBtn.addEventListener('click', () => { el.settingsSaveDialog.close(); discardSettings(); });
+    el.settingsSaveDialog.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); el.settingsSaveDialog.close(); saveSettings(); });
+    bindAppearance();
 
     // Main-process events
     let shownBusy = false;
