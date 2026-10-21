@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Reminders: a note can carry a remindAt time; when it passes, the note is marked reminded and the
    notifier is called once. Main process only; the clock and the notifier are injectable for tests. */

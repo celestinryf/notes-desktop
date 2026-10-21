@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Note locking: the body is encrypted with AES-256-GCM under a key derived from a password with scrypt.
    The record on disk keeps only the ciphertext; plaintext lives in memory for the session once unlocked. */
@@ -37,7 +38,7 @@ function unlock(blob, password) {
   try { return { body: decrypt(blob, key), key }; } catch (_) { return null; }
 }
 
-/** @returns {Lock | null} */
+/** @returns {NoteLock | null} */
 function sanitizeLock(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const ok = ['salt', 'iv', 'tag', 'ct'].every((k) => typeof raw[k] === 'string' && raw[k].length > 0);

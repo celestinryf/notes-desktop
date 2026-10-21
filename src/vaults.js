@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Vault manager: watches vault directories for changes, keeps the store in step, and runs git sync
    (commit local changes, pull with rebase, push) the way the Obsidian git plugin does. Main process only. */

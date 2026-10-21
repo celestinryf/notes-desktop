@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* "Convert to…": writes an opened file out in another format, as a new file next to the original. The original is
    never touched and no existing file is ever overwritten.
@@ -109,6 +110,7 @@ function mammothOptions(convertImage) {
   const mammoth = require('mammoth');
   const opts = {
     transformDocument: (doc) => {
+      // @ts-expect-error mammoth's typings leave out transforms, which its documentation lists
       for (const h of mammoth.transforms.getDescendantsOfType(doc, 'hyperlink')) if (h.href && !SAFE_HREF.test(h.href)) h.href = '';
       return doc;
     },
@@ -227,39 +229,50 @@ function inlineRuns(tok) {
   return runs;
 }
 
+/** @typedef {{ text?: string, bold?: boolean, italic?: boolean, code?: boolean, strike?: boolean, href?: string | null, img?: string | null, alt?: string, br?: boolean }} Run */
+/** @typedef {{ header: boolean, cells: Run[][] }} TableRow */
+/** @typedef {{ t: string, level?: number, runs?: Run[], tight?: boolean, ordered?: boolean, start?: number, items?: Block[][], rows?: TableRow[], lang?: string, text?: string, blocks?: Block[] }} Block */
 function markdownBlocks(src) {
   const tokens = md().parse(String(src), {});
+  /** @type {Block[]} */
   const root = [];
+  /** @type {({ blocks: Block[], list?: undefined } | { list: Block, blocks?: undefined })[]} */
   const stack = [{ blocks: root }];
   const top = () => stack[stack.length - 1];
-  let table = null, row = null;
+  // Blocks go into the open container; a list frame only takes items, so a block there is a markdown-it fault.
+  const topBlocks = () => { const f = top(); if (!f.blocks) throw new Error('a block outside a list item'); return f.blocks; };
+  const topItems = () => { const f = top(); if (!f.list || !f.list.items) throw new Error('a list item outside a list'); return f.list.items; };
+  /** @type {Block | null} */
+  let table = null;
+  /** @type {TableRow | null} */
+  let row = null;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     const inline = tokens[i + 1] && tokens[i + 1].type === 'inline' ? tokens[i + 1] : null;
     switch (t.type) {
-      case 'heading_open': top().blocks.push({ t: 'h', level: Number(t.tag.slice(1)), runs: inlineRuns(inline) }); break;
-      case 'paragraph_open': top().blocks.push({ t: 'p', runs: inlineRuns(inline), tight: !!t.hidden }); break; // hidden: in a tight list
+      case 'heading_open': topBlocks().push({ t: 'h', level: Number(t.tag.slice(1)), runs: inlineRuns(inline) }); break;
+      case 'paragraph_open': topBlocks().push({ t: 'p', runs: inlineRuns(inline), tight: !!t.hidden }); break; // hidden: in a tight list
       case 'bullet_list_open':
       case 'ordered_list_open': {
         const list = { t: 'list', ordered: t.type === 'ordered_list_open', start: Number(t.attrGet('start')) || 1, items: [] };
-        top().blocks.push(list);
+        topBlocks().push(list);
         stack.push({ list });
         break;
       }
-      case 'list_item_open': { const item = []; top().list.items.push(item); stack.push({ blocks: item }); break; }
-      case 'blockquote_open': { const q = { t: 'quote', blocks: [] }; top().blocks.push(q); stack.push({ blocks: q.blocks }); break; }
+      case 'list_item_open': { const item = []; topItems().push(item); stack.push({ blocks: item }); break; }
+      case 'blockquote_open': { const q = { t: 'quote', blocks: [] }; topBlocks().push(q); stack.push({ blocks: q.blocks }); break; }
       case 'list_item_close': case 'bullet_list_close': case 'ordered_list_close': case 'blockquote_close': stack.pop(); break;
-      case 'fence': case 'code_block': top().blocks.push({ t: 'code', lang: String(t.info || '').trim().split(/\s+/)[0], text: t.content.replace(/\n$/, '') }); break;
-      case 'hr': top().blocks.push({ t: 'hr' }); break;
+      case 'fence': case 'code_block': topBlocks().push({ t: 'code', lang: String(t.info || '').trim().split(/\s+/)[0], text: t.content.replace(/\n$/, '') }); break;
+      case 'hr': topBlocks().push({ t: 'hr' }); break;
       case 'html_block': {
         if (/^\s*<(style|script)\b/i.test(t.content)) break; // code, not text
         const text = stripTags(t.content).trim();
-        if (text) top().blocks.push({ t: 'p', runs: [{ text }] });
+        if (text) topBlocks().push({ t: 'p', runs: [{ text }] });
         break;
       }
-      case 'table_open': table = { t: 'table', rows: [] }; top().blocks.push(table); break;
-      case 'tr_open': row = { header: false, cells: [] }; table.rows.push(row); break;
-      case 'th_open': case 'td_open': row.header = t.type === 'th_open'; row.cells.push(inlineRuns(inline)); break;
+      case 'table_open': table = { t: 'table', rows: [] }; topBlocks().push(table); break;
+      case 'tr_open': row = { header: false, cells: [] }; if (table && table.rows) table.rows.push(row); break;
+      case 'th_open': case 'td_open': if (row) { row.header = t.type === 'th_open'; row.cells.push(inlineRuns(inline)); } break;
       case 'table_close': table = null; break;
       default: break;
     }
@@ -314,6 +327,7 @@ function blockText(b) {
 }
 
 // Pixel size of a PNG, JPEG, GIF or BMP, read from its header; null for anything else.
+/** @returns {{ type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null} */
 function imageInfo(buf) {
   if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { type: 'png', w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
   if (buf.length > 10 && buf.toString('latin1', 0, 4) === 'GIF8') return { type: 'gif', w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };

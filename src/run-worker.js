@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Runs a worker-thread script once: posts it workerData, resolves with the first message it sends, and gives up after
    timeoutMs. Long or untrusted parsing (PDF text, PDF rewriting) runs this way so it never stalls the app. */

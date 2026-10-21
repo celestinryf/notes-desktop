@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Finds the Claude Code executable without going through a shell. npm installs `claude` on Windows as a
    .cmd shim that only cmd.exe can run; spawning through cmd.exe would mean quoting the prompt for cmd,

@@ -43,7 +43,7 @@ interface Settings {
 }
 type SettingsPatch = Partial<Settings>;
 
-interface Lock { v: 1; kdf: 'scrypt'; N: number; salt: string; iv: string; tag: string; ct: string }
+interface NoteLock { v: 1; kdf: 'scrypt'; N: number; salt: string; iv: string; tag: string; ct: string }
 interface Sticky { x: number | null; y: number | null; w: number; h: number; color: string; onTop: boolean }
 interface Live { role: 'host' | 'guest'; url: string; token?: string; port?: number; pending?: boolean }
 
@@ -60,7 +60,7 @@ interface Note {
   trashedFrom: string | undefined;
   sticky: Sticky | null;
   live: Live | null;
-  lock: Lock | null;
+  lock: NoteLock | null;
   remindAt: number | null;
   remindedAt: number | null;
   pinned: boolean;

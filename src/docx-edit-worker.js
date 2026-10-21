@@ -1,8 +1,11 @@
+// @ts-check
 'use strict';
 /* Writes edits into a Word document, in a worker thread. workerData: { bytes (the .docx the edits were made on),
    patches: changed paragraphs of word/document.xml as ooxml.js makes them }. Every other part of the file is kept
    as it was. Posts back { ok, bytes } or { ok: false, error }. */
 const { parentPort, workerData } = require('worker_threads');
+const port = parentPort;
+if (!port) throw new Error('this script runs in a worker thread only');
 const JSZip = require('jszip');
 const X = require('./docx-edit/ooxml');
 
@@ -19,8 +22,8 @@ const X = require('./docx-edit/ooxml');
     const out = X.applyPatches(xml, workerData.patches);
     X.assertWellFormed(out);
     zip.file('word/document.xml', out);
-    parentPort.postMessage({ ok: true, bytes: await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } }) });
+    port.postMessage({ ok: true, bytes: await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } }) });
   } catch (err) {
-    parentPort.postMessage({ ok: false, error: err.message });
+    port.postMessage({ ok: false, error: err.message });
   }
 })();

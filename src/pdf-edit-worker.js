@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Changes pdf-lib makes to a PDF, in a worker thread. workerData: { bytes, task, ... }, task one of
      'check'     nothing is changed; refuses a digitally signed PDF (see below)
@@ -8,6 +9,8 @@
    Posts back { ok, bytes } (no bytes for 'check') or { ok: false, error }.
    pdf-lib writes the whole file anew, which would break a digital signature, so a signed PDF is always refused. */
 const { parentPort, workerData } = require('worker_threads');
+const port = parentPort;
+if (!port) throw new Error('this script runs in a worker thread only');
 const { PDFDocument, PDFName, PDFNumber, PDFHexString, PDFString, PDFRef, PDFArray, PDFDict, degrees } = require('pdf-lib');
 
 const NOTE_SIZE = 20; // points: the usual size of a sticky note's icon
@@ -111,7 +114,8 @@ function deleteNote(doc, op) {
     grew = false;
     for (const r of annotRefs(page)) {
       const d = doc.context.lookup(r);
-      if (!gone.has(r) && d instanceof PDFDict && gone.has(d.get(PDFName.of('IRT')))) { gone.add(r); grew = true; }
+      const irt = d instanceof PDFDict ? d.get(PDFName.of('IRT')) : undefined;
+      if (!gone.has(r) && irt instanceof PDFRef && gone.has(irt)) { gone.add(r); grew = true; }
     }
   }
   for (const r of [...gone]) {
@@ -135,7 +139,7 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
       let signed = false;
       try { signed = isSigned(await PDFDocument.load(workerData.bytes, { updateMetadata: false, ignoreEncryption: true })); } catch (_) { signed = false; }
       if (signed) throw new Error(SIGNED);
-      parentPort.postMessage({ ok: true });
+      port.postMessage({ ok: true });
       return;
     }
     const doc = await PDFDocument.load(workerData.bytes, { updateMetadata: false });
@@ -155,8 +159,8 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
         run(doc, op, workerData.author || '');
       }
     } else throw new Error('unknown task');
-    parentPort.postMessage({ ok: true, bytes: await doc.save() });
+    port.postMessage({ ok: true, bytes: await doc.save() });
   } catch (err) {
-    parentPort.postMessage({ ok: false, error: /encrypt/i.test(err.message) ? 'this PDF is encrypted, so Notes cannot change it this way' : err.message });
+    port.postMessage({ ok: false, error: /encrypt/i.test(err.message) ? 'this PDF is encrypted, so Notes cannot change it this way' : err.message });
   }
 })();

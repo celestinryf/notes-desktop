@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Workspace for the bot: a folder of Markdown files that mirrors the notes which do not already live on disk,
    so a coding agent can read and edit them with ordinary file tools. Export before a run, import after. */

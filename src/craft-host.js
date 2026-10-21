@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* The Craft apps edit office files inside Notes: WordCraft (Word documents) and GridCraft (spreadsheets), the user's
    forks of ArtCraft's Rust office apps (github.com/celestinryf/<name>), each built to WebAssembly and shown in a
@@ -29,7 +30,7 @@ const MIME = {
 function buildDir(key) {
   const app = APPS[key];
   if (!app || process.env.NOTES_APP_NO_CRAFTS === '1' || process.env['NOTES_APP_NO_' + app.env] === '1') return null;
-  const candidates = [process.env['NOTES_APP_' + app.env + '_DIR'], path.join(os.homedir(), key, 'dist', 'web')].filter(Boolean);
+  const candidates = [process.env['NOTES_APP_' + app.env + '_DIR'], path.join(os.homedir(), key, 'dist', 'web')].flatMap((d) => (d ? [d] : []));
   return candidates.find((d) => { try { return fs.statSync(path.join(d, 'index.html')).isFile(); } catch (_) { return false; } }) || null;
 }
 

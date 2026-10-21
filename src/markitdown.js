@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* MarkItDown (Microsoft's Python converter, `pip install "markitdown[all]"`) reads the files Notes has no reader of
    its own for: spreadsheets, e-books, Outlook messages and zips. Its Markdown is made for text analysis, not for
@@ -56,7 +57,7 @@ async function toMarkdown(filePath) {
 // once the process (and on Windows the Python it starts) is gone.
 function run(exe, args) {
   const spec = launchSpec(exe, args);
-  return new Promise((resolve, reject) => {
+  return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(spec.file, spec.args, {
@@ -75,7 +76,7 @@ function run(exe, args) {
       else if (code === 0) resolve();
       else reject(new Error('MarkItDown could not read this file' + (err.trim() ? ': ' + lastLine(err) : '.')));
     });
-  });
+  }));
 }
 // The markitdown.exe on Windows is a launcher that runs Python as a child; killing it alone leaves Python running.
 function killTree(child) {

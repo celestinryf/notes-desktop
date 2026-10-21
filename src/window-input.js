@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Zoom keys and the right-click menu for app windows. Main process only.
 
@@ -46,9 +47,11 @@ function attachZoom(webContents, opts) {
 // Builds the right-click menu for one context-menu event. Pure: no Electron objects, so it is testable.
 // params: Electron's context-menu params. Returns an array of menu item descriptions; items with an
 // `action` are wired by attachContextMenu, items with a `role` are Electron's standard edit roles.
+/** @typedef {{ label?: string, action?: string, arg?: string, enabled?: boolean, type?: 'separator', role?: string, accelerator?: string, click?: () => void }} MenuItemSpec */
 function contextMenuTemplate(params) {
   const p = params || {};
   const flags = p.editFlags || {};
+  /** @type {MenuItemSpec[]} */
   const items = [];
   const word = String(p.misspelledWord || '');
   if (p.isEditable && word) {
@@ -100,14 +103,16 @@ function attachContextMenu(webContents, getWindow, deps) {
   webContents.on('context-menu', (_event, params) => {
     const template = contextMenuTemplate(params).map((item) => {
       if (!item.action) return item;
+      /** @type {MenuItemSpec} */
       const out = Object.assign({}, item);
       delete out.action; delete out.arg;
       out.click = () => {
+        const arg = item.arg || '';
         switch (item.action) {
-          case 'replaceMisspelling': webContents.replaceMisspelling(item.arg); break;
-          case 'addToDictionary': webContents.session.addWordToSpellCheckerDictionary(item.arg); break;
-          case 'openLink': if (/^https?:\/\//i.test(item.arg)) shell.openExternal(item.arg); break;
-          case 'copyText': clipboard.writeText(item.arg); break;
+          case 'replaceMisspelling': webContents.replaceMisspelling(arg); break;
+          case 'addToDictionary': webContents.session.addWordToSpellCheckerDictionary(arg); break;
+          case 'openLink': if (/^https?:\/\//i.test(arg)) shell.openExternal(arg); break;
+          case 'copyText': clipboard.writeText(arg); break;
           case 'editUndo': webContents.send('app:editCommand', 'undo'); break;
           case 'editRedo': webContents.send('app:editCommand', 'redo'); break;
           case 'zoomIn': case 'zoomOut': case 'zoomReset': {

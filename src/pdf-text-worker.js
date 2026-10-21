@@ -1,7 +1,10 @@
+// @ts-check
 'use strict';
 /* Pulls the text out of a PDF, in a worker thread so a long PDF never stalls the app. Posts back one list of
    paragraphs per page; a page with no text (a scanned image) comes back empty. */
 const { parentPort, workerData } = require('worker_threads');
+const port = parentPort;
+if (!port) throw new Error('this script runs in a worker thread only');
 
 const LIST_START = /^([•◦▪▫‣●○■□☐☑–—*-]|\d{1,3}[.)]|[a-z][.)]|\[[ xX]\])\s/;
 
@@ -33,20 +36,21 @@ function pageParagraphs(items) {
 }
 
 (async () => {
-  let doc = null;
+  let task = null;
   try {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    doc = await pdfjs.getDocument({ data: new Uint8Array(workerData.bytes), isEvalSupported: false, disableFontFace: true, verbosity: 0 }).promise;
+    task = pdfjs.getDocument({ data: new Uint8Array(workerData.bytes), disableFontFace: true, verbosity: 0 });
+    const doc = await task.promise;
     const pages = [];
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       pages.push(pageParagraphs((await page.getTextContent()).items));
       page.cleanup();
     }
-    parentPort.postMessage({ ok: true, pages });
+    port.postMessage({ ok: true, pages });
   } catch (err) {
-    parentPort.postMessage({ ok: false, error: err.name === 'PasswordException' ? 'This PDF is password-protected.' : 'Could not read this PDF: ' + err.message });
+    port.postMessage({ ok: false, error: err.name === 'PasswordException' ? 'This PDF is password-protected.' : 'Could not read this PDF: ' + err.message });
   } finally {
-    if (doc) await doc.destroy().catch(() => {});
+    if (task) await task.destroy().catch(() => {});
   }
 })();

@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* Keeps a git history of notes.json with an optional remote to push to.
    The repository lives in <dataDir>/history and holds a snapshot copy of notes.json. Git therefore never
@@ -118,12 +119,12 @@ class GitSync {
   noteChanged() {
     if (!this.state.enabled) return;
     this._set({ pending: true });
-    clearTimeout(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.commit().catch(() => {}); }, this.debounceMs);
   }
 
   async flush() {
-    clearTimeout(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     if (this.state.pending) await this.commit();
     if (this.busy) await this.busy;
   }
