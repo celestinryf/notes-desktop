@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 const path = require('path');
 const fs = require('fs');
@@ -325,10 +326,10 @@ function main() {
   }
 
   function stickyMenu() {
-    const items = store.stickies().map((n) => ({
+    const items = /** @type {Electron.MenuItemConstructorOptions[]} */ (store.stickies().map((n) => ({
       label: (stickies.isOpen(n.id) ? '' : '(hidden) ') + (H.deriveTitle(n) || 'Untitled').slice(0, 60),
       click: () => stickies.open(n.id),
-    }));
+    })));
     if (!items.length) items.push({ label: 'No stickies yet', enabled: false });
     items.push({ type: 'separator' });
     items.push({ label: 'Show all', enabled: store.stickies().length > 0, click: () => { for (const n of store.stickies()) stickies.open(n.id, { focus: false }); } });
@@ -348,6 +349,7 @@ function main() {
     stickies.broadcast('settings:changed', store.getSettings());
   }
 
+  /** @type {Record<string, boolean>} */
   let craftsReady = {}; // which Craft apps' builds are there: { wordcraft, gridcraft }
   function info() {
     return {
@@ -370,10 +372,16 @@ function main() {
   // ---- IPC ----------------------------------------------------------------
 
   const pub = (n) => store.publicNote(n);
-  ipcMain.handle('notes:list', (_e, opts) => store.list(opts).map(pub));
-  ipcMain.handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
-  ipcMain.handle('notes:get', (_e, id) => pub(store.get(id)));
-  ipcMain.handle('notes:create', (_e, data) => {
+  /**
+   * @template {IpcChannel} K
+   * @param {K} channel
+   * @param {(event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>} fn
+   */
+  const handle = (channel, fn) => ipcMain.handle(channel, fn);
+  handle('notes:list', (_e, opts) => store.list(opts).map(pub));
+  handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
+  handle('notes:get', (_e, id) => pub(store.get(id)));
+  handle('notes:create', (_e, data) => {
     data = Object.assign({}, data || {});
     // The page may only name content and placement; file links, vault membership and locks are the store's.
     for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) delete data[k];
@@ -382,7 +390,7 @@ function main() {
     if (note.vaultId) vaults.noteChanged(note.vaultId);
     return pub(note);
   });
-  ipcMain.handle('notes:update', (e, id, patch) => {
+  handle('notes:update', (e, id, patch) => {
     const note = store.update(id, patch);
     if (note && note.vaultId) vaults.noteChanged(note.vaultId);
     if (note) notifyNoteChanged(note.id, e.sender);
@@ -390,10 +398,10 @@ function main() {
   });
 
   // ---- locking ---------------------------------------------------------------
-  ipcMain.handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); forgetWorkspaceCopy(id); live.stop(id); stickies.close(id, { forget: true }); return n; });
-  ipcMain.handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
-  ipcMain.handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
-  ipcMain.handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
+  handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); forgetWorkspaceCopy(id); live.stop(id); stickies.close(id, { forget: true }); return n; });
+  handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
+  handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
+  handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
   // Hiding the window locks everything again (after the renderer has written what it was typing).
   function relockOnHide() {
     flushWindow(win, 800).then(() => {
@@ -425,31 +433,31 @@ function main() {
   }
 
   // ---- live share -------------------------------------------------------------
-  ipcMain.handle('live:host', async (_e, id) => { try { return { ok: true, status: await live.host(id) }; } catch (err) { return { ok: false, error: err.message }; } });
-  ipcMain.handle('live:join', async (_e, url, folderId) => {
+  handle('live:host', async (_e, id) => { try { return { ok: true, status: await live.host(id) }; } catch (err) { return { ok: false, error: err.message }; } });
+  handle('live:join', async (_e, url, folderId) => {
     const folder = folderId ? store.getFolder(folderId) : null;
     try { const r = await live.join(url, { folderId: folder && !folder.vaultId ? folder.id : null }); fanReloaded({ reason: 'live' }); return { ok: true, noteId: r.noteId, status: r.status }; }
     catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('live:stop', (_e, id) => live.stop(id));
-  ipcMain.handle('live:status', (_e, id) => live.statusOf(id));
-  ipcMain.handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
-  ipcMain.handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
-  ipcMain.handle('notes:splitIntoBook', (_e, id, opts) => {
+  handle('live:stop', (_e, id) => live.stop(id));
+  handle('live:status', (_e, id) => live.statusOf(id));
+  handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
+  handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
+  handle('notes:splitIntoBook', (_e, id, opts) => {
     const r = store.splitIntoBook(id, opts);
     if (r.originalTrashed) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
     return r;
   });
-  ipcMain.handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => {
+  handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => {
     const r = store.undoSplit(folderId, pageIds, originalId);
     for (const id of r.removedIds) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
     return r;
   });
-  ipcMain.handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
-  ipcMain.handle('notes:restore', (_e, id) => pub(store.restore(id)));
-  ipcMain.handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
+  handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
+  handle('notes:restore', (_e, id) => pub(store.restore(id)));
+  handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
   function forgetWorkspaceCopy(id) { try { require('./workspace').forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
-  ipcMain.handle('notes:emptyTrash', () => store.emptyTrash());
+  handle('notes:emptyTrash', () => store.emptyTrash());
 
   // ---- desktop stickies ------------------------------------------------------
 
@@ -468,18 +476,18 @@ function main() {
     fanReloaded({ reason: 'sticky' });
     return pub(note);
   }
-  ipcMain.handle('stickies:list', () => store.stickies().map(stickyView));
-  ipcMain.handle('stickies:open', (_e, id) => !!stickies.open(id));
-  ipcMain.handle('stickies:close', (_e, id, opts) => { stickies.close(id, opts || {}); return true; });
-  ipcMain.handle('stickies:create', () => newSticky());
-  ipcMain.handle('stickies:setColor', (_e, id, color) => stickies.setColor(id, color));
-  ipcMain.handle('stickies:setOnTop', (_e, id, onTop) => stickies.setOnTop(id, onTop));
-  ipcMain.handle('stickies:openInNotes', (_e, id) => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
-  ipcMain.handle('notes:tags', () => store.tags());
-  ipcMain.handle('notes:counts', () => store.counts());
-  ipcMain.handle('notes:related', (_e, id) => store.related(id));
-  ipcMain.handle('folders:setBook', (_e, id, on) => store.setBook(id, on));
-  ipcMain.handle('folders:reorderPages', (_e, id, ids) => store.reorderPages(id, ids));
+  handle('stickies:list', () => store.stickies().map(stickyView));
+  handle('stickies:open', (_e, id) => !!stickies.open(id));
+  handle('stickies:close', (_e, id, opts) => { stickies.close(id, opts || {}); return true; });
+  handle('stickies:create', () => newSticky());
+  handle('stickies:setColor', (_e, id, color) => stickies.setColor(id, color));
+  handle('stickies:setOnTop', (_e, id, onTop) => stickies.setOnTop(id, onTop));
+  handle('stickies:openInNotes', (_e, id) => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
+  handle('notes:tags', () => store.tags());
+  handle('notes:counts', () => store.counts());
+  handle('notes:related', (_e, id) => store.related(id));
+  handle('folders:setBook', (_e, id, on) => store.setBook(id, on));
+  handle('folders:reorderPages', (_e, id, ids) => store.reorderPages(id, ids));
 
   // ---- file-backed notes ---------------------------------------------------
 
@@ -495,7 +503,7 @@ function main() {
     return { ok: linked.length > 0, linked: linked.map((n) => n.id), failed, firstId: linked.length ? linked[0].id : null };
   }
 
-  ipcMain.handle('files:openDialog', async () => {
+  handle('files:openDialog', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: 'Open files as notes',
       properties: ['openFile', 'multiSelections'],
@@ -507,9 +515,9 @@ function main() {
     if (canceled || !filePaths.length) return { ok: false, canceled: true, linked: [], failed: [] };
     return linkPaths(filePaths);
   });
-  ipcMain.handle('files:link', (_e, paths, opts) => linkPaths(Array.isArray(paths) ? paths : [], opts || {}));
-  ipcMain.handle('files:refresh', (_e, id) => store.refreshFileNote(id));
-  ipcMain.handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
+  handle('files:link', (_e, paths, opts) => linkPaths(Array.isArray(paths) ? paths : [], opts || {}));
+  handle('files:refresh', (_e, id) => store.refreshFileNote(id));
+  handle('files:reveal', (_e, id) => { const n = store.get(id); if (n && n.filePath) shell.showItemInFolder(n.filePath); });
   const EXEC_EXT = /\.(exe|bat|cmd|com|scr|pif|msi|msp|msc|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|lnk|url|jar|hta|reg|cpl|py|pyw|mht|mhtml)$/i;
   // Only documents and media are handed to their default app; anything else is shown in Explorer instead,
   // so a file that could run code is never launched from inside Notes. (An allowlist, not a denylist.)
@@ -520,7 +528,7 @@ function main() {
     shell.showItemInFolder(fullPath);
     return 'Shown in Explorer instead: Notes only opens documents and media itself.';
   }
-  ipcMain.handle('files:openExternal', async (_e, id) => {
+  handle('files:openExternal', async (_e, id) => {
     const n = store.get(id);
     if (!n || !n.filePath) return 'No file';
     return openSafely(n.filePath);
@@ -534,7 +542,7 @@ function main() {
 
   // PDFs: the bytes for the viewer, and saving the viewer's edits back into the file.
   const MAX_PDF_BYTES = 100 * 1024 * 1024;
-  ipcMain.handle('files:pdfBytes', (_e, id) => {
+  handle('files:pdfBytes', (_e, id) => {
     const n = fileNoteOfKind(id, 'pdf');
     if (fs.statSync(n.filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
     return fs.readFileSync(n.filePath);
@@ -597,14 +605,14 @@ function main() {
     conflictCopies.set(id, { file: copy, mtime: mtimeOf(copy) });
     return { savedAs: copy, newCopy: true };
   }
-  ipcMain.handle('files:savePdf', (_e, id, bytes, expectedMtime) => saveEdits(id, fileNoteOfKind(id, 'pdf').filePath, pdfBuffer(bytes), expectedMtime));
+  handle('files:savePdf', (_e, id, bytes, expectedMtime) => saveEdits(id, fileNoteOfKind(id, 'pdf').filePath, pdfBuffer(bytes), expectedMtime));
 
   // A signature the person chose to remember, kept as a PNG in the app's data folder (never anywhere else).
   const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
   const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
-  ipcMain.handle('signature:get', () => (fs.existsSync(SIGNATURE_FILE) ? fs.readFileSync(SIGNATURE_FILE) : null));
+  handle('signature:get', () => (fs.existsSync(SIGNATURE_FILE) ? fs.readFileSync(SIGNATURE_FILE) : null));
   const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  ipcMain.handle('signature:set', (_e, bytes) => {
+  handle('signature:set', (_e, bytes) => {
     if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_SIGNATURE_BYTES) return { ok: false, error: 'the signature picture is missing or too large.' };
     const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_MAGIC)) return { ok: false, error: 'the signature is not a PNG picture.' };
@@ -614,7 +622,7 @@ function main() {
     fs.renameSync(tmp, SIGNATURE_FILE);
     return { ok: true };
   });
-  ipcMain.handle('signature:forget', () => { fs.rmSync(SIGNATURE_FILE, { force: true }); return { ok: true }; });
+  handle('signature:forget', () => { fs.rmSync(SIGNATURE_FILE, { force: true }); return { ok: true }; });
 
   // PDF bytes from the renderer: a byte array of at most MAX_PDF_BYTES that starts like a PDF, as a Buffer.
   function pdfBuffer(bytes) {
@@ -650,7 +658,7 @@ function main() {
 
   // Page changes (reorder, remove, add pages from another PDF, turn): bytes is the PDF pdf.js rebuilt in the renderer
   // with the new page order, or null when only turning; rotations has one entry per page of the result.
-  ipcMain.handle('files:pdfApplyPages', (_e, id, bytes, rotations, expectedMtime) => {
+  handle('files:pdfApplyPages', (_e, id, bytes, rotations, expectedMtime) => {
     if (!Array.isArray(rotations) || !rotations.length || rotations.some((r) => ![0, 90, 180, 270].includes(r))) return { ok: false, error: 'the page turns were not valid.' };
     return rewritePdf(id, expectedMtime, async (current) => {
       // Rebuilding the file breaks a digital signature: the worker refuses a signed PDF.
@@ -664,13 +672,13 @@ function main() {
   function commentAuthor() {
     try { return os.userInfo().username || ''; } catch (_) { return ''; }
   }
-  ipcMain.handle('files:pdfComments', (_e, id, ops, expectedMtime) => {
+  handle('files:pdfComments', (_e, id, ops, expectedMtime) => {
     if (!Array.isArray(ops) || !ops.length || ops.length > 100) return { ok: false, error: 'that comment change was not valid.' };
     return rewritePdf(id, expectedMtime, (current) => pdfLibTask(current, 'comments', { ops, author: commentAuthor() }, 'Saving the comment'));
   });
   // Undo for page and comment changes: the backup taken just before goes back in place (after a backup of what is
   // there). expectedMtime is the time the change itself wrote, so an Undo never wipes out anything saved after it.
-  ipcMain.handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
+  handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     const dir = backupDirFor(file);
     let names = [];
@@ -684,7 +692,7 @@ function main() {
     }
   });
   // A PDF to take pages from: the person picks it; its bytes go to the renderer for thumbnails and for pdf.js.
-  ipcMain.handle('files:pdfPickPages', async () => {
+  handle('files:pdfPickPages', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (canceled || !filePaths.length) return { ok: false, canceled: true };
     const file = filePaths[0];
@@ -701,7 +709,7 @@ function main() {
     docxBases.set(id, { buf, mtime });
     while (docxBases.size > KEEP_DOCX_BASES) docxBases.delete(docxBases.keys().next().value);
   }
-  ipcMain.handle('files:docxBytes', async (_e, id) => {
+  handle('files:docxBytes', async (_e, id) => {
     const file = fileNoteOfKind(id, 'docx').filePath;
     const mtime = mtimeOf(file);
     const buf = await readDocumentBuffer(file);
@@ -709,7 +717,7 @@ function main() {
     return buf;
   });
   // A spreadsheet's bytes, for GridCraft.
-  ipcMain.handle('files:documentBytes', (_e, id) => readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath));
+  handle('files:documentBytes', (_e, id) => readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath));
   // The Craft apps' saves of a file note, by the note's kind:
   // - Under the document's own name, in a format the app writes (own): over the note's file (after a backup, or into
   //   the "(edited)" copy if it changed on disk since it was read). In another format (an .xlsm, an .ods): into one
@@ -744,7 +752,7 @@ function main() {
     sideCopies.set(id, file);
     return file;
   }
-  ipcMain.handle('files:saveCraft', async (_e, id, bytes, name, expectedMtime) => {
+  handle('files:saveCraft', async (_e, id, bytes, name, expectedMtime) => {
     const n = store.get(id);
     const rules = n && n.filePath && CRAFT_SAVES[n.fileKind];
     if (!rules) throw new Error('Not a document a Craft app edits.');
@@ -786,12 +794,12 @@ function main() {
   });
 
   // An image note's picture, for the image viewer.
-  ipcMain.handle('files:imageBytes', (_e, id) => {
+  handle('files:imageBytes', (_e, id) => {
     const { bytes, mime } = readImage(fileNoteOfKind(id, 'image').filePath);
     return { bytes, mime };
   });
   const MAX_DOCX_PATCH_CHARS = 50 * 1024 * 1024;
-  ipcMain.handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
+  handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
     const file = fileNoteOfKind(id, 'docx').filePath;
     const base = docxBases.get(id);
     // The edits were made on the version the renderer was shown; never apply them to another one.
@@ -807,8 +815,8 @@ function main() {
   });
 
   const { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } = require('./files');
-  ipcMain.handle('agentFiles:discover', () => discoverAgentFiles());
-  ipcMain.handle('agentFiles:link', async () => {
+  handle('agentFiles:discover', () => discoverAgentFiles());
+  handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);
     const found = discoverAgentFiles();
     const res = await linkPaths(found.map((f) => f.filePath), { folderId: folder.id });
@@ -829,17 +837,17 @@ function main() {
   // ---- vaults --------------------------------------------------------------
 
   const vaultView = (v) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
-  ipcMain.handle('vaults:list', () => store.vaults.map(vaultView));
-  ipcMain.handle('vaults:pickFolder', async () => {
+  handle('vaults:list', () => store.vaults.map(vaultView));
+  handle('vaults:pickFolder', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
     return canceled || !filePaths.length ? null : filePaths[0];
   });
-  ipcMain.handle('vaults:add', async (_e, data) => {
+  handle('vaults:add', async (_e, data) => {
     const v = store.addVault(data);
     await vaults.open(v.id, { pull: true });
     return vaultView(v);
   });
-  ipcMain.handle('vaults:clone', async (_e, url, parentDir, name) => {
+  handle('vaults:clone', async (_e, url, parentDir, name) => {
     const safe = String(name || path.basename(String(url).replace(/\.git$/, '').replace(/[\\/]+$/, '')) || 'vault').replace(/[<>:"/\\|?*]/g, '-');
     const dest = path.join(parentDir, safe);
     if (fs.existsSync(dest)) return { ok: false, error: 'A folder named "' + safe + '" already exists there.' };
@@ -852,7 +860,7 @@ function main() {
     await vaults.open(v.id, { pull: false });
     return { ok: true, vault: vaultView(v) };
   });
-  ipcMain.handle('vaults:update', async (_e, id, patch) => {
+  handle('vaults:update', async (_e, id, patch) => {
     patch = Object.assign({}, patch || {});
     if (patch.remote !== undefined) {
       patch.remote = String(patch.remote || '').trim();
@@ -862,13 +870,13 @@ function main() {
     if (v) { vaults.schedulePull(id); if (patch.remote !== undefined) await vaults.initRepo(id, patch.remote); }
     return v ? vaultView(v) : null;
   });
-  ipcMain.handle('vaults:remove', (_e, id) => { vaults.close(id); const r = store.removeVault(id); closeOrphanStickies(); fanReloaded({ reason: 'vault' }); return r; });
+  handle('vaults:remove', (_e, id) => { vaults.close(id); const r = store.removeVault(id); closeOrphanStickies(); fanReloaded({ reason: 'vault' }); return r; });
   function closeOrphanStickies() { for (const sid of stickies.openIds()) if (!store.get(sid)) stickies.close(sid); }
-  ipcMain.handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));
-  ipcMain.handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); closeOrphanStickies(); if (r && (r.added || r.updated || r.removed)) fanReloaded({ reason: 'vault' }); return r; });
-  ipcMain.handle('vaults:initRepo', (_e, id, remote) => vaults.initRepo(id, remote));
-  ipcMain.handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
-  ipcMain.handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
+  handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));
+  handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); closeOrphanStickies(); if (r && (r.added || r.updated || r.removed)) fanReloaded({ reason: 'vault' }); return r; });
+  handle('vaults:initRepo', (_e, id, remote) => vaults.initRepo(id, remote));
+  handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
+  handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
 
   // ---- bot: Claude Code over the notes -------------------------------------
 
@@ -936,7 +944,7 @@ function main() {
     }
   }
 
-  ipcMain.handle('bot:run', async (_e, opts) => {
+  handle('bot:run', async (_e, opts) => {
     opts = opts || {};
     if (botChild || botStarting) return { ok: false, error: 'A run is already in progress.' };
     const prompt = String(opts.prompt || '').trim();
@@ -993,8 +1001,8 @@ function main() {
     });
     return { ok: true, cwd: target.cwd, kind: target.kind };
   });
-  ipcMain.handle('bot:cancel', () => { if (botChild) { killTree(botChild); return true; } return false; });
-  ipcMain.handle('bot:openTerminal', async (_e, noteId) => {
+  handle('bot:cancel', () => { if (botChild) { killTree(botChild); return true; } return false; });
+  handle('bot:openTerminal', async (_e, noteId) => {
     if (botChild || botStarting) return { ok: false, error: 'A run is in progress; wait for it to finish (or stop it) first.' }; // the workspace is in use
     let target;
     try { target = botCwdFor(noteId); } catch (err) { return { ok: false, error: err.message }; }
@@ -1029,7 +1037,7 @@ function main() {
     }
   });
   // Pulls edits made in the workspace (e.g. in a terminal session) back into the notes.
-  ipcMain.handle('bot:importWorkspace', () => {
+  handle('bot:importWorkspace', () => {
     if (botChild) return { error: 'A run is in progress; its edits are imported when it finishes.' };
     const r = workspace.importNotes(store, WORKSPACE_DIR);
     lastContentHash = contentHash();
@@ -1037,15 +1045,15 @@ function main() {
     return r;
   });
 
-  ipcMain.handle('folders:tree', () => store.folderTree());
-  ipcMain.handle('folders:path', (_e, id) => store.folderPath(id));
-  ipcMain.handle('folders:create', (_e, data) => store.createFolder(data));
-  ipcMain.handle('folders:rename', (_e, id, name) => store.renameFolder(id, name));
-  ipcMain.handle('folders:move', (_e, id, parentId) => store.moveFolder(id, parentId));
-  ipcMain.handle('folders:delete', (_e, id) => store.deleteFolder(id));
+  handle('folders:tree', () => store.folderTree());
+  handle('folders:path', (_e, id) => store.folderPath(id));
+  handle('folders:create', (_e, data) => store.createFolder(data));
+  handle('folders:rename', (_e, id, name) => store.renameFolder(id, name));
+  handle('folders:move', (_e, id, parentId) => store.moveFolder(id, parentId));
+  handle('folders:delete', (_e, id) => store.deleteFolder(id));
 
-  ipcMain.handle('settings:get', () => store.getSettings());
-  ipcMain.handle('settings:set', async (_e, patch) => {
+  handle('settings:get', () => store.getSettings());
+  handle('settings:set', async (_e, patch) => {
     patch = patch || {};
     const before = store.getSettings();
     let error = null;
@@ -1082,14 +1090,14 @@ function main() {
     return { settings, info: info(), error };
   });
 
-  ipcMain.handle('git:status', () => git.status());
-  ipcMain.handle('git:commit', () => git.commit('manual commit'));
-  ipcMain.handle('git:push', () => git.push());
-  ipcMain.handle('git:history', (_e, limit) => git.history(limit));
+  handle('git:status', () => git.status());
+  handle('git:commit', () => git.commit('manual commit'));
+  handle('git:push', () => git.push());
+  handle('git:history', (_e, limit) => git.history(limit));
 
   // Dictation: Windows' built-in speech recognition types into the focused control. We bring the window to
   // the front and press Win+H on the user's behalf; nothing is recorded by this app.
-  ipcMain.handle('app:dictate', async () => {
+  handle('app:dictate', async () => {
     if (process.platform !== 'win32') return { ok: false, error: 'Dictation is only wired up for Windows here.' };
     if (process.env.NOTES_APP_DRY_DICTATE === '1') return { ok: true, method: 'windows-dictation', dryRun: true };
     try {
@@ -1100,7 +1108,7 @@ function main() {
         '[K]::keybd_event(0x5B,0,0,[UIntPtr]::Zero); [K]::keybd_event(0x48,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [K]::keybd_event(0x48,0,2,[UIntPtr]::Zero); [K]::keybd_event(0x5B,0,2,[UIntPtr]::Zero)',
       ].join('; ');
       await new Promise((resolve, reject) => {
-        require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err) => (err ? reject(err) : resolve()));
+        require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err) => (err ? reject(err) : resolve(undefined)));
       });
       return { ok: true, method: 'windows-dictation' };
     } catch (err) {
@@ -1108,14 +1116,14 @@ function main() {
     }
   });
 
-  ipcMain.handle('app:info', () => info());
-  ipcMain.handle('app:hide', () => hideWindow());
-  ipcMain.handle('app:titleBar', (e, colors) => {
+  handle('app:info', () => info());
+  handle('app:hide', () => hideWindow());
+  handle('app:titleBar', (e, colors) => {
     const ok = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
     if (!win || win.isDestroyed() || e.sender !== win.webContents || !colors || !ok(colors.color) || !ok(colors.symbol)) return false;
     try { win.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbol, height: TITLE_BAR_H }); return true; } catch (_) { return false; }
   });
-  ipcMain.handle('app:print', (e) => new Promise((resolve) => {
+  handle('app:print', (e) => new Promise((resolve) => {
     if (process.env.NOTES_APP_DRY_PRINT === '1') return resolve({ ok: true, dry: true });
     try { e.sender.print({ printBackground: true }, (ok, reason) => resolve({ ok, error: ok ? null : (reason || 'print failed') })); }
     catch (err) { resolve({ ok: false, error: err.message }); }
@@ -1124,7 +1132,7 @@ function main() {
   // before the scripts finish). Once the renderer is ready it asks, and we replay the signal if visible.
   let rendererReady = false;
   let pendingNewNote = false;
-  ipcMain.handle('app:rendererReady', () => {
+  handle('app:rendererReady', () => {
     rendererReady = true;
     const visible = !!(win && !win.isDestroyed() && win.isVisible());
     if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
@@ -1137,10 +1145,10 @@ function main() {
     showWindow();
     if (rendererReady) win.webContents.send('app:new-note'); else pendingNewNote = true;
   }
-  ipcMain.handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
-  ipcMain.handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
+  handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
+  handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
 
-  ipcMain.handle('app:exportNote', async (_e, id) => {
+  handle('app:exportNote', async (_e, id) => {
     const out = store.exportNote(id);
     if (!out) return { ok: false };
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
@@ -1155,7 +1163,7 @@ function main() {
 
   // ---- sharing ---------------------------------------------------------------
 
-  ipcMain.handle('app:copy', async (_e, data) => {
+  handle('app:copy', async (_e, data) => {
     const d = data || {};
     const text = String(d.text || '');
     if (!d.html) { await clipboard.writeText(text); return true; }
@@ -1165,7 +1173,7 @@ function main() {
     await clipboard.write([item]);
     return true;
   });
-  ipcMain.handle('app:emailNote', async (_e, id) => {
+  handle('app:emailNote', async (_e, id) => {
     const note = store.publicNote(store.get(id));
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.locked && !note.unlocked) return { ok: false, error: 'Unlock the note first.' };
@@ -1176,7 +1184,7 @@ function main() {
   // Two steps, because the page is what gets printed: the renderer asks for a path, then (if it still shows
   // that same note) asks for the print. A note switched or relocked while the dialog was up is never printed
   // under the wrong name.
-  ipcMain.handle('app:pdfPath', async (_e, id) => {
+  handle('app:pdfPath', async (_e, id) => {
     const note = store.publicNote(store.get(id));
     if (!note) return { ok: false, error: 'Note not found' };
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
@@ -1187,7 +1195,7 @@ function main() {
     if (canceled || !filePath) return { ok: false, canceled: true };
     return { ok: true, filePath };
   });
-  ipcMain.handle('app:writePdf', async (e, filePath) => {
+  handle('app:writePdf', async (e, filePath) => {
     if (typeof filePath !== 'string' || !/\.pdf$/i.test(filePath)) return { ok: false, error: 'Not a PDF path' };
     try {
       // The print stylesheet leaves only the note on the page.
@@ -1198,7 +1206,7 @@ function main() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('app:exportHtml', async (_e, id, bodyHtml) => {
+  handle('app:exportHtml', async (_e, id, bodyHtml) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     const title = H.deriveTitle(note) || 'Note';
@@ -1223,7 +1231,9 @@ function main() {
   // and opts.allowFiles; it gives up after opts.timeoutMs.
   async function withHiddenPage(doc, opts, fn) {
     const tmp = path.join(app.getPath('temp'), 'notes-page-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.html');
-    let w = null, timer = null, contentsId = null;
+    let w = null, contentsId = null;
+    /** @type {NodeJS.Timeout | undefined} */
+    let timer;
     try {
       fs.writeFileSync(tmp, doc, 'utf8');
       const webPreferences = { javascript: !!opts.javascript, sandbox: true, contextIsolation: true };
@@ -1239,7 +1249,8 @@ function main() {
       }
       const work = (async () => { await w.loadFile(tmp); return fn(w); })();
       if (!opts.timeoutMs) return await work;
-      return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to render')), opts.timeoutMs); })]);
+      const timeout = /** @type {Promise<never>} */ (new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to render')), opts.timeoutMs); }));
+      return await Promise.race([work, timeout]);
     } finally {
       clearTimeout(timer);
       isolatedAccess.delete(contentsId);
@@ -1278,7 +1289,8 @@ function main() {
     const head = ISOLATED_CSP + '<meta http-equiv="x-dns-prefetch-control" content="off"><base href="' + convert.escHtml(require('url').pathToFileURL(baseDir + path.sep).href) + '">';
     if (/<head(\s[^>]*)?>/i.test(doc)) return doc.replace(/<head(\s[^>]*)?>/i, (m) => m + head);
     // No <head>: put one after the doctype (or <html>), so the page keeps standards mode.
-    const at = /^\s*(<!doctype[^>]*>)?\s*(<html(\s[^>]*)?>)?/i.exec(doc)[0].length;
+    const lead = /^\s*(<!doctype[^>]*>)?\s*(<html(\s[^>]*)?>)?/i.exec(doc);
+    const at = lead ? lead[0].length : 0;
     return doc.slice(0, at) + '<head>' + head + '</head>' + doc.slice(at);
   }
 
@@ -1313,21 +1325,21 @@ function main() {
       return { pdf, warning: r && r.flowed ? 'This document does not record where its pages break, so its headers and footers were left out.' : '' };
     }),
   };
-  ipcMain.handle('files:convertOptions', (_e, id) => convert.options(store.get(id)));
+  handle('files:convertOptions', (_e, id) => convert.options(store.get(id)));
   // An opened file as Markdown, for the book reader and book export (Word pictures inlined, PDF text only).
-  ipcMain.handle('files:asMarkdown', async (_e, id) => {
+  handle('files:asMarkdown', async (_e, id) => {
     const n = store.get(id);
     if (!convert.sourceOf(n)) return { ok: false, error: 'this kind of file has no text to show' };
     // The book reader and its exports load pictures, so a page made from a file keeps only its inlined ones; a picture
     // on the web or a network share becomes its description.
     try { return { ok: true, markdown: convert.inlinePicturesOnly((await convert.toMarkdown(n)).markdown) }; } catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('files:convert', async (_e, id, to) => {
+  handle('files:convert', async (_e, id, to) => {
     try { return Object.assign({ ok: true }, await convert.convertFile(store.get(id), to, printers)); }
     catch (err) { return { ok: false, error: err.message }; }
   });
 
-  ipcMain.handle('book:export', async (_e, format, data) => {
+  handle('book:export', async (_e, format, data) => {
     data = data || {};
     const name = String(data.name || 'Book');
     const doc = () => convert.htmlDocument(name, String(data.html || ''), BOOK_CSS);
@@ -1361,7 +1373,7 @@ function main() {
     }
   });
 
-  ipcMain.handle('app:exportAll', async () => {
+  handle('app:exportAll', async () => {
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       title: 'Export all notes',
       defaultPath: path.join(app.getPath('documents'), 'notes-export-' + new Date().toISOString().slice(0, 10) + '.json'),
@@ -1373,7 +1385,7 @@ function main() {
   });
 
   // ---- per-note version history (from the git snapshots of notes.json) ------------
-  ipcMain.handle('history:versions', async (_e, id, limit) => {
+  handle('history:versions', async (_e, id, limit) => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
@@ -1414,13 +1426,13 @@ function main() {
     fs.copyFileSync(srcPath, path.join(ATTACH_DIR, name));
     return { name, href: 'attachment://' + encodeURIComponent(name), size: fs.statSync(path.join(ATTACH_DIR, name)).size };
   }
-  ipcMain.handle('attachments:pick', async () => {
+  handle('attachments:pick', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Attach files', properties: ['openFile', 'multiSelections'] });
     if (canceled || !filePaths.length) return [];
     return filePaths.map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } });
   });
-  ipcMain.handle('attachments:addPaths', (_e, paths) => (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string').map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } }));
-  ipcMain.handle('attachments:saveRecording', (_e, bytes, ext) => {
+  handle('attachments:addPaths', (_e, paths) => (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string').map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } }));
+  handle('attachments:saveRecording', (_e, bytes, ext) => {
     fs.mkdirSync(ATTACH_DIR, { recursive: true });
     const clean = /^[a-z0-9]{1,5}$/i.test(String(ext)) ? String(ext).toLowerCase() : 'webm';
     const stamp = H.fileStamp().slice(0, 19);
@@ -1429,7 +1441,7 @@ function main() {
     fs.writeFileSync(path.join(ATTACH_DIR, name), Buffer.from(bytes));
     return { name, href: 'attachment://' + encodeURIComponent(name), size: Buffer.from(bytes).length };
   });
-  ipcMain.handle('attachments:open', async (_e, href) => {
+  handle('attachments:open', async (_e, href) => {
     const raw = String(href || '').replace(/^attachment:\/\//i, '');
     let name;
     try { name = safeAttachmentName(decodeURIComponent(raw)); } catch (_) { name = null; }
@@ -1438,7 +1450,7 @@ function main() {
     if (path.dirname(full) !== ATTACH_DIR || !fs.existsSync(full)) return 'Attachment not found: ' + name;
     return openSafely(full);
   });
-  ipcMain.handle('attachments:reveal', (_e, href) => {
+  handle('attachments:reveal', (_e, href) => {
     const raw = String(href || '').replace(/^attachment:\/\//i, '');
     let name; try { name = safeAttachmentName(decodeURIComponent(raw)); } catch (_) { name = null; }
     const full = name ? path.join(ATTACH_DIR, name) : null;
@@ -1446,7 +1458,7 @@ function main() {
     return !!(full && fs.existsSync(full));
   });
 
-  ipcMain.handle('app:importMarkdown', async () => {
+  handle('app:importMarkdown', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: 'Import Markdown or text files',
       properties: ['openFile', 'multiSelections'],
@@ -1475,11 +1487,11 @@ function main() {
   // Asks one window to write any pending edit and waits for its own flush-done (not another window's).
   function flushWindow(w, ms) {
     return new Promise((resolve) => {
-      if (!w || w.isDestroyed()) return resolve();
+      if (!w || w.isDestroyed()) return resolve(undefined);
       const id = w.webContents.id;
       const done = (e) => { if (e.sender.id === id) finish(); };
       const timer = setTimeout(finish, ms);
-      function finish() { clearTimeout(timer); ipcMain.removeListener('app:flush-done', done); resolve(); }
+      function finish() { clearTimeout(timer); ipcMain.removeListener('app:flush-done', done); resolve(undefined); }
       ipcMain.on('app:flush-done', done);
       try { w.webContents.send('app:flush'); } catch (_) { finish(); }
     });

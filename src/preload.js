@@ -1,9 +1,12 @@
+// @ts-check
 'use strict';
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+/** @template {IpcChannel} K @param {K} channel @returns {Invoker<K>} */
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
+/** @template {keyof MainEvents} K @param {K} channel @returns {Listener<K>} */
 const on = (channel) => (handler) => {
-  const wrapped = (_event, ...args) => handler(...args);
+  const wrapped = (_event, ...args) => handler(.../** @type {MainEvents[K]} */ (args));
   ipcRenderer.on(channel, wrapped);
   return () => ipcRenderer.removeListener(channel, wrapped);
 };
@@ -13,7 +16,8 @@ const on = (channel) => (handler) => {
 const isOurPage = window.top === window || (location.protocol === 'file:' && /\/renderer\/index\.html$/.test(location.pathname) &&
   new URLSearchParams(location.search).get('pane') === 'right');
 
-if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
+/** @type {NotesApi} */
+const notesApi = {
   notes: {
     list: invoke('notes:list'),
     outline: invoke('notes:outline'),
@@ -174,4 +178,5 @@ if (isOurPage) contextBridge.exposeInMainWorld('notesApi', {
     relocked: on('lock:relocked'),
     editCommand: on('app:editCommand'),
   },
-});
+};
+if (isOurPage) contextBridge.exposeInMainWorld('notesApi', notesApi);

@@ -50,6 +50,7 @@ function resolve(dir, url) {
 
 // Serves every app's build. Returns which are there: { wordcraft, gridcraft }.
 function serve(protocol) {
+  /** @type {Record<string, boolean>} */
   const ready = {};
   for (const key of KEYS) {
     const dir = buildDir(key);

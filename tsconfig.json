@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "lib": [
+      "es2022",
+      "dom"
+    ],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "useUnknownInCatchVariables": false
+  },
+  "include": [
+    "src/types.d.ts",
+    "src/store.js",
+    "src/preload.js",
+    "src/main.js",
+    "src/shared/themes.js"
+  ]
+}
