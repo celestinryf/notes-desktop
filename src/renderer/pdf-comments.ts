@@ -1,7 +1,8 @@
-// @ts-check
 /* The comments panel beside an open PDF, exposed as window.NotesPdfComments. It lists the PDF's sticky notes, and
    other marks that carry a comment, and adds, retypes and deletes sticky notes. Those are standard PDF "Text"
    annotations, which main writes into the file, so other PDF apps show them as comments too. */
+import type { PdfComment, PdfPoint } from './pdf-editor.ts';
+
 export const NotesPdfComments = (function () {
   'use strict';
   const KIND_NAMES = { Text: 'Note', Highlight: 'Highlight', Underline: 'Underline', Squiggly: 'Squiggly underline', StrikeOut: 'Strikethrough',
@@ -17,15 +18,15 @@ export const NotesPdfComments = (function () {
     const addBtn = panel.querySelector('[data-comments-act="add"]');
     const hint = panel.querySelector('.pdf-comments-hint');
     // list: the comments as last read. editing: the id being retyped, or 'new' for draft (a place { page, x, y }).
-    let list = [], editing = null, draft = null, picking = false, working = false, readSeq = 0;
+    let list: PdfComment[] = [], editing: string | null = null, draft: PdfPoint | null = null, picking = false, working = false, readSeq = 0;
 
-    function el(tag, cls, text) {
+    function el(tag, cls, text?) {
       const e = document.createElement(tag);
       if (cls) e.className = cls;
       if (text !== undefined) e.textContent = text;
       return e;
     }
-    function button(act, text, title) {
+    function button(act, text, title?) {
       const b = el('button', 'tool-btn', text);
       b.type = 'button';
       b.dataset.cAct = act;
@@ -75,8 +76,8 @@ export const NotesPdfComments = (function () {
       addBtn.dataset.commentsAct = picking ? 'cancel-pick' : 'add';
       hint.textContent = picking ? 'Click on the page where the comment goes. Esc cancels.' : '';
       addBtn.disabled = working || (!picking && !!editing);
-      const cards = [];
-      if (editing === 'new') cards.push(editorCard('', 'New comment · page ' + (draft.page + 1)));
+      const cards: HTMLElement[] = [];
+      if (editing === 'new' && draft) cards.push(editorCard('', 'New comment · page ' + (draft.page + 1)));
       const replies = new Map();
       for (const c of list) if (c.replyTo) { if (!replies.has(c.replyTo)) replies.set(c.replyTo, []); replies.get(c.replyTo).push(c); }
       const ids = new Set(list.map((c) => c.id));
@@ -137,8 +138,10 @@ export const NotesPdfComments = (function () {
       const text = box ? box.value.trim() : '';
       if (!text) { hooks.say('Write the comment first, or press Cancel.'); return; }
       let op;
-      if (editing === 'new') op = { op: 'add', page: draft.page, x: draft.x, y: draft.y, text };
-      else {
+      if (editing === 'new') {
+        if (!draft) { cancelEdit(); return; }
+        op = { op: 'add', page: draft.page, x: draft.x, y: draft.y, text };
+      } else {
         const c = list.find((x) => x.id === editing);
         if (!c) { cancelEdit(); return; }
         if (text === c.text.trim()) { cancelEdit(); return; }

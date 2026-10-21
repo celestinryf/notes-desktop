@@ -106,7 +106,7 @@ export const NotesSignPad = (function () {
     }
 
     // The strokes as a PNG blob, cropped; null when nothing is drawn.
-    function toBlob() {
+    function toBlob(): Promise<Blob | null> {
       if (!box) return Promise.resolve(null);
       const pad = PAD * scale;
       const x0 = Math.max(0, Math.floor(box.x0 - pad)), y0 = Math.max(0, Math.floor(box.y0 - pad));

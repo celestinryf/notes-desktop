@@ -3947,7 +3947,7 @@
     return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }
 
-  // src/renderer/pdf-editor.js
+  // src/renderer/pdf-editor.ts
   var NotesPdfEditor = (function() {
     "use strict";
     const PV = window.PdfView;
@@ -4283,7 +4283,10 @@
         closeOthers,
         // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
         // the kept pages use is written, so a removed page leaves nothing behind in the file.
-        extractPages: (pageInfos) => doc.extractPages(pageInfos),
+        extractPages: (pageInfos) => {
+          if (!doc) throw new Error("no PDF is open");
+          return doc.extractPages(pageInfos);
+        },
         markSaved(hash) {
           if (doc) {
             savedHash = hash;
@@ -4452,7 +4455,7 @@
     return { create };
   })();
 
-  // src/renderer/pdf-comments.js
+  // src/renderer/pdf-comments.ts
   var NotesPdfComments = (function() {
     "use strict";
     const KIND_NAMES = {
@@ -4537,7 +4540,7 @@
         hint.textContent = picking ? "Click on the page where the comment goes. Esc cancels." : "";
         addBtn.disabled = working || !picking && !!editing;
         const cards = [];
-        if (editing === "new") cards.push(editorCard("", "New comment \xB7 page " + (draft.page + 1)));
+        if (editing === "new" && draft) cards.push(editorCard("", "New comment \xB7 page " + (draft.page + 1)));
         const replies = /* @__PURE__ */ new Map();
         for (const c of list) if (c.replyTo) {
           if (!replies.has(c.replyTo)) replies.set(c.replyTo, []);
@@ -4608,8 +4611,13 @@
           return;
         }
         let op;
-        if (editing === "new") op = { op: "add", page: draft.page, x: draft.x, y: draft.y, text };
-        else {
+        if (editing === "new") {
+          if (!draft) {
+            cancelEdit();
+            return;
+          }
+          op = { op: "add", page: draft.page, x: draft.x, y: draft.y, text };
+        } else {
           const c = list.find((x) => x.id === editing);
           if (!c) {
             cancelEdit();
@@ -4798,7 +4806,7 @@
     };
   }
 
-  // src/renderer/pdf-note.js
+  // src/renderer/pdf-note.ts
   function createPdfNote({ api, externalLinkClick, showBanner, openFiles }) {
     let pdf = null;
     let pdfShownKey = null, pdfSeq = 0, pdfNote = null;
@@ -4847,7 +4855,7 @@
         if (seq !== pdfSeq) return;
         if (await ctl.open(bytes, opts) && seq === pdfSeq) {
           pdfNote = { id: note.id, fileMtime: note.fileMtime };
-          if (pdfCommentsShown()) pdfComments.refresh();
+          if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
         }
       } catch (err) {
         if (seq !== pdfSeq) return;
@@ -4870,11 +4878,14 @@
       return !pdfDirty();
     }
     async function savePdfNow(explicit) {
-      const target = pdfNote;
+      const target = pdfNote, ctl = pdf;
       try {
-        const { bytes, hash } = await pdf.save();
+        if (!target || !ctl) throw new Error("no PDF is open.");
+        const saved = await ctl.save();
+        if (!saved) throw new Error("no PDF is open.");
+        const { bytes, hash } = saved;
         const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
-        if (pdfNote === target) pdf.markSaved(hash);
+        if (pdfNote === target) ctl.markSaved(hash);
         if (reportFileSaved(target, r, explicit, "PDF") && pdfNote === target) pdfShownKey = target.id + ":" + r.mtime;
         return true;
       } catch (err) {
@@ -4942,7 +4953,8 @@
     }
     async function applyPdfPages(plan) {
       const target = pdfNote;
-      if (!target || pdfPagesFor !== target) {
+      const ctl = pdf;
+      if (!target || !ctl || pdfPagesFor !== target) {
         closePdfPages();
         toast("That PDF changed while the pages were open, so they were not changed.");
         return false;
@@ -4962,14 +4974,14 @@
         }
         const pageInfos = plan.pageInfos.map((info) => info.document === null ? Object.assign({}, info, { document: saved }) : info);
         try {
-          bytes = await pdf.extractPages(pageInfos);
+          bytes = await ctl.extractPages(pageInfos);
         } catch (err) {
           toast("Could not rearrange the pages: " + (err.message || err));
           return false;
         }
         let pages = 0;
         try {
-          if (bytes) pages = (await pdf.openOther(bytes)).pages;
+          if (bytes) pages = (await ctl.openOther(bytes)).pages;
         } catch (_) {
           pages = 0;
         }
@@ -5052,7 +5064,8 @@
       if (!pdf || !pdfNote || !NotesSignPad || signBusy || el.signDialog.open) return;
       signBusy = true;
       try {
-        if (!signPad) signPad = NotesSignPad.create(el.signPad);
+        const pad = signPad || NotesSignPad.create(el.signPad);
+        signPad = pad;
         let saved = null;
         try {
           saved = await api.signature.get();
@@ -5064,10 +5077,10 @@
         signSay("");
         el.signName.value = "";
         el.signDialog.showModal();
-        signPad.fit();
+        pad.fit();
         el.signRemember.checked = !!saved;
         el.signForgetBtn.classList.toggle("hidden", !saved);
-        if (saved) await signPad.load(new Blob([saved], { type: "image/png" })).catch(() => signPad.clear());
+        if (saved) await pad.load(new Blob([saved], { type: "image/png" })).catch(() => pad.clear());
       } finally {
         signBusy = false;
       }
@@ -5417,7 +5430,7 @@
     return { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly };
   }
 
-  // src/renderer/docx-editor.js
+  // src/renderer/docx-editor.ts
   var NotesDocxEditor = (function() {
     "use strict";
     const DV = window.DocxView;
@@ -5450,6 +5463,14 @@
     ]);
     function create(hooks2) {
       let doc = null, xml = "", scan = null, baselines = /* @__PURE__ */ new Map(), dirty = false, edits = 0, seq = 0;
+      const shownDoc = () => {
+        if (!doc) throw new Error("no Word document is open");
+        return doc;
+      };
+      const shownScan = () => {
+        if (!scan) throw new Error("no Word document is open for editing");
+        return scan;
+      };
       let gen = 0;
       const SRC = "data-notes-src";
       const REST = "data-notes-rest";
@@ -5474,7 +5495,8 @@
         if (hooks2.onDirty) hooks2.onDirty(v);
       }
       function fmtOf(el2) {
-        if (styleCache.has(el2)) return styleCache.get(el2);
+        const cached = styleCache.get(el2);
+        if (cached) return cached;
         const win = el2.ownerDocument.defaultView;
         const cs = win.getComputedStyle(el2);
         let u = false;
@@ -5517,7 +5539,7 @@
         }
       }
       function shownByPage() {
-        return [...doc.querySelectorAll('article[contenteditable="true"]')].map((art) => ({
+        return [...shownDoc().querySelectorAll('article[contenteditable="true"]')].map((art) => ({
           art,
           list: [...art.querySelectorAll("p")].filter((p) => !p.closest('[contenteditable="false"]'))
         }));
@@ -5525,13 +5547,15 @@
       const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
       function sources(list) {
         const out = /* @__PURE__ */ new Map();
-        let last = null;
+        let last;
         for (const p of list) {
-          if (map.has(p)) last = map.get(p);
-          if (last !== null) out.set(p, last);
+          const at = map.get(p);
+          if (at !== void 0) last = at;
+          if (last !== void 0) out.set(p, last);
         }
         const firstKnown = list.find((p) => map.has(p));
-        for (const p of list) if (!out.has(p) && firstKnown) out.set(p, map.get(firstKnown));
+        const first = firstKnown ? map.get(firstKnown) : void 0;
+        for (const p of list) if (!out.has(p) && first !== void 0) out.set(p, first);
         return out;
       }
       async function open(frameDoc, bytes) {
@@ -5563,21 +5587,21 @@
         if (my !== seq) return null;
         doc = frameDoc;
         xml = nextXml;
-        scan = block ? null : nextScan;
+        scan = !block && nextScan && nextScan.prefix ? nextScan : null;
         const counts = scan ? attach() : { editable: 0, readOnly: 0 };
         if (scan && !counts.editable) scan = null;
         return Object.assign(counts, { block });
       }
       function attach() {
         let editable = 0;
-        const pages = [...doc.querySelectorAll("section.docx > article")];
+        const pages = [...shownDoc().querySelectorAll("section.docx > article")];
         const take = (id) => {
-          const mark = doc.getElementById(id);
+          const mark = shownDoc().getElementById(id);
           const p = mark && mark.closest("p");
           if (mark) mark.remove();
           return p;
         };
-        for (const para of scan.paragraphs) {
+        for (const para of shownScan().paragraphs) {
           if (!para.editable) continue;
           const p = take(X.MARK + para.index);
           const rest = para.pageBreaks.length ? take(X.BREAK_MARK + para.index) : null;
@@ -5598,21 +5622,22 @@
           editable++;
         }
         X.limitTo(scan, (i) => baselines.has(i));
-        const readOnly = scan.paragraphs.length - editable;
+        const readOnly = shownScan().paragraphs.length - editable;
         if (!editable) return { editable, readOnly };
         const holders = /* @__PURE__ */ new Set();
-        for (const art of doc.querySelectorAll("section.docx > article")) {
+        for (const art of shownDoc().querySelectorAll("section.docx > article")) {
           for (const p of art.querySelectorAll("p")) if (map.has(p)) for (let e = p.parentElement; e && e !== art; e = e.parentElement) holders.add(e);
           fix(art, holders);
           art.contentEditable = "true";
           art.spellcheck = true;
         }
-        doc.addEventListener("beforeinput", onBeforeInput, true);
-        doc.addEventListener("input", onInput, true);
-        doc.addEventListener("paste", onPaste, true);
-        doc.addEventListener("drop", (e) => e.preventDefault(), true);
-        doc.addEventListener("keydown", onKeydown, true);
-        doc.defaultView.addEventListener("blur", () => {
+        shownDoc().addEventListener("beforeinput", onBeforeInput, true);
+        shownDoc().addEventListener("input", onInput, true);
+        shownDoc().addEventListener("paste", onPaste, true);
+        shownDoc().addEventListener("drop", (e) => e.preventDefault(), true);
+        shownDoc().addEventListener("keydown", onKeydown, true);
+        const win = shownDoc().defaultView;
+        if (win) win.addEventListener("blur", () => {
           if (hooks2.onBlur) hooks2.onBlur();
         });
         return { editable, readOnly };
@@ -5665,11 +5690,18 @@
         const src2 = sources(list);
         const i = list.indexOf(a), j = list.indexOf(b);
         if (i < 0 || j < 0) return false;
-        const chain = scan.paragraphs[src2.get(a)].chain;
+        const scanned = shownScan();
+        const paragraphOf = (p) => {
+          const index = src2.get(p);
+          return index === void 0 ? void 0 : scanned.paragraphs[index];
+        };
+        const start = paragraphOf(a);
+        if (!start) return false;
         for (let k = Math.min(i, j); k <= Math.max(i, j); k++) {
-          if (scan.paragraphs[src2.get(list[k])].chain !== chain) return false;
+          const para = paragraphOf(list[k]);
+          if (!para || para.chain !== start.chain) return false;
           if (k > Math.min(i, j)) {
-            const between = doc.createRange();
+            const between = shownDoc().createRange();
             between.setStartAfter(list[k - 1]);
             between.setEndBefore(list[k]);
             const frag = between.cloneContents();
@@ -5707,9 +5739,9 @@
         edits++;
         setDirty(true);
         if (e.inputType === "insertLineBreak") {
-          const sel = doc.getSelection();
+          const sel = shownDoc().getSelection();
           const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
-          if (p) {
+          if (p && sel) {
             const caret = sel.getRangeAt(0);
             const typed = [...p.querySelectorAll("br")].filter((br) => caret.comparePoint(br, 0) <= 0).pop();
             if (typed) typed.setAttribute(REAL_BR, "");
@@ -5727,14 +5759,14 @@
         }
         const lines = text.replace(/\r\n?/g, "\n").split("\n");
         lines.forEach((line, k) => {
-          if (k) doc.execCommand("insertParagraph");
-          if (line) doc.execCommand("insertText", false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ""));
+          if (k) shownDoc().execCommand("insertParagraph");
+          if (line) shownDoc().execCommand("insertText", false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ""));
         });
       }
       function onKeydown(e) {
         if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
           e.preventDefault();
-          if (selectionAllowed()) doc.execCommand("insertText", false, TAB_SHOWN);
+          if (selectionAllowed()) shownDoc().execCommand("insertText", false, TAB_SHOWN);
           return;
         }
         if (hooks2.onKey) hooks2.onKey(e);
@@ -5753,8 +5785,8 @@
         if (!scan || !dirty) return null;
         const list = shownParagraphs();
         const src2 = sources(list);
-        for (const art of doc.querySelectorAll('article[contenteditable="true"]')) {
-          for (const n of art.childNodes) if (n.nodeType === 3 && n.data.trim()) throw new Error("some text is outside any paragraph");
+        for (const art of shownDoc().querySelectorAll('article[contenteditable="true"]')) {
+          for (const n of art.childNodes) if (n.nodeType === Node.TEXT_NODE && (n.textContent || "").trim()) throw new Error("some text is outside any paragraph");
         }
         const pieces = [];
         const lost = () => new Error("a page break could not be placed");
@@ -5779,28 +5811,31 @@
           });
           if (end) endWithBreak(pieces[pieces.length - 1]);
         }
-        if (pieces.some((pc) => pc.source === void 0)) throw new Error("a paragraph could not be matched to the file");
+        const placed = pieces.filter((pc) => pc.source !== void 0);
+        if (placed.length !== pieces.length) throw new Error("a paragraph could not be matched to the file");
         const known = new Set([...baselines.values()].flatMap((b) => b.pictures).filter(Boolean));
-        if (pieces.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture)))) {
+        if (placed.some((pc) => pc.chars.some((c) => c.ch === X.PICTURE && !known.has(c.picture ?? null)))) {
           throw new Error("a picture deleted in an earlier save cannot be brought back with Undo");
         }
         const bySource = /* @__PURE__ */ new Map();
-        for (const pc of pieces) {
-          if (!bySource.has(pc.source)) bySource.set(pc.source, []);
-          bySource.get(pc.source).push(pc);
+        for (const pc of placed) {
+          const same = bySource.get(pc.source) || [];
+          same.push(pc);
+          bySource.set(pc.source, same);
         }
         const spans = /* @__PURE__ */ new Map();
         for (const para of scan.paragraphs) {
-          if (!baselines.has(para.index)) continue;
+          const base = baselines.get(para.index);
+          if (!base || !para.editable) continue;
           const pcs = bySource.get(para.index) || [];
-          if (pcs.length === 1 && sameChars(pcs[0].chars, baselines.get(para.index), para.text)) continue;
+          if (pcs.length === 1 && sameChars(pcs[0].chars, base, para.text)) continue;
           const sp = spans.get(para.chain);
           spans.set(para.chain, sp ? { first: sp.first, last: para.index } : { first: para.index, last: para.index });
         }
         if (!spans.size) return null;
         const patches = [], plan = [];
         for (const { first, last } of spans.values()) {
-          const group = pieces.filter((pc) => pc.source >= first && pc.source <= last);
+          const group = placed.filter((pc) => pc.source >= first && pc.source <= last);
           const start = scan.paragraphs[first].start, end = scan.paragraphs[last].end;
           const out = X.rewriteParagraphs(xml, scan, first, last, group.map((pc) => ({ source: pc.source, chars: pc.chars })), baselines);
           patches.push({ start, end, old: xml.slice(start, end), xml: out });
@@ -5822,38 +5857,41 @@
         saving = null;
         if (!s || !scan) return { ok: false, lost: false };
         try {
-          if (rebase(s)) return { ok: true, lost: false };
+          if (rebase(s, scan)) return { ok: true, lost: false };
         } catch (_) {
         }
         return { ok: false, lost: edits !== s.edits };
       }
-      function rebase(s) {
+      function rebase(s, current) {
         const nextXml = X.applyPatches(xml, s.patches);
         const next = X.scanDocument(nextXml);
+        if (!next.prefix) return false;
         const nextMap = /* @__PURE__ */ new Map(), nextBase = /* @__PURE__ */ new Map();
         const byFirst = new Map(s.plan.map((g) => [g.first, g]));
         let ni = 0;
-        for (let i = 0; i < scan.paragraphs.length; ) {
+        for (let i = 0; i < current.paragraphs.length; ) {
           const g = byFirst.get(i);
           if (g) {
             for (const pc of g.pieces) {
               const para = next.paragraphs[ni];
               if (!para || !para.editable || !X.sameShownText(para.text, textOf(pc.chars))) return false;
               for (const el2 of pc.els) nextMap.set(el2, ni);
-              nextBase.set(ni, baselineOf(pc.chars, (baselines.get(pc.source) || {}).empty || {}));
+              const before = baselines.get(pc.source);
+              nextBase.set(ni, baselineOf(pc.chars, before ? before.empty : {}));
               ni++;
             }
             i = g.last + 1;
             continue;
           }
-          if (baselines.has(i)) nextBase.set(ni, baselines.get(i));
+          const kept = baselines.get(i);
+          if (kept) nextBase.set(ni, kept);
           i++;
           ni++;
         }
         if (ni !== next.paragraphs.length) return false;
         const shift = /* @__PURE__ */ new Map();
         let at = 0;
-        for (let i = 0; i < scan.paragraphs.length; ) {
+        for (let i = 0; i < current.paragraphs.length; ) {
           const g = byFirst.get(i);
           if (g) {
             at += g.pieces.length;
@@ -5864,7 +5902,11 @@
           at++;
           i++;
         }
-        for (const p of shownParagraphs()) if (map.has(p) && shift.has(map.get(p)) && !nextMap.has(p)) nextMap.set(p, shift.get(map.get(p)));
+        for (const p of shownParagraphs()) {
+          const was = map.get(p);
+          const to = was === void 0 ? void 0 : shift.get(was);
+          if (to !== void 0 && !nextMap.has(p)) nextMap.set(p, to);
+        }
         X.limitTo(next, (i) => nextBase.has(i));
         xml = nextXml;
         scan = next;
@@ -5892,7 +5934,7 @@
     return { create };
   })();
 
-  // src/renderer/word-note.js
+  // src/renderer/word-note.ts
   function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
     const DOCX_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"><style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>`;
     let docxShownKey = null;
@@ -6009,10 +6051,11 @@
       return !docxDirty();
     });
     async function saveDocxNow(explicit) {
-      const target = docxNote;
+      const target = docxNote, ed = docx;
       let c;
       try {
-        c = docx.save();
+        if (!target || !ed) throw new Error("no Word document is open");
+        c = ed.save();
       } catch (err) {
         toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; use Reload to start again from the file.");
         return false;
@@ -6023,7 +6066,7 @@
         if (docxNote !== target) return true;
         const inPlace = reportFileSaved(target, r, explicit, "document");
         if (inPlace) docxShownKey = target.id + ":" + r.mtime;
-        const synced = docx.markSaved();
+        const synced = ed.markSaved();
         if (!synced.ok) {
           docxShownKey = null;
           if (state.current && state.current.id === target.id) showDocx(state.current);
@@ -6031,7 +6074,7 @@
         }
         return true;
       } catch (err) {
-        docx.saveFailed();
+        ed.saveFailed();
         toast("Could not save the document: " + ipcErrorText(err) + " Your changes are still here.");
         return false;
       }
