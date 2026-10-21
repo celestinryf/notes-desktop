@@ -2558,7 +2558,7 @@
     app: $("#app"),
     sidebar: $("#sidebar"),
     newNoteBtn: $("#newNoteBtn"),
-    navItems: Array.from(document.querySelectorAll(".nav-item[data-view]")),
+    navItems: Array.from(document.querySelectorAll(".nav-item[data-view]")).filter((b) => b instanceof HTMLElement),
     countAll: $("#countAll"),
     countPinned: $("#countPinned"),
     countTrash: $("#countTrash"),
@@ -2842,6 +2842,10 @@
 
   // src/renderer/state.js
   var lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
+  function settingsNow() {
+    if (!state.settings) throw new Error("settings are read before they were loaded");
+    return state.settings;
+  }
   var state = {
     view: "all",
     tag: null,
@@ -2868,7 +2872,8 @@
     liveStatus: {},
     vaultStatus: {},
     pending: /* @__PURE__ */ new Map(),
-    inflight: /* @__PURE__ */ new Map()
+    inflight: /* @__PURE__ */ new Map(),
+    selecting: Promise.resolve()
   };
 
   // src/renderer/find-state.js
@@ -2958,6 +2963,11 @@
 
   // src/renderer/tree.js
   var import_icons4 = __toESM(require_icons());
+  var toggles = /* @__PURE__ */ new WeakMap();
+  function setRowToggle(row, fn) {
+    if (fn) toggles.set(row, fn);
+    else toggles.delete(row);
+  }
   function bookMark() {
     return '<span class="row-mark book-mark" title="Book: its notes are pages">' + import_icons4.default.svg("book") + "</span>";
   }
@@ -3005,17 +3015,18 @@
         }
       };
       const expanded = row.getAttribute("aria-expanded");
+      const toggle = toggles.get(row);
       if (e.key === "ArrowDown") go(i + 1);
       else if (e.key === "ArrowUp") go(i - 1);
       else if (e.key === "Home") go(0);
       else if (e.key === "End") go(rows.length - 1);
       else if (e.key === "ArrowRight") {
         e.preventDefault();
-        if (expanded === "false" && row._toggle) row._toggle(true);
+        if (expanded === "false" && toggle) toggle(true);
         else if (expanded === "true") go(i + 1);
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        if (expanded === "true" && row._toggle) row._toggle(false);
+        if (expanded === "true" && toggle) toggle(false);
         else {
           const group = row.parentElement && row.parentElement.closest(".tree-children");
           const parent = group && group.previousElementSibling;
@@ -6301,7 +6312,7 @@
     let peekTimer = null;
     const isNarrow = () => window.innerWidth < NARROW_W;
     function sidebarLayout() {
-      if (state.settings && state.settings.sidebarCollapsed) return "float";
+      if (settingsNow().sidebarCollapsed) return "float";
       return isNarrow() ? "float" : "docked";
     }
     function sidebarHidden() {
@@ -6359,13 +6370,13 @@
         else peekSidebar("sticky");
         return;
       }
-      const collapsed = !!state.settings.sidebarCollapsed;
+      const collapsed = !!settingsNow().sidebarCollapsed;
       sidebarPeek = null;
       updateSettings({ sidebarCollapsed: !collapsed });
     }
     function bindSidebarFloat() {
       if (GUEST) return;
-      const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains("is-resizing") || el.sidebar.contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
+      const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains("is-resizing") || !!document.activeElement && el.sidebar.contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
       let nearEdge = false;
       const leaveSoon = () => {
         clearTimeout(peekTimer);
@@ -6488,21 +6499,21 @@
     }
     async function refresh(opts) {
       opts = opts || {};
-      const listOpts = { query: state.query, sort: state.settings.sort };
+      const listOpts = { query: state.query, sort: settingsNow().sort };
       if (state.view === "trash") listOpts.trashed = true;
       else if (state.query) {
       } else if (state.view === "pinned") listOpts.pinned = true;
       else if (state.view === "reminders") listOpts.reminders = true;
       else if (state.view === "tag") listOpts.tag = state.tag;
       else if (state.view === "folder") listOpts.folderId = state.folderId;
-      const wantTree = state.settings.listMode === "tree" && !state.query && (state.view === "all" || state.view === "folder");
+      const wantTree = settingsNow().listMode === "tree" && !state.query && (state.view === "all" || state.view === "folder");
       const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
         api.notes.list(listOpts),
         api.notes.counts(),
         api.notes.tags(),
         api.folders.tree(),
         state.view === "folder" ? api.folders.path(state.folderId) : Promise.resolve([]),
-        wantTree ? api.notes.outline(state.settings.sort) : Promise.resolve(null)
+        wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null)
       ]);
       state.notes = notes;
       state.outline = outline;
@@ -6511,7 +6522,7 @@
       if (state.view === "folder" && !folderPath.length) {
         state.view = "all";
         state.folderId = null;
-        if (state.settings.lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {
+        if (settingsNow().lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {
         });
         el.navItems.forEach((b) => b.classList.toggle("is-active", b.dataset.view === "all"));
         return refresh(opts);
@@ -6556,9 +6567,12 @@
       for (const { tag, count } of tags) {
         const b = document.createElement("button");
         b.className = "nav-item" + (state.view === "tag" && state.tag === tag ? " is-active" : "");
-        b.innerHTML = '<span></span><span class="count"></span>';
-        b.firstChild.textContent = tag;
-        b.lastChild.textContent = count;
+        const name = document.createElement("span");
+        name.textContent = tag;
+        const n = document.createElement("span");
+        n.className = "count";
+        n.textContent = String(count);
+        b.append(name, n);
         b.addEventListener("click", () => setView("tag", tag));
         el.tagList.append(b);
       }
@@ -6617,8 +6631,10 @@
         if (!n.trashedAt) {
           li.draggable = true;
           li.addEventListener("dragstart", (e) => {
-            e.dataTransfer.setData("text/x-note-id", n.id);
-            e.dataTransfer.effectAllowed = "move";
+            if (e.dataTransfer) {
+              e.dataTransfer.setData("text/x-note-id", n.id);
+              e.dataTransfer.effectAllowed = "move";
+            }
             li.classList.add("is-dragging");
             toPeer({ type: "drag", id: n.id });
           });
@@ -6704,7 +6720,7 @@
       state.tag = view === "tag" ? arg : null;
       state.folderId = view === "folder" ? arg : null;
       el.navItems.forEach((b) => b.classList.toggle("is-active", b.dataset.view === view));
-      if (!GUEST && (state.settings.lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {
+      if (!GUEST && (settingsNow().lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {
       });
       await refresh(refreshOpts);
     }
@@ -6728,15 +6744,15 @@
       if (had && !state.query) await scopeListToNote(state.current);
     }
     function syncListCollapsed() {
-      const collapsed = !!(state.settings && state.settings.listCollapsed && state.current);
+      const collapsed = !!(settingsNow().listCollapsed && state.current);
       el.app.classList.toggle("list-collapsed", collapsed);
       if (el.toggleListBtn) el.toggleListBtn.classList.toggle("is-on", !collapsed);
     }
     function toggleList() {
-      updateSettings({ listCollapsed: !state.settings.listCollapsed });
+      updateSettings({ listCollapsed: !settingsNow().listCollapsed });
     }
     async function showList() {
-      if (state.settings.listCollapsed) await updateSettings({ listCollapsed: false });
+      if (settingsNow().listCollapsed) await updateSettings({ listCollapsed: false });
     }
     function folderParents() {
       const m = /* @__PURE__ */ new Map();
@@ -6750,7 +6766,7 @@
       return out;
     }
     function expandedSet() {
-      const list = state.settings && state.settings.expandedFolders || [];
+      const list = settingsNow().expandedFolders || [];
       if (!list.length) return /* @__PURE__ */ new Set();
       const open = /* @__PURE__ */ new Set();
       for (const id of pathTo(list[list.length - 1])) {
@@ -6812,7 +6828,7 @@
         row.setAttribute("aria-selected", String(row.classList.contains("is-active")));
         row.tabIndex = -1;
         row.draggable = !(editing && editing.mode === "rename" && editing.id === node.id);
-        row._toggle = kids ? (on) => setExpanded(node.id, on) : null;
+        setRowToggle(row, kids ? (on) => setExpanded(node.id, on) : null);
         const chevron = document.createElement("button");
         chevron.className = "folder-chevron" + (kids ? isOpen ? " is-open" : "" : " is-leaf");
         chevron.tabIndex = -1;
@@ -6863,7 +6879,7 @@
           setView("folder", node.id);
         });
         row.addEventListener("dblclick", (e) => {
-          if (!e.target.closest(".folder-input")) {
+          if (!(e.target instanceof Element && e.target.closest(".folder-input"))) {
             e.preventDefault();
             startRename(node.id);
           }
@@ -6874,8 +6890,10 @@
         });
         wireDropTarget(row, node.id);
         row.addEventListener("dragstart", (e) => {
-          e.dataTransfer.setData("text/x-folder-id", node.id);
-          e.dataTransfer.effectAllowed = "move";
+          if (e.dataTransfer) {
+            e.dataTransfer.setData("text/x-folder-id", node.id);
+            e.dataTransfer.effectAllowed = "move";
+          }
           row.classList.add("is-dragging");
         });
         row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
@@ -6892,10 +6910,11 @@
         const row = document.createElement("div");
         row.className = "folder-row is-active";
         row.style.setProperty("--depth", depth);
-        row.append(document.createElement("span"));
-        row.firstChild.className = "folder-chevron is-leaf";
+        const chevron = document.createElement("span");
+        chevron.className = "folder-chevron is-leaf";
+        row.append(chevron);
         row.append(folderInput("", (value) => commitFolderEdit(value)));
-        if (editing.book) row.insertAdjacentHTML("beforeend", bookMark());
+        if (editing && editing.book) row.insertAdjacentHTML("beforeend", bookMark());
         return row;
       };
       const frag = document.createDocumentFragment();
@@ -6969,14 +6988,14 @@
       const refocus = treeFocusKey(root);
       root.innerHTML = "";
       const out = state.outline || {};
-      const open = new Set(state.settings.treeExpanded || []);
+      const open = new Set(settingsNow().treeExpanded || []);
       const scopeId = state.view === "folder" ? state.folderId : null;
       const scopeNode = scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) : null;
       const here = new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []);
       const heads = currentHeadings();
       const minLevel = heads.length ? Math.min(...heads.map((h) => h.level)) : 1;
       const setOpen = (id, on) => {
-        const next = new Set(state.settings.treeExpanded || []);
+        const next = new Set(settingsNow().treeExpanded || []);
         if (on) next.add(id);
         else next.delete(id);
         updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
@@ -7003,8 +7022,10 @@
         });
         row.draggable = true;
         row.addEventListener("dragstart", (e) => {
-          e.dataTransfer.setData("text/x-note-id", n.id);
-          e.dataTransfer.effectAllowed = "move";
+          if (e.dataTransfer) {
+            e.dataTransfer.setData("text/x-note-id", n.id);
+            e.dataTransfer.effectAllowed = "move";
+          }
           row.classList.add("is-dragging");
           toPeer({ type: "drag", id: n.id });
         });
@@ -7024,8 +7045,11 @@
             hr.setAttribute("role", "treeitem");
             hr.setAttribute("aria-level", String(depth + 2 + (h.level - minLevel)));
             hr.tabIndex = -1;
-            hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name"></span>';
-            hr.querySelector(".row-name").textContent = h.text;
+            hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>';
+            const hName = document.createElement("span");
+            hName.className = "row-name";
+            hName.textContent = h.text;
+            hr.append(hName);
             hr.title = h.text;
             hr.addEventListener("click", () => jumpToHeading(i));
             group.append(hr);
@@ -7046,10 +7070,17 @@
         row.setAttribute("aria-level", String(depth + 1));
         if (kids) row.setAttribute("aria-expanded", String(isOpen));
         row.tabIndex = -1;
-        row._toggle = kids ? (on) => setOpen(node.id, on) : null;
-        row.innerHTML = '<span class="tree-chevron' + (isOpen ? " is-open" : "") + (kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + '</span><span class="row-name"></span>' + (node.book ? bookMark() : "") + '<span class="count"></span>';
-        row.querySelector(".row-name").textContent = node.name;
-        row.querySelector(".count").textContent = node.count || "";
+        setRowToggle(row, kids ? (on) => setOpen(node.id, on) : null);
+        row.innerHTML = '<span class="tree-chevron' + (isOpen ? " is-open" : "") + (kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + "</span>";
+        const rowName = document.createElement("span");
+        rowName.className = "row-name";
+        rowName.textContent = node.name;
+        row.append(rowName);
+        if (node.book) row.insertAdjacentHTML("beforeend", bookMark());
+        const rowCount = document.createElement("span");
+        rowCount.className = "count";
+        rowCount.textContent = node.count ? String(node.count) : "";
+        row.append(rowCount);
         row.title = node.name;
         row.addEventListener("click", () => {
           if (kids) setOpen(node.id, !isOpen);
@@ -7096,7 +7127,7 @@
     function revealInTree(note) {
       if (GUEST || !treeModeActive() || !note || !note.folderId) return;
       const path = pathTo(note.folderId);
-      const have = new Set(state.settings.treeExpanded || []);
+      const have = new Set(settingsNow().treeExpanded || []);
       const missing = path.filter((id) => !have.has(id));
       state.revealInTree = note.id;
       if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
@@ -7398,7 +7429,7 @@
       renderTabs();
     }
     function openIds() {
-      return tabs.ids.filter(Boolean);
+      return tabs.ids.flatMap((id) => id ? [id] : []);
     }
     function tabTitle(id) {
       if (!id) return "New tab";
@@ -7498,7 +7529,7 @@
           left: { ids: openIds(), current: state.currentId },
           right: { ids: tabs.split ? tabs.peerIds.slice() : [], current: tabs.split ? tabs.peerCurrent : null }
         };
-        if (JSON.stringify(panes) === JSON.stringify(state.settings.panes)) return;
+        if (JSON.stringify(panes) === JSON.stringify(settingsNow().panes)) return;
         updateSettings({ panes }).catch(() => {
         });
       }, 1500);
@@ -7581,7 +7612,7 @@
       opts = opts || {};
       if (!GUEST && tabs.split && !tabs.ids.includes(id) && (peerHas(id) || tabs.active === "right")) {
         toPeer({ type: "open", id, newTab: !!opts.newTab, focus: opts.focus || null });
-        if (opts.focus) tabs.frame.focus();
+        if (opts.focus && tabs.frame) tabs.frame.focus();
         return Promise.resolve();
       }
       return selectNote(id, opts);
@@ -7634,7 +7665,7 @@
       dropFrame();
     }
     function dropFrame() {
-      tabs.frame.remove();
+      if (tabs.frame) tabs.frame.remove();
       tabs.frame = null;
       tabs.split = false;
       tabs.peerReady = false;
@@ -7847,8 +7878,10 @@
         const t = e.target.closest(".tab");
         if (!t) return;
         tabs.dragIndex = Number(t.dataset.index);
-        e.dataTransfer.setData("text/x-notes-tab", t.dataset.index);
-        e.dataTransfer.effectAllowed = "move";
+        if (e.dataTransfer) {
+          e.dataTransfer.setData("text/x-notes-tab", String(tabs.dragIndex));
+          e.dataTransfer.effectAllowed = "move";
+        }
         toPeer({ type: "drag", id: tabs.ids[tabs.dragIndex] || null });
       });
       el.tabList.addEventListener("dragend", () => {
@@ -7981,7 +8014,7 @@
       state.currentLossless = lossless;
       state.lossyOverride = null;
       el.bodyInput.placeholder = plainFile ? "Plain text." : "Markdown source. Ctrl+E switches back to the rendered view.";
-      const wantSource = import_helpers18.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
+      const wantSource = import_helpers18.default.isTableFile(note) ? false : plainFile || settingsNow().editorMode === "source" || !lossless || !state.rich;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
@@ -8120,7 +8153,8 @@
       closeConvertMenu();
       el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers18.default.CRAFT_OF[note.fileKind]));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
-      const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
+      const craft = isFile ? craftFor(note) : null;
+      const inCraft = !!craft && craft.usable();
       el.editorColumn.classList.toggle("shows-craft", inCraft);
       el.editor.classList.toggle("shows-craft", inCraft);
       syncTextViews(note);
@@ -8183,7 +8217,7 @@
         await refresh({ keepEditor: true });
         if (res.firstId === state.currentId) {
           const fresh = await api.notes.get(res.firstId);
-          if (fresh && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id) && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
+          if (fresh && state.current && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id) && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
         } else await openNote(res.firstId);
       }
       const failed = res.failed.length ? " Could not open: " + res.failed.join(", ") : "";
@@ -8269,7 +8303,7 @@
       state.dirty = true;
       if (find.open && state.sourceMode) runFind(true, true, true);
       setSaved("Saving\u2026");
-      clearTimeout(state.saveTimer);
+      if (state.saveTimer) clearTimeout(state.saveTimer);
       state.saveTimer = setTimeout(flushSave, 350);
       if (state.current) updateStatus(state.current);
     }
@@ -8280,9 +8314,9 @@
       return patch;
     }
     function scheduleRetry() {
-      clearTimeout(state.retryTimer);
+      if (state.retryTimer) clearTimeout(state.retryTimer);
       state.retryTimer = setTimeout(async () => {
-        if (state.pending.has(state.currentId)) {
+        if (state.currentId && state.pending.has(state.currentId)) {
           state.dirty = true;
           await flushSave();
         }
@@ -8372,7 +8406,7 @@
       return docsSaved && textSaved;
     }
     async function flushTextSave() {
-      clearTimeout(state.saveTimer);
+      if (state.saveTimer) clearTimeout(state.saveTimer);
       if (!state.dirty || !state.currentId) return true;
       const id = state.currentId;
       const patch = currentPatch();
@@ -8420,7 +8454,7 @@
         const prevTags = (state.notes[idx].tags || []).join(",");
         state.notes[idx] = updated;
         refreshRow(updated);
-        if (state.settings.sort === "updated" && idx !== 0) await refresh({ keepEditor: true });
+        if (settingsNow().sort === "updated" && idx !== 0) await refresh({ keepEditor: true });
         else if (updated.tags.join(",") !== prevTags) await refresh({ keepEditor: true });
       }
       api.notes.tags().then(renderTags);
@@ -8490,7 +8524,7 @@
     async function destroyCurrent() {
       if (!state.current) return;
       if (!window.confirm('Delete "' + import_helpers18.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
-      state.pending.delete(state.currentId);
+      if (state.currentId) state.pending.delete(state.currentId);
       state.dirty = false;
       await api.notes.destroy(state.currentId);
       clearEditor();
@@ -8537,7 +8571,7 @@
     const { showCode: showCode2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
     const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
     function openSettings() {
-      const s = state.settings;
+      const s = settingsNow();
       draft = {};
       el.hotkeyInput.value = import_helpers18.default.displayAccelerator(s.hotkey).replace(/ /g, "");
       el.hotkeyError.textContent = "";
@@ -8569,14 +8603,18 @@
       el.settingsSearch.focus();
     }
     let draft = {};
+    const settingKeys = (o) => (
+      /** @type {(keyof Settings)[]} */
+      Object.keys(o)
+    );
     const same = (a, b) => JSON.stringify(a === void 0 ? null : a) === JSON.stringify(b === void 0 ? null : b);
     const draftSettings = () => Object.assign({}, state.settings, draft);
     function settingsDirty() {
-      return Object.keys(draft).some((k) => !same(draft[k], state.settings[k]));
+      return settingKeys(draft).some((k) => !same(draft[k], settingsNow()[k]));
     }
     function setDraft(patch) {
-      for (const k of Object.keys(patch)) {
-        if (same(patch[k], state.settings[k])) delete draft[k];
+      for (const k of settingKeys(patch)) {
+        if (same(patch[k], settingsNow()[k])) delete draft[k];
         else draft[k] = patch[k];
       }
       previewSettings();
@@ -8632,7 +8670,7 @@
         closeSettings();
         return;
       }
-      const names = Object.keys(draft).filter((k) => !same(draft[k], state.settings[k])).map((k) => SETTING_NAMES[k] || k);
+      const names = settingKeys(draft).filter((k) => !same(draft[k], settingsNow()[k])).map((k) => SETTING_NAMES[k] || k);
       el.settingsSaveList.textContent = "Not saved yet: " + names.join(", ") + ".";
       el.settingsSaveDialog.showModal();
     }
@@ -8678,7 +8716,7 @@
           dot.className = "swatch-accent";
           sample.append(aa, dot);
           sample.insertAdjacentHTML("beforeend", I("check"));
-          sample.lastElementChild.classList.add("swatch-check");
+          if (sample.lastElementChild) sample.lastElementChild.classList.add("swatch-check");
           const name = document.createElement("span");
           name.className = "swatch-name";
           name.textContent = id === T().CUSTOM ? "Custom" : T().SCHEMES[id].name;
@@ -8804,7 +8842,7 @@
     function collectMatches(root, tokens, out) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (let node; node = walker.nextNode(); ) {
-        const text = node.textContent.toLowerCase();
+        const text = (node.textContent || "").toLowerCase();
         for (const t of tokens) {
           for (let i = text.indexOf(t); i !== -1; i = text.indexOf(t, i + t.length)) {
             const r = new Range();
@@ -8816,7 +8854,7 @@
       }
     }
     function syncListModeSeg() {
-      const mode = state.settings.listMode;
+      const mode = settingsNow().listMode;
       el.listModeSeg.querySelectorAll("button").forEach((b) => {
         const on = b.dataset.mode === mode;
         b.classList.toggle("is-on", on);
@@ -8910,12 +8948,12 @@
         ...[...el.moreMenu.querySelectorAll(".menu-item")].map((b) => fromButton(b, "This note")),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
-        ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: b.textContent.trim(), icon: "share-2", keys: "", ok: noteOpen && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action) })),
+        ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action) })),
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
-        cmd("list-mode", "View", state.settings && state.settings.listMode === "tree" ? "Note list: show as a list" : "Note list: show folders with their notes", state.settings && state.settings.listMode === "tree" ? "list" : "folder-open", "", () => updateSettings({ listMode: state.settings.listMode === "tree" ? "list" : "tree" }).then(() => refresh({ keepEditor: true })), !GUEST, "tree outline view"),
-        cmd("focus", "View", "Focus: hide the sidebar and the list", "eye", "", () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(state.settings && state.settings.sidebarCollapsed && state.settings.listCollapsed), "zen distraction free writing"),
-        cmd("width", "View", state.settings && state.settings.editorWidth ? "Writing column: full width" : "Writing column: readable width", "columns-2", "", () => updateSettings({ editorWidth: state.settings.editorWidth ? 0 : 760 }), !!state.settings, "measure line length narrow wide"),
+        cmd("list-mode", "View", settingsNow().listMode === "tree" ? "Note list: show as a list" : "Note list: show folders with their notes", settingsNow().listMode === "tree" ? "list" : "folder-open", "", () => updateSettings({ listMode: settingsNow().listMode === "tree" ? "list" : "tree" }).then(() => refresh({ keepEditor: true })), !GUEST, "tree outline view"),
+        cmd("focus", "View", "Focus: hide the sidebar and the list", "eye", "", () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), "zen distraction free writing"),
+        cmd("width", "View", settingsNow().editorWidth ? "Writing column: full width" : "Writing column: readable width", "columns-2", "", () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, "measure line length narrow wide"),
         fromButton(el.splitViewBtn, "View", { title: "Split view: open a second side", ok: usable(el.splitViewBtn) }),
         cmd("new-tab", "View", "New tab", "plus", "Ctrl+T", newEmptyTab),
         cmd("close-tab", "View", "Close this tab", "x", "Ctrl+W", () => closeTab(tabs.at), tabs.ids.length > 0),
@@ -8924,10 +8962,10 @@
         ...flattenTree(state.tree).map((f) => cmd("folder-" + f.id, "Go to", (f.book ? "Book: " : "Folder: ") + f.name, f.book ? "book-open" : "folder", "", () => setView("folder", f.id), !GUEST)),
         ...[...el.tagList.querySelectorAll(".nav-item")].map((b) => cmd("tag-" + b.firstChild.textContent, "Go to", "Tag: #" + b.firstChild.textContent, "hash", "", () => b.click(), !GUEST)),
         cmd("settings", "App", "Settings", "settings", "Ctrl+,", side("settings", openSettings), true, "preferences options hotkey font search"),
-        ...Object.keys(import_themes.default.SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + import_themes.default.SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && (state.settings && state.settings.colorScheme) !== id, "theme colors appearance")),
+        ...Object.keys(import_themes.default.SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + import_themes.default.SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && settingsNow().colorScheme !== id, "theme colors appearance")),
         cmd("scheme-custom", "View", "Colour scheme: custom colours\u2026", "palette", "", side("settings", () => {
           openSettings();
-          document.getElementById("set-appearance").scrollIntoView({ block: "start" });
+          document.getElementById("set-appearance")?.scrollIntoView({ block: "start" });
         }), true, "theme colors appearance pick"),
         cmd("import", "App", "Import Markdown files\u2026", "download", "", () => el.importBtn.click(), !GUEST),
         cmd("export-all", "App", "Export all notes\u2026", "download", "", () => el.exportAllBtn.click(), !GUEST, "backup json"),
@@ -9243,7 +9281,7 @@
       bindMenuKeys();
       bindSettingsNav();
       bindSidebarFloat();
-      el.tagsFold.addEventListener("click", () => updateSettings({ tagsCollapsed: !state.settings.tagsCollapsed }));
+      el.tagsFold.addEventListener("click", () => updateSettings({ tagsCollapsed: !settingsNow().tagsCollapsed }));
       bindTreeKeys(el.folderTree);
       bindTreeKeys(el.noteTree);
       el.listModeSeg.addEventListener("click", (e) => {
@@ -9565,7 +9603,7 @@
       window.addEventListener("resize", () => {
         if (!state.settings) return;
         applySidebar();
-        applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth);
+        applyPaneWidths(settingsNow().sidebarWidth, settingsNow().listWidth);
       });
       el.searchInput.addEventListener("input", () => {
         clearTimeout(searchTimer);
@@ -9801,12 +9839,12 @@
             if (!GUEST) await refresh();
             return;
           }
-          if (fresh && reason === "live" && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) {
+          if (fresh && state.current && reason === "live" && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) {
             el.titleInput.value = fresh.title;
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && isViewerOnlyFile8(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && state.current && isViewerOnlyFile8(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {

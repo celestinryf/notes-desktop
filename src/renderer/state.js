@@ -2,6 +2,12 @@
 // The open note is locked and not unlocked for now: its text is hidden and nothing may write it.
 export const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
 
+// The settings, which init loads before anything that reads them runs. Asking earlier is a bug, and says so.
+export function settingsNow() {
+  if (!state.settings) throw new Error('settings are read before they were loaded');
+  return state.settings;
+}
+
 /** @type {RendererState} */
 export const state = {
   view: 'all',
@@ -28,4 +34,5 @@ export const state = {
   vaultStatus: {},
   pending: new Map(),
   inflight: new Map(),
+  selecting: Promise.resolve(),
 };

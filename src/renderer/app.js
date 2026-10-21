@@ -1,3 +1,4 @@
+// @ts-check
 /* Renderer: vanilla JS, talks to the main process through window.notesApi (see preload.js). */
 import H from '../shared/helpers.js';
 import NotesThemes from '../shared/themes.js';
@@ -11,12 +12,12 @@ import { NotesCraftFrame } from './craft-frame.js';
 import { NotesCsv } from './csv-view.js';
 import { NotesSignPad } from './sign-pad.js';
 import { I, el, setLabel, setIcon, setPressed } from './dom.js';
-import { state, lockedNow } from './state.js';
+import { state, lockedNow, settingsNow } from './state.js';
 import { find } from './find-state.js';
 import { escapeHtml, highlight, ipcErrorText } from './text.js';
 import { toast } from './toast.js';
 import { setActivity } from './activity.js';
-import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys } from './tree.js';
+import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.js';
 import { placePopover } from './popover.js';
 import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.js';
 import { createBooks } from './books.js';
@@ -141,7 +142,7 @@ import { createEditorText } from './editor-text.js';
   let peekTimer = null;
   const isNarrow = () => window.innerWidth < NARROW_W;
   function sidebarLayout() {
-    if (state.settings && state.settings.sidebarCollapsed) return 'float';
+    if (settingsNow().sidebarCollapsed) return 'float';
     return isNarrow() ? 'float' : 'docked';
   }
   // Hidden from the grid: the sidebar takes no column.
@@ -193,7 +194,7 @@ import { createEditorText } from './editor-text.js';
     if (GUEST) { toPeer({ type: 'command', name: 'toggleSidebar' }); return; }
     // Too narrow to dock: the toggle floats it in and out, and the saved choice stays as it is.
     if (isNarrow()) { if (sidebarPeek) unpeekSidebar(); else peekSidebar('sticky'); return; }
-    const collapsed = !!state.settings.sidebarCollapsed;
+    const collapsed = !!settingsNow().sidebarCollapsed;
     sidebarPeek = null;
     updateSettings({ sidebarCollapsed: !collapsed });
   }
@@ -201,7 +202,7 @@ import { createEditorText } from './editor-text.js';
     if (GUEST) return;
     // Stay while something in it is still being used: a name being typed, or its folder menu.
     const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains('is-resizing')
-      || (el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
+      || (!!document.activeElement && el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
     // The hover zone is measured from the pointer, not from an element, so nothing under it goes dead: the edge strip
     // stays narrow and only catches a drag. Nearness is the x position alone (a sidebar sliding in or out under the
     // pointer is the target of moves meanwhile); near the edge or over the sidebar, it stays, whatever order the events come in.
@@ -332,18 +333,18 @@ import { createEditorText } from './editor-text.js';
 
   async function refresh(opts) {
     opts = opts || {};
-    const listOpts = { query: state.query, sort: state.settings.sort };
+    const listOpts = { query: state.query, sort: settingsNow().sort };
     if (state.view === 'trash') listOpts.trashed = true;
     else if (state.query) { /* a search looks across every live note, whatever is selected */ }
     else if (state.view === 'pinned') listOpts.pinned = true;
     else if (state.view === 'reminders') listOpts.reminders = true;
     else if (state.view === 'tag') listOpts.tag = state.tag;
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
-    const wantTree = state.settings.listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
+    const wantTree = settingsNow().listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
     const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
       api.notes.list(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' ? api.folders.path(state.folderId) : Promise.resolve([]),
-      wantTree ? api.notes.outline(state.settings.sort) : Promise.resolve(null),
+      wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
     ]);
     state.notes = notes;
     state.outline = outline;
@@ -352,7 +353,7 @@ import { createEditorText } from './editor-text.js';
     if (state.view === 'folder' && !folderPath.length) {
       // The folder we were looking at is gone; fall back to all notes, and stop starting in it.
       state.view = 'all'; state.folderId = null;
-      if (state.settings.lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {});
+      if (settingsNow().lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {});
       el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all'));
       return refresh(opts);
     }
@@ -400,9 +401,12 @@ import { createEditorText } from './editor-text.js';
     for (const { tag, count } of tags) {
       const b = document.createElement('button');
       b.className = 'nav-item' + (state.view === 'tag' && state.tag === tag ? ' is-active' : '');
-      b.innerHTML = '<span></span><span class="count"></span>';
-      b.firstChild.textContent = tag;
-      b.lastChild.textContent = count;
+      const name = document.createElement('span');
+      name.textContent = tag;
+      const n = document.createElement('span');
+      n.className = 'count';
+      n.textContent = String(count);
+      b.append(name, n);
       b.addEventListener('click', () => setView('tag', tag));
       el.tagList.append(b);
     }
@@ -450,8 +454,7 @@ import { createEditorText } from './editor-text.js';
       if (!n.trashedAt) {
         li.draggable = true;
         li.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/x-note-id', n.id);
-          e.dataTransfer.effectAllowed = 'move';
+          if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; }
           li.classList.add('is-dragging');
           toPeer({ type: 'drag', id: n.id }); // it can be dropped on the right side's tabs
         });
@@ -548,7 +551,7 @@ import { createEditorText } from './editor-text.js';
     state.folderId = view === 'folder' ? arg : null;
     el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
     // Remember the folder so the app starts in it next time.
-    if (!GUEST && (state.settings.lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
+    if (!GUEST && (settingsNow().lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
     await refresh(refreshOpts);
   }
 
@@ -573,18 +576,18 @@ import { createEditorText } from './editor-text.js';
 
   // The list can be put away while a note is open; with no note open it always shows, so there is a way back.
   function syncListCollapsed() {
-    const collapsed = !!(state.settings && state.settings.listCollapsed && state.current);
+    const collapsed = !!(settingsNow().listCollapsed && state.current);
     el.app.classList.toggle('list-collapsed', collapsed);
     if (el.toggleListBtn) el.toggleListBtn.classList.toggle('is-on', !collapsed);
   }
 
   function toggleList() {
-    updateSettings({ listCollapsed: !state.settings.listCollapsed });
+    updateSettings({ listCollapsed: !settingsNow().listCollapsed });
   }
 
   // Search lives in the list, so anything that needs it brings the list back first.
   async function showList() {
-    if (state.settings.listCollapsed) await updateSettings({ listCollapsed: false });
+    if (settingsNow().listCollapsed) await updateSettings({ listCollapsed: false });
   }
 
   // ---- folders -------------------------------------------------------------
@@ -604,7 +607,7 @@ import { createEditorText } from './editor-text.js';
   // The sidebar opens one folder path at a time (the user's rule): the newest folder opened and the folders around it.
   // Older settings could hold several open branches; only the newest one counts, and only as far down as it is open.
   function expandedSet() {
-    const list = (state.settings && state.settings.expandedFolders) || [];
+    const list = (settingsNow().expandedFolders) || [];
     if (!list.length) return new Set();
     const open = new Set();
     for (const id of pathTo(list[list.length - 1])) { if (!list.includes(id)) break; open.add(id); }
@@ -666,7 +669,7 @@ import { createEditorText } from './editor-text.js';
       row.setAttribute('aria-selected', String(row.classList.contains('is-active')));
       row.tabIndex = -1;
       row.draggable = !(editing && editing.mode === 'rename' && editing.id === node.id);
-      row._toggle = kids ? (on) => setExpanded(node.id, on) : null;
+      setRowToggle(row, kids ? (on) => setExpanded(node.id, on) : null);
 
       const chevron = document.createElement('button');
       chevron.className = 'folder-chevron' + (kids ? (isOpen ? ' is-open' : '') : ' is-leaf');
@@ -714,12 +717,11 @@ import { createEditorText } from './editor-text.js';
         if (kids && !isOpen) setExpanded(node.id, true);
         setView('folder', node.id);
       });
-      row.addEventListener('dblclick', (e) => { if (!e.target.closest('.folder-input')) { e.preventDefault(); startRename(node.id); } });
+      row.addEventListener('dblclick', (e) => { if (!(e.target instanceof Element && e.target.closest('.folder-input'))) { e.preventDefault(); startRename(node.id); } });
       row.addEventListener('contextmenu', (e) => { e.preventDefault(); openFolderMenu(node.id, row, e); });
       wireDropTarget(row, node.id);
       row.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/x-folder-id', node.id);
-        e.dataTransfer.effectAllowed = 'move';
+        if (e.dataTransfer) { e.dataTransfer.setData('text/x-folder-id', node.id); e.dataTransfer.effectAllowed = 'move'; }
         row.classList.add('is-dragging');
       });
       row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
@@ -737,10 +739,11 @@ import { createEditorText } from './editor-text.js';
       const row = document.createElement('div');
       row.className = 'folder-row is-active';
       row.style.setProperty('--depth', depth);
-      row.append(document.createElement('span'));
-      row.firstChild.className = 'folder-chevron is-leaf';
+      const chevron = document.createElement('span');
+      chevron.className = 'folder-chevron is-leaf';
+      row.append(chevron);
       row.append(folderInput('', (value) => commitFolderEdit(value)));
-      if (editing.book) row.insertAdjacentHTML('beforeend', bookMark());
+      if (editing && editing.book) row.insertAdjacentHTML('beforeend', bookMark());
       return row;
     };
     const frag = document.createDocumentFragment();
@@ -821,14 +824,14 @@ import { createEditorText } from './editor-text.js';
     const refocus = treeFocusKey(root);
     root.innerHTML = '';
     const out = state.outline || {};
-    const open = new Set(state.settings.treeExpanded || []);
+    const open = new Set(settingsNow().treeExpanded || []);
     const scopeId = state.view === 'folder' ? state.folderId : null;
     const scopeNode = scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) : null;
     const here = new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []);
     const heads = currentHeadings();
     const minLevel = heads.length ? Math.min(...heads.map((h) => h.level)) : 1;
     const setOpen = (id, on) => {
-      const next = new Set(state.settings.treeExpanded || []);
+      const next = new Set(settingsNow().treeExpanded || []);
       if (on) next.add(id); else next.delete(id);
       updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
     };
@@ -849,7 +852,7 @@ import { createEditorText } from './editor-text.js';
       row.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
       row.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
       row.draggable = true;
-      row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; row.classList.add('is-dragging'); toPeer({ type: 'drag', id: n.id }); });
+      row.addEventListener('dragstart', (e) => { if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; } row.classList.add('is-dragging'); toPeer({ type: 'drag', id: n.id }); });
       row.addEventListener('dragend', () => { row.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
       into.append(row);
       // The open note's outline, as Google Docs shows it: its headings, indented by level; a click goes there.
@@ -864,8 +867,11 @@ import { createEditorText } from './editor-text.js';
           hr.setAttribute('role', 'treeitem');
           hr.setAttribute('aria-level', String(depth + 2 + (h.level - minLevel)));
           hr.tabIndex = -1;
-          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name"></span>';
-          hr.querySelector('.row-name').textContent = h.text;
+          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>';
+          const hName = document.createElement('span');
+          hName.className = 'row-name';
+          hName.textContent = h.text;
+          hr.append(hName);
           hr.title = h.text;
           hr.addEventListener('click', () => jumpToHeading(i));
           group.append(hr);
@@ -887,11 +893,17 @@ import { createEditorText } from './editor-text.js';
       row.setAttribute('aria-level', String(depth + 1));
       if (kids) row.setAttribute('aria-expanded', String(isOpen));
       row.tabIndex = -1;
-      row._toggle = kids ? (on) => setOpen(node.id, on) : null;
-      row.innerHTML = '<span class="tree-chevron' + (isOpen ? ' is-open' : '') + (kids ? '' : ' is-leaf') + '" aria-hidden="true">' + I('chevron-right') + '</span>'
-        + '<span class="row-name"></span>' + (node.book ? bookMark() : '') + '<span class="count"></span>';
-      row.querySelector('.row-name').textContent = node.name;
-      row.querySelector('.count').textContent = node.count || '';
+      setRowToggle(row, kids ? (on) => setOpen(node.id, on) : null);
+      row.innerHTML = '<span class="tree-chevron' + (isOpen ? ' is-open' : '') + (kids ? '' : ' is-leaf') + '" aria-hidden="true">' + I('chevron-right') + '</span>';
+      const rowName = document.createElement('span');
+      rowName.className = 'row-name';
+      rowName.textContent = node.name;
+      row.append(rowName);
+      if (node.book) row.insertAdjacentHTML('beforeend', bookMark());
+      const rowCount = document.createElement('span');
+      rowCount.className = 'count';
+      rowCount.textContent = node.count ? String(node.count) : '';
+      row.append(rowCount);
       row.title = node.name;
       row.addEventListener('click', () => { if (kids) setOpen(node.id, !isOpen); });
       row.addEventListener('contextmenu', (e) => { e.preventDefault(); openFolderMenu(node.id, row, e); });
@@ -932,7 +944,7 @@ import { createEditorText } from './editor-text.js';
   function revealInTree(note) {
     if (GUEST || !treeModeActive() || !note || !note.folderId) return;
     const path = pathTo(note.folderId);
-    const have = new Set(state.settings.treeExpanded || []);
+    const have = new Set(settingsNow().treeExpanded || []);
     const missing = path.filter((id) => !have.has(id));
     state.revealInTree = note.id;
     if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
@@ -1156,6 +1168,8 @@ import { createEditorText } from './editor-text.js';
 
   const GUEST = new URLSearchParams(location.search).get('pane') === 'right';
   const SIDE = GUEST ? 'right' : 'left';
+  /** @type {{ ids: (string | null)[], at: number, titles: Map<string, string>, split: boolean, active: 'left' | 'right', activeHere: boolean, ratio: number,
+   *   frame: HTMLIFrameElement | null, peerReady: boolean, queue: object[], peerIds: string[], peerCurrent: string | null, dragIndex: number | null, peerDrag: string | null }} */
   const tabs = {
     ids: [],            // note ids in tab order; null is an empty tab
     at: 0,              // the tab on screen
@@ -1217,7 +1231,7 @@ import { createEditorText } from './editor-text.js';
     renderTabs();
   }
 
-  function openIds() { return tabs.ids.filter(Boolean); }
+  function openIds() { return tabs.ids.flatMap((id) => (id ? [id] : [])); }
 
   function tabTitle(id) {
     if (!id) return 'New tab';
@@ -1315,7 +1329,7 @@ import { createEditorText } from './editor-text.js';
         left: { ids: openIds(), current: state.currentId },
         right: { ids: tabs.split ? tabs.peerIds.slice() : [], current: tabs.split ? tabs.peerCurrent : null },
       };
-      if (JSON.stringify(panes) === JSON.stringify(state.settings.panes)) return;
+      if (JSON.stringify(panes) === JSON.stringify(settingsNow().panes)) return;
       updateSettings({ panes }).catch(() => {}); // only the layout; losing one write costs nothing
     }, 1500);
   }
@@ -1403,7 +1417,7 @@ import { createEditorText } from './editor-text.js';
     opts = opts || {};
     if (!GUEST && tabs.split && !tabs.ids.includes(id) && (peerHas(id) || tabs.active === 'right')) {
       toPeer({ type: 'open', id, newTab: !!opts.newTab, focus: opts.focus || null });
-      if (opts.focus) tabs.frame.focus();
+      if (opts.focus && tabs.frame) tabs.frame.focus();
       return Promise.resolve();
     }
     return selectNote(id, opts);
@@ -1455,7 +1469,7 @@ import { createEditorText } from './editor-text.js';
   }
 
   function dropFrame() {
-    tabs.frame.remove();
+    if (tabs.frame) tabs.frame.remove();
     tabs.frame = null;
     tabs.split = false;
     tabs.peerReady = false;
@@ -1636,8 +1650,7 @@ import { createEditorText } from './editor-text.js';
       const t = e.target.closest('.tab');
       if (!t) return;
       tabs.dragIndex = Number(t.dataset.index);
-      e.dataTransfer.setData('text/x-notes-tab', t.dataset.index);
-      e.dataTransfer.effectAllowed = 'move';
+      if (e.dataTransfer) { e.dataTransfer.setData('text/x-notes-tab', String(tabs.dragIndex)); e.dataTransfer.effectAllowed = 'move'; }
       toPeer({ type: 'drag', id: tabs.ids[tabs.dragIndex] || null });
     });
     el.tabList.addEventListener('dragend', () => { tabs.dragIndex = null; toPeer({ type: 'drag', id: null }); });
@@ -1763,7 +1776,7 @@ import { createEditorText } from './editor-text.js';
     el.bodyInput.placeholder = plainFile ? 'Plain text.' : 'Markdown source. Ctrl+E switches back to the rendered view.';
     // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
     // A CSV opens as its table; other plain files as their text; Markdown by the setting (or as source when lossy).
-    const wantSource = H.isTableFile(note) ? false : (plainFile || state.settings.editorMode === 'source' || !lossless || !state.rich);
+    const wantSource = H.isTableFile(note) ? false : (plainFile || settingsNow().editorMode === 'source' || !lossless || !state.rich);
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (markdown && !lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
@@ -1969,7 +1982,8 @@ import { createEditorText } from './editor-text.js';
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || !!H.CRAFT_OF[note.fileKind]));
     el.editor.classList.toggle('shows-image', isFile && note.fileKind === 'image');
     // A Craft app is a whole office app: it gets the note's area, and shows its own title, counts and status.
-    const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
+    const craft = isFile ? craftFor(note) : null;
+    const inCraft = !!craft && craft.usable();
     el.editorColumn.classList.toggle('shows-craft', inCraft);
     el.editor.classList.toggle('shows-craft', inCraft);
     syncTextViews(note);
@@ -2035,7 +2049,7 @@ import { createEditorText } from './editor-text.js';
         // Opening the file that is already open: linking re-read it, so show it as it is now (unless the person
         // has unsaved typing in it). Selecting it again would do nothing, and the poll would then see no change.
         const fresh = await api.notes.get(res.firstId);
-        if (fresh && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id)
+        if (fresh && state.current && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id)
           && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
       } else await openNote(res.firstId);
     }
@@ -2123,7 +2137,7 @@ import { createEditorText } from './editor-text.js';
     // Edits that bypass the input event (Tab, list keys, Ctrl+B/I/K wrappers) still keep find's offsets honest.
     if (find.open && state.sourceMode) runFind(true, true, true);
     setSaved('Saving…');
-    clearTimeout(state.saveTimer);
+    if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(flushSave, 350);
     if (state.current) updateStatus(state.current);
   }
@@ -2140,9 +2154,9 @@ import { createEditorText } from './editor-text.js';
   }
 
   function scheduleRetry() {
-    clearTimeout(state.retryTimer);
+    if (state.retryTimer) clearTimeout(state.retryTimer);
     state.retryTimer = setTimeout(async () => {
-      if (state.pending.has(state.currentId)) { state.dirty = true; await flushSave(); }
+      if (state.currentId && state.pending.has(state.currentId)) { state.dirty = true; await flushSave(); }
       await retryPending();
     }, 3000);
   }
@@ -2232,7 +2246,7 @@ import { createEditorText } from './editor-text.js';
   }
 
   async function flushTextSave() {
-    clearTimeout(state.saveTimer);
+    if (state.saveTimer) clearTimeout(state.saveTimer);
     if (!state.dirty || !state.currentId) return true;
     const id = state.currentId;
     const patch = currentPatch();
@@ -2274,7 +2288,7 @@ import { createEditorText } from './editor-text.js';
       const prevTags = (state.notes[idx].tags || []).join(',');
       state.notes[idx] = updated;
       refreshRow(updated);
-      if (state.settings.sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
+      if (settingsNow().sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
       else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
     // Tags may have changed: cheap to refresh the tag list.
@@ -2344,7 +2358,7 @@ import { createEditorText } from './editor-text.js';
   async function destroyCurrent() {
     if (!state.current) return;
     if (!window.confirm('Delete "' + H.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
-    state.pending.delete(state.currentId);
+    if (state.currentId) state.pending.delete(state.currentId);
     state.dirty = false;
     await api.notes.destroy(state.currentId);
     clearEditor();
@@ -2399,7 +2413,7 @@ import { createEditorText } from './editor-text.js';
   // ---- settings dialog -----------------------------------------------------
 
   function openSettings() {
-    const s = state.settings;
+    const s = settingsNow();
     draft = {};
     el.hotkeyInput.value = H.displayAccelerator(s.hotkey).replace(/ /g, '');
     el.hotkeyError.textContent = '';
@@ -2435,12 +2449,14 @@ import { createEditorText } from './editor-text.js';
   // Settings changed in the dialog are held here, shown on the page as a preview, and written only by Save changes.
   // Closing the dialog with changes (Esc, Cancel, a click outside) asks first. Actions in the dialog (Commit now,
   // Add a folder, Import) are not settings and run at once.
+  /** @type {SettingsPatch} */
   let draft = {};
+  const settingKeys = (o) => /** @type {(keyof Settings)[]} */ (Object.keys(o));
   const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
   const draftSettings = () => Object.assign({}, state.settings, draft);
-  function settingsDirty() { return Object.keys(draft).some((k) => !same(draft[k], state.settings[k])); }
+  function settingsDirty() { return settingKeys(draft).some((k) => !same(draft[k], settingsNow()[k])); }
   function setDraft(patch) {
-    for (const k of Object.keys(patch)) { if (same(patch[k], state.settings[k])) delete draft[k]; else draft[k] = patch[k]; }
+    for (const k of settingKeys(patch)) { if (same(patch[k], settingsNow()[k])) delete draft[k]; else draft[k] = patch[k]; }
     previewSettings();
     syncSettingsDirty();
   }
@@ -2492,7 +2508,7 @@ import { createEditorText } from './editor-text.js';
   // Esc, Cancel or a click outside: straight out when nothing changed, otherwise the question.
   function requestCloseSettings() {
     if (!settingsDirty()) { closeSettings(); return; }
-    const names = Object.keys(draft).filter((k) => !same(draft[k], state.settings[k])).map((k) => SETTING_NAMES[k] || k);
+    const names = settingKeys(draft).filter((k) => !same(draft[k], settingsNow()[k])).map((k) => SETTING_NAMES[k] || k);
     el.settingsSaveList.textContent = 'Not saved yet: ' + names.join(', ') + '.';
     el.settingsSaveDialog.showModal();
   }
@@ -2525,7 +2541,7 @@ import { createEditorText } from './editor-text.js';
         const dot = document.createElement('span'); dot.className = 'swatch-accent';
         sample.append(aa, dot);
         sample.insertAdjacentHTML('beforeend', I('check'));
-        sample.lastElementChild.classList.add('swatch-check');
+        if (sample.lastElementChild) sample.lastElementChild.classList.add('swatch-check');
         const name = document.createElement('span'); name.className = 'swatch-name'; name.textContent = id === T().CUSTOM ? 'Custom' : T().SCHEMES[id].name;
         b.append(sample, name);
         el.schemeGrid.append(b);
@@ -2640,7 +2656,7 @@ import { createEditorText } from './editor-text.js';
   function collectMatches(root, tokens, out) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node; (node = walker.nextNode());) {
-      const text = node.textContent.toLowerCase();
+      const text = (node.textContent || '').toLowerCase();
       for (const t of tokens) {
         for (let i = text.indexOf(t); i !== -1; i = text.indexOf(t, i + t.length)) {
           const r = new Range();
@@ -2653,7 +2669,7 @@ import { createEditorText } from './editor-text.js';
   }
 
   function syncListModeSeg() {
-    const mode = state.settings.listMode;
+    const mode = settingsNow().listMode;
     el.listModeSeg.querySelectorAll('button').forEach((b) => { const on = b.dataset.mode === mode; b.classList.toggle('is-on', on); b.setAttribute('aria-checked', String(on)); });
   }
 
@@ -2750,12 +2766,12 @@ import { createEditorText } from './editor-text.js';
       ...[...el.moreMenu.querySelectorAll('.menu-item')].map((b) => fromButton(b, 'This note')),
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
-      ...[...el.shareMenu.querySelectorAll('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: b.textContent.trim(), icon: 'share-2', keys: '', ok: noteOpen && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action) })),
+      ...[...el.shareMenu.querySelectorAll('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action) })),
       cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
-      cmd('list-mode', 'View', state.settings && state.settings.listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', state.settings && state.settings.listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: state.settings.listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
-      cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(state.settings && state.settings.sidebarCollapsed && state.settings.listCollapsed), 'zen distraction free writing'),
-      cmd('width', 'View', state.settings && state.settings.editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: state.settings.editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
+      cmd('list-mode', 'View', settingsNow().listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', settingsNow().listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: settingsNow().listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
+      cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), 'zen distraction free writing'),
+      cmd('width', 'View', settingsNow().editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
       fromButton(el.splitViewBtn, 'View', { title: 'Split view: open a second side', ok: usable(el.splitViewBtn) }),
       cmd('new-tab', 'View', 'New tab', 'plus', 'Ctrl+T', newEmptyTab),
       cmd('close-tab', 'View', 'Close this tab', 'x', 'Ctrl+W', () => closeTab(tabs.at), tabs.ids.length > 0),
@@ -2764,8 +2780,8 @@ import { createEditorText } from './editor-text.js';
       ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
       ...[...el.tagList.querySelectorAll('.nav-item')].map((b) => cmd('tag-' + b.firstChild.textContent, 'Go to', 'Tag: #' + b.firstChild.textContent, 'hash', '', () => b.click(), !GUEST)),
       cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font search'),
-      ...Object.keys(NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (state.settings && state.settings.colorScheme) !== id, 'theme colors appearance')),
-      cmd('scheme-custom', 'View', 'Colour scheme: custom colours…', 'palette', '', side('settings', () => { openSettings(); document.getElementById('set-appearance').scrollIntoView({ block: 'start' }); }), true, 'theme colors appearance pick'),
+      ...Object.keys(NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (settingsNow().colorScheme) !== id, 'theme colors appearance')),
+      cmd('scheme-custom', 'View', 'Colour scheme: custom colours…', 'palette', '', side('settings', () => { openSettings(); document.getElementById('set-appearance')?.scrollIntoView({ block: 'start' }); }), true, 'theme colors appearance pick'),
       cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
       cmd('export-all', 'App', 'Export all notes…', 'download', '', () => el.exportAllBtn.click(), !GUEST, 'backup json'),
       cmd('data-folder', 'App', 'Open the data folder', 'folder-open', '', () => el.dataFolderBtn.click(), !GUEST),
@@ -2907,7 +2923,7 @@ import { createEditorText } from './editor-text.js';
     bindMenuKeys();
     bindSettingsNav();
     bindSidebarFloat();
-    el.tagsFold.addEventListener('click', () => updateSettings({ tagsCollapsed: !state.settings.tagsCollapsed }));
+    el.tagsFold.addEventListener('click', () => updateSettings({ tagsCollapsed: !settingsNow().tagsCollapsed }));
     bindTreeKeys(el.folderTree);
     bindTreeKeys(el.noteTree);
     el.listModeSeg.addEventListener('click', (e) => {
@@ -3089,7 +3105,7 @@ import { createEditorText } from './editor-text.js';
     window.addEventListener('resize', () => {
       if (!state.settings) return;
       applySidebar();
-      applyPaneWidths(state.settings.sidebarWidth, state.settings.listWidth);
+      applyPaneWidths(settingsNow().sidebarWidth, settingsNow().listWidth);
     });
 
     el.searchInput.addEventListener('input', () => {
@@ -3250,9 +3266,9 @@ import { createEditorText } from './editor-text.js';
         const fresh = await api.notes.get(wanted);
         if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
         if (!fresh && wanted === state.currentId && !state.dirty) { clearEditor(); if (!GUEST) await refresh(); return; }
-        if (fresh && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshRow(fresh); }
+        if (fresh && state.current && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshRow(fresh); }
         // A PDF or Word file is shown from the file, so a new version of it (same text or not) is shown too.
-        if (fresh && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+        if (fresh && state.current && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
         else if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
             // Someone else typed. Take their text unless this person is typing right now or a save of their
