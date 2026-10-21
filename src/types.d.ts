@@ -108,6 +108,47 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null;
 }
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
+// ---- What the channels below return (recorded from the handlers; a change there changes these first) ----
+interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean }
+interface RelatedNotes { outgoing: RelatedItem[]; incoming: RelatedItem[]; byTags: RelatedItem[] }
+interface GitState {
+  available: boolean | null; enabled: boolean; initialized: boolean; repoDir: string; remote: string; commits: number;
+  lastCommitAt: number | null; lastPushAt: number | null; lastError: string | null; pending: boolean;
+}
+type GitResult = { ok: true; nothingToCommit?: boolean } | { ok: false; error?: string | null; skipped?: string };
+interface GitCommit { hash: string; at: number; subject: string }
+type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
+type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
+type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };
+// A live share as the page shows it (live.js reports it on every change).
+interface LiveStatus {
+  role: 'host' | 'guest'; url: string; peers: number; connected: boolean; version?: number;
+  error?: string | null; localOnly?: boolean; pending?: boolean; ended?: boolean;
+}
+
+interface VaultStatus {
+  isRepo: boolean; branch?: string; remote?: string; ahead?: number; behind?: number; dirty?: boolean;
+  syncing?: boolean; lastSyncAt?: number | null; conflict?: boolean; lastError?: string | null;
+}
+interface VaultView extends Vault { status: VaultStatus; rootFolderId: string | null }
+type VaultResult = { ok: true; reason?: string } | { ok: false; error?: string; skipped?: string };
+interface VaultScan { added: number; updated: number; removed: number; notes?: number; folders?: number; unavailable?: boolean }
+interface Attachment { name: string; href: string; size: number }
+type AttachmentResult = Attachment | { error: string; name: string };
+interface AgentFile { filePath: string; label: string }
+interface LinkResult { ok: boolean; linked: string[]; failed: string[]; firstId: string | null }
+interface DocxPatch { start: number; end: number; old: string; xml: string }
+// How main saved an edited file: in place (with the mtime, and whether the first backup of the session was taken),
+// or into a copy beside it because the file changed on disk since it was opened.
+type SavedFile = { mtime: number | null; backup: boolean; savedAs?: undefined } | { savedAs: string; newCopy: boolean; mtime?: undefined };
+type CraftSave = SavedFile | { exported: string; own?: boolean } | { relinked: string; mtime: number };
+interface ConvertOption { to: string; label: string; note: string }
+type ConvertResult = { ok: true; filePath: string; warning: string } | { ok: false; error: string };
+type MarkdownResult = { ok: true; markdown: string } | { ok: false; error: string };
+type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: false; error: string };
+interface WorkspaceImport { updated: number; created: number; missing: number; conflicts: number; details: string[]; updatedIds?: string[]; error?: string }
+type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
+
 interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
 type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string } | { ok: false; error: string };
 
@@ -129,7 +170,7 @@ interface IpcContract {
   'notes:emptyTrash': () => number;
   'notes:tags': () => TagCount[];
   'notes:counts': () => Counts;
-  'notes:related': (id: string) => unknown;
+  'notes:related': (id: string) => RelatedNotes | null;
   'folders:tree': () => FolderNode[];
   'folders:path': (id: string) => { id: string; name: string }[];
   'folders:create': (data: { name?: string; parentId?: string | null }) => Folder;
@@ -140,87 +181,87 @@ interface IpcContract {
   'folders:reorderPages': (id: string, ids: string[]) => Folder | null;
   'settings:get': () => Settings;
   'settings:set': (patch: SettingsPatch) => SettingsResult;
-  'git:status': () => unknown;
-  'git:commit': () => unknown;
-  'git:push': () => unknown;
-  'git:history': (limit?: number) => unknown;
+  'git:status': () => GitState;
+  'git:commit': () => GitResult;
+  'git:push': () => GitResult;
+  'git:history': (limit?: number) => GitCommit[];
   'app:info': () => AppInfo;
   'app:hide': () => void;
   'app:titleBar': (colors: { color: string; symbol: string }) => boolean;
-  'app:print': () => unknown;
-  'app:rendererReady': () => unknown;
+  'app:print': () => PrintResult;
+  'app:rendererReady': () => { visible: boolean };
   'app:dictate': () => { ok: boolean; method?: string; dryRun?: boolean; error?: string };
   'app:openDataFolder': () => string;
   'app:openExternal': (url: string) => void;
-  'app:exportNote': (id: string) => unknown;
-  'app:copy': (data: { text?: string; html?: string }) => unknown;
-  'app:emailNote': (id: string) => unknown;
-  'app:pdfPath': (id: string) => unknown;
-  'app:writePdf': (filePath: string) => unknown;
-  'app:exportHtml': (id: string, bodyHtml: string) => unknown;
-  'app:exportAll': () => unknown;
+  'app:exportNote': (id: string) => FileResult;
+  'app:copy': (data: { text?: string; html?: string }) => boolean;
+  'app:emailNote': (id: string) => EmailResult;
+  'app:pdfPath': (id: string) => FileResult;
+  'app:writePdf': (filePath: string) => FileResult;
+  'app:exportHtml': (id: string, bodyHtml: string) => FileResult;
+  'app:exportAll': () => FileResult;
   'app:importMarkdown': () => { canceled?: boolean; count: number; firstId?: string | null; failed?: string[] };
   'history:versions': (id: string, limit?: number) => HistoryVersions;
-  'lock:set': (id: string, password: string) => unknown;
-  'lock:unlock': (id: string, password: string) => unknown;
+  'lock:set': (id: string, password: string) => PublicNote | null;
+  'lock:unlock': (id: string, password: string) => PublicNote | null;
   'lock:relock': (id: string) => PublicNote | null;
-  'lock:remove': (id: string, password: string) => unknown;
+  'lock:remove': (id: string, password: string) => PublicNote | null;
   'live:host': (id: string) => Ok<{ status: unknown }>;
   'live:join': (url: string, folderId?: string | null) => Ok<{ noteId: string; status: unknown }>;
-  'live:stop': (id: string) => unknown;
-  'live:status': (id: string) => unknown;
+  'live:stop': (id: string) => boolean;
+  'live:status': (id: string) => LiveStatus | null;
   'stickies:list': () => { id: string; title: string; sticky: Sticky | null; open: boolean }[];
   'stickies:open': (id: string) => boolean;
   'stickies:close': (id: string, opts?: { forget?: boolean }) => boolean;
   'stickies:create': () => PublicNote | null;
-  'stickies:setColor': (id: string, color: string) => unknown;
-  'stickies:setOnTop': (id: string, onTop: boolean) => unknown;
+  'stickies:setColor': (id: string, color: string) => Sticky | null | undefined;
+  'stickies:setOnTop': (id: string, onTop: boolean) => Sticky | null | undefined;
   'stickies:openInNotes': (id: string) => boolean;
   'files:openDialog': () => { ok: boolean; canceled?: boolean; linked: string[]; failed: string[]; firstId?: string | null };
   'files:link': (paths: string[], opts?: Record<string, unknown>) => { ok: boolean; linked: string[]; failed: string[]; firstId: string | null };
-  'files:refresh': (id: string) => unknown;
+  'files:refresh': (id: string) => { changed: boolean; missing: boolean };
   'files:reveal': (id: string) => void;
   'files:openExternal': (id: string) => string;
   'files:pdfBytes': (id: string) => Buffer;
-  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number) => unknown;
+  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number) => SavedFile;
   'files:pdfApplyPages': (id: string, bytes: Uint8Array | null, rotations: number[], expectedMtime: number) => Ok<{ mtime: number | null; backup: string }>;
   'files:pdfRestore': (id: string, name: string, expectedMtime: number) => Ok<{ mtime: number | null }>;
   'files:pdfComments': (id: string, ops: unknown[], expectedMtime: number) => Ok<{ mtime: number | null; backup: string }>;
   'files:pdfPickPages': () => Ok<{ name: string; bytes: Buffer }>;
-  'files:saveDocx': (...args: unknown[]) => unknown;
-  'files:saveCraft': (...args: unknown[]) => unknown;
-  'files:documentBytes': (id: string) => unknown;
-  'files:docxBytes': (id: string) => unknown;
-  'files:imageBytes': (id: string) => unknown;
-  'files:convertOptions': (id: string) => unknown;
-  'files:convert': (id: string, to: string) => unknown;
-  'files:asMarkdown': (id: string) => unknown;
+  'files:saveDocx': (id: string, patches: DocxPatch[], expectedMtime: number) => SavedFile;
+  'files:saveCraft': (id: string, bytes: Uint8Array, name: string, expectedMtime: number) => CraftSave;
+  'files:documentBytes': (id: string) => Uint8Array;
+  'files:docxBytes': (id: string) => Uint8Array;
+  'files:imageBytes': (id: string) => { bytes: Uint8Array; mime: string };
+  'files:convertOptions': (id: string) => ConvertOption[];
+  'files:convert': (id: string, to: string) => ConvertResult;
+  'files:asMarkdown': (id: string) => MarkdownResult;
   'signature:get': () => Buffer | null;
   'signature:set': (bytes: Uint8Array) => Ok;
   'signature:forget': () => Ok;
-  'agentFiles:discover': () => unknown;
-  'agentFiles:link': (...args: unknown[]) => unknown;
-  'attachments:pick': () => unknown;
-  'attachments:addPaths': (paths: string[]) => unknown[];
-  'attachments:saveRecording': (bytes: Uint8Array, ext: string) => unknown;
-  'attachments:open': (href: string) => unknown;
-  'attachments:reveal': (href: string) => unknown;
-  'bot:run': (opts?: Record<string, any>) => unknown;
+  'agentFiles:discover': () => AgentFile[];
+  'agentFiles:link': () => LinkResult & { folderId: string; found: number };
+  'attachments:pick': () => AttachmentResult[];
+  'attachments:addPaths': (paths: string[]) => AttachmentResult[];
+  'attachments:saveRecording': (bytes: Uint8Array, ext: string) => Attachment;
+  'attachments:open': (href: string) => string;
+  'attachments:reveal': (href: string) => boolean;
+  'bot:run': (opts?: { prompt?: string; noteId?: string | null; allowEdits?: boolean }) => BotRun;
   'bot:cancel': () => boolean;
-  'bot:openTerminal': (noteId: string) => unknown;
-  'bot:importWorkspace': () => unknown;
-  'book:export': (format: string, data?: { name?: string; html?: string; markdown?: string; dialogTitle?: string }) => unknown;
-  'vaults:list': () => unknown;
+  'bot:openTerminal': (noteId: string | null) => BotRun;
+  'bot:importWorkspace': () => WorkspaceImport | { error: string };
+  'book:export': (format: string, data?: { name?: string; html?: string; markdown?: string; dialogTitle?: string }) => BookExport;
+  'vaults:list': () => VaultView[];
   'vaults:pickFolder': () => string | null;
-  'vaults:add': (data: { path: string; name?: string; remote?: string }) => unknown;
-  'vaults:clone': (url: string, dest: string, name?: string) => unknown;
-  'vaults:update': (id: string, patch: Partial<Vault>) => unknown;
-  'vaults:remove': (id: string) => unknown;
-  'vaults:sync': (id: string) => unknown;
-  'vaults:scan': (id: string) => unknown;
-  'vaults:initRepo': (id: string, remote?: string) => unknown;
-  'vaults:status': (id: string) => unknown;
-  'vaults:openFolder': (id: string) => unknown;
+  'vaults:add': (data: { path: string; name?: string; remote?: string }) => VaultView;
+  'vaults:clone': (url: string, dest: string, name?: string) => { ok: true; vault: VaultView } | { ok: false; error: string };
+  'vaults:update': (id: string, patch: Partial<Vault>) => VaultView | null | { ok: false; error: string };
+  'vaults:remove': (id: string) => boolean;
+  'vaults:sync': (id: string) => VaultResult;
+  'vaults:scan': (id: string) => VaultScan | null;
+  'vaults:initRepo': (id: string, remote?: string) => VaultResult;
+  'vaults:status': (id: string) => VaultStatus | null;
+  'vaults:openFolder': (id: string) => string;
 }
 type IpcChannel = keyof IpcContract;
 type IpcArgs<K extends IpcChannel> = Parameters<IpcContract[K]>;

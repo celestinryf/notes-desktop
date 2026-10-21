@@ -852,7 +852,7 @@ function main() {
     const dest = path.join(parentDir, safe);
     if (fs.existsSync(dest)) return { ok: false, error: 'A folder named "' + safe + '" already exists there.' };
     const r = await VaultManager.clone(url, dest);
-    if (!r.ok) return r;
+    if (!r.ok) return { ok: false, error: r.error || 'The clone failed.' };
     let v;
     try { v = store.addVault({ path: dest, name: safe, remote: url }); }
     catch (err) { try { fs.rmSync(dest, { recursive: true, force: true }); } catch (_) { /* leave it */ } return { ok: false, error: err.message }; } // no orphan clone on disk
@@ -1335,7 +1335,7 @@ function main() {
     try { return { ok: true, markdown: convert.inlinePicturesOnly((await convert.toMarkdown(n)).markdown) }; } catch (err) { return { ok: false, error: err.message }; }
   });
   handle('files:convert', async (_e, id, to) => {
-    try { return Object.assign({ ok: true }, await convert.convertFile(store.get(id), to, printers)); }
+    try { const r = await convert.convertFile(store.get(id), to, printers); return { ok: true, filePath: r.filePath, warning: r.warning }; }
     catch (err) { return { ok: false, error: err.message }; }
   });
 

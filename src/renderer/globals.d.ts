@@ -21,17 +21,6 @@ interface Window {
   NotesIcons?: { svg(name: string, size?: number): string; hydrate(root?: ParentNode | null): void; names: string[] };
 }
 
-// A live share as the page shows it (live.js reports it on every change).
-interface LiveStatus {
-  role: 'host' | 'guest'; url: string; peers: number; connected: boolean; version?: number;
-  error?: string | null; localOnly?: boolean; pending?: boolean; ended?: boolean;
-}
-
-interface VaultStatus {
-  isRepo: boolean; branch?: string; remote?: string; ahead?: number; behind?: number; dirty?: boolean;
-  syncing?: boolean; lastSyncAt?: number | null; conflict?: boolean; lastError?: string | null;
-}
-
 interface FolderEdit { mode: 'create' | 'rename'; id?: string; parentId?: string | null; book?: boolean }
 
 // The main page's state (state.js). Everything the page remembers between events lives here.
