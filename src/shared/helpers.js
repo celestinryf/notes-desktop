@@ -320,6 +320,11 @@
     return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
   }
 
+  // An opened file whose text is not Markdown: plain text, Word, PDF, a sheet, a picture.
+  function isNonMarkdownFile(note) {
+    return isPlainTextFile(note) || isViewerOnlyFile(note);
+  }
+
   // Word documents (fileKind 'docx'): everything WordCraft opens. Word's own zip formats are saved where they are; the
   // others (RTF, ODT, the old binary .doc) WordCraft saves as a .docx beside them, and the note moves to it.
   const WORD_EXT = new Set(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt']);
@@ -462,7 +467,7 @@
 
   return {
     fuzzyScore,
-    splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
+    splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
     WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
     UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
     countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,

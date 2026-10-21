@@ -159,3 +159,23 @@ test('safeFilename never cuts through a surrogate pair', () => {
   assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out), 'no lone surrogate');
   assert.equal(Array.from(out).length, 80);
 });
+
+test('file kind helpers: Markdown files render, other text files are plain, everything else is viewer-only', () => {
+  const md = { filePath: 'C:/v/note.md', fileKind: 'text' };
+  const txt = { filePath: 'C:/v/readme.txt', fileKind: 'text' };
+  const code = { filePath: 'C:/v/main.rs', fileKind: 'text' };
+  const pdf = { filePath: 'C:/v/paper.pdf', fileKind: 'pdf' };
+  const plain = { title: 'no file', body: 'x' };
+  assert.equal(H.isPlainTextFile(md), false);
+  assert.equal(H.isPlainTextFile(txt), true);
+  assert.equal(H.isPlainTextFile(code), true);
+  assert.equal(H.isPlainTextFile(pdf), false);
+  assert.equal(H.isViewerOnlyFile(pdf), true);
+  assert.equal(H.isViewerOnlyFile(txt), false);
+  assert.equal(H.isNonMarkdownFile(md), false);
+  assert.equal(H.isNonMarkdownFile(txt), true);
+  assert.equal(H.isNonMarkdownFile(pdf), true);
+  assert.equal(H.isNonMarkdownFile(plain), false);
+  assert.equal(H.isNonMarkdownFile(null), false);
+  assert.equal(H.isNonMarkdownFile({ filePath: 'C:/v/x.MARKDOWN', fileKind: 'text' }), false);
+});
