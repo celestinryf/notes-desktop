@@ -18,7 +18,7 @@ const NAMES = [
   'sun-moon', 'settings', 'check', 'circle-alert', 'save', 'pin-off', 'book', 'mail', 'list-filter', 'arrow-right-left',
   // documents
   'eye', 'highlighter', 'type', 'pencil', 'image', 'signature', 'message-square', 'layout-grid', 'undo-2', 'redo-2',
-  'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'square-stack',
+  'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'square-stack', 'palette',
 ];
 
 const pkg = path.dirname(require.resolve('lucide-static/package.json'));

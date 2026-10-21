@@ -16,10 +16,20 @@
   const CUSTOM = 'custom';
 
   // Premade schemes: { id: { name, light: seed, dark: seed } }, a seed being { background, text, accent }.
-  // Only the built-in one so far; the premade ones are still to be designed with the user.
+  // The seeds are only a start: derive() makes every token from them and keeps the text readable. The order here
+  // is the order of the swatches in Settings. Names and seeds were chosen by the agent on 2026-10-20; change freely.
   const SCHEMES = {
     notes: { name: 'Notes', builtIn: true },
+    paper: { name: 'Paper', light: { background: '#fafafa', text: '#1f1f1f', accent: '#3c6fd1' }, dark: { background: '#1c1c1e', text: '#ebebeb', accent: '#7aa2f7' } },
+    slate: { name: 'Slate', light: { background: '#f3f5f8', text: '#1d2430', accent: '#2f6fd6' }, dark: { background: '#1b2028', text: '#e3e8ef', accent: '#8ab4f8' } },
+    forest: { name: 'Forest', light: { background: '#f3f6ee', text: '#1f2a1a', accent: '#3f7a3a' }, dark: { background: '#1a2219', text: '#e3ebdc', accent: '#8cc46e' } },
+    ocean: { name: 'Ocean', light: { background: '#eef5f8', text: '#14262e', accent: '#1c7a9c' }, dark: { background: '#15222a', text: '#dde9ef', accent: '#5fc0dc' } },
+    rose: { name: 'Rose', light: { background: '#fbf3f4', text: '#2c1a1f', accent: '#c2375a' }, dark: { background: '#241a1e', text: '#f3e6ea', accent: '#e8809a' } },
+    sepia: { name: 'Sepia', light: { background: '#f4ecd8', text: '#3b2f1e', accent: '#8a5a2b' }, dark: { background: '#2a2318', text: '#ead9bd', accent: '#d19a5a' } },
   };
+  // The built-in scheme's own seeds (styles.css --paper, --fg and --accent), for its swatch and as the custom
+  // pickers' starting colours.
+  const BUILT_IN_SEEDS = { light: { background: '#fffaf3', text: '#2a1a12', accent: '#f47b3e' }, dark: { background: '#211710', text: '#f6eadb', accent: '#f47b3e' } };
 
   // The colour tokens a scheme sets (styles.css defines them all for the built-in scheme). Brand names that the
   // stylesheet uses directly (carets, checkboxes, the live dot) are included so they follow the scheme too.
@@ -171,5 +181,23 @@
     return tokens ? { background: tokens.paper, foreground: tokens.fg } : BUILT_IN_WINDOW[mode === 'dark' ? 'dark' : 'light'];
   }
 
-  return { BUILT_IN, CUSTOM, SCHEMES, TOKENS, derive, resolve, windowColors, cleanCustom, cleanSchemeId, contrast, isHex };
+  // The seeds a scheme starts from in a mode: the built-in scheme's own colours, a premade scheme's seed, or the
+  // custom colours (falling back to the built-in ones while none are picked for that mode).
+  function seedsOf(id, customColors, mode) {
+    const m = mode === 'dark' ? 'dark' : 'light';
+    if (id === CUSTOM) return (customColors && customColors[m]) || BUILT_IN_SEEDS[m];
+    const scheme = SCHEMES[id];
+    return scheme && !scheme.builtIn ? scheme[m] : BUILT_IN_SEEDS[m];
+  }
+
+  // What a scheme looks like in a mode, for its swatch in Settings: { paper, text, accent }, the derived colours
+  // (so the sample matches the page), or the built-in scheme's own.
+  function swatch(id, customColors, mode) {
+    const seed = seedsOf(id, customColors, mode);
+    if (id === BUILT_IN || (id !== CUSTOM && !(SCHEMES[id] && !SCHEMES[id].builtIn))) return { paper: seed.background, text: seed.text, accent: seed.accent };
+    const t = derive(seed);
+    return { paper: t.paper, text: t.fg, accent: t.accent };
+  }
+
+  return { BUILT_IN, CUSTOM, SCHEMES, TOKENS, BUILT_IN_SEEDS, derive, resolve, windowColors, seedsOf, swatch, cleanCustom, cleanSchemeId, contrast, isHex };
 });

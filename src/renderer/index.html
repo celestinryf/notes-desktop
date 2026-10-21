@@ -328,6 +328,7 @@
         <nav class="settings-nav" id="settingsNav" aria-label="Settings sections">
           <h2 class="dialog-title" id="settingsTitle">Settings</h2>
           <a href="#set-general" data-icon="settings">General</a>
+          <a href="#set-appearance" data-icon="palette">Appearance</a>
           <a href="#set-writing" data-icon="pencil">Writing</a>
           <a href="#set-speech" data-icon="volume-2">Speech</a>
           <a href="#set-history" data-icon="history">History</a>
@@ -348,14 +349,6 @@
                 <span class="field-help">Click here and press the combination you want (Ctrl, Alt, or Win plus a key). It shows and hides Notes from anywhere.</span>
                 <span class="field-error" id="hotkeyError"></span>
               </label>
-              <label class="field">
-                <span class="field-label">Theme</span>
-                <select id="themeSelect" class="select">
-                  <option value="system">Follow Windows</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-              </label>
               <label class="field field-check">
                 <input id="sidebarFloatInput" type="checkbox" />
                 <span>Hide the sidebar. Point at the window's left edge to bring it in (Ctrl+\ does the same).</span>
@@ -368,6 +361,34 @@
                 <input id="alwaysOnTopInput" type="checkbox" />
                 <span>Keep the window above other windows</span>
               </label>
+            </section>
+
+            <section class="settings-section" id="set-appearance">
+              <h3>Appearance</h3>
+              <label class="field">
+                <span class="field-label">Theme</span>
+                <select id="themeSelect" class="select">
+                  <option value="system">Follow Windows</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <span class="field-help">Light or dark, or whichever Windows is using.</span>
+              </label>
+              <div class="field">
+                <span class="field-label" id="schemeLabel">Colour scheme</span>
+                <div class="scheme-grid" id="schemeGrid" role="radiogroup" aria-labelledby="schemeLabel"></div>
+                <span class="field-help">Each scheme has a light and a dark look. The page shows your choice as you make it; Save changes keeps it.</span>
+              </div>
+              <div class="field">
+                <span class="field-label">Custom colours <span id="customModeNote"></span></span>
+                <div class="color-row">
+                  <label class="color-field"><input id="customBgInput" type="color" /><span>Background</span></label>
+                  <label class="color-field"><input id="customTextInput" type="color" /><span>Text</span></label>
+                  <label class="color-field"><input id="customAccentInput" type="color" /><span>Accent</span></label>
+                </div>
+                <span class="field-help">Pick three colours and every other colour follows. Text is kept readable whatever you choose. Switch the theme to pick the other mode's colours.</span>
+                <div class="dialog-actions"><button type="button" class="btn btn-small" id="schemeResetBtn">Reset to Notes</button></div>
+              </div>
             </section>
 
             <section class="settings-section" id="set-writing">
@@ -450,10 +471,25 @@
             </div>
           </div>
           <div class="settings-actions">
-            <span class="field-help">Changes apply as you make them.</span>
+            <span class="field-help" id="settingsDirtyNote" aria-live="polite"></span>
             <span class="spacer"></span>
-            <button type="submit" class="btn btn-primary" id="closeSettingsBtn">Done</button>
+            <button type="button" class="btn" id="cancelSettingsBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="saveSettingsBtn" disabled>Save changes</button>
           </div>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Asked when Settings is closed with changes not yet saved -->
+    <dialog id="settingsSaveDialog" class="modal dialog-small" aria-labelledby="settingsSaveTitle">
+      <form method="dialog" class="dialog-form">
+        <h2 class="dialog-title" id="settingsSaveTitle">Save your changes?</h2>
+        <p class="field-help" id="settingsSaveList"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="settingsSaveKeepBtn">Keep editing</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-danger" id="settingsSaveDiscardBtn">Discard</button>
+          <button type="submit" class="btn btn-primary" id="settingsSaveYesBtn" autofocus>Save and close</button>
         </div>
       </form>
     </dialog>

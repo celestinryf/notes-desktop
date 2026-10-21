@@ -362,6 +362,7 @@ function main() {
       loadError: store.loadError ? String(store.loadError.message || store.loadError) : null,
       documentsDir: app.getPath('documents'),
       saveBlocked: !!store.saveBlocked,
+      drySpeech: process.env.NOTES_APP_DRY_SPEECH === '1', // tests and screenshots: read aloud says nothing out loud
       recoveredNotes: store.recoveredFromBackup ? store.notes.length : null,
     };
   }
