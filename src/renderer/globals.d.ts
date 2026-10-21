@@ -3,6 +3,14 @@
 type RichEditor = ReturnType<typeof import('../editor/index.js').create>;
 type CodeEditor = ReturnType<typeof import('../code/index.js').create>;
 
+// Chromium's window-controls overlay (Electron titleBarOverlay); absent where the OS draws the title bar.
+interface WindowControlsOverlay extends EventTarget {
+  visible: boolean;
+  getTitlebarAreaRect(): DOMRect;
+  addEventListener(type: 'geometrychange', listener: () => void): void;
+}
+interface Navigator { windowControlsOverlay?: WindowControlsOverlay }
+
 interface Window {
   notesApi: NotesApi;
   NotesEditor?: typeof import('../editor/index.js');
@@ -36,7 +44,7 @@ interface RendererState {
   menuFolderId: string | null;
   editingFolder: FolderEdit | null;
   query: string;
-  notes: OutlineRow[];
+  notes: PublicNote[];
   currentId: string | null;
   current: PublicNote | null;
   sourceMode: boolean;
@@ -52,9 +60,9 @@ interface RendererState {
   vaultStatus: Record<string, VaultStatus>;
   pending: Map<string, NotePatch>;
   inflight: Map<string, Promise<unknown>>;
+  selecting: Promise<unknown>;
   // Set while the page runs, not at start.
-  outline?: OutlineRow[];
-  selecting?: Promise<unknown>;
+  outline?: Record<string, OutlineRow[]> | null;
   currentLossless?: boolean | null;
   lossyOverride?: string | null;
   lossyToastFor?: string | null;

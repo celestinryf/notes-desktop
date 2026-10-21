@@ -23,7 +23,7 @@ export const el = {
   app: $('#app'),
   sidebar: $('#sidebar'),
   newNoteBtn: $('#newNoteBtn'),
-  navItems: Array.from(document.querySelectorAll('.nav-item[data-view]')),
+  navItems: Array.from(document.querySelectorAll('.nav-item[data-view]')).filter((b) => b instanceof HTMLElement),
   countAll: $('#countAll'), countPinned: $('#countPinned'), countTrash: $('#countTrash'), countReminders: $('#countReminders'),
   remindBtn: $('#remindBtn'), remindDialog: $('#remindDialog'), remindForm: $('#remindForm'), remindInput: $('#remindInput'), remindQuick: $('#remindQuick'),
   remindCurrent: $('#remindCurrent'), remindClearBtn: $('#remindClearBtn'), remindCancelBtn: $('#remindCancelBtn'),

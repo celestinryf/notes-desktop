@@ -1,6 +1,14 @@
 // @ts-check
 import NotesIcons from './icons.js';
 
+// What a row's chevron does, by row: set when the row is built, read by the arrow keys.
+/** @type {WeakMap<HTMLElement, (open: boolean) => void>} */
+const toggles = new WeakMap();
+/** @param {HTMLElement} row @param {((open: boolean) => void) | null} fn */
+export function setRowToggle(row, fn) {
+  if (fn) toggles.set(row, fn); else toggles.delete(row);
+}
+
 // Folder rows carry no leading icon (the chevron already says "folder"); a book is told apart by this trailing mark.
 export function bookMark() { return '<span class="row-mark book-mark" title="Book: its notes are pages">' + NotesIcons.svg('book') + '</span>'; }
 
@@ -43,17 +51,18 @@ export function bindTreeKeys(root) {
     const i = rows.indexOf(row);
     const go = (j) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };
     const expanded = row.getAttribute('aria-expanded');
+    const toggle = toggles.get(row);
     if (e.key === 'ArrowDown') go(i + 1);
     else if (e.key === 'ArrowUp') go(i - 1);
     else if (e.key === 'Home') go(0);
     else if (e.key === 'End') go(rows.length - 1);
     else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      if (expanded === 'false' && row._toggle) row._toggle(true);
+      if (expanded === 'false' && toggle) toggle(true);
       else if (expanded === 'true') go(i + 1);
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      if (expanded === 'true' && row._toggle) row._toggle(false);
+      if (expanded === 'true' && toggle) toggle(false);
       else {
         const group = row.parentElement && row.parentElement.closest('.tree-children');
         const parent = group && group.previousElementSibling;
