@@ -12,6 +12,7 @@ import { NotesCsv } from './csv-view.js';
 import { NotesSignPad } from './sign-pad.js';
 import { I, el, setLabel, setIcon, setPressed } from './dom.js';
 import { state } from './state.js';
+import { find } from './find-state.js';
 import { escapeHtml, highlight, ipcErrorText } from './text.js';
 import { toast } from './toast.js';
 import { setActivity } from './activity.js';
@@ -22,6 +23,12 @@ import { createBookReader } from './book-reader.js';
 import { createRelated } from './related.js';
 import { createReminders } from './reminders.js';
 import { quickPick } from './remind-times.js';
+import { withPeerNotice } from './peer-notice.js';
+import { createLiveShare } from './live-share.js';
+import { createSharing } from './sharing.js';
+import { createStickyButton } from './sticky-button.js';
+import { createBotPanel } from './bot-panel.js';
+import { createCodeEditor } from './code-editor.js';
 import { createImages } from './images.js';
 import { createConvertMenu } from './convert-menu.js';
 import { createEditorText } from './editor-text.js';
@@ -29,7 +36,7 @@ import { createEditorText } from './editor-text.js';
 (function () {
   'use strict';
 
-  const api = withPeerNotice(window.notesApi);
+  const api = withPeerNotice(window.notesApi, peerChanged);
   const { isViewerOnlyFile, isPlainTextFile } = H;
   // An opened file whose text is not Markdown: plain text, Word, PDF.
   const isNonMarkdownFile = (n) => isPlainTextFile(n) || isViewerOnlyFile(n);
@@ -1271,35 +1278,6 @@ import { createEditorText } from './editor-text.js';
     peerDrag: null,     // a tab or note card being dragged on the other side
   };
 
-  function withPeerNotice(raw) {
-    // Writes that change notes, folders or files. After one, the other side reloads its list and its note.
-    const WRITES = {
-      notes: ['create', 'update', 'togglePin', 'duplicate', 'splitIntoBook', 'undoSplit', 'trash', 'restore', 'destroy', 'emptyTrash'],
-      folders: ['create', 'rename', 'setBook', 'reorderPages', 'move', 'delete'],
-      lock: ['set', 'unlock', 'relock', 'remove'],
-      files: ['link', 'refresh', 'savePdf', 'pdfApplyPages', 'pdfRestore', 'saveDocx', 'saveCraft', 'convert', 'asMarkdown'],
-      attachments: ['pick', 'addPaths', 'saveRecording'],
-      stickies: ['open', 'close', 'create', 'setColor', 'setOnTop'],
-      live: ['host', 'join', 'stop'],
-      vaults: ['add', 'clone', 'update', 'remove', 'sync', 'scan', 'initRepo'],
-      agentFiles: ['link'],
-      bot: ['importWorkspace'],
-      app: ['importMarkdown'],
-    };
-    if (!raw) return raw;
-    const out = {};
-    for (const ns of Object.keys(raw)) {
-      const writes = WRITES[ns];
-      if (!writes) { out[ns] = raw[ns]; continue; }
-      out[ns] = Object.assign({}, raw[ns]);
-      for (const name of writes) {
-        const fn = raw[ns][name];
-        if (typeof fn === 'function') out[ns][name] = (...args) => { const r = fn(...args); Promise.resolve(r).then(peerChanged, () => {}); return r; };
-      }
-    }
-    return out;
-  }
-
   function peerWindow() { return GUEST ? window.parent : (tabs.frame && tabs.frame.contentWindow); }
   function toPeer(msg) {
     if (!GUEST && !tabs.split) return;
@@ -1713,8 +1691,7 @@ import { createEditorText } from './editor-text.js';
   function runEditCommand(cmd) {
     if (!GUEST && tabs.frame && document.activeElement === tabs.frame) { toPeer({ type: 'event', name: 'editCommand', arg: cmd }); return; }
     if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === 'redo' ? 'redo' : 'undo']().run();
-    else if (codeOn && code.contains(document.activeElement)) code[cmd === 'redo' ? 'redo' : 'undo']();
-    else document.execCommand(cmd === 'redo' ? 'redo' : 'undo');
+    else if (!src.undoRedo(cmd)) document.execCommand(cmd === 'redo' ? 'redo' : 'undo');
   }
 
   // Dropping a tab or a note card on a tab bar: reorder this side's tabs, or open the note here.
@@ -2305,80 +2282,9 @@ import { createEditorText } from './editor-text.js';
 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
 
-  // ---- live share --------------------------------------------------------------
+  // ---- live share: see live-share.js ----
 
-  state.lastTypedAt = 0;
-  state.liveStatus = {};
-
-  function renderLiveRow(note) {
-    const live = note && note.live;
-    el.liveRow.classList.toggle('hidden', !live);
-    if (!live) return;
-    const s = state.liveStatus[note.id];
-    const peers = s ? s.peers : 0;
-    const connected = s ? s.connected : false;
-    el.liveRow.classList.toggle('is-off', !connected);
-    el.liveText.textContent = live.role === 'host'
-      ? ('Live: you are sharing this note · ' + peers + (peers === 1 ? ' person' : ' people') + ' connected' + (s && s.localOnly ? ' · no network found, the link only works on this computer' : '') + (s && s.error ? ' · ' + s.error : ''))
-      : (connected ? ('Live: following a shared note' + (s && s.pending ? ' · sending your edits…' : '')) : ('Live: reconnecting to the host…' + (s && s.error ? ' (' + s.error + ')' : '') + (s && s.pending ? ' · your edits will be sent when it is back' : '')));
-  }
-
-  async function startLiveHost() {
-    const note = state.current;
-    if (!note) return;
-    const r = await api.live.host(note.id);
-    if (!r.ok) { toast('Could not share: ' + r.error); return; }
-    await refreshCurrentMeta();
-    openLiveDialog('link', r.status.url);
-  }
-
-  async function stopLive() {
-    const note = state.current;
-    if (!note || !note.live) return;
-    await flushSave();
-    await api.live.stop(note.id);
-    delete state.liveStatus[note.id];
-    await refreshCurrentMeta();
-    toast('Live share ended. The note stays.');
-  }
-
-  function openLiveDialog(mode, url) {
-    el.liveDialog.dataset.mode = mode;
-    const hosting = mode === 'link';
-    el.liveDialogTitle.textContent = hosting ? 'Live share link' : 'Join a live share';
-    el.liveDialogHint.textContent = hosting
-      ? 'Anyone on your local network with this link edits this note with you, live. The link is not encrypted, so use it on networks you trust. Windows may ask once to allow Notes through the firewall; say yes or nobody can connect. Stop sharing from the Share menu when you are done.'
-      : 'Paste the link the other person shared. You get your own copy of the note that stays in step while the share lasts.';
-    el.liveLinkLabel.textContent = hosting ? 'Link' : 'Link to join';
-    el.liveLinkInput.value = hosting ? url : '';
-    el.liveLinkInput.readOnly = hosting;
-    el.liveCopyBtn.classList.toggle('hidden', !hosting);
-    el.liveSubmitBtn.classList.toggle('hidden', hosting);
-    el.liveCancelBtn.textContent = hosting ? 'Close' : 'Cancel';
-    el.liveError.textContent = '';
-    el.liveDialog.showModal();
-    el.liveLinkInput.focus();
-    el.liveLinkInput.select();
-  }
-
-  async function submitLiveDialog() {
-    if (el.liveDialog.dataset.mode !== 'join') { el.liveDialog.close(); return; }
-    const url = el.liveLinkInput.value.trim();
-    if (!url) { el.liveError.textContent = 'Paste a link.'; return; }
-    el.liveSubmitBtn.disabled = true;
-    el.liveError.textContent = 'Connecting…';
-    try {
-      const r = await api.live.join(url, state.view === 'folder' ? state.folderId : null);
-      if (!r.ok) { el.liveError.textContent = r.error; return; }
-      el.liveDialog.close();
-      state.liveStatus[r.noteId] = r.status;
-      await setView('all');
-      await selectNoteNow(r.noteId);
-      toast('Joined. Edits on either side show up here as they happen.');
-    } finally {
-      el.liveSubmitBtn.disabled = false;
-    }
-  }
+  const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
 
   // ---- locking -----------------------------------------------------------------
 
@@ -2502,91 +2408,9 @@ import { createEditorText } from './editor-text.js';
 
   const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
 
-  // ---- sharing -----------------------------------------------------------------
+  // ---- sharing: see sharing.js ----
 
-  // Which share actions apply to the open note; the share menu and the command palette both use it.
-  function syncShareMenu() {
-    const n = state.current;
-    if (!n) return;
-    el.shareReveal.classList.toggle('hidden', !n.filePath);
-    el.shareLiveHost.classList.toggle('hidden', !!n.live || !!n.locked || !!n.filePath);
-    el.shareLiveStop.classList.toggle('hidden', !n.live);
-  }
-
-  function openShareMenu() {
-    if (!state.current || state.current.trashedAt) return;
-    syncShareMenu();
-    placePopover(el.shareMenu, el.shareBtn);
-  }
-
-  function closeShareMenu() {
-    el.shareMenu.classList.add('hidden');
-  }
-
-  // The note as HTML: what the rendered view shows, or a one-off render when the source view is up.
-  function currentHtml() {
-    const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
-    if (live) return live.innerHTML;
-    return markdownToHtml(el.bodyInput.value, state.current);
-  }
-
-  // Renders Markdown with the editor itself, off screen, so exports look like the rendered view. note: whose
-  // relative pictures these are (an opened file's are read from its folder).
-  function markdownToHtml(md, note) {
-    if (!window.NotesEditor) return '<pre>' + escapeHtml(md) + '</pre>';
-    const host = document.createElement('div');
-    host.style.position = 'absolute'; host.style.left = '-99999px';
-    document.body.append(host);
-    try {
-      let ed = null;
-      try {
-        ed = window.NotesEditor.create(host, { imageBase: () => H.imageBaseFor(note) });
-        ed.setMarkdown(String(md || ''));
-        return host.querySelector('.rich-editor-content').innerHTML;
-      } finally { if (ed) ed.destroy(); }
-    } finally { host.remove(); }
-  }
-
-  async function shareAction(action) {
-    closeShareMenu();
-    let note = state.current;
-    if (!note) return;
-    if (note.locked && !note.unlocked) { toast('Unlock the note first.'); return; }
-    await flushSave();
-    if (!state.current || state.current.id !== note.id) return; // the person moved on
-    note = state.current; // the saved view, including a title typed a moment ago
-    const titleLine = note.title ? note.title + '\n\n' : '';
-    try {
-      if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
-      else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
-      else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
-      else if (action === 'copy-note-link') { await api.app.copy({ text: '[' + (H.deriveTitle(note) || 'Note') + '](note://' + note.id + ')' }); toast('Copied. Paste it into another note to link here.'); }
-      else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
-      else if (action === 'pdf') {
-        if (find.open) closeFind();
-        if (GUEST) {
-          const r = await api.book.export('pdf', Object.assign(exportOfCurrent(), { dialogTitle: 'Save as PDF' }));
-          if (r.ok) toast('Saved PDF to ' + r.filePath); else if (!r.canceled) toast('Could not save PDF: ' + r.error);
-          return;
-        }
-        const chosen = await api.app.pdfPath(note.id);
-        if (!chosen.ok) { if (!chosen.canceled) toast('Could not save PDF: ' + chosen.error); return; }
-        // The page is what prints: it must still show this very note, unlocked, with nothing unsaved.
-        if (state.currentId !== note.id || lockedNow()) { toast('The note changed while the dialog was open; nothing was saved.'); return; }
-        await flushSave();
-        const r = await api.app.writePdf(chosen.filePath);
-        if (r.ok) toast('Saved PDF to ' + r.filePath); else toast('Could not save PDF: ' + r.error);
-      }
-      else if (action === 'html') { const r = await api.app.exportHtml(note.id, currentHtml()); if (r.ok) toast('Saved HTML to ' + r.filePath); else if (!r.canceled) toast('Could not save HTML: ' + r.error); }
-      else if (action === 'md') { await exportCurrent(); }
-      else if (action === 'reveal') { await api.files.reveal(note.id); }
-      else if (action === 'live-host') { await startLiveHost(); }
-      else if (action === 'live-join') { openLiveDialog('join'); }
-      else if (action === 'live-stop') { await stopLive(); }
-    } catch (err) {
-      toast('Share failed: ' + (err.message || err));
-    }
-  }
+  const { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive });
 
   // ---- attachments and voice memos --------------------------------------------
 
@@ -2768,9 +2592,6 @@ import { createEditorText } from './editor-text.js';
 
   // ---- find in note, print ---------------------------------------------------
 
-  // Done in the page, not with Chromium's page-wide find: only the note is searched, the count is exact,
-  // and it works whether the note is shown rendered (Custom Highlight API) or as source (textarea selection).
-  const find = { open: false, query: '', ranges: [], active: -1, sourceHits: [] };
 
   function openFind() {
     if (!state.current) return;
@@ -3023,37 +2844,9 @@ import { createEditorText } from './editor-text.js';
     return { name: title, html: (state.current.title ? '<h1>' + escapeHtml(state.current.title) + '</h1>' : '') + currentHtml() };
   }
 
-  // ---- desktop stickies ------------------------------------------------------
+  // ---- desktop stickies: see sticky-button.js ----
 
-  function renderStickyButton(note) {
-    const on = !!(note && note.sticky);
-    el.stickyBtn.classList.toggle('is-on', on);
-    setLabel(el.stickyBtn, on ? 'Take off the desktop' : 'Stick to the desktop');
-    el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
-    // A sticky shows rendered Markdown, so neither a PDF/Word file nor a plain-text file can become one (one that
-    // already is can still be removed).
-    const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
-    el.stickyBtn.disabled = !note || !!note.trashedAt || (notMarkdown && !on) || !!note.locked;
-    el.stickyBtn.title = note && note.locked ? 'Locked notes cannot be stickies' : el.stickyBtn.title;
-  }
-
-  async function toggleSticky() {
-    const note = state.current;
-    if (!note || el.stickyBtn.disabled) return;
-    await flushSave();
-    try {
-      if (note.sticky) {
-        await api.stickies.close(note.id, { forget: true });
-        toast('Removed from the desktop. The note is kept.');
-      } else {
-        await api.stickies.open(note.id);
-        toast('On the desktop. Drag its top bar to move it; its close button removes it, Esc just hides it (tray → Stickies brings it back).');
-      }
-    } catch (err) {
-      toast('Could not change the sticky: ' + (err.message || err));
-    }
-    await refreshCurrentMeta();
-  }
+  const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
 
   // Re-reads the open note's metadata (not its body) after something outside the editor changed it.
   async function refreshCurrentMeta() {
@@ -3071,93 +2864,9 @@ import { createEditorText } from './editor-text.js';
     await refresh({ keepEditor: true });
   }
 
-  // ---- bot: Claude Code over the notes -------------------------------------
+  // ---- bot: Claude Code over the notes: see bot-panel.js ----
 
-  const bot = { open: false, running: false };
-
-  function toggleBot(force) {
-    bot.open = typeof force === 'boolean' ? force : !bot.open;
-    el.botPanel.classList.toggle('hidden', !bot.open);
-    el.botBtn.classList.toggle('is-on', bot.open);
-    if (bot.open) { describeBotScope(); el.botPrompt.focus(); }
-  }
-
-  function describeBotScope() {
-    const n = state.current;
-    let text = 'Scope: all plain notes (exported to a workspace folder for the run)';
-    if (n && n.vaultId) text = 'Scope: this note’s vault folder';
-    else if (n && n.filePath) text = 'Scope: the folder containing this file';
-    el.botScope.textContent = text;
-    el.botScope.title = text;
-  }
-
-  function botAppend(text, cls) {
-    const span = document.createElement('span');
-    if (cls) span.className = cls;
-    span.textContent = text;
-    el.botOutput.append(span);
-    el.botOutput.scrollTop = el.botOutput.scrollHeight;
-  }
-
-  async function runBot() {
-    if (bot.running) { await api.bot.cancel(); return; }
-    const prompt = el.botPrompt.value.trim();
-    await flushSave();
-    el.botOutput.textContent = '';
-    if (!prompt) {
-      // Empty prompt: pull in whatever a terminal session changed in the workspace.
-      const r = await api.bot.importWorkspace();
-      botAppend(r.error ? ('Import failed: ' + r.error + '\n') : ('Pulled in workspace edits. ' + importSummary(r) + '\n' + (r.details || []).map((d) => '  ' + d).join('\n') + (r.details && r.details.length ? '\n' : '')), r.error ? 'bot-err' : 'bot-meta');
-      await refresh({ keepEditor: true });
-      el.botPrompt.focus();
-      return;
-    }
-    const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
-    if (!res.ok) { botAppend(res.error + '\n', 'bot-err'); return; }
-  }
-
-  function onBotEvent(ev) {
-    if (ev.type === 'start') {
-      bot.running = true;
-      el.botPanel.classList.add('is-running');
-      el.botRunBtn.textContent = 'Stop';
-      botAppend('Claude Code, on your Claude ' + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + ' ' : '') + 'subscription (no API credits)\n', 'bot-meta');
-      botAppend('Working in ' + ev.cwd + (ev.focus ? '  (looking at ' + ev.focus + ')' : '') + '\n', 'bot-meta');
-      if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend('Pulled in earlier workspace edits first. ' + importSummary(ev.imported) + '\n', 'bot-meta');
-    } else if (ev.type === 'out') {
-      botAppend(ev.text);
-    } else if (ev.type === 'err') {
-      botAppend(ev.text, 'bot-err');
-    } else if (ev.type === 'end') {
-      bot.running = false;
-      el.botPanel.classList.remove('is-running');
-      el.botRunBtn.textContent = 'Run';
-      if (ev.error) botAppend('\n' + ev.error + '\n', 'bot-err');
-      else {
-        const imp = ev.imported;
-        const summary = imp && !imp.error ? ' ' + importSummary(imp) : '';
-        botAppend('\nDone' + (ev.code === 0 ? '' : ' (exit code ' + ev.code + ')') + '.' + summary + '\n', 'bot-meta');
-        if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith('conflict')).map((d) => '  ' + d).join('\n') + '\n', 'bot-err');
-      }
-      refresh({ keepEditor: true }).then(async () => {
-        // Reload the open note from the store in case the agent edited it.
-        if (state.currentId && !state.dirty) { const wanted = state.currentId; const fresh = await api.notes.get(wanted); if (fresh && fresh.id === state.currentId && !state.dirty && !state.inflight.has(fresh.id) && fresh.body !== el.bodyInput.value) { applyFreshFileBody(fresh); toast('This note was updated by the bot.'); } }
-      });
-    } else if (ev.type === 'reloaded') {
-      refresh({ keepEditor: true });
-    }
-  }
-
-  function importSummary(imp) {
-    return 'Notes updated: ' + imp.updated + ', created: ' + imp.created + (imp.conflicts ? ', conflicts: ' + imp.conflicts : '') + (imp.missing ? ', files removed by the agent (notes kept): ' + imp.missing : '') + '.';
-  }
-
-  async function openBotTerminal() {
-    await flushSave();
-    const res = await api.bot.openTerminal(state.currentId);
-    if (!res.ok) { toast('Could not open a terminal: ' + res.error); return; }
-    toast('Claude Code opened in a terminal at ' + res.cwd + (res.kind === 'workspace' ? '. Its edits are pulled in on the next Run, or press Run with an empty prompt.' : ''));
-  }
+  const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
 
   // ---- speech: read aloud and dictate --------------------------------------
 
@@ -4597,86 +4306,13 @@ import { createEditorText } from './editor-text.js';
     el.linkInput.select();
   }
 
-  // ---- the code editor ----------------------------------------------------
-  // An opened text file that is not Markdown (.txt, LaTeX, code, config) is edited in CodeMirror (src/code/index.js),
-  // shown in the textarea's place. The textarea still holds the text: saving, the title and the counts read it there,
-  // and the person's edits in the code editor are copied into it as they happen (with the textarea's input event).
+  // ---- the code editor: see code-editor.js ----
 
-  let code = null;      // the code editor, made when a file first needs it
-  let codeOn = false;   // it is showing the open note's text
-  let codeFailed = false; // it could not start: files use the textarea until Notes restarts
-
-  // Prose files (.txt) are written, not coded: the plain text box in the writing font, as the user asked, with no
-  // line numbers or highlighting. LaTeX, code and config get the code editor.
-  const PROSE_EXT = new Set(['txt', 'text']);
-  const isProseFile = (note) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
-
-  function codeEditor() {
-    if (!code) {
-      code = window.NotesCode.create({
-        parent: el.codeHost,
-        onChange: (text) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
-        onSelection: renderCodePosition,
-        // While the find bar is open, Enter steps between matches, as it does in the textarea.
-        onEnter: (shift) => { if (!find.open) return false; runFind(!shift); return true; },
-      });
-    }
-    return code;
-  }
-
-  // Shows the note's text in the code editor when it is a plain-text file (and the editor is built), else in the
-  // textarea. A new note starts a new undo history.
-  function showCode(note, readOnly) {
-    codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile(note) && !isProseFile(note);
-    if (codeOn) {
-      try {
-        codeEditor().load(el.bodyInput.value, { ext: H.extOf(note.filePath), readOnly, placeholder: 'Plain text.', label: H.deriveTitle(note) });
-      } catch (err) {
-        // Never a blank page: the textarea holds the text, so it shows it instead.
-        console.error('The code editor could not start:', err);
-        codeFailed = true;
-        codeOn = false;
-        toast('The code editor could not start, so this file opens as plain text.');
-      }
-    }
-    if (!codeOn && code) { try { code.load('', {}); } catch (_) { /* nothing of the last file is kept around */ } }
-    el.bodyInput.classList.toggle('uses-code', codeOn);
-    el.bodyInput.classList.toggle('is-prose', isProseFile(note));
-    renderCodePosition();
-    autoGrow();
-  }
-
-  // The status line: where the caret is, for the code editor only (the file row's badge names the language).
-  function renderCodePosition() {
-    const shown = codeOn && state.sourceMode;
-    el.statusCode.classList.toggle('hidden', !shown);
-    if (!shown) return;
-    const at = code.position();
-    el.statusCode.textContent = 'Ln ' + at.line + ', Col ' + at.col;
-  }
-
-  // The source text and its selection, in whichever of the textarea and the code editor is showing it. Code that
-  // changes the text, moves the selection or focuses it goes through here, so the two never disagree.
-  const src = {
-    get value() { return el.bodyInput.value; },
-    set value(text) { el.bodyInput.value = text; if (codeOn) code.setValue(el.bodyInput.value); },
-    // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
-    reload(text) { el.bodyInput.value = text; if (codeOn) code.setValue(el.bodyInput.value, { history: false }); },
-    get readOnly() { return el.bodyInput.readOnly; },
-    get selectionStart() { return codeOn ? code.selectionStart : el.bodyInput.selectionStart; },
-    get selectionEnd() { return codeOn ? code.selectionEnd : el.bodyInput.selectionEnd; },
-    setSelectionRange(from, to) { if (codeOn) code.setSelectionRange(from, to); else el.bodyInput.setSelectionRange(from, to); },
-    focus() { if (codeOn) code.focus(); else el.bodyInput.focus(); },
-    hasFocus() { return codeOn ? code.hasFocus() : document.activeElement === el.bodyInput; },
-    // Scrolls a position into view (a find match, a heading).
-    reveal(at) { if (codeOn) code.reveal(at); else scrollTextareaToSelection(at); },
-    // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
-    dispatchEvent(event) { return el.bodyInput.dispatchEvent(event); },
-  };
+  const { src, showCode, renderCodePosition } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
 
   // ---- editor text helpers: see editor-text.js ----
 
-  const { wrapSelection, handleEditorKeydown } = createEditorText({ find, runFind, scheduleSave });
+  const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
 
   // ---- settings dialog -----------------------------------------------------
 
@@ -5139,7 +4775,7 @@ import { createEditorText } from './editor-text.js';
         case 'i': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
           if (document.activeElement === el.bodyInput) { if (!isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('[', '](url)'); } }
-          else if (bodyHasFocus() && !codeOn) { e.preventDefault(); openLinkDialog(); }
+          else if (bodyHasFocus() && !src.codeOn) { e.preventDefault(); openLinkDialog(); }
           return;
         default: break;
       }

@@ -1,6 +1,7 @@
 import { el } from './dom.js';
+import { find } from './find-state.js';
 
-export function createEditorText({ find, runFind, scheduleSave }) {
+export function createEditorText({ runFind, scheduleSave }) {
   function wrapSelection(before, after) {
     const ta = el.bodyInput;
     if (ta.readOnly) return;
