@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state, lockedNow } from './state.js';
 import { find } from './find-state.js';
@@ -9,6 +10,7 @@ import { autoGrow } from './editor-view.js';
 const { isViewerOnlyFile } = H;
 
 export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
+  /** @type {{ versions: HistoryVersion[], index: number, noteId: string | null }} */
   const hist = { versions: [], index: -1, noteId: null };
 
   async function openHistory() {
@@ -30,11 +32,15 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     hist.versions.forEach((v, i) => {
       const li = document.createElement('li');
       li.setAttribute('role', 'option');
-      li.dataset.index = i;
+      li.dataset.index = String(i);
       const first = (v.body.split('\n').find((l) => l.trim()) || '(empty)').replace(/^#+\s*/, '');
-      li.innerHTML = '<span class="when"></span><span class="first"></span>';
-      li.querySelector('.when').textContent = new Date(v.at).toLocaleString() + ' · ' + v.chars + ' chars';
-      li.querySelector('.first').textContent = H.truncate(first, 48);
+      const when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = new Date(v.at).toLocaleString() + ' · ' + v.chars + ' chars';
+      const firstLine = document.createElement('span');
+      firstLine.className = 'first';
+      firstLine.textContent = H.truncate(first, 48);
+      li.append(when, firstLine);
       li.addEventListener('click', () => showVersion(i));
       el.historyList.append(li);
     });

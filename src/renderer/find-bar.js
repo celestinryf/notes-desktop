@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state, lockedNow } from './state.js';
 import { find } from './find-state.js';
@@ -16,7 +17,8 @@ export function createFindBar({ api, flushSave, GUEST }) {
     if (!state.current) return;
     find.open = true;
     el.findBar.classList.remove('hidden');
-    const sel = String(window.getSelection && window.getSelection().toString() || '').trim();
+    const selection = window.getSelection();
+    const sel = (selection ? selection.toString() : '').trim();
     if (!sel && src.hasFocus()) {
       const t = src.value.slice(src.selectionStart, src.selectionEnd).trim();
       if (t) el.findInput.value = t;
@@ -86,7 +88,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
     }
     if (window.CSS && CSS.highlights) CSS.highlights.set('notes-find-active', new Highlight(...(find.active >= 0 && find.ranges[find.active] ? [find.ranges[find.active]] : [])));
     const r = find.ranges[find.active];
-    if (r) { const node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement; if (node && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (r) { const node = r.startContainer instanceof Element ? r.startContainer : r.startContainer.parentElement; if (node) node.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     el.findCount.textContent = find.ranges.length ? (find.active + 1) + '/' + find.ranges.length : 'No matches';
   }
 
@@ -138,7 +140,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
     const blockOf = (n) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n.nodeType === 1) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
+      if (n instanceof Element) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
       const b = blockOf(n);
       if (lastBlock && b !== lastBlock) text += '\n'; // a separator no query can contain
       lastBlock = b;
@@ -157,9 +159,10 @@ export function createFindBar({ api, flushSave, GUEST }) {
       const r = document.createRange();
       r.setStart(s.node, s.offset);
       // The end may fall exactly at a node boundary: keep it inside the node where the match ends.
-      if (e.offset === 0 && pos + q.length > 0) { const prev = locate(pos + q.length - 1); r.setEnd(prev.node, prev.offset + 1); } else r.setEnd(e.node, e.offset);
+      const prev = e.offset === 0 && pos + q.length > 0 ? locate(pos + q.length - 1) : null;
+      if (prev) r.setEnd(prev.node, prev.offset + 1); else r.setEnd(e.node, e.offset);
       return r;
-    }).filter(Boolean);
+    }).flatMap((r) => (r ? [r] : []));
   }
 
   // quiet: recount and re-highlight after the text changed, without moving the selection or scrolling.
@@ -204,8 +207,8 @@ export function createFindBar({ api, flushSave, GUEST }) {
     const n = find.ranges.length;
     if (n && find.active >= 0 && !quiet) {
       const r = find.ranges[find.active];
-      const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-      if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const elNode = r.startContainer instanceof Element ? r.startContainer : r.startContainer.parentElement;
+      if (elNode) elNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
     el.findCount.textContent = n ? (find.active + 1) + '/' + n : 'No matches';
     el.findCount.classList.toggle('is-none', !n);
@@ -242,8 +245,9 @@ export function createFindBar({ api, flushSave, GUEST }) {
 
   // The open note as a page of its own, for the export window (title, then the rendered body).
   function exportOfCurrent() {
-    const title = H.deriveTitle(state.current);
-    return { name: title, html: (state.current.title ? '<h1>' + escapeHtml(state.current.title) + '</h1>' : '') + currentHtml() };
+    const note = state.current;
+    if (!note) return { name: 'Note', html: '' };
+    return { name: H.deriveTitle(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() };
   }
 
   return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };

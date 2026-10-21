@@ -1,3 +1,4 @@
+// @ts-check
 /* The PDF viewer and editor for opened PDFs, exposed as window.NotesPdfEditor. It drives pdf.js's own viewer and
    Firefox's annotation editors (highlight, text box, drawing, picture); the PDF is parsed in pdf.js's worker, never
    on this page. Edits stay in pdf.js's annotation storage until save() turns them into the PDF's own bytes. */
@@ -159,6 +160,7 @@ export const NotesPdfEditor = (function () {
     async function unload() {
       cancelPick();
       closeOthers();
+      // @ts-expect-error pdf.js unloads on null; its typings say a document only
       viewer.setDocument(null);
       linkService.setDocument(null);
       const t = task;
@@ -213,6 +215,7 @@ export const NotesPdfEditor = (function () {
     }
 
     // Resolves once pdf.js has finished switching to editor type t (switches are asynchronous), or after a second.
+    /** @returns {Promise<void>} */
     function modeSwitched(t) {
       return new Promise((resolve) => {
         const done = () => { clearTimeout(timer); eventBus.off('annotationeditormodechanged', onChanged); resolve(); };

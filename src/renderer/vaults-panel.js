@@ -1,3 +1,4 @@
+// @ts-check
 import { el } from './dom.js';
 import { state } from './state.js';
 import H from '../shared/helpers.js';
@@ -87,10 +88,13 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
       item.dataset.id = v.id;
       const head = document.createElement('div');
       head.className = 'vault-head';
-      head.innerHTML = '<span></span><span class="vault-path"></span>';
-      head.firstChild.textContent = v.name;
-      head.lastChild.textContent = v.path;
-      head.lastChild.title = v.path;
+      const name = document.createElement('span');
+      name.textContent = v.name;
+      const where = document.createElement('span');
+      where.className = 'vault-path';
+      where.textContent = v.path;
+      where.title = v.path;
+      head.append(name, where);
       item.append(head);
       const st = document.createElement('div');
       st.className = 'vault-status' + (v.status.lastError || v.status.conflict ? ' is-error' : '');
@@ -110,9 +114,13 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
       mk('Open folder', () => api.vaults.openFolder(v.id));
       const auto = document.createElement('label');
       auto.className = 'field-check';
-      auto.innerHTML = '<input type="checkbox"><span>Auto-sync</span>';
-      auto.firstChild.checked = v.autoSync;
-      auto.firstChild.addEventListener('change', async () => { await api.vaults.update(v.id, { autoSync: auto.firstChild.checked }); renderVaultList(); });
+      const autoBox = document.createElement('input');
+      autoBox.type = 'checkbox';
+      autoBox.checked = v.autoSync;
+      autoBox.addEventListener('change', async () => { await api.vaults.update(v.id, { autoSync: autoBox.checked }); renderVaultList(); });
+      const autoLabel = document.createElement('span');
+      autoLabel.textContent = 'Auto-sync';
+      auto.append(autoBox, autoLabel);
       actions.append(auto);
       mk('Remove', () => removeVault(v.id), 'btn-danger');
       item.append(actions);
