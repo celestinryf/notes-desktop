@@ -131,6 +131,7 @@ import { createEditorText } from './editor-text.js';
   // The pane toggles live in the sidebar's header while it is docked, and move to the start of the top bar when it
   // hides, so they can always be reached (as Obsidian does).
   const NARROW_W = 1000;
+  const PEEK_EDGE_PX = 24; // how close to the left edge the pointer must come for the hidden sidebar to float in
   let sidebarPeek = null; // hidden but shown: 'hover' (leaves with the pointer) or 'sticky' (until Esc or a click outside)
   let peekTimer = null;
   const isNarrow = () => window.innerWidth < NARROW_W;
@@ -196,16 +197,30 @@ import { createEditorText } from './editor-text.js';
     // Stay while something in it is still being used: a name being typed, or its folder menu.
     const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains('is-resizing')
       || (el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
+    // The hover zone is measured from the pointer, not from an element, so nothing under it goes dead: the edge strip
+    // stays narrow and only catches a drag. Nearness is the x position alone (a sidebar sliding in or out under the
+    // pointer is the target of moves meanwhile); near the edge or over the sidebar, it stays, whatever order the events come in.
+    let nearEdge = false;
     const leaveSoon = () => {
       clearTimeout(peekTimer);
       peekTimer = setTimeout(function check() {
-        if (sidebarPeek !== 'hover' || el.sidebar.matches(':hover')) return;
+        if (sidebarPeek !== 'hover' || nearEdge || el.sidebar.matches(':hover')) return;
         if (busy()) { peekTimer = setTimeout(check, 500); return; }
         unpeekSidebar();
       }, 350);
     };
-    el.sidebarEdge.addEventListener('mouseenter', () => { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); });
-    el.sidebarEdge.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); else if (!sidebarPeek) clearTimeout(peekTimer); });
+    document.addEventListener('mousemove', (e) => {
+      const overSidebar = el.sidebar.contains(e.target);
+      const near = e.clientX <= PEEK_EDGE_PX;
+      // While near and still hidden, every move re-arms the short wait: a sidebar that could not float in a moment
+      // ago (the layout was still changing) floats in on the next move, not only after leaving and coming back.
+      if (near && !sidebarPeek) { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); }
+      if (near === nearEdge) return;
+      nearEdge = near;
+      if (near || overSidebar) return;
+      if (sidebarPeek === 'hover') leaveSoon();
+      else if (!sidebarPeek) clearTimeout(peekTimer);
+    });
     el.sidebarEdge.addEventListener('dragenter', () => peekSidebar('hover'));
     el.sidebar.addEventListener('mouseenter', () => { if (sidebarPeek === 'hover') clearTimeout(peekTimer); });
     el.sidebar.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); });
