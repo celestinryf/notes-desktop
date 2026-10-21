@@ -299,7 +299,7 @@
           if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = "note-" + s;
           return s || UNTITLED;
         }
-        function isViewerOnlyFile6(note) {
+        function isViewerOnlyFile7(note) {
           return !!(note && note.filePath && note.fileKind !== "text");
         }
         function extOf(filePath) {
@@ -311,7 +311,7 @@
           return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
         }
         function isNonMarkdownFile2(note) {
-          return isPlainTextFile4(note) || isViewerOnlyFile6(note);
+          return isPlainTextFile4(note) || isViewerOnlyFile7(note);
         }
         const WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
         const OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
@@ -440,7 +440,7 @@
           splitAtHeadings,
           headingTitle,
           extOf,
-          isViewerOnlyFile: isViewerOnlyFile6,
+          isViewerOnlyFile: isViewerOnlyFile7,
           isPlainTextFile: isPlainTextFile4,
           isNonMarkdownFile: isNonMarkdownFile2,
           isTableFile,
@@ -801,7 +801,7 @@
   });
 
   // src/renderer/app.js
-  var import_helpers12 = __toESM(require_helpers());
+  var import_helpers14 = __toESM(require_helpers());
   var import_themes = __toESM(require_themes());
   var import_icons5 = __toESM(require_icons());
 
@@ -2838,6 +2838,7 @@
   };
 
   // src/renderer/state.js
+  var lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
   var state = {
     view: "all",
     // all | pinned | trash | tag | folder
@@ -3344,9 +3345,36 @@
     return { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog };
   }
 
-  // src/renderer/sharing.js
+  // src/renderer/note-html.js
   var import_helpers4 = __toESM(require_helpers());
-  function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
+  function currentHtml() {
+    const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
+    if (live) return live.innerHTML;
+    return markdownToHtml(el.bodyInput.value, state.current);
+  }
+  function markdownToHtml(md, note) {
+    if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
+    const host = document.createElement("div");
+    host.style.position = "absolute";
+    host.style.left = "-99999px";
+    document.body.append(host);
+    try {
+      let ed = null;
+      try {
+        ed = window.NotesEditor.create(host, { imageBase: () => import_helpers4.default.imageBaseFor(note) });
+        ed.setMarkdown(String(md || ""));
+        return host.querySelector(".rich-editor-content").innerHTML;
+      } finally {
+        if (ed) ed.destroy();
+      }
+    } finally {
+      host.remove();
+    }
+  }
+
+  // src/renderer/sharing.js
+  var import_helpers5 = __toESM(require_helpers());
+  function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
     function syncShareMenu() {
       const n = state.current;
       if (!n) return;
@@ -3362,30 +3390,6 @@
     function closeShareMenu() {
       el.shareMenu.classList.add("hidden");
     }
-    function currentHtml() {
-      const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
-      if (live) return live.innerHTML;
-      return markdownToHtml(el.bodyInput.value, state.current);
-    }
-    function markdownToHtml(md, note) {
-      if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
-      const host = document.createElement("div");
-      host.style.position = "absolute";
-      host.style.left = "-99999px";
-      document.body.append(host);
-      try {
-        let ed = null;
-        try {
-          ed = window.NotesEditor.create(host, { imageBase: () => import_helpers4.default.imageBaseFor(note) });
-          ed.setMarkdown(String(md || ""));
-          return host.querySelector(".rich-editor-content").innerHTML;
-        } finally {
-          if (ed) ed.destroy();
-        }
-      } finally {
-        host.remove();
-      }
-    }
     async function shareAction(action) {
       closeShareMenu();
       let note = state.current;
@@ -3400,16 +3404,16 @@
       const titleLine = note.title ? note.title + "\n\n" : "";
       try {
         if (action === "copy-md") {
-          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note) });
+          await api.app.copy({ text: import_helpers5.default.noteToMarkdown(note) });
           toast("Copied as Markdown");
         } else if (action === "copy-text") {
-          await api.app.copy({ text: titleLine + import_helpers4.default.plainTextFromMarkdown(el.bodyInput.value) });
+          await api.app.copy({ text: titleLine + import_helpers5.default.plainTextFromMarkdown(el.bodyInput.value) });
           toast("Copied as plain text");
         } else if (action === "copy-html") {
-          await api.app.copy({ text: import_helpers4.default.noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
+          await api.app.copy({ text: import_helpers5.default.noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
           toast("Copied as rich text");
         } else if (action === "copy-note-link") {
-          await api.app.copy({ text: "[" + (import_helpers4.default.deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
+          await api.app.copy({ text: "[" + (import_helpers5.default.deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
           toast("Copied. Paste it into another note to link here.");
         } else if (action === "email") {
           const r = await api.app.emailNote(note.id);
@@ -3454,12 +3458,12 @@
         toast("Share failed: " + (err.message || err));
       }
     }
-    return { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction };
+    return { syncShareMenu, openShareMenu, closeShareMenu, shareAction };
   }
 
   // src/renderer/sticky-button.js
-  var import_helpers5 = __toESM(require_helpers());
-  var { isViewerOnlyFile, isPlainTextFile } = import_helpers5.default;
+  var import_helpers6 = __toESM(require_helpers());
+  var { isViewerOnlyFile, isPlainTextFile } = import_helpers6.default;
   function createStickyButton({ api, flushSave, refreshCurrentMeta }) {
     function renderStickyButton(note) {
       const on = !!(note && note.sticky);
@@ -3591,8 +3595,8 @@
   }
 
   // src/renderer/code-editor.js
-  var import_helpers6 = __toESM(require_helpers());
-  var { isPlainTextFile: isPlainTextFile2 } = import_helpers6.default;
+  var import_helpers7 = __toESM(require_helpers());
+  var { isPlainTextFile: isPlainTextFile2 } = import_helpers7.default;
   var code = null;
   var codeOn = false;
   var codeFailed = false;
@@ -3653,7 +3657,7 @@
     }
   };
   var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
-  var isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(import_helpers6.default.extOf(note.filePath));
+  var isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(import_helpers7.default.extOf(note.filePath));
   function codeEditor() {
     if (!code) {
       code = window.NotesCode.create({
@@ -3677,7 +3681,7 @@
     codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile2(note) && !isProseFile(note);
     if (codeOn) {
       try {
-        codeEditor().load(el.bodyInput.value, { ext: import_helpers6.default.extOf(note.filePath), readOnly, placeholder: "Plain text.", label: import_helpers6.default.deriveTitle(note) });
+        codeEditor().load(el.bodyInput.value, { ext: import_helpers7.default.extOf(note.filePath), readOnly, placeholder: "Plain text.", label: import_helpers7.default.deriveTitle(note) });
       } catch (err) {
         console.error("The code editor could not start:", err);
         codeFailed = true;
@@ -3709,7 +3713,7 @@
   }
 
   // src/renderer/vaults-panel.js
-  var import_helpers7 = __toESM(require_helpers());
+  var import_helpers8 = __toESM(require_helpers());
   function createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded }) {
     async function syncVault(id) {
       toast("Syncing vault\u2026");
@@ -3861,7 +3865,7 @@
       else parts.push("no remote (local history only)");
       if (s.dirty) parts.push("uncommitted changes");
       if (s.syncing) parts.push("syncing\u2026");
-      if (s.lastSyncAt) parts.push("last sync " + import_helpers7.default.relativeTime(s.lastSyncAt));
+      if (s.lastSyncAt) parts.push("last sync " + import_helpers8.default.relativeTime(s.lastSyncAt));
       if (s.conflict) parts.push("CONFLICT: resolve in the folder");
       if (s.lastError) parts.push("error: " + s.lastError);
       return parts.join(" \xB7 ");
@@ -3870,10 +3874,9 @@
   }
 
   // src/renderer/locking.js
-  var import_helpers8 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers8.default;
+  var import_helpers9 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile3 } = import_helpers9.default;
   function createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
-    const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
     function renderLockState(note) {
       const locked = !!(note && note.locked);
       const open = !!(note && note.unlocked);
@@ -4000,13 +4003,13 @@
         toast("Locked.");
       } else if (action === "remove") openLockDialog("remove");
     }
-    return { lockedNow, renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction };
+    return { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction };
   }
 
   // src/renderer/attachments.js
-  var import_helpers9 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile3 } = import_helpers9.default;
-  function createAttachments({ api, tableShown, lockedNow, flushSave, refresh }) {
+  var import_helpers10 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile3 } = import_helpers10.default;
+  function createAttachments({ api, tableShown, flushSave, refresh }) {
     function insertAttachmentLinks(items) {
       const ok = items.filter((x) => x && !x.error);
       const bad = items.filter((x) => x && x.error);
@@ -4060,7 +4063,7 @@
       if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile3(target)) {
         const links = ok.map((it) => "[\u{1F4CE} " + it.name.replace(/[[\]]/g, "") + "](" + it.href + ")").join("\n");
         await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + links + "\n" });
-        toast('Attached to "' + import_helpers9.default.truncate(import_helpers9.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
+        toast('Attached to "' + import_helpers10.default.truncate(import_helpers10.default.deriveTitle(target), 30) + '", the note that was open when you chose the files.');
         refresh({ keepEditor: true });
       } else toast("Attached files are kept in the attachments folder; that note can no longer take them.");
     }
@@ -4123,7 +4126,7 @@
             const target = await api.notes.get(rec.noteId);
             if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile3(target)) {
               await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + "[" + label + "](" + saved.href + ")\n" });
-              toast('Voice memo saved into "' + import_helpers9.default.truncate(import_helpers9.default.deriveTitle(target), 30) + '", the note it was recorded in.');
+              toast('Voice memo saved into "' + import_helpers10.default.truncate(import_helpers10.default.deriveTitle(target), 30) + '", the note it was recorded in.');
               refresh({ keepEditor: true });
             } else toast("Voice memo saved as " + saved.name + " (that note can no longer take it; Attach it where you want it).");
           }
@@ -4146,9 +4149,9 @@
   }
 
   // src/renderer/history-dialog.js
-  var import_helpers10 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile4 } = import_helpers10.default;
-  function createHistoryDialog({ api, flushSave, lockedNow, applyEditorMode, autoGrow, runFind, scheduleSave }) {
+  var import_helpers11 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile4 } = import_helpers11.default;
+  function createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave }) {
     const hist = { versions: [], index: -1, noteId: null };
     async function openHistory() {
       const note = state.current;
@@ -4179,7 +4182,7 @@
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
         li.innerHTML = '<span class="when"></span><span class="first"></span>';
         li.querySelector(".when").textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        li.querySelector(".first").textContent = import_helpers10.default.truncate(first, 48);
+        li.querySelector(".first").textContent = import_helpers11.default.truncate(first, 48);
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
@@ -4219,8 +4222,8 @@
   }
 
   // src/renderer/speech.js
-  var import_helpers11 = __toESM(require_helpers());
-  var { isViewerOnlyFile: isViewerOnlyFile5, isNonMarkdownFile } = import_helpers11.default;
+  var import_helpers12 = __toESM(require_helpers());
+  var { isViewerOnlyFile: isViewerOnlyFile5, isNonMarkdownFile } = import_helpers12.default;
   function createSpeech({ api, focusBody }) {
     const tts = { active: false, queue: [], index: 0 };
     function selectedTextForSpeech() {
@@ -4238,7 +4241,7 @@
       if (selected) return selected;
       const title = el.titleInput.value.trim();
       const note = state.current;
-      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers11.default.plainTextFromMarkdown(el.bodyInput.value);
+      const body = isNonMarkdownFile(note) ? el.bodyInput.value : import_helpers12.default.plainTextFromMarkdown(el.bodyInput.value);
       return (title ? title + ".\n" : "") + body;
     }
     function pickVoice() {
@@ -4290,7 +4293,7 @@
         toast("Nothing to read yet.");
         return;
       }
-      tts.queue = import_helpers11.default.speechChunks(text);
+      tts.queue = import_helpers12.default.speechChunks(text);
       tts.index = 0;
       setReadAloudState(true);
       window.speechSynthesis.cancel();
@@ -4320,6 +4323,305 @@
       else toast('Windows dictation opened: speak now. Say "stop dictating" or press Win+H to finish.');
     }
     return { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation };
+  }
+
+  // src/renderer/find-bar.js
+  var import_helpers13 = __toESM(require_helpers());
+
+  // src/renderer/find-text.js
+  function isQueryText(text, q) {
+    return new RegExp("^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i").test(text);
+  }
+  function findOffsets(text, q) {
+    const hits = [];
+    if (!q) return hits;
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      hits.push(m.index);
+      if (m[0].length === 0) re.lastIndex++;
+    }
+    return hits;
+  }
+
+  // src/renderer/find-bar.js
+  var { isViewerOnlyFile: isViewerOnlyFile6 } = import_helpers13.default;
+  function createFindBar({ api, tableShown, focusBody, flushSave, GUEST }) {
+    function openFind() {
+      if (!state.current) return;
+      find.open = true;
+      el.findBar.classList.remove("hidden");
+      const sel = String(window.getSelection && window.getSelection().toString() || "").trim();
+      if (!sel && src.hasFocus()) {
+        const t = src.value.slice(src.selectionStart, src.selectionEnd).trim();
+        if (t) el.findInput.value = t;
+      } else if (sel && sel.length < 200) el.findInput.value = sel;
+      el.findInput.focus();
+      el.findInput.select();
+      runFind(true, true);
+    }
+    function toggleReplace(force) {
+      const on = typeof force === "boolean" ? force : el.replaceRow.classList.contains("hidden");
+      el.replaceRow.classList.toggle("hidden", !on);
+      el.findReplaceToggle.setAttribute("aria-pressed", String(on));
+      if (on) el.replaceInput.focus();
+    }
+    function replaceCurrent() {
+      const q = el.findInput.value;
+      const text = el.replaceInput.value;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
+      if (state.sourceMode) {
+        const wanted = find.active;
+        runFind(true, true, true);
+        if (!find.sourceHits.length) {
+          runFind(true, true);
+          return;
+        }
+        find.active = Math.min(Math.max(wanted, 0), find.sourceHits.length - 1);
+        const at = find.sourceHits[find.active];
+        const ta = src;
+        if (ta.readOnly) return;
+        if (!isQueryText(ta.value.slice(at, at + q.length), q)) {
+          showActiveMatch();
+          return;
+        }
+        ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
+        ta.setSelectionRange(at + text.length, at + text.length);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        runFind(true, true, true);
+        if (find.sourceHits.length) {
+          const next = find.sourceHits.findIndex((h) => h >= at + text.length);
+          find.active = next === -1 ? 0 : next;
+          showActiveMatch();
+        }
+        return;
+      }
+      if (tableShown()) {
+        toast("Switch to Text (Ctrl+E) to replace in this file.");
+        return;
+      }
+      if (!state.rich) return;
+      const wantedIdx = find.active;
+      runFind(true, true, true);
+      if (!find.ranges.length) {
+        runFind(true, true);
+        return;
+      }
+      find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
+      const idx = find.active;
+      if (!isQueryText(String(find.ranges[idx]), q)) {
+        showActiveMatch();
+        return;
+      }
+      state.rich.replaceRanges([find.ranges[idx]], text);
+      runFind(true, true, true);
+      const inside = findOffsets(text, q).length;
+      if (find.ranges.length) {
+        find.active = (idx + inside) % find.ranges.length;
+        showActiveMatch();
+      }
+    }
+    function showActiveMatch() {
+      const q = el.findInput.value;
+      if (state.sourceMode) {
+        const at = find.sourceHits[find.active];
+        if (at === void 0) return;
+        if (document.activeElement !== el.replaceInput) src.focus();
+        src.setSelectionRange(at, at + q.length);
+        src.reveal(at);
+        el.findCount.textContent = find.active + 1 + "/" + find.sourceHits.length;
+        return;
+      }
+      if (window.CSS && CSS.highlights) CSS.highlights.set("notes-find-active", new Highlight(...find.active >= 0 && find.ranges[find.active] ? [find.ranges[find.active]] : []));
+      const r = find.ranges[find.active];
+      if (r) {
+        const node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+        if (node && node.scrollIntoView) node.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+      el.findCount.textContent = find.ranges.length ? find.active + 1 + "/" + find.ranges.length : "No matches";
+    }
+    function replaceAll() {
+      const q = el.findInput.value;
+      const text = el.replaceInput.value;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
+      let n = 0;
+      if (state.sourceMode) {
+        const ta = src;
+        if (ta.readOnly) return;
+        const hits = findOffsets(ta.value, q);
+        n = hits.length;
+        if (!n) {
+          toast("No matches");
+          return;
+        }
+        let out = "", last = 0;
+        for (const at of hits) {
+          out += ta.value.slice(last, at) + text;
+          last = at + q.length;
+        }
+        ta.value = out + ta.value.slice(last);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        if (tableShown()) {
+          toast("Switch to Text (Ctrl+E) to replace in this file.");
+          return;
+        }
+        if (!state.rich) return;
+        runFind(true, true, true);
+        n = state.rich.replaceRanges(find.ranges, text);
+        if (!n) {
+          toast("No matches");
+          return;
+        }
+      }
+      runFind(true, true, true);
+      toast("Replaced " + n + (n === 1 ? " match" : " matches"));
+    }
+    function closeFind() {
+      if (!find.open) return;
+      find.open = false;
+      el.findBar.classList.add("hidden");
+      toggleReplace(false);
+      el.findCount.textContent = "";
+      clearFindHighlights();
+      focusBody();
+    }
+    function clearFindHighlights() {
+      if (window.CSS && CSS.highlights) {
+        CSS.highlights.delete("notes-find");
+        CSS.highlights.delete("notes-find-active");
+      }
+      find.ranges = [];
+      find.sourceHits = [];
+      find.active = -1;
+    }
+    function findRangesIn(root, q) {
+      const nodes = [];
+      let text = "";
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      const blockOf = (n) => {
+        let e = n.parentElement;
+        while (e && e !== root && getComputedStyle(e).display === "inline") e = e.parentElement;
+        return e;
+      };
+      let lastBlock = null;
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.nodeType === 1) {
+          if (n.tagName === "BR" || n.tagName === "IMG") text += "\n";
+          continue;
+        }
+        const b = blockOf(n);
+        if (lastBlock && b !== lastBlock) text += "\n";
+        lastBlock = b;
+        nodes.push({ node: n, start: text.length });
+        text += n.nodeValue;
+      }
+      const locate = (pos) => {
+        let lo = 0, hi = nodes.length - 1;
+        while (lo < hi) {
+          const mid = lo + hi + 1 >> 1;
+          if (nodes[mid].start <= pos) lo = mid;
+          else hi = mid - 1;
+        }
+        if (!nodes.length) return null;
+        const node = nodes[lo].node;
+        return { node, offset: Math.min(pos - nodes[lo].start, node.nodeValue.length) };
+      };
+      return findOffsets(text, q).map((pos) => {
+        const s = locate(pos), e = locate(pos + q.length);
+        if (!s || !e) return null;
+        const r = document.createRange();
+        r.setStart(s.node, s.offset);
+        if (e.offset === 0 && pos + q.length > 0) {
+          const prev = locate(pos + q.length - 1);
+          r.setEnd(prev.node, prev.offset + 1);
+        } else r.setEnd(e.node, e.offset);
+        return r;
+      }).filter(Boolean);
+    }
+    function runFind(forward, fresh, quiet) {
+      const q = el.findInput.value;
+      const sameQuery = q === find.query;
+      find.query = q;
+      if (!q) {
+        clearFindHighlights();
+        el.findCount.textContent = "";
+        return;
+      }
+      if (state.sourceMode) {
+        if (fresh || !sameQuery || !find.sourceHits.length) {
+          find.sourceHits = findOffsets(el.bodyInput.value, q);
+          const caret = src.selectionStart || 0;
+          const idx = find.sourceHits.findIndex((h) => h >= caret);
+          find.active = find.sourceHits.length ? idx === -1 ? 0 : idx : -1;
+        } else if (find.sourceHits.length) {
+          find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
+        }
+        const n2 = find.sourceHits.length;
+        if (n2 && find.active >= 0 && !quiet) {
+          const at = find.sourceHits[find.active];
+          if (!fresh) src.focus();
+          src.setSelectionRange(at, at + q.length);
+          src.reveal(at);
+        }
+        el.findCount.textContent = n2 ? find.active + 1 + "/" + n2 : "No matches";
+        el.findCount.classList.toggle("is-none", !n2);
+        return;
+      }
+      if (fresh || !sameQuery || !find.ranges.length) {
+        find.ranges = findRangesIn(tableShown() ? el.csvView : el.richEditor, q);
+        find.active = find.ranges.length ? sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0 : -1;
+      } else if (find.ranges.length) {
+        find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
+      }
+      if (window.CSS && CSS.highlights) {
+        CSS.highlights.set("notes-find", new Highlight(...find.ranges));
+        CSS.highlights.set("notes-find-active", new Highlight(...find.active >= 0 ? [find.ranges[find.active]] : []));
+      }
+      const n = find.ranges.length;
+      if (n && find.active >= 0 && !quiet) {
+        const r = find.ranges[find.active];
+        const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+        if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+      el.findCount.textContent = n ? find.active + 1 + "/" + n : "No matches";
+      el.findCount.classList.toggle("is-none", !n);
+    }
+    function scrollTextareaToSelection(at) {
+      const ta = el.bodyInput;
+      const scroller = ta.closest(".editor-scroll") || ta;
+      const cs = getComputedStyle(ta);
+      const mirror = document.createElement("div");
+      for (const prop of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "padding", "border", "boxSizing", "whiteSpace", "wordBreak", "overflowWrap", "tabSize"]) mirror.style[prop] = cs[prop];
+      mirror.style.whiteSpace = "pre-wrap";
+      mirror.style.position = "absolute";
+      mirror.style.visibility = "hidden";
+      mirror.style.top = "0";
+      mirror.style.left = "-99999px";
+      mirror.style.width = ta.clientWidth + "px";
+      mirror.textContent = ta.value.slice(0, at);
+      const marker = document.createElement("span");
+      marker.textContent = "\u200B";
+      mirror.append(marker);
+      document.body.append(mirror);
+      const y = marker.offsetTop;
+      mirror.remove();
+      const target = ta.offsetTop + y - scroller.clientHeight / 2;
+      if (scroller !== ta) scroller.scrollTop = Math.max(0, target);
+      else ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
+    }
+    async function printNote() {
+      if (!state.current) return;
+      await flushSave();
+      const r = GUEST ? await api.book.export("print", exportOfCurrent()) : await api.app.print();
+      if (!r.ok) toast("Could not print: " + (r.error || "unknown error"));
+      else if (r.dry) toast("Print: dry run");
+    }
+    function exportOfCurrent() {
+      const title = import_helpers13.default.deriveTitle(state.current);
+      return { name: title, html: (state.current.title ? "<h1>" + escapeHtml(state.current.title) + "</h1>" : "") + currentHtml() };
+    }
+    return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }
 
   // src/renderer/images.js
@@ -4500,7 +4802,7 @@
   (function() {
     "use strict";
     const api = withPeerNotice(window.notesApi, peerChanged);
-    const { isViewerOnlyFile: isViewerOnlyFile6, isPlainTextFile: isPlainTextFile4, isNonMarkdownFile: isNonMarkdownFile2 } = import_helpers12.default;
+    const { isViewerOnlyFile: isViewerOnlyFile7, isPlainTextFile: isPlainTextFile4, isNonMarkdownFile: isNonMarkdownFile2 } = import_helpers14.default;
     function effectiveTheme(settings) {
       const s = settings || state.settings;
       const t = s ? s.theme : "system";
@@ -4535,7 +4837,7 @@
       applyEditorLayout(settings);
       if (el.settingsDialog.open && settingsDirty()) previewSettings();
       if (opts && opts.fromPeer) return;
-      if (import_helpers12.default.isTableFile(state.current)) return;
+      if (import_helpers14.default.isTableFile(state.current)) return;
       const forcedSource = state.currentLossless === false && state.lossyOverride !== state.currentId || !state.rich || isPlainTextFile4(state.current);
       const wantSource = settings.editorMode === "source" || forcedSource;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
@@ -4665,18 +4967,18 @@
       }, true);
     }
     function paneBudget() {
-      return Math.max(0, window.innerWidth - import_helpers12.default.EDITOR_MIN);
+      return Math.max(0, window.innerWidth - import_helpers14.default.EDITOR_MIN);
     }
     function fitPaneWidths(sidebar, list) {
-      sidebar = import_helpers12.default.clampPane("sidebarWidth", sidebar);
-      list = import_helpers12.default.clampPane("listWidth", list);
+      sidebar = import_helpers14.default.clampPane("sidebarWidth", sidebar);
+      list = import_helpers14.default.clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
       const over = sidebarShown + list - paneBudget();
       if (over > 0) {
-        const listGive = Math.min(over, list - import_helpers12.default.PANE_LIMITS.listWidth.min);
+        const listGive = Math.min(over, list - import_helpers14.default.PANE_LIMITS.listWidth.min);
         list -= listGive;
         const rest = over - listGive;
-        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers12.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
+        if (rest > 0 && sidebarShown) sidebar = Math.max(import_helpers14.default.PANE_LIMITS.sidebarWidth.min, sidebar - rest);
       }
       return { sidebar, list };
     }
@@ -4688,8 +4990,8 @@
     }
     function currentPaneWidths() {
       return {
-        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers12.default.PANE_LIMITS.sidebarWidth.def,
-        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers12.default.PANE_LIMITS.listWidth.def
+        sidebar: parseInt(el.app.style.getPropertyValue("--sidebar-w"), 10) || import_helpers14.default.PANE_LIMITS.sidebarWidth.def,
+        list: parseInt(el.app.style.getPropertyValue("--list-w"), 10) || import_helpers14.default.PANE_LIMITS.listWidth.def
       };
     }
     function setupResizer(handle, key) {
@@ -4726,7 +5028,7 @@
       });
       handle.addEventListener("dblclick", () => {
         const patch = {};
-        patch[key] = import_helpers12.default.PANE_LIMITS[key].def;
+        patch[key] = import_helpers14.default.PANE_LIMITS[key].def;
         updateSettings(patch);
       });
     }
@@ -4860,7 +5162,7 @@
         li.className = "note-row" + (n.id === state.currentId ? " is-active" : "");
         li.dataset.id = n.id;
         li.setAttribute("role", "option");
-        li.title = import_helpers12.default.deriveTitle(n);
+        li.title = import_helpers14.default.deriveTitle(n);
         li.innerHTML = rowInner(n, q);
         if (viewingBook && !q) {
           const no = document.createElement("span");
@@ -4906,21 +5208,21 @@
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
       const overdue = n.remindAt <= Date.now();
-      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers12.default.formatWhen(n.remindAt)) + "</span>";
+      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(import_helpers14.default.formatWhen(n.remindAt)) + "</span>";
     }
     function rowInner(n, q) {
-      const title = n.body === void 0 ? n.title : import_helpers12.default.deriveTitle(n);
+      const title = n.body === void 0 ? n.title : import_helpers14.default.deriveTitle(n);
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "") + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
-      const inTitle = !q || import_helpers12.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
+      const inTitle = !q || import_helpers14.default.tokenize(q).some((t) => title.toLowerCase().includes(t));
       const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
       return '<span class="row-name">' + highlight(title, q) + "</span>" + why + marks + fileMark + reminderMark(n) + whereMark(n);
     }
     function matchExcerpt(n, q) {
       const body = String(n.body || "").replace(/\s+/g, " ");
       const low = body.toLowerCase();
-      const at = import_helpers12.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-      if (at === void 0) return (n.tags || []).filter((t) => import_helpers12.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers12.default.snippet(n, 80);
+      const at = import_helpers14.default.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (at === void 0) return (n.tags || []).filter((t) => import_helpers14.default.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || import_helpers14.default.snippet(n, 80);
       const start = Math.max(0, at - 30);
       let text = body.slice(start, start + 80);
       if (start > 0) text = "\u2026" + text.replace(/^\S*\s/, "");
@@ -4934,11 +5236,11 @@
     }
     function refreshRow(note) {
       if (tabs.ids.includes(note.id)) {
-        tabs.titles.set(note.id, import_helpers12.default.deriveTitle(note));
+        tabs.titles.set(note.id, import_helpers14.default.deriveTitle(note));
         renderActiveTabTitle();
       }
       if (state.outline) {
-        const title = import_helpers12.default.deriveTitle(note);
+        const title = import_helpers14.default.deriveTitle(note);
         for (const list of Object.values(state.outline)) {
           const e = list.find((x) => x.id === note.id);
           if (e) {
@@ -4956,7 +5258,7 @@
       if (!li) return;
       const pageNo = li.querySelector(".page-no");
       li.innerHTML = rowInner(note, state.query);
-      li.title = import_helpers12.default.deriveTitle(note);
+      li.title = import_helpers14.default.deriveTitle(note);
       if (pageNo) li.prepend(pageNo);
     }
     async function setView(view, arg, refreshOpts) {
@@ -5445,11 +5747,11 @@
             await setView("folder", folder.id, { keepEditor: true });
             await selectNoteNow(page.id);
             el.titleInput.focus();
-            toast('Book "' + import_helpers12.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
+            toast('Book "' + import_helpers14.default.truncate(folder.name, 30) + '" created. Give the first page a title; + Page adds more.');
             return;
           }
           await setView("folder", folder.id);
-          toast('Folder "' + import_helpers12.default.truncate(folder.name, 30) + '" created');
+          toast('Folder "' + import_helpers14.default.truncate(folder.name, 30) + '" created');
         } else {
           if (name) await api.folders.rename(edit.id, name);
           await refresh({ keepEditor: true });
@@ -5493,7 +5795,7 @@
       if (state.currentId === noteId && updated) state.current = updated;
       await refresh({ keepEditor: true });
       const name = folderId ? (flattenTree(state.tree).find((n) => n.id === folderId) || {}).name : null;
-      toast(name ? "Moved to " + import_helpers12.default.truncate(name, 30) : "Moved out of folders");
+      toast(name ? "Moved to " + import_helpers14.default.truncate(name, 30) : "Moved out of folders");
     }
     async function moveFolderTo(folderId, parentId) {
       const res = await api.folders.move(folderId, parentId || null);
@@ -5663,7 +5965,7 @@
     }
     function tabTitle(id) {
       if (!id) return "New tab";
-      if (id === state.currentId && state.current) return import_helpers12.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
+      if (id === state.currentId && state.current) return import_helpers14.default.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
       return tabs.titles.get(id) || "\u2026";
     }
     function renderTabs() {
@@ -5712,7 +6014,7 @@
       try {
         const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => void 0)));
         notes.forEach((n, i) => {
-          if (n) tabs.titles.set(ids[i], import_helpers12.default.deriveTitle(n));
+          if (n) tabs.titles.set(ids[i], import_helpers14.default.deriveTitle(n));
           else if (n === null) gone.push(ids[i]);
         });
       } finally {
@@ -6233,7 +6535,7 @@
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
       const plainFile = isPlainTextFile4(note);
-      const markdown = !plainFile && !isViewerOnlyFile6(note);
+      const markdown = !plainFile && !isViewerOnlyFile7(note);
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
@@ -6242,7 +6544,7 @@
       state.currentLossless = lossless;
       state.lossyOverride = null;
       el.bodyInput.placeholder = plainFile ? "Plain text." : "Markdown source. Ctrl+E switches back to the rendered view.";
-      const wantSource = import_helpers12.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
+      const wantSource = import_helpers14.default.isTableFile(note) ? false : plainFile || state.settings.editorMode === "source" || !lossless || !state.rich;
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
@@ -6250,8 +6552,8 @@
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
-      const fileReadOnly = isViewerOnlyFile6(note);
-      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers12.default.isTableFile(note) || fileReadOnly);
+      const fileReadOnly = isViewerOnlyFile7(note);
+      el.sourceBtn.classList.toggle("hidden", plainFile && !import_helpers14.default.isTableFile(note) || fileReadOnly);
       syncSourceButton();
       [el.titleInput, el.tagsInput].forEach((i) => {
         i.readOnly = inTrash;
@@ -6315,11 +6617,11 @@
         el.statusWords.textContent = tableStats.rows.toLocaleString() + (tableStats.rows === 1 ? " row" : " rows");
         el.statusChars.textContent = tableStats.cols + (tableStats.cols === 1 ? " column" : " columns");
       } else {
-        const words = import_helpers12.default.countWords(body);
+        const words = import_helpers14.default.countWords(body);
         el.statusWords.textContent = words + (words === 1 ? " word" : " words");
         el.statusChars.textContent = body.length + (body.length === 1 ? " character" : " characters");
       }
-      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers12.default.relativeTime(note.trashedAt) : "Edited " + import_helpers12.default.relativeTime(note.updatedAt);
+      el.statusUpdated.textContent = note.trashedAt ? "Trashed " + import_helpers14.default.relativeTime(note.trashedAt) : "Edited " + import_helpers14.default.relativeTime(note.updatedAt);
     }
     function setSaved(label) {
       el.statusSaved.textContent = label;
@@ -6364,8 +6666,8 @@
         tab.draggable = true;
         tab.innerHTML = '<span class="no"></span><span class="t"></span>';
         tab.querySelector(".no").textContent = String(i + 1);
-        tab.querySelector(".t").textContent = import_helpers12.default.truncate(import_helpers12.default.deriveTitle(p) || "Untitled", 28);
-        tab.title = import_helpers12.default.deriveTitle(p) || "Untitled";
+        tab.querySelector(".t").textContent = import_helpers14.default.truncate(import_helpers14.default.deriveTitle(p) || "Untitled", 28);
+        tab.title = import_helpers14.default.deriveTitle(p) || "Untitled";
         tab.addEventListener("click", () => {
           if (p.id !== state.currentId) selectNote(p.id);
         });
@@ -6456,7 +6758,7 @@
       }
       await flushSave();
       if (!state.current || state.current.id !== note.id) return;
-      const plan = import_helpers12.default.splitAtHeadings(state.current.body, import_helpers12.default.deriveTitle(state.current));
+      const plan = import_helpers14.default.splitAtHeadings(state.current.body, import_helpers14.default.deriveTitle(state.current));
       if (plan.pages.length < 2) {
         toast("Add at least two headings (lines starting with #) to split this note into pages.");
         return;
@@ -6496,7 +6798,7 @@
       if (r.originalTrashed && state.currentId === id) clearEditor();
       await setView("folder", r.folder.id, { keepEditor: true });
       await selectNoteNow(r.pageIds[0]);
-      toast('Made the book "' + import_helpers12.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
+      toast('Made the book "' + import_helpers14.default.truncate(r.folder.name, 30) + '" with ' + r.pageIds.length + " pages" + (r.originalTrashed ? "; the original note is in the trash." : "."), {
         label: "Undo",
         run: async () => {
           await flushSave();
@@ -6580,18 +6882,18 @@
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
         } else if (action === "copy-link") {
-          await api.app.copy({ text: "[" + (import_helpers12.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
+          await api.app.copy({ text: "[" + (import_helpers14.default.deriveTitle(page) || "Page") + "](note://" + id + ")" });
           toast("Copied. Paste it into another note to link to this page.");
         } else if (action === "delete") {
           if (id === state.currentId) {
             await trashCurrent();
             return;
           }
-          const title = import_helpers12.default.deriveTitle(page) || "Untitled";
+          const title = import_helpers14.default.deriveTitle(page) || "Untitled";
           await api.notes.trash(id);
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
-          toast('Moved "' + import_helpers12.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+          toast('Moved "' + import_helpers14.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
             await api.notes.restore(id);
             await refresh({ keepEditor: true });
             if (state.current) renderBookStrip(state.current);
@@ -6660,7 +6962,7 @@
         pages: pages.map((p, i) => {
           const locked = !!(p.locked && !p.unlocked);
           const body = locked ? "" : bodies[i];
-          return { id: p.id, no: i + 1, title: import_helpers12.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
+          return { id: p.id, no: i + 1, title: import_helpers14.default.deriveTitle(p) || "Untitled", locked, body, html: locked ? "" : markdownToHtml(body, p) };
         })
       };
     }
@@ -6698,300 +7000,13 @@
     const { reader, openReader, closeReader, readerOpen } = createBookReader({ book, collectBook, syncTitleBar });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
+    const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, tableShown, focusBody, flushSave, GUEST });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
-    const { lockedNow, renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
+    const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, focusBody, applyEditorMode, autoGrow, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
-    const { syncShareMenu, openShareMenu, closeShareMenu, currentHtml, markdownToHtml, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, lockedNow, exportCurrent, startLiveHost, openLiveDialog, stopLive });
-    const { attachFiles, toggleRecording } = createAttachments({ api, tableShown, lockedNow, flushSave, refresh });
-    const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, lockedNow, applyEditorMode, autoGrow, runFind, scheduleSave });
-    function openFind() {
-      if (!state.current) return;
-      find.open = true;
-      el.findBar.classList.remove("hidden");
-      const sel = String(window.getSelection && window.getSelection().toString() || "").trim();
-      if (!sel && src.hasFocus()) {
-        const t = src.value.slice(src.selectionStart, src.selectionEnd).trim();
-        if (t) el.findInput.value = t;
-      } else if (sel && sel.length < 200) el.findInput.value = sel;
-      el.findInput.focus();
-      el.findInput.select();
-      runFind(true, true);
-    }
-    function toggleReplace(force) {
-      const on = typeof force === "boolean" ? force : el.replaceRow.classList.contains("hidden");
-      el.replaceRow.classList.toggle("hidden", !on);
-      el.findReplaceToggle.setAttribute("aria-pressed", String(on));
-      if (on) el.replaceInput.focus();
-    }
-    function replaceCurrent() {
-      const q = el.findInput.value;
-      const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
-      if (state.sourceMode) {
-        const wanted = find.active;
-        runFind(true, true, true);
-        if (!find.sourceHits.length) {
-          runFind(true, true);
-          return;
-        }
-        find.active = Math.min(Math.max(wanted, 0), find.sourceHits.length - 1);
-        const at = find.sourceHits[find.active];
-        const ta = src;
-        if (ta.readOnly) return;
-        if (!isQueryText(ta.value.slice(at, at + q.length), q)) {
-          showActiveMatch();
-          return;
-        }
-        ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
-        ta.setSelectionRange(at + text.length, at + text.length);
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
-        runFind(true, true, true);
-        if (find.sourceHits.length) {
-          const next = find.sourceHits.findIndex((h) => h >= at + text.length);
-          find.active = next === -1 ? 0 : next;
-          showActiveMatch();
-        }
-        return;
-      }
-      if (tableShown()) {
-        toast("Switch to Text (Ctrl+E) to replace in this file.");
-        return;
-      }
-      if (!state.rich) return;
-      const wantedIdx = find.active;
-      runFind(true, true, true);
-      if (!find.ranges.length) {
-        runFind(true, true);
-        return;
-      }
-      find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
-      const idx = find.active;
-      if (!isQueryText(String(find.ranges[idx]), q)) {
-        showActiveMatch();
-        return;
-      }
-      state.rich.replaceRanges([find.ranges[idx]], text);
-      runFind(true, true, true);
-      const inside = findOffsets(text, q).length;
-      if (find.ranges.length) {
-        find.active = (idx + inside) % find.ranges.length;
-        showActiveMatch();
-      }
-    }
-    function showActiveMatch() {
-      const q = el.findInput.value;
-      if (state.sourceMode) {
-        const at = find.sourceHits[find.active];
-        if (at === void 0) return;
-        if (document.activeElement !== el.replaceInput) src.focus();
-        src.setSelectionRange(at, at + q.length);
-        src.reveal(at);
-        el.findCount.textContent = find.active + 1 + "/" + find.sourceHits.length;
-        return;
-      }
-      if (window.CSS && CSS.highlights) CSS.highlights.set("notes-find-active", new Highlight(...find.active >= 0 && find.ranges[find.active] ? [find.ranges[find.active]] : []));
-      const r = find.ranges[find.active];
-      if (r) {
-        const node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-        if (node && node.scrollIntoView) node.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-      el.findCount.textContent = find.ranges.length ? find.active + 1 + "/" + find.ranges.length : "No matches";
-    }
-    function replaceAll() {
-      const q = el.findInput.value;
-      const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile6(state.current)) return;
-      let n = 0;
-      if (state.sourceMode) {
-        const ta = src;
-        if (ta.readOnly) return;
-        const hits = findOffsets(ta.value, q);
-        n = hits.length;
-        if (!n) {
-          toast("No matches");
-          return;
-        }
-        let out = "", last = 0;
-        for (const at of hits) {
-          out += ta.value.slice(last, at) + text;
-          last = at + q.length;
-        }
-        ta.value = out + ta.value.slice(last);
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
-      } else {
-        if (tableShown()) {
-          toast("Switch to Text (Ctrl+E) to replace in this file.");
-          return;
-        }
-        if (!state.rich) return;
-        runFind(true, true, true);
-        n = state.rich.replaceRanges(find.ranges, text);
-        if (!n) {
-          toast("No matches");
-          return;
-        }
-      }
-      runFind(true, true, true);
-      toast("Replaced " + n + (n === 1 ? " match" : " matches"));
-    }
-    function closeFind() {
-      if (!find.open) return;
-      find.open = false;
-      el.findBar.classList.add("hidden");
-      toggleReplace(false);
-      el.findCount.textContent = "";
-      clearFindHighlights();
-      focusBody();
-    }
-    function clearFindHighlights() {
-      if (window.CSS && CSS.highlights) {
-        CSS.highlights.delete("notes-find");
-        CSS.highlights.delete("notes-find-active");
-      }
-      find.ranges = [];
-      find.sourceHits = [];
-      find.active = -1;
-    }
-    function isQueryText(text, q) {
-      return new RegExp("^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i").test(text);
-    }
-    function findOffsets(text, q) {
-      const hits = [];
-      if (!q) return hits;
-      const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        hits.push(m.index);
-        if (m[0].length === 0) re.lastIndex++;
-      }
-      return hits;
-    }
-    function findRangesIn(root, q) {
-      const nodes = [];
-      let text = "";
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-      const blockOf = (n) => {
-        let e = n.parentElement;
-        while (e && e !== root && getComputedStyle(e).display === "inline") e = e.parentElement;
-        return e;
-      };
-      let lastBlock = null;
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        if (n.nodeType === 1) {
-          if (n.tagName === "BR" || n.tagName === "IMG") text += "\n";
-          continue;
-        }
-        const b = blockOf(n);
-        if (lastBlock && b !== lastBlock) text += "\n";
-        lastBlock = b;
-        nodes.push({ node: n, start: text.length });
-        text += n.nodeValue;
-      }
-      const locate = (pos) => {
-        let lo = 0, hi = nodes.length - 1;
-        while (lo < hi) {
-          const mid = lo + hi + 1 >> 1;
-          if (nodes[mid].start <= pos) lo = mid;
-          else hi = mid - 1;
-        }
-        if (!nodes.length) return null;
-        const node = nodes[lo].node;
-        return { node, offset: Math.min(pos - nodes[lo].start, node.nodeValue.length) };
-      };
-      return findOffsets(text, q).map((pos) => {
-        const s = locate(pos), e = locate(pos + q.length);
-        if (!s || !e) return null;
-        const r = document.createRange();
-        r.setStart(s.node, s.offset);
-        if (e.offset === 0 && pos + q.length > 0) {
-          const prev = locate(pos + q.length - 1);
-          r.setEnd(prev.node, prev.offset + 1);
-        } else r.setEnd(e.node, e.offset);
-        return r;
-      }).filter(Boolean);
-    }
-    function runFind(forward, fresh, quiet) {
-      const q = el.findInput.value;
-      const sameQuery = q === find.query;
-      find.query = q;
-      if (!q) {
-        clearFindHighlights();
-        el.findCount.textContent = "";
-        return;
-      }
-      if (state.sourceMode) {
-        if (fresh || !sameQuery || !find.sourceHits.length) {
-          find.sourceHits = findOffsets(el.bodyInput.value, q);
-          const caret = src.selectionStart || 0;
-          const idx = find.sourceHits.findIndex((h) => h >= caret);
-          find.active = find.sourceHits.length ? idx === -1 ? 0 : idx : -1;
-        } else if (find.sourceHits.length) {
-          find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
-        }
-        const n2 = find.sourceHits.length;
-        if (n2 && find.active >= 0 && !quiet) {
-          const at = find.sourceHits[find.active];
-          if (!fresh) src.focus();
-          src.setSelectionRange(at, at + q.length);
-          src.reveal(at);
-        }
-        el.findCount.textContent = n2 ? find.active + 1 + "/" + n2 : "No matches";
-        el.findCount.classList.toggle("is-none", !n2);
-        return;
-      }
-      if (fresh || !sameQuery || !find.ranges.length) {
-        find.ranges = findRangesIn(tableShown() ? el.csvView : el.richEditor, q);
-        find.active = find.ranges.length ? sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0 : -1;
-      } else if (find.ranges.length) {
-        find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
-      }
-      if (window.CSS && CSS.highlights) {
-        CSS.highlights.set("notes-find", new Highlight(...find.ranges));
-        CSS.highlights.set("notes-find-active", new Highlight(...find.active >= 0 ? [find.ranges[find.active]] : []));
-      }
-      const n = find.ranges.length;
-      if (n && find.active >= 0 && !quiet) {
-        const r = find.ranges[find.active];
-        const elNode = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-        if (elNode && elNode.scrollIntoView) elNode.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-      el.findCount.textContent = n ? find.active + 1 + "/" + n : "No matches";
-      el.findCount.classList.toggle("is-none", !n);
-    }
-    function scrollTextareaToSelection(at) {
-      const ta = el.bodyInput;
-      const scroller = ta.closest(".editor-scroll") || ta;
-      const cs = getComputedStyle(ta);
-      const mirror = document.createElement("div");
-      for (const prop of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "padding", "border", "boxSizing", "whiteSpace", "wordBreak", "overflowWrap", "tabSize"]) mirror.style[prop] = cs[prop];
-      mirror.style.whiteSpace = "pre-wrap";
-      mirror.style.position = "absolute";
-      mirror.style.visibility = "hidden";
-      mirror.style.top = "0";
-      mirror.style.left = "-99999px";
-      mirror.style.width = ta.clientWidth + "px";
-      mirror.textContent = ta.value.slice(0, at);
-      const marker = document.createElement("span");
-      marker.textContent = "\u200B";
-      mirror.append(marker);
-      document.body.append(mirror);
-      const y = marker.offsetTop;
-      mirror.remove();
-      const target = ta.offsetTop + y - scroller.clientHeight / 2;
-      if (scroller !== ta) scroller.scrollTop = Math.max(0, target);
-      else ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
-    }
-    async function printNote() {
-      if (!state.current) return;
-      await flushSave();
-      const r = GUEST ? await api.book.export("print", exportOfCurrent()) : await api.app.print();
-      if (!r.ok) toast("Could not print: " + (r.error || "unknown error"));
-      else if (r.dry) toast("Print: dry run");
-    }
-    function exportOfCurrent() {
-      const title = import_helpers12.default.deriveTitle(state.current);
-      return { name: title, html: (state.current.title ? "<h1>" + escapeHtml(state.current.title) + "</h1>" : "") + currentHtml() };
-    }
+    const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
+    const { attachFiles, toggleRecording } = createAttachments({ api, tableShown, flushSave, refresh });
+    const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave });
     async function refreshCurrentMeta() {
       if (!state.currentId) return;
       const fresh = await api.notes.get(state.currentId);
@@ -7116,7 +7131,7 @@
               down = true;
               clear();
               const n = state.current;
-              if (n && n.filePath && import_helpers12.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
+              if (n && n.filePath && import_helpers14.default.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
               toast(ui.label + " did not start, so " + ui.without);
             }
           });
@@ -7198,7 +7213,7 @@
     }
     const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
     const useWordCraft = () => crafts.wordcraft.usable();
-    const craftFor = (n) => n && n.filePath && import_helpers12.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers12.default.CRAFT_OF[n.fileKind]] : null;
+    const craftFor = (n) => n && n.filePath && import_helpers14.default.CRAFT_OF[n.fileKind] ? crafts[import_helpers14.default.CRAFT_OF[n.fileKind]] : null;
     const craftDirty = () => Object.values(crafts).some((c) => c.dirty());
     async function flushCrafts() {
       let ok = true;
@@ -7206,22 +7221,22 @@
       return ok;
     }
     function showCraftOnly(n) {
-      const key = import_helpers12.default.CRAFT_OF[n.fileKind];
+      const key = import_helpers14.default.CRAFT_OF[n.fileKind];
       if (crafts[key].usable()) {
         showBanner("");
         crafts[key].show(n);
         return;
       }
-      showBanner("Notes shows ." + import_helpers12.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
+      showBanner("Notes shows ." + import_helpers14.default.extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
     }
     async function showDocx(note) {
       if (useWordCraft()) {
         crafts.wordcraft.show(note);
         return;
       }
-      if (!import_helpers12.default.isOoxmlWordFile(note)) {
+      if (!import_helpers14.default.isOoxmlWordFile(note)) {
         el.docxEditor.classList.add("hidden");
-        showBanner("Notes shows ." + import_helpers12.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
+        showBanner("Notes shows ." + import_helpers14.default.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
         return;
       }
       const key = note.id + ":" + note.fileMtime;
@@ -7300,22 +7315,22 @@
       if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
     }
     function fileBadge(note) {
-      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers12.default.extOf(note.filePath).toUpperCase();
+      if (["docx", "sheet", "image"].includes(note.fileKind)) return import_helpers14.default.extOf(note.filePath).toUpperCase();
       if (note.fileKind !== "text") return (note.fileKind || "file").toUpperCase();
       if (!isPlainTextFile4(note)) return "Markdown";
-      if (import_helpers12.default.isTableFile(note)) return import_helpers12.default.extOf(note.filePath).toUpperCase();
-      return window.NotesCode ? window.NotesCode.languageFor(import_helpers12.default.extOf(note.filePath)).name : "Plain text";
+      if (import_helpers14.default.isTableFile(note)) return import_helpers14.default.extOf(note.filePath).toUpperCase();
+      return window.NotesCode ? window.NotesCode.languageFor(import_helpers14.default.extOf(note.filePath)).name : "Plain text";
     }
     function renderFileRow(note) {
       const isFile = !!(note && note.filePath);
       el.fileRow.classList.toggle("hidden", !isFile);
       el.fileBanner.classList.add("hidden");
       if (!(isFile && note.fileKind === "docx")) clearDocx();
-      for (const [kind, key] of Object.entries(import_helpers12.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
+      for (const [kind, key] of Object.entries(import_helpers14.default.CRAFT_OF)) if (!(isFile && note.fileKind === kind)) crafts[key].clear();
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
-      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers12.default.CRAFT_OF[note.fileKind]));
+      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!import_helpers14.default.CRAFT_OF[note.fileKind]));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const inCraft = isFile && !!craftFor(note) && craftFor(note).usable();
       el.editorColumn.classList.toggle("shows-craft", inCraft);
@@ -7734,13 +7749,13 @@
       state.current = fresh;
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
-      if (isViewerOnlyFile6(fresh)) {
+      if (isViewerOnlyFile7(fresh)) {
         showCode2(fresh, true);
         renderFileRow(fresh);
         updateStatus(fresh);
         return;
       }
-      if (import_helpers12.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
+      if (import_helpers14.default.isTableFile(fresh) && tableShown()) renderTable(fresh);
       if (state.rich && !isPlainTextFile4(fresh)) {
         let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
         if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
@@ -7795,7 +7810,7 @@
     state.pending = /* @__PURE__ */ new Map();
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
-      if (isViewerOnlyFile6(state.current)) delete patch.body;
+      if (isViewerOnlyFile7(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
     }
@@ -7861,7 +7876,7 @@
               state.notes[idx] = updated;
               refreshRow(updated);
             }
-            toast('Saved earlier changes to "' + import_helpers12.default.truncate(import_helpers12.default.deriveTitle(updated), 30) + '"');
+            toast('Saved earlier changes to "' + import_helpers14.default.truncate(import_helpers14.default.deriveTitle(updated), 30) + '"');
           }
         } catch (err) {
           if (/changed on disk/i.test(String(err && err.message))) {
@@ -7928,7 +7943,7 @@
         renderRelatedSoon();
         if (book.id && patch.title !== void 0) {
           const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t');
-          if (t) t.textContent = import_helpers12.default.truncate(import_helpers12.default.deriveTitle(updated) || "Untitled", 28);
+          if (t) t.textContent = import_helpers14.default.truncate(import_helpers14.default.deriveTitle(updated) || "Untitled", 28);
         }
         if (updated.filePath && el.filePath.textContent !== updated.filePath) {
           el.filePath.textContent = updated.filePath;
@@ -7988,13 +8003,13 @@
     async function trashCurrent() {
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
-      const title = import_helpers12.default.deriveTitle(state.current);
+      const title = import_helpers14.default.deriveTitle(state.current);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
       await api.notes.trash(id);
       clearEditor();
       await refresh();
-      toast('Moved "' + import_helpers12.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+      toast('Moved "' + import_helpers14.default.truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
         await api.notes.restore(id);
         await refresh({ keepEditor: true });
         await selectNote(id);
@@ -8010,7 +8025,7 @@
     }
     async function destroyCurrent() {
       if (!state.current) return;
-      if (!window.confirm('Delete "' + import_helpers12.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
+      if (!window.confirm('Delete "' + import_helpers14.default.deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
       state.pending.delete(state.currentId);
       state.dirty = false;
       await api.notes.destroy(state.currentId);
@@ -8063,7 +8078,7 @@
       }
       state.rich = window.NotesEditor.create(el.richEditor, {
         placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
-        imageBase: () => import_helpers12.default.imageBaseFor(state.current),
+        imageBase: () => import_helpers14.default.imageBaseFor(state.current),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),
         onUpdate: (md) => {
@@ -8111,16 +8126,16 @@
       }
       let items;
       if (t.kind === "slash") {
-        items = SLASH.map((b) => ({ b, s: import_helpers12.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
+        items = SLASH.map((b) => ({ b, s: import_helpers14.default.fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
         if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
       } else {
         if (!inline.notes || !inline.trigger || inline.trigger.kind !== "link") inline.notes = await api.notes.list({ sort: "updated" });
         if (seq !== inline.seq) return;
         const q = t.query.trim();
         const notes = inline.notes.filter((n) => n.id !== state.currentId && !n.trashedAt);
-        const scored = q ? notes.map((n) => ({ n, s: import_helpers12.default.fuzzyScore(q, import_helpers12.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers12.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers12.default.relativeTime(n.updatedAt), note: n }));
-        if (q) items.push({ id: "new", title: 'New note "' + import_helpers12.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
+        const scored = q ? notes.map((n) => ({ n, s: import_helpers14.default.fuzzyScore(q, import_helpers14.default.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
+        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: import_helpers14.default.deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: import_helpers14.default.relativeTime(n.updatedAt), note: n }));
+        if (q) items.push({ id: "new", title: 'New note "' + import_helpers14.default.truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
       }
       inline.trigger = t;
       inline.items = items;
@@ -8236,14 +8251,14 @@
         }
         inline.notes = null;
         refresh({ keepEditor: true });
-        toast('Created "' + import_helpers12.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
+        toast('Created "' + import_helpers14.default.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
       state.rich.insertLinkAt(range, it.title, "note://" + it.note.id);
     }
     function syncTextViews(note) {
-      const none = lockedNow() || isViewerOnlyFile6(note);
-      const isTable = import_helpers12.default.isTableFile(note);
+      const none = lockedNow() || isViewerOnlyFile7(note);
+      const isTable = import_helpers14.default.isTableFile(note);
       const table = isTable && !state.sourceMode && !none;
       el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
       el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
@@ -8256,7 +8271,7 @@
     function renderTable(note) {
       const text = el.bodyInput.value;
       if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
-        tableStats = NotesCsv.render(el.csvView, text, import_helpers12.default.extOf(note.filePath));
+        tableStats = NotesCsv.render(el.csvView, text, import_helpers14.default.extOf(note.filePath));
         tableDrawn = { id: note.id, text };
       }
       updateStatus(note);
@@ -8269,7 +8284,7 @@
       el.editor.classList.toggle("fills-pane", on);
     }
     function syncSourceButton() {
-      const table = import_helpers12.default.isTableFile(state.current);
+      const table = import_helpers14.default.isTableFile(state.current);
       const label = state.sourceMode ? table ? "Table" : "Rendered" : table ? "Text" : "Source";
       const what = state.sourceMode ? table ? "Show as a table" : "Back to the rendered view" : table ? "Edit as text" : "Show Markdown source";
       setLabel(el.sourceBtn, label);
@@ -8290,20 +8305,20 @@
       syncTextViews(state.current);
       renderCodePosition2();
       if (state.sourceMode) autoGrow();
-      else if (state.rich && state.currentId && !isViewerOnlyFile6(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      else if (state.rich && state.currentId && !isViewerOnlyFile7(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
     }
     function toggleSource(force) {
       const next = typeof force === "boolean" ? force : !state.sourceMode;
-      if (isViewerOnlyFile6(state.current)) {
+      if (isViewerOnlyFile7(state.current)) {
         toast("This file is shown as it is; it has no Markdown view to switch to.");
         return;
       }
       if (next === state.sourceMode) return;
-      if (!next && isPlainTextFile4(state.current) && !import_helpers12.default.isTableFile(state.current)) {
+      if (!next && isPlainTextFile4(state.current) && !import_helpers14.default.isTableFile(state.current)) {
         toast("This is a plain-text file, so it is edited as the text it is.");
         return;
       }
-      if (!next && !state.rich && !import_helpers12.default.isTableFile(state.current)) {
+      if (!next && !state.rich && !import_helpers14.default.isTableFile(state.current)) {
         toast("The rendered editor is unavailable; staying in Markdown source.");
         return;
       }
@@ -8316,7 +8331,7 @@
         }
       }
       applyEditorMode(next);
-      if (!import_helpers12.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
+      if (!import_helpers14.default.isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
       focusBody();
     }
     function focusBody() {
@@ -8371,7 +8386,7 @@
           if (n.id === state.currentId) continue;
           const o = document.createElement("option");
           o.value = "note://" + n.id;
-          o.textContent = import_helpers12.default.truncate(import_helpers12.default.deriveTitle(n), 60);
+          o.textContent = import_helpers14.default.truncate(import_helpers14.default.deriveTitle(n), 60);
           el.linkNoteSelect.append(o);
         }
         if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
@@ -8387,7 +8402,7 @@
     function openSettings() {
       const s = state.settings;
       draft = {};
-      el.hotkeyInput.value = import_helpers12.default.displayAccelerator(s.hotkey).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers14.default.displayAccelerator(s.hotkey).replace(/ /g, "");
       el.hotkeyError.textContent = "";
       el.themeSelect.value = s.theme;
       renderSchemeGrid();
@@ -8456,7 +8471,7 @@
       draft = {};
       if (res.error) {
         el.hotkeyError.textContent = res.error;
-        el.hotkeyInput.value = import_helpers12.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
+        el.hotkeyInput.value = import_helpers14.default.displayAccelerator(res.settings.hotkey).replace(/ /g, "");
         syncSettingsDirty();
         el.hotkeyInput.focus();
         return false;
@@ -8623,7 +8638,7 @@
       });
     }
     function filterSettings() {
-      const tokens = import_helpers12.default.tokenize(el.settingsSearch.value);
+      const tokens = import_helpers14.default.tokenize(el.settingsSearch.value);
       const ranges = [];
       let any = false;
       for (const sec of el.settingsScroll.querySelectorAll(".settings-section")) {
@@ -8687,7 +8702,7 @@
       if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
       else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
       else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers12.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers12.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
+      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + import_helpers14.default.relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + import_helpers14.default.relativeTime(s.lastPushAt) : ", not pushed yet" : "");
       if (s.lastError) text += "  Error: " + s.lastError;
       el.gitStatus.textContent = text;
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -8717,13 +8732,13 @@
       return { partial: null, value: mods.concat(key).join("+") };
     }
     function commitHotkey(value) {
-      const parsed = import_helpers12.default.parseAccelerator(value);
+      const parsed = import_helpers14.default.parseAccelerator(value);
       if (!parsed.ok) {
         el.hotkeyError.textContent = parsed.reason;
         return;
       }
       el.hotkeyError.textContent = "";
-      el.hotkeyInput.value = import_helpers12.default.displayAccelerator(parsed.value).replace(/ /g, "");
+      el.hotkeyInput.value = import_helpers14.default.displayAccelerator(parsed.value).replace(/ /g, "");
       setDraft({ hotkey: parsed.value });
     }
     let palette = null;
@@ -8794,16 +8809,16 @@
         notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
           id: "note-" + n.id,
           group: "Notes",
-          title: import_helpers12.default.deriveTitle(n),
+          title: import_helpers14.default.deriveTitle(n),
           icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
-          hint: n.folderId && folders.get(n.folderId) || import_helpers12.default.relativeTime(n.updatedAt),
-          matches: (q) => !n.locked && import_helpers12.default.matchesQuery(n, q),
+          hint: n.folderId && folders.get(n.folderId) || import_helpers14.default.relativeTime(n.updatedAt),
+          matches: (q) => !n.locked && import_helpers14.default.matchesQuery(n, q),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));
       }
       const out = NotesPalette.rank(query, commands, notes);
       const title = query.replace(/^\s*>\s*/, "").trim();
-      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers12.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
+      if (title && !commandsOnly) out.push({ id: "create", group: "Create", title: 'New note "' + import_helpers14.default.truncate(title, 60) + '"', icon: "square-pen", keys: "", run: () => GUEST ? toPeer({ type: "command", name: "newNote", title }) : newNote({ title }) });
       return out;
     }
     function onKeydown(e) {
@@ -9572,8 +9587,8 @@
       });
       el.hotkeyInput.addEventListener("blur", () => {
         const v = el.hotkeyInput.value.trim();
-        if (v && !v.endsWith("+") && v !== import_helpers12.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
-        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers12.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
+        if (v && !v.endsWith("+") && v !== import_helpers14.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
+        else if (!v || v.endsWith("+")) el.hotkeyInput.value = import_helpers14.default.displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
       });
       el.themeSelect.addEventListener("change", () => setDraft({ theme: el.themeSelect.value }));
       el.fontSizeInput.addEventListener("input", () => {
@@ -9689,7 +9704,7 @@
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && isViewerOnlyFile6(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && isViewerOnlyFile7(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {

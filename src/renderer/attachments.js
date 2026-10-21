@@ -1,5 +1,5 @@
 import { el, setLabel } from './dom.js';
-import { state } from './state.js';
+import { state, lockedNow } from './state.js';
 import { src } from './code-editor.js';
 import H from '../shared/helpers.js';
 import { toast } from './toast.js';
@@ -7,7 +7,7 @@ import { setActivity } from './activity.js';
 
 const { isViewerOnlyFile } = H;
 
-export function createAttachments({ api, tableShown, lockedNow, flushSave, refresh }) {
+export function createAttachments({ api, tableShown, flushSave, refresh }) {
   function insertAttachmentLinks(items) {
     const ok = items.filter((x) => x && !x.error);
     const bad = items.filter((x) => x && x.error);

@@ -1,5 +1,5 @@
 import { el } from './dom.js';
-import { state } from './state.js';
+import { state, lockedNow } from './state.js';
 import { find } from './find-state.js';
 import { src } from './code-editor.js';
 import H from '../shared/helpers.js';
@@ -7,7 +7,7 @@ import { toast } from './toast.js';
 
 const { isViewerOnlyFile } = H;
 
-export function createHistoryDialog({ api, flushSave, lockedNow, applyEditorMode, autoGrow, runFind, scheduleSave }) {
+export function createHistoryDialog({ api, flushSave, applyEditorMode, autoGrow, runFind, scheduleSave }) {
   const hist = { versions: [], index: -1, noteId: null };
 
   async function openHistory() {
