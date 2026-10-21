@@ -93,10 +93,10 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
 
   async function savePdfNow(explicit) {
     const target = pdfNote, ctl = pdf;
-    if (!target || !ctl) return true;
     try {
+      if (!target || !ctl) throw new Error('no PDF is open.');
       const saved = await ctl.save();
-      if (!saved) return true;
+      if (!saved) throw new Error('no PDF is open.');
       const { bytes, hash } = saved;
       const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
       if (pdfNote === target) ctl.markSaved(hash);

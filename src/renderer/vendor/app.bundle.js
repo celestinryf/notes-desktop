@@ -4879,10 +4879,10 @@
     }
     async function savePdfNow(explicit) {
       const target = pdfNote, ctl = pdf;
-      if (!target || !ctl) return true;
       try {
+        if (!target || !ctl) throw new Error("no PDF is open.");
         const saved = await ctl.save();
-        if (!saved) return true;
+        if (!saved) throw new Error("no PDF is open.");
         const { bytes, hash } = saved;
         const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
         if (pdfNote === target) ctl.markSaved(hash);
@@ -6052,9 +6052,9 @@
     });
     async function saveDocxNow(explicit) {
       const target = docxNote, ed = docx;
-      if (!target || !ed) return true;
       let c;
       try {
+        if (!target || !ed) throw new Error("no Word document is open");
         c = ed.save();
       } catch (err) {
         toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; use Reload to start again from the file.");
