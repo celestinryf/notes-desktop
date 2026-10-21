@@ -4866,6 +4866,7 @@
       el.editorColumn.style.setProperty("--editor-col-width", (settings.editorWidth || 760) + "px");
     }
     const NARROW_W = 1e3;
+    const PEEK_EDGE_PX = 24;
     let sidebarPeek = null;
     let peekTimer = null;
     const isNarrow = () => window.innerWidth < NARROW_W;
@@ -4935,10 +4936,11 @@
     function bindSidebarFloat() {
       if (GUEST) return;
       const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains("is-resizing") || el.sidebar.contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
+      let nearEdge = false;
       const leaveSoon = () => {
         clearTimeout(peekTimer);
         peekTimer = setTimeout(function check() {
-          if (sidebarPeek !== "hover" || el.sidebar.matches(":hover")) return;
+          if (sidebarPeek !== "hover" || nearEdge || el.sidebar.matches(":hover")) return;
           if (busy()) {
             peekTimer = setTimeout(check, 500);
             return;
@@ -4946,11 +4948,16 @@
           unpeekSidebar();
         }, 350);
       };
-      el.sidebarEdge.addEventListener("mouseenter", () => {
-        clearTimeout(peekTimer);
-        peekTimer = setTimeout(() => peekSidebar("hover"), 90);
-      });
-      el.sidebarEdge.addEventListener("mouseleave", () => {
+      document.addEventListener("mousemove", (e) => {
+        const overSidebar = el.sidebar.contains(e.target);
+        const near = e.clientX <= PEEK_EDGE_PX;
+        if (near && !sidebarPeek) {
+          clearTimeout(peekTimer);
+          peekTimer = setTimeout(() => peekSidebar("hover"), 90);
+        }
+        if (near === nearEdge) return;
+        nearEdge = near;
+        if (near || overSidebar) return;
         if (sidebarPeek === "hover") leaveSoon();
         else if (!sidebarPeek) clearTimeout(peekTimer);
       });

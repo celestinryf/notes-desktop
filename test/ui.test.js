@@ -1688,6 +1688,29 @@ test('settings: changes preview on the page and are written by Save changes; the
   await waitForDom(() => document.documentElement.dataset.theme === 'light');
 });
 
+test('hidden sidebar: the pointer within 24px of the left edge floats it in, further away sends it off', async () => {
+  const peeking = () => page.evaluate(() => document.getElementById('app').classList.contains('sidebar-peek'));
+  await page.mouse.move(600, 400);
+  await page.click('#toggleSidebarBtn');
+  await waitForDom(() => document.getElementById('app').classList.contains('sidebar-collapsed'));
+  try {
+    await page.mouse.move(600, 400);
+    await sleep(500);
+    assert.equal(await peeking(), false, 'hidden while the pointer is far from the edge');
+    await page.mouse.move(20, 400);
+    await waitFor('sidebar floats in from 20px', peeking);
+    await page.mouse.move(600, 400);
+    await waitFor('sidebar goes away', async () => !(await peeking()));
+    await page.mouse.move(2, 400);
+    await waitFor('sidebar floats in from the edge itself', peeking);
+    await page.mouse.move(600, 400);
+    await waitFor('sidebar goes away again', async () => !(await peeking()));
+  } finally {
+    await page.keyboard.press('Control+\\');
+    await waitForDom(() => !document.getElementById('app').classList.contains('sidebar-collapsed'));
+  }
+});
+
 test('export note, export all, and import through stubbed dialogs', async () => {
   const outMd = path.join(dataDir, 'exported.md');
   const outJson = path.join(dataDir, 'all.json');
