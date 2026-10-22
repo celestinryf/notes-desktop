@@ -1255,20 +1255,17 @@ function main() {
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
     if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Keep every change in a git history in the data folder" in Settings › History.' };
     const commits = await git.history(Math.min(200, Math.max(1, limit || 80)));
-    const texts = await git.notesAt(commits.map((c) => c.hash));
     const versions: HistoryVersion[] = [];
     let lastBody: string | null = null;
-    for (const [i, c] of commits.entries()) {
-      const text = texts[i];
-      if (!text) continue;
+    await git.eachNotesAt(commits.map((c) => c.hash), (i, text) => {
+      if (!text) return;
       let snap: { notes?: Note[] };
-      try { snap = JSON.parse(text); } catch (_) { continue; }
+      try { snap = JSON.parse(text); } catch (_) { return; }
       const n = (snap.notes || []).find((x) => x.id === id);
-      if (!n || typeof n.body !== 'string' || n.lock) continue;
-      if (n.body === lastBody) continue;
+      if (!n || typeof n.body !== 'string' || n.lock || n.body === lastBody) return;
       lastBody = n.body;
-      versions.push({ hash: c.hash, at: c.at, title: n.title || '', body: n.body, chars: n.body.length });
-    }
+      versions.push({ hash: commits[i].hash, at: commits[i].at, title: n.title || '', body: n.body, chars: n.body.length });
+    });
     return { ok: true, versions, current: note.body };
   });
 

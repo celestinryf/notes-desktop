@@ -15,34 +15,46 @@ function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
   });
 }
 
-function catBlobs(specs: string[], cwd: string, timeoutMs: number): Promise<(string | null)[] | null> {
+function eachBlob(specs: string[], cwd: string, timeoutMs: number, visit: (index: number, text: string | null) => void): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn('git', ['cat-file', '--batch'], { cwd, windowsHide: true });
-    const chunks: Buffer[] = [];
     const timer = setTimeout(() => child.kill(), timeoutMs);
-    child.stdout.on('data', (d: Buffer) => chunks.push(d));
+    let pending: Buffer[] = [], have = 0, need = -1, index = 0, done = false;
+    const joined = () => { const all = pending.length === 1 ? pending[0] : Buffer.concat(pending, have); pending = [all]; return all; };
+    const keepFrom = (all: Buffer, at: number) => { pending = [all.subarray(at)]; have = all.length - at; };
+    const drain = () => {
+      while (index < specs.length) {
+        if (need < 0) {
+          const all = joined();
+          const eol = all.indexOf(10);
+          if (eol === -1) return;
+          const header = all.toString('utf8', 0, eol);
+          keepFrom(all, eol + 1);
+          const size = Number(header.slice(header.lastIndexOf(' ') + 1));
+          if (/ (missing|ambiguous)$/.test(header) || !Number.isInteger(size)) { visit(index++, null); continue; }
+          need = size + 1;
+        }
+        if (have < need) return;
+        const all = joined();
+        const text = all.toString('utf8', 0, need - 1);
+        keepFrom(all, need);
+        need = -1;
+        visit(index++, text);
+      }
+    };
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      while (index < specs.length) visit(index++, null);
+      resolve(ok);
+    };
+    child.stdout.on('data', (d: Buffer) => { pending.push(d); have += d.length; if (need < 0 || have >= need) drain(); });
     child.stdin.on('error', () => {});
-    child.on('error', () => { clearTimeout(timer); resolve(null); });
-    child.on('close', (code) => { clearTimeout(timer); resolve(code === 0 ? parseBatch(Buffer.concat(chunks), specs.length) : null); });
+    child.on('error', () => finish(false));
+    child.on('close', (code) => finish(code === 0));
     child.stdin.end(specs.map((s) => s + '\n').join(''));
   });
-}
-
-function parseBatch(out: Buffer, count: number) {
-  const blobs: (string | null)[] = [];
-  let at = 0;
-  while (blobs.length < count && at < out.length) {
-    const eol = out.indexOf(10, at);
-    if (eol === -1) break;
-    const header = out.toString('utf8', at, eol);
-    at = eol + 1;
-    const size = Number(header.slice(header.lastIndexOf(' ') + 1));
-    if (/ (missing|ambiguous)$/.test(header) || !Number.isInteger(size)) { blobs.push(null); continue; }
-    blobs.push(out.toString('utf8', at, at + size));
-    at += size + 1;
-  }
-  while (blobs.length < count) blobs.push(null);
-  return blobs;
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -204,9 +216,9 @@ class GitSync {
     });
   }
 
-  async notesAt(hashes: string[]) {
-    if (!hashes.length) return [];
-    return (await catBlobs(hashes.map((h) => h + ':notes.json'), this.dir, 20000)) || hashes.map(() => null);
+  async eachNotesAt(hashes: string[], visit: (index: number, text: string | null) => void) {
+    if (!hashes.length) return true;
+    return eachBlob(hashes.map((h) => h + ':notes.json'), this.dir, 20000, visit);
   }
 }
 
