@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
@@ -13,6 +13,36 @@ function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
     });
   });
+}
+
+function catBlobs(specs: string[], cwd: string, timeoutMs: number): Promise<(string | null)[] | null> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['cat-file', '--batch'], { cwd, windowsHide: true });
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.stdout.on('data', (d: Buffer) => chunks.push(d));
+    child.stdin.on('error', () => {});
+    child.on('error', () => { clearTimeout(timer); resolve(null); });
+    child.on('close', (code) => { clearTimeout(timer); resolve(code === 0 ? parseBatch(Buffer.concat(chunks), specs.length) : null); });
+    child.stdin.end(specs.map((s) => s + '\n').join(''));
+  });
+}
+
+function parseBatch(out: Buffer, count: number) {
+  const blobs: (string | null)[] = [];
+  let at = 0;
+  while (blobs.length < count && at < out.length) {
+    const eol = out.indexOf(10, at);
+    if (eol === -1) break;
+    const header = out.toString('utf8', at, eol);
+    at = eol + 1;
+    const size = Number(header.slice(header.lastIndexOf(' ') + 1));
+    if (/ (missing|ambiguous)$/.test(header) || !Number.isInteger(size)) { blobs.push(null); continue; }
+    blobs.push(out.toString('utf8', at, at + size));
+    at += size + 1;
+  }
+  while (blobs.length < count) blobs.push(null);
+  return blobs;
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -174,9 +204,9 @@ class GitSync {
     });
   }
 
-  async showNotesAt(hash: string) {
-    const r = await run(['show', hash + ':notes.json'], this.dir);
-    return r.ok ? r.stdout : null;
+  async notesAt(hashes: string[]) {
+    if (!hashes.length) return [];
+    return (await catBlobs(hashes.map((h) => h + ':notes.json'), this.dir, 20000)) || hashes.map(() => null);
   }
 }
 

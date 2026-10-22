@@ -40,8 +40,9 @@ test('commits snapshots of notes.json into <data>/history, skips empty commits, 
   const history = await sync.history(10);
   assert.equal(history.length, 2);
   assert.match(history[0].subject, /^notes \d{4}-/);
-  assert.equal(await sync.showNotesAt(history[1].hash), '{"v":1}');
-  assert.equal(await sync.showNotesAt(history[0].hash), '{"v":2}');
+  assert.deepEqual(await sync.notesAt([history[1].hash, history[0].hash]), ['{"v":1}', '{"v":2}']);
+  assert.deepEqual(await sync.notesAt([history[0].hash, 'f'.repeat(40)]), ['{"v":2}', null]);
+  assert.deepEqual(await sync.notesAt([]), []);
 });
 
 test('does nothing while disabled', { skip: !gitAvailable && 'git not installed' }, async () => {

@@ -1253,12 +1253,13 @@ function main() {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
-    if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Commit every change to a git repo" in Settings.' };
+    if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Keep every change in a git history in the data folder" in Settings › History.' };
     const commits = await git.history(Math.min(200, Math.max(1, limit || 80)));
+    const texts = await git.notesAt(commits.map((c) => c.hash));
     const versions: HistoryVersion[] = [];
     let lastBody: string | null = null;
-    for (const c of commits) {
-      const text = await git.showNotesAt(c.hash);
+    for (const [i, c] of commits.entries()) {
+      const text = texts[i];
       if (!text) continue;
       let snap: { notes?: Note[] };
       try { snap = JSON.parse(text); } catch (_) { continue; }
