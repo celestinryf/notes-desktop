@@ -2,21 +2,27 @@
 
 A tray-resident notes app for Windows. Press **Ctrl + Alt + N** anywhere to toggle it. It starts hidden at login so the hotkey always works.
 
+**Status:** in development. Notes runs on Windows, from source. macOS support and installers are planned. Parts of this README predate recent changes, and a full rewrite is planned.
+
 ## Run
 
+Requires Node.js 24 or later and npm.
+
 ```
+git clone https://github.com/celestinryf/notes-desktop.git
+cd notes-desktop
 npm install
 npm run install:shortcuts   # Start Menu + desktop shortcuts, launches the app
 ```
 
-The rendered editor is a prebuilt bundle at `src/renderer/vendor/editor.bundle.js`. After changing `src/editor/index.js`, run `npm run build`.
+The renderer and the editors are prebuilt bundles in `src/renderer/vendor/`. After changing their sources, run `npm run build`.
 
 The app adds its own autostart entry (Settings → "Start Notes when I log in"). Quit from the tray icon.
 
 ## Features
 
 - Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
-- Open files as notes (Ctrl+O, the Open file… button, or drag files onto the window): Markdown, text, LaTeX, JSON, code and any other text file are editable and written back to the file in place (hard links such as CLAUDE.md ↔ AGENTS.md stay joined; CRLF files stay CRLF). PDFs show in a viewer, Word documents are converted to Markdown for reading; both are read-only here with an "Open with…" button for the native app. Changes made by other programs are picked up while the note is open.
+- Open files as notes (Ctrl+O, the Open file… button, or drag files onto the window): Markdown, text, LaTeX, JSON, code and any other text file are editable and written back to the file in place (hard links such as CLAUDE.md ↔ AGENTS.md stay joined; CRLF files stay CRLF). PDFs open in a viewer where you can comment, sign and rearrange pages. Word documents show as laid out in the file and can be edited in place, or in WordCraft when its web build is present. "Open with…" opens any file in its native app. Changes made by other programs are picked up while the note is open.
 - Agent files: Settings → "Add my agent files" links your global CLAUDE.md/AGENTS.md, Claude commands, output styles, memory notes, and every project's CLAUDE.md/AGENTS.md into an "Agent files" folder. Editing them in Notes edits the real files.
 - Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
 - Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
@@ -57,7 +63,8 @@ The app adds its own autostart entry (Settings → "Start Notes when I log in").
 | Ctrl+Shift+N | New folder (inside the current folder) |
 | Ctrl+F | Search |
 | Ctrl+E | Toggle Markdown source / rendered |
-| Ctrl+P | Pin / unpin |
+| Ctrl+P | Command palette: find any note or command |
+| Ctrl+D | Pin / unpin |
 | Ctrl+Shift+Del | Move to trash (Ctrl+Del also works outside a text field) |
 | Ctrl+S | Save now |
 | Ctrl+, | Settings |
@@ -76,3 +83,7 @@ npm run test:all  # all three
 ```
 
 The UI and e2e tests use isolated data folders and test-only hotkeys so they never touch your notes or your running instance. Export and import dialogs are stubbed inside the main process during the UI test so the real file writes still happen.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Third-party code and fonts are listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
