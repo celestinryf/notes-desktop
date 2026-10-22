@@ -688,4 +688,4 @@ function applyPatches(xml: string, patches: Patch[]) {
   return out;
 }
 
-export { MARK, BREAK_MARK, PAGE_BREAK, PICTURE, sameShownText, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches };
+export { MARK, BREAK_MARK, PAGE_BREAK, PICTURE, sameShownText, limitTo, tokenize, parseNodes, assertWellFormed, decodeText, escapeText, mainPrefix, scanDocument, settingsBlock, withFormatting, runXml, matchTokens, rewriteParagraphs, markForDisplay, checkPatches, applyPatches, type EditableParagraph };

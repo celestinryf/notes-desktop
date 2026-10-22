@@ -64,7 +64,7 @@ const BY_EXT = new Map<string, { name: string, mode: StreamParser<unknown>, lang
 for (const [name, mode, exts] of LANGUAGES) for (const ext of exts) BY_EXT.set(ext, { name, mode });
 
 // The language for a file extension: its name (for the status line) and its parser (made once), or plain text.
-export function languageFor(ext) {
+export function languageFor(ext: string | null | undefined) {
   const found = BY_EXT.get(String(ext || '').toLowerCase());
   if (!found) return { name: 'Plain text', language: null, code: false };
   if (!found.language) found.language = StreamLanguage.define(found.mode);
@@ -85,7 +85,7 @@ const highlight = HighlightStyle.define([
 ]);
 
 // The indentation the file already uses: a tab, or the smallest run of leading spaces (2 when there is none).
-export function detectIndent(text) {
+export function detectIndent(text: string) {
   let tabs = 0, spaces = 0, unit = 0;
   for (const line of String(text).split('\n', 2000)) {
     if (line.startsWith('\t')) tabs++;
@@ -99,7 +99,7 @@ export function detectIndent(text) {
 // An edit Notes makes itself, so it is not reported back as the person's.
 const fromNotes = Annotation.define();
 
-const lineIsIndented = (state) => {
+const lineIsIndented = (state: EditorState) => {
   const { from, to } = state.selection.main;
   for (let pos = from; pos <= to;) {
     const line = state.doc.lineAt(pos);
@@ -112,7 +112,16 @@ const lineIsIndented = (state) => {
 
 /* create({ parent, onChange(text), onSelection(), onEnter(shift) -> handled }) -> editor
    onEnter: Enter (and Shift+Enter) go to Notes first, so the find bar can step between matches. */
-export function create({ parent, onChange, onSelection, onEnter }) {
+export type CodeEditorOptions = {
+  parent: Element | DocumentFragment,
+  onChange?: (text: string) => void,
+  onSelection?: () => void,
+  onEnter?: (shift: boolean) => boolean,
+};
+
+export type LoadOptions = { ext?: string, readOnly?: boolean, placeholder?: string, label?: string };
+
+export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOptions) {
   const language = new Compartment(), writable = new Compartment(), hint = new Compartment(), indent = new Compartment(), words = new Compartment();
 
   const keys = [
@@ -120,20 +129,20 @@ export function create({ parent, onChange, onSelection, onEnter }) {
     { key: 'Shift-Enter', run: () => !!(onEnter && onEnter(true)) },
     // Tab indents (the selected lines, or at the caret); Shift+Tab outdents, and when nothing is indented lets focus
     // move on, as it does everywhere else. A file that cannot be edited never keeps Tab.
-    { key: 'Tab', run: (v) => {
+    { key: 'Tab', run: (v: EditorView) => {
       if (v.state.readOnly) return false;
       if (v.state.selection.ranges.some((range) => !range.empty)) return indentMore(v);
       v.dispatch(v.state.replaceSelection(v.state.facet(indentUnit)), { scrollIntoView: true, userEvent: 'input' });
       return true;
     } },
-    { key: 'Shift-Tab', run: (v) => !v.state.readOnly && lineIsIndented(v.state) && indentLess(v) },
+    { key: 'Shift-Tab', run: (v: EditorView) => !v.state.readOnly && lineIsIndented(v.state) && indentLess(v) },
     { key: 'Mod-/', run: toggleComment },
     { key: 'Mod-b', run: () => true },
     { key: 'Mod-i', run: () => true },
     { key: 'Mod-u', run: () => true },
   ];
 
-  const stateFor = (text, opts) => {
+  const stateFor = (text: string, opts: LoadOptions) => {
     const lang = languageFor(opts.ext);
     return EditorState.create({
       doc: text,
@@ -156,18 +165,18 @@ export function create({ parent, onChange, onSelection, onEnter }) {
   };
 
   const view = new EditorView({ parent, state: stateFor('', {}) });
-  const clamp = (n) => Math.max(0, Math.min(Number(n) || 0, view.state.doc.length));
+  const clamp = (n: unknown) => Math.max(0, Math.min(Number(n) || 0, view.state.doc.length));
 
   return {
     dom: view.dom,
     // A new document (another note, or the file read again): its undo history starts here.
-    load(text, opts) { view.setState(stateFor(String(text || ''), opts || {})); },
+    load(text: string, opts?: LoadOptions) { view.setState(stateFor(String(text || ''), opts || {})); },
     get value() { return view.state.doc.toString(); },
     // The text replaced by Notes. Only the part that differs is changed, so the caret and the scroll stay where they
     // were when the change is elsewhere. It is one undo step, unless history is false: text that came from outside
     // (the file saved by another program, a live or vault update) is not the person's to undo, and undoing it would
     // save the old text over the new.
-    setValue(text, { history = true } = {}) {
+    setValue(text: string, { history = true } = {}) {
       const next = String(text || '').replace(/\r\n?/g, '\n'), prev = view.state.doc.toString();
       if (next === prev) return;
       let start = 0;
@@ -182,11 +191,11 @@ export function create({ parent, onChange, onSelection, onEnter }) {
     redo() { return redo(view); },
     get selectionStart() { return view.state.selection.main.from; },
     get selectionEnd() { return view.state.selection.main.to; },
-    setSelectionRange(from, to) {
+    setSelectionRange(from: number, to: number) {
       view.dispatch({ selection: EditorSelection.single(clamp(from), clamp(to === undefined ? from : to)), annotations: fromNotes.of(true) });
     },
     // As a textarea's setRangeText: mode is 'select', 'start', 'end' or 'preserve' (the default).
-    setRangeText(text, from, to, mode) {
+    setRangeText(text: string, from: number, to: number, mode?: 'select' | 'start' | 'end' | 'preserve') {
       const a = clamp(from), b = Math.max(a, clamp(to)), insert = String(text);
       const spec: TransactionSpec = { changes: { from: a, to: b, insert }, annotations: fromNotes.of(true) };
       if (mode === 'select') spec.selection = EditorSelection.single(a, a + insert.length);
@@ -195,11 +204,11 @@ export function create({ parent, onChange, onSelection, onEnter }) {
       view.dispatch(spec);
     },
     // Scrolls a position to the middle of the view (a find match, a line).
-    reveal(at) { view.dispatch({ effects: EditorView.scrollIntoView(clamp(at), { y: 'center' }) }); },
+    reveal(at: number) { view.dispatch({ effects: EditorView.scrollIntoView(clamp(at), { y: 'center' }) }); },
     focus() { view.focus(); },
     hasFocus() { return view.hasFocus; },
-    contains(node) { return !!node && view.dom.contains(node); },
-    setReadOnly(readOnly) { view.dispatch({ effects: writable.reconfigure([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]) }); },
+    contains(node: Element | null) { return !!node && view.dom.contains(node); },
+    setReadOnly(readOnly: boolean) { view.dispatch({ effects: writable.reconfigure([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]) }); },
     // The caret's line and column, counted from 1.
     position() {
       const head = view.state.selection.main.head, line = view.state.doc.lineAt(head);

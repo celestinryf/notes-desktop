@@ -110,7 +110,7 @@ interface AppInfo {
 }
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
 // ---- What the channels below return (recorded from the handlers; a change there changes these first) ----
-interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean }
+interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean; sharedTags?: string[] }
 interface RelatedNotes { outgoing: RelatedItem[]; incoming: RelatedItem[]; byTags: RelatedItem[] }
 interface GitState {
   available: boolean | null; enabled: boolean; initialized: boolean; repoDir: string; remote: string; commits: number;
@@ -153,7 +153,7 @@ type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; 
 interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
 type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string } | { ok: false; error: string };
 
-type Ok<T = {}> = { ok: boolean; error?: string; canceled?: boolean } & Partial<T>;
+type Ok<T = {}> = ({ ok: true } & T) | { ok: false; error?: string; canceled?: boolean };
 
 interface IpcContract {
   'notes:list': (opts?: ListOpts) => PublicNote[];
@@ -207,8 +207,8 @@ interface IpcContract {
   'lock:unlock': (id: string, password: string) => PublicNote | null;
   'lock:relock': (id: string) => PublicNote | null;
   'lock:remove': (id: string, password: string) => PublicNote | null;
-  'live:host': (id: string) => Ok<{ status: unknown }>;
-  'live:join': (url: string, folderId?: string | null) => Ok<{ noteId: string; status: unknown }>;
+  'live:host': (id: string) => Ok<{ status: LiveStatus | null }>;
+  'live:join': (url: string, folderId?: string | null) => Ok<{ noteId: string; status: LiveStatus | null }>;
   'live:stop': (id: string) => boolean;
   'live:status': (id: string) => LiveStatus | null;
   'stickies:list': () => { id: string; title: string; sticky: Sticky | null; open: boolean }[];
@@ -224,20 +224,20 @@ interface IpcContract {
   'files:reveal': (id: string) => void;
   'files:openExternal': (id: string) => string;
   'files:pdfBytes': (id: string) => Buffer;
-  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number) => SavedFile;
-  'files:pdfApplyPages': (id: string, bytes: Uint8Array | null, rotations: number[], expectedMtime: number) => Ok<{ mtime: number | null; backup: string }>;
-  'files:pdfRestore': (id: string, name: string, expectedMtime: number) => Ok<{ mtime: number | null }>;
-  'files:pdfComments': (id: string, ops: unknown[], expectedMtime: number) => Ok<{ mtime: number | null; backup: string }>;
-  'files:pdfPickPages': () => Ok<{ name: string; bytes: Buffer }>;
-  'files:saveDocx': (id: string, patches: DocxPatch[], expectedMtime: number) => SavedFile;
-  'files:saveCraft': (id: string, bytes: Uint8Array, name: string, expectedMtime: number) => CraftSave;
+  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number | null) => SavedFile;
+  'files:pdfApplyPages': (id: string, bytes: Uint8Array | null, rotations: number[], expectedMtime: number | null) => Ok<{ mtime: number | null; backup: string }>;
+  'files:pdfRestore': (id: string, name: string, expectedMtime: number | null) => Ok<{ mtime: number | null }>;
+  'files:pdfComments': (id: string, ops: unknown[], expectedMtime: number | null) => Ok<{ mtime: number | null; backup: string }>;
+  'files:pdfPickPages': () => Ok<{ name: string; bytes: Uint8Array<ArrayBuffer> }>;
+  'files:saveDocx': (id: string, patches: DocxPatch[], expectedMtime: number | null) => SavedFile;
+  'files:saveCraft': (id: string, bytes: Uint8Array, name: string, expectedMtime: number | null) => CraftSave;
   'files:documentBytes': (id: string) => Uint8Array;
   'files:docxBytes': (id: string) => Uint8Array;
-  'files:imageBytes': (id: string) => { bytes: Uint8Array; mime: string };
+  'files:imageBytes': (id: string) => { bytes: Uint8Array<ArrayBuffer>; mime: string };
   'files:convertOptions': (id: string) => ConvertOption[];
   'files:convert': (id: string, to: string) => ConvertResult;
   'files:asMarkdown': (id: string) => MarkdownResult;
-  'signature:get': () => Buffer | null;
+  'signature:get': () => Uint8Array<ArrayBuffer> | null;
   'signature:set': (bytes: Uint8Array) => Ok;
   'signature:forget': () => Ok;
   'agentFiles:discover': () => AgentFile[];
@@ -269,25 +269,31 @@ type IpcArgs<K extends IpcChannel> = Parameters<IpcContract[K]>;
 type IpcResult<K extends IpcChannel> = Awaited<ReturnType<IpcContract[K]>>;
 type Invoker<K extends IpcChannel> = (...args: IpcArgs<K>) => Promise<IpcResult<K>>;
 
+type BotEvent =
+  | { type: 'start'; cwd: string; kind: string; focus?: string; imported?: WorkspaceImport | { error: string } | null; plan?: string }
+  | { type: 'out' | 'err'; text: string }
+  | { type: 'end'; ok: boolean; error?: string; code?: number | null; imported?: WorkspaceImport | { error: string } | null }
+  | ({ type: 'reloaded' } & VaultScan);
+
 interface MainEvents {
   'app:shown': [];
   'app:new-note': [];
   'settings:changed': [settings: Settings];
   'theme:system': [theme: Theme];
-  'git:status': [status: unknown];
+  'git:status': [status: GitState];
   'app:flush': [];
   'notes:reloaded': [payload: { reason: string; id?: string }];
-  'vault:status': [payload: { id: string; status: unknown }];
-  'bot:event': [event: unknown];
+  'vault:status': [payload: { id: string; status: VaultStatus }];
+  'bot:event': [event: BotEvent];
   'notes:changed': [payload: { id: string }];
-  'sticky:changed': [payload: unknown];
-  'stickies:changed': [payload: unknown];
+  'sticky:changed': [sticky: Sticky | null];
+  'stickies:changed': [];
   'app:open-note': [id: string];
-  'reminder:fired': [payload: unknown];
+  'reminder:fired': [payload: { id: string; title: string }];
   'app:notice': [message: string];
-  'live:status': [payload: unknown];
+  'live:status': [payload: { id: string; status: LiveStatus | null }];
   'lock:relocked': [ids: string[]];
-  'app:editCommand': [command: string];
+  'app:editCommand': [command: 'undo' | 'redo'];
 }
 type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) => void) => () => void;
 

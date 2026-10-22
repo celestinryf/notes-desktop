@@ -110,7 +110,7 @@ function tokenize(query?: string) {
   return String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
 }
 
-function matchesQuery(note: Note, query?: string) {
+function matchesQuery(note: Pick<Note, 'title' | 'body' | 'tags'>, query?: string) {
   const tokens = tokenize(query);
   if (!tokens.length) return true;
   const hay = (String(note.title || '') + '\n' + String(note.body || '') + '\n' + (note.tags || []).join(' ')).toLowerCase();

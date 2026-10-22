@@ -1,5 +1,8 @@
 /* A pad to draw a signature on, exposed as window.NotesSignPad. The picture it gives back is cropped to the strokes,
    on a transparent background, so it sits on a PDF page like ink. */
+type Point = { x: number, y: number };
+type Box = { x0: number, y0: number, x1: number, y1: number };
+
 export const NotesSignPad = (function () {
   'use strict';
   const INK = '#1b1f4a';
@@ -7,9 +10,11 @@ export const NotesSignPad = (function () {
 
   // canvas: drawn at its CSS size times the screen's pixel ratio, so the signature stays sharp on a high-DPI screen
   // and when the PDF is zoomed or printed. Call fit() each time the pad is shown.
-  function create(canvas) {
-    const ctx = canvas.getContext('2d');
-    let drawing = false, last: { x: number; y: number; } | null = null, box: { x0: number; y0: number; x1: number; y1: number; } | null = null, scale = 1;
+  function create(canvas: HTMLCanvasElement) {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('The signature pad needs a 2D canvas.');
+    const ctx: CanvasRenderingContext2D = context;
+    let drawing = false, last: Point | null = null, box: Box | null = null, scale = 1;
 
     function fit() {
       const r = canvas.getBoundingClientRect();
@@ -20,11 +25,11 @@ export const NotesSignPad = (function () {
     }
 
     // Pointer position in the canvas's own pixels (it may be drawn at another size on screen).
-    function point(e) {
+    function point(e: PointerEvent): Point {
       const r = canvas.getBoundingClientRect();
       return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
     }
-    function grow(p) {
+    function grow(p: Point) {
       box = box
         ? { x0: Math.min(box.x0, p.x), y0: Math.min(box.y0, p.y), x1: Math.max(box.x1, p.x), y1: Math.max(box.y1, p.y) }
         : { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
@@ -36,14 +41,14 @@ export const NotesSignPad = (function () {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
     }
-    function dot(p) {
+    function dot(p: Point) {
       pen();
       ctx.beginPath();
       ctx.arc(p.x, p.y, 1.5 * scale, 0, Math.PI * 2);
       ctx.fill();
       grow(p);
     }
-    function line(a, b) {
+    function line(a: Point, b: Point) {
       pen();
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -62,7 +67,7 @@ export const NotesSignPad = (function () {
       dot(last);
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (!drawing) return;
+      if (!drawing || !last) return;
       const p = point(e);
       line(last, p);
       last = p;
@@ -77,7 +82,7 @@ export const NotesSignPad = (function () {
     }
 
     // Shows a saved signature (a PNG blob), centred, so it can be used as it is or drawn over.
-    async function load(blob) {
+    async function load(blob: Blob) {
       clear();
       const img = await createImageBitmap(blob);
       const s = Math.min(1, canvas.width / img.width, canvas.height / img.height);
@@ -88,7 +93,7 @@ export const NotesSignPad = (function () {
     }
 
     // Writes a typed name on the pad in a handwriting-like face: the way to sign without drawing.
-    function writeName(name) {
+    function writeName(name: string) {
       clear();
       const text = String(name || '').trim();
       if (!text) return false;
@@ -96,7 +101,7 @@ export const NotesSignPad = (function () {
       ctx.fillStyle = INK;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
-      const font = (px) => 'italic 500 ' + px + 'px Fraunces, Georgia, serif';
+      const font = (px: number) => 'italic 500 ' + px + 'px Fraunces, Georgia, serif';
       ctx.font = font(size);
       while (size > 8 && ctx.measureText(text).width > canvas.width * 0.9) ctx.font = font(size *= 0.9);
       const w = ctx.measureText(text).width;

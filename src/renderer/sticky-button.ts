@@ -5,8 +5,14 @@ import { toast } from './toast.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
-export function createStickyButton({ api, flushSave, refreshCurrentMeta }) {
-  function renderStickyButton(note) {
+interface StickyButtonDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  refreshCurrentMeta: () => Promise<unknown>;
+}
+
+export function createStickyButton({ api, flushSave, refreshCurrentMeta }: StickyButtonDeps) {
+  function renderStickyButton(note: PublicNote | null) {
     const on = !!(note && note.sticky);
     el.stickyBtn.classList.toggle('is-on', on);
     setLabel(el.stickyBtn, on ? 'Take off the desktop' : 'Stick to the desktop');

@@ -163,15 +163,16 @@ function cleanSchemeId(id: string, customColors: CustomColors | null | undefined
 }
 
 // The seed in use for a mode, or null for the built-in scheme (and for a mode a scheme has no colours for).
-function seedFor(settings: Settings, mode: Mode) {
-  const id = settings && settings.colorScheme;
+function seedFor(settings: Settings | null, mode: Mode) {
+  if (!settings) return null;
+  const id = settings.colorScheme;
   if (id === CUSTOM) return (settings.customColors && settings.customColors[mode]) || null;
   const scheme = SCHEMES[id];
   return scheme && !scheme.builtIn ? scheme[mode] || null : null;
 }
 
 // The tokens to set on the page for these settings in this mode, or null: the stylesheet's own colours.
-function resolve(settings: Settings, mode: Mode) {
+function resolve(settings: Settings | null, mode: Mode) {
   const seed = seedFor(settings, mode);
   return seed ? derive(seed) : null;
 }

@@ -125,13 +125,19 @@
           const s = size || 16;
           return '<svg class="icon" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + body + "</svg>";
         }
+        function hasDataset(node) {
+          return node instanceof HTMLElement || node instanceof SVGElement;
+        }
         function hydrate(root) {
           (root || document).querySelectorAll("[data-icon]").forEach((el2) => {
+            if (!hasDataset(el2)) return;
             const first = el2.firstElementChild;
-            if (first && first.classList.contains("icon") && first.dataset.name === el2.dataset.icon) return;
-            if (first && first.classList.contains("icon")) first.remove();
-            el2.insertAdjacentHTML("afterbegin", svg(el2.dataset.icon));
-            el2.firstElementChild.dataset.name = el2.dataset.icon;
+            const firstIcon = hasDataset(first) && first.classList.contains("icon") ? first : null;
+            if (firstIcon && firstIcon.dataset.name === el2.dataset.icon) return;
+            if (firstIcon) firstIcon.remove();
+            el2.insertAdjacentHTML("afterbegin", svg(String(el2.dataset.icon)));
+            const inserted = el2.firstElementChild;
+            if (hasDataset(inserted)) inserted.dataset.name = el2.dataset.icon;
           });
         }
         const api = { svg, hydrate, names: Object.keys(PATHS) };
@@ -779,7 +785,8 @@
     return Object.prototype.hasOwnProperty.call(SCHEMES, id) ? id : BUILT_IN;
   }
   function seedFor(settings, mode) {
-    const id = settings && settings.colorScheme;
+    if (!settings) return null;
+    const id = settings.colorScheme;
     if (id === CUSTOM) return settings.customColors && settings.customColors[mode] || null;
     const scheme = SCHEMES[id];
     return scheme && !scheme.builtIn ? scheme[mode] || null : null;
@@ -824,7 +831,8 @@
     return raw.split(re).map((part, i) => i % 2 ? '<span class="mark">' + escapeHtml(part) + "</span>" : escapeHtml(part)).join("");
   }
   function ipcErrorText(err) {
-    return String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+    const message = typeof err === "object" && err !== null && "message" in err ? err.message : void 0;
+    return String(message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
   }
 
   // src/renderer/palette.ts
@@ -993,20 +1001,28 @@
       const scored = (arr, text) => arr.map((x) => ({ x, s: fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
       const cmds = scored(commands, (c) => c.title + (c.keywords ? " " + c.keywords : ""));
       if (commandsOnly || !notes) return cmds;
-      if (!q) return notes.slice(0, 6).concat(cmds);
+      if (!q) return [...notes.slice(0, 6), ...cmds];
       const byTitle = scored(notes, (n) => n.title);
       const seen = new Set(byTitle.map((n) => n.id));
       const byBody = notes.filter((n) => !seen.has(n.id) && n.matches(q)).slice(0, 6);
       const noteHits = byTitle.slice(0, 8).concat(byBody);
       const strong = cmds.length && fuzzyScore(q, cmds[0].title) >= 500;
-      return strong ? cmds.slice(0, 10).concat(noteHits) : noteHits.concat(cmds.slice(0, 8));
+      return strong ? [...cmds.slice(0, 10), ...noteHits] : [...noteHits, ...cmds.slice(0, 8)];
     }
     return { create, rank };
   })();
 
   // src/renderer/dom.ts
   var import_icons2 = __toESM(require_icons());
-  var $ = (sel) => document.querySelector(sel);
+
+  // src/renderer/page-element.ts
+  function pageElement(selector, type) {
+    const node = document.querySelector(selector);
+    if (!(node instanceof type)) throw new Error("The page is missing " + selector + ".");
+    return node;
+  }
+
+  // src/renderer/dom.ts
   var I = (name) => import_icons2.default.svg(name);
   function setLabel(btn, text) {
     const l = btn.querySelector(".lbl");
@@ -1014,6 +1030,7 @@
     else btn.textContent = text;
   }
   function setIcon(btn, name) {
+    if (!btn) return;
     if (btn.dataset.icon === name) return;
     btn.dataset.icon = name;
     import_icons2.default.hydrate(btn.parentElement);
@@ -1023,289 +1040,289 @@
     btn.setAttribute("aria-pressed", String(!!on));
   }
   var el = {
-    app: $("#app"),
-    sidebar: $("#sidebar"),
-    newNoteBtn: $("#newNoteBtn"),
+    app: pageElement("#app", HTMLDivElement),
+    sidebar: pageElement("#sidebar", HTMLElement),
+    newNoteBtn: pageElement("#newNoteBtn", HTMLButtonElement),
     navItems: Array.from(document.querySelectorAll(".nav-item[data-view]")).filter((b) => b instanceof HTMLElement),
-    countAll: $("#countAll"),
-    countPinned: $("#countPinned"),
-    countTrash: $("#countTrash"),
-    countReminders: $("#countReminders"),
-    remindBtn: $("#remindBtn"),
-    remindDialog: $("#remindDialog"),
-    remindForm: $("#remindForm"),
-    remindInput: $("#remindInput"),
-    remindQuick: $("#remindQuick"),
-    remindCurrent: $("#remindCurrent"),
-    remindClearBtn: $("#remindClearBtn"),
-    remindCancelBtn: $("#remindCancelBtn"),
-    shareBtn: $("#shareBtn"),
-    shareMenu: $("#shareMenu"),
-    shareReveal: $("#shareReveal"),
-    lockBtn: $("#lockBtn"),
-    lockMenu: $("#lockMenu"),
-    lockDialog: $("#lockDialog"),
-    lockForm: $("#lockForm"),
-    lockDialogTitle: $("#lockDialogTitle"),
-    lockDialogHint: $("#lockDialogHint"),
-    lockPassword: $("#lockPassword"),
-    lockPassword2: $("#lockPassword2"),
-    lockConfirmRow: $("#lockConfirmRow"),
-    lockError: $("#lockError"),
-    lockCancelBtn: $("#lockCancelBtn"),
-    lockSubmitBtn: $("#lockSubmitBtn"),
-    liveRow: $("#liveRow"),
-    liveText: $("#liveText"),
-    liveLinkBtn: $("#liveLinkBtn"),
-    liveStopBtn: $("#liveStopBtn"),
-    shareLiveHost: $("#shareLiveHost"),
-    shareLiveStop: $("#shareLiveStop"),
-    liveDialog: $("#liveDialog"),
-    liveForm: $("#liveForm"),
-    liveDialogTitle: $("#liveDialogTitle"),
-    liveDialogHint: $("#liveDialogHint"),
-    liveLinkLabel: $("#liveLinkLabel"),
-    liveLinkInput: $("#liveLinkInput"),
-    liveError: $("#liveError"),
-    liveCopyBtn: $("#liveCopyBtn"),
-    liveCancelBtn: $("#liveCancelBtn"),
-    liveSubmitBtn: $("#liveSubmitBtn"),
-    pageMenu: $("#pageMenu"),
-    bookMenu: $("#bookMenu"),
-    newBookBtn: $("#newBookBtn"),
-    splitBtn: $("#splitBtn"),
-    splitDialog: $("#splitDialog"),
-    splitForm: $("#splitForm"),
-    splitLead: $("#splitLead"),
-    splitPages: $("#splitPages"),
-    splitName: $("#splitName"),
-    splitKeep: $("#splitKeep"),
-    splitCancelBtn: $("#splitCancelBtn"),
-    bookReader: $("#bookReader"),
-    bookReaderTitle: $("#bookReaderTitle"),
-    bookReaderToc: $("#bookReaderToc"),
-    bookReaderBody: $("#bookReaderBody"),
-    bookReaderScroll: $("#bookReaderScroll"),
-    bookReaderPdfBtn: $("#bookReaderPdfBtn"),
-    bookReaderPrintBtn: $("#bookReaderPrintBtn"),
-    bookReaderCloseBtn: $("#bookReaderCloseBtn"),
-    bookStrip: $("#bookStrip"),
-    bookName: $("#bookName"),
-    bookTabs: $("#bookTabs"),
-    bookPrevBtn: $("#bookPrevBtn"),
-    bookNextBtn: $("#bookNextBtn"),
-    bookAddBtn: $("#bookAddBtn"),
-    relatedPanel: $("#relatedPanel"),
-    relatedOut: $("#relatedOut"),
-    relatedIn: $("#relatedIn"),
-    relatedTags: $("#relatedTags"),
-    folderMenuBook: $("#folderMenuBook"),
-    lockScreen: $("#lockScreen"),
-    lockScreenPassword: $("#lockScreenPassword"),
-    lockScreenBtn: $("#lockScreenBtn"),
-    lockScreenError: $("#lockScreenError"),
-    tagList: $("#tagList"),
-    themeBtn: $("#themeBtn"),
-    settingsBtn: $("#settingsBtn"),
-    hotkeyHint: $("#hotkeyHint"),
-    hotkeyHint2: $("#hotkeyHint2"),
-    searchInput: $("#searchInput"),
-    sortSelect: $("#sortSelect"),
-    listTitle: $("#listTitle"),
-    emptyTrashBtn: $("#emptyTrashBtn"),
-    noteList: $("#noteList"),
-    listEmpty: $("#listEmpty"),
-    editorEmpty: $("#editorEmpty"),
-    editor: $("#editor"),
-    editorPane: $("#editorPane"),
-    paneMain: $("#paneMain"),
-    tabBar: $("#tabBar"),
-    tabList: $("#tabList"),
-    tabAddBtn: $("#tabAddBtn"),
-    splitViewBtn: $("#splitViewBtn"),
-    paneCloseBtn: $("#paneCloseBtn"),
-    splitDivider: $("#splitDivider"),
-    toggleSidebarBtn: $("#toggleSidebarBtn"),
-    toggleListBtn: $("#toggleListBtn"),
-    hideListBtn: $("#hideListBtn"),
-    pinBtn: $("#pinBtn"),
-    sourceBtn: $("#sourceBtn"),
-    editorColumn: $("#editorColumn"),
-    richEditor: $("#richEditor"),
-    linkDialog: $("#linkDialog"),
-    linkForm: $("#linkForm"),
-    linkInput: $("#linkInput"),
-    linkRemoveBtn: $("#linkRemoveBtn"),
-    linkCancelBtn: $("#linkCancelBtn"),
-    alignSeg: $("#alignSeg"),
-    editorWidthInput: $("#editorWidthInput"),
-    editorWidthValue: $("#editorWidthValue"),
-    editorFullWidthInput: $("#editorFullWidthInput"),
-    gitEnabledInput: $("#gitEnabledInput"),
-    gitRemoteInput: $("#gitRemoteInput"),
-    gitStatus: $("#gitStatus"),
-    gitCommitBtn: $("#gitCommitBtn"),
-    gitPushBtn: $("#gitPushBtn"),
-    exportBtn: $("#exportBtn"),
-    duplicateBtn: $("#duplicateBtn"),
-    restoreBtn: $("#restoreBtn"),
-    deleteBtn: $("#deleteBtn"),
-    destroyBtn: $("#destroyBtn"),
-    titleInput: $("#titleInput"),
-    tagsInput: $("#tagsInput"),
-    bodyInput: $("#bodyInput"),
-    codeHost: $("#codeHost"),
-    csvView: $("#csvView"),
-    imageViewer: $("#imageViewer"),
-    imageView: $("#imageView"),
-    statusWords: $("#statusWords"),
-    statusChars: $("#statusChars"),
-    statusUpdated: $("#statusUpdated"),
-    statusSaved: $("#statusSaved"),
-    statusCode: $("#statusCode"),
-    settingsDialog: $("#settingsDialog"),
-    settingsForm: $("#settingsForm"),
-    hotkeyInput: $("#hotkeyInput"),
-    hotkeyError: $("#hotkeyError"),
-    themeSelect: $("#themeSelect"),
-    schemeGrid: $("#schemeGrid"),
-    customModeNote: $("#customModeNote"),
-    customBgInput: $("#customBgInput"),
-    customTextInput: $("#customTextInput"),
-    customAccentInput: $("#customAccentInput"),
-    schemeResetBtn: $("#schemeResetBtn"),
-    settingsDirtyNote: $("#settingsDirtyNote"),
-    cancelSettingsBtn: $("#cancelSettingsBtn"),
-    saveSettingsBtn: $("#saveSettingsBtn"),
-    settingsSaveDialog: $("#settingsSaveDialog"),
-    settingsSaveKeepBtn: $("#settingsSaveKeepBtn"),
-    settingsSaveDiscardBtn: $("#settingsSaveDiscardBtn"),
-    settingsSaveList: $("#settingsSaveList"),
-    fontSizeInput: $("#fontSizeInput"),
-    fontSizeValue: $("#fontSizeValue"),
-    openAtLoginInput: $("#openAtLoginInput"),
-    alwaysOnTopInput: $("#alwaysOnTopInput"),
-    importBtn: $("#importBtn"),
-    exportAllBtn: $("#exportAllBtn"),
-    dataFolderBtn: $("#dataFolderBtn"),
-    settingsInfo: $("#settingsInfo"),
-    toast: $("#toast"),
-    sidebarResizer: $("#sidebarResizer"),
-    listResizer: $("#listResizer"),
-    newFolderBtn: $("#newFolderBtn"),
-    folderTree: $("#folderTree"),
-    folderSelect: $("#folderSelect"),
-    folderMenu: $("#folderMenu"),
-    navAll: document.querySelector('.nav-item[data-view="all"]'),
-    openFileBtn: $("#openFileBtn"),
-    fileRow: $("#fileRow"),
-    fileKind: $("#fileKind"),
-    filePath: $("#filePath"),
-    fileRevealBtn: $("#fileRevealBtn"),
-    fileOpenBtn: $("#fileOpenBtn"),
-    fileReloadBtn: $("#fileReloadBtn"),
-    docxView: $("#docxView"),
-    docxEditor: $("#docxEditor"),
-    docxSaveBtn: $("#docxSaveBtn"),
-    fileConvertBtn: $("#fileConvertBtn"),
-    convertMenu: $("#convertMenu"),
-    fileBanner: $("#fileBanner"),
-    pdfEditor: $("#pdfEditor"),
-    pdfSaveBtn: $("#pdfSaveBtn"),
-    pdfUndoBtn: $("#pdfUndoBtn"),
-    pdfRedoBtn: $("#pdfRedoBtn"),
-    pdfZoomLabel: $("#pdfZoom"),
-    pdfPages: $("#pdfPages"),
-    pdfComments: $("#pdfComments"),
-    pdfCommentsBtn: $("#pdfCommentsBtn"),
-    pdfCommentsClose: $("#pdfCommentsClose"),
-    agentFilesBtn: $("#agentFilesBtn"),
-    agentFilesStatus: $("#agentFilesStatus"),
-    signDialog: $("#signDialog"),
-    signForm: $("#signForm"),
-    signPad: $("#signPad"),
-    signRemember: $("#signRemember"),
-    signClearBtn: $("#signClearBtn"),
-    signForgetBtn: $("#signForgetBtn"),
-    signCancelBtn: $("#signCancelBtn"),
-    signPlaceBtn: $("#signPlaceBtn"),
-    signName: $("#signName"),
-    signTypeBtn: $("#signTypeBtn"),
-    signStatus: $("#signStatus"),
-    readAloudBtn: $("#readAloudBtn"),
-    dictateBtn: $("#dictateBtn"),
-    ttsVoiceSelect: $("#ttsVoiceSelect"),
-    ttsRateInput: $("#ttsRateInput"),
-    ttsRateValue: $("#ttsRateValue"),
-    vaultList: $("#vaultList"),
-    vaultAddFolderBtn: $("#vaultAddFolderBtn"),
-    vaultCloneBtn: $("#vaultCloneBtn"),
-    vaultDialog: $("#vaultDialog"),
-    vaultForm: $("#vaultForm"),
-    vaultUrlInput: $("#vaultUrlInput"),
-    vaultDestInput: $("#vaultDestInput"),
-    vaultDestBtn: $("#vaultDestBtn"),
-    vaultNameInput: $("#vaultNameInput"),
-    vaultError: $("#vaultError"),
-    vaultCancelBtn: $("#vaultCancelBtn"),
-    vaultCloneSubmitBtn: $("#vaultCloneSubmitBtn"),
-    folderMenuSync: $("#folderMenuSync"),
-    folderMenuOpen: $("#folderMenuOpen"),
-    stickyBtn: $("#stickyBtn"),
-    botBtn: $("#botBtn"),
-    printBtn: $("#printBtn"),
-    findBar: $("#findBar"),
-    findInput: $("#findInput"),
-    findCount: $("#findCount"),
-    findPrevBtn: $("#findPrevBtn"),
-    findNextBtn: $("#findNextBtn"),
-    findCloseBtn: $("#findCloseBtn"),
-    findReplaceToggle: $("#findReplaceToggle"),
-    replaceRow: $("#replaceRow"),
-    replaceInput: $("#replaceInput"),
-    replaceOneBtn: $("#replaceOneBtn"),
-    replaceAllBtn: $("#replaceAllBtn"),
-    attachBtn: $("#attachBtn"),
-    recordBtn: $("#recordBtn"),
-    historyBtn: $("#historyBtn"),
-    linkNoteSelect: $("#linkNoteSelect"),
-    historyDialog: $("#historyDialog"),
-    historyList: $("#historyList"),
-    historyPreview: $("#historyPreview"),
-    historyStatus: $("#historyStatus"),
-    historyCloseBtn: $("#historyCloseBtn"),
-    historyRestoreBtn: $("#historyRestoreBtn"),
-    botPanel: $("#botPanel"),
-    botScope: $("#botScope"),
-    botAllowEdits: $("#botAllowEdits"),
-    botTerminalBtn: $("#botTerminalBtn"),
-    botCloseBtn: $("#botCloseBtn"),
-    botPrompt: $("#botPrompt"),
-    botRunBtn: $("#botRunBtn"),
-    botOutput: $("#botOutput"),
-    moreBtn: $("#moreBtn"),
-    moreMenu: $("#moreMenu"),
-    paletteBtn: $("#paletteBtn"),
-    palette: $("#palette"),
-    paletteInput: $("#paletteInput"),
-    paletteList: $("#paletteList"),
-    inlineMenu: $("#inlineMenu"),
-    wordcraftFrame: $("#wordcraftFrame"),
-    gridcraftFrame: $("#gridcraftFrame"),
-    sidebarTop: $("#sidebarTop"),
-    barToggles: $("#barToggles"),
-    sidebarEdge: $("#sidebarEdge"),
-    noteTree: $("#noteTree"),
-    noteActions: $("#noteActions"),
-    tagsFold: $("#tagsFold"),
-    listModeSeg: $("#listModeSeg"),
-    sidebarFloatInput: $("#sidebarFloatInput"),
-    activityBar: $("#activityBar"),
-    emptyNewNoteBtn: $("#emptyNewNoteBtn"),
-    settingsNav: $("#settingsNav"),
-    settingsScroll: $("#settingsScroll"),
-    settingsSearch: $("#settingsSearch"),
-    settingsEmpty: $("#settingsEmpty")
+    countAll: pageElement("#countAll", HTMLSpanElement),
+    countPinned: pageElement("#countPinned", HTMLSpanElement),
+    countTrash: pageElement("#countTrash", HTMLSpanElement),
+    countReminders: pageElement("#countReminders", HTMLSpanElement),
+    remindBtn: pageElement("#remindBtn", HTMLButtonElement),
+    remindDialog: pageElement("#remindDialog", HTMLDialogElement),
+    remindForm: pageElement("#remindForm", HTMLFormElement),
+    remindInput: pageElement("#remindInput", HTMLInputElement),
+    remindQuick: pageElement("#remindQuick", HTMLDivElement),
+    remindCurrent: pageElement("#remindCurrent", HTMLParagraphElement),
+    remindClearBtn: pageElement("#remindClearBtn", HTMLButtonElement),
+    remindCancelBtn: pageElement("#remindCancelBtn", HTMLButtonElement),
+    shareBtn: pageElement("#shareBtn", HTMLButtonElement),
+    shareMenu: pageElement("#shareMenu", HTMLDivElement),
+    shareReveal: pageElement("#shareReveal", HTMLButtonElement),
+    lockBtn: pageElement("#lockBtn", HTMLButtonElement),
+    lockMenu: pageElement("#lockMenu", HTMLDivElement),
+    lockDialog: pageElement("#lockDialog", HTMLDialogElement),
+    lockForm: pageElement("#lockForm", HTMLFormElement),
+    lockDialogTitle: pageElement("#lockDialogTitle", HTMLHeadingElement),
+    lockDialogHint: pageElement("#lockDialogHint", HTMLParagraphElement),
+    lockPassword: pageElement("#lockPassword", HTMLInputElement),
+    lockPassword2: pageElement("#lockPassword2", HTMLInputElement),
+    lockConfirmRow: pageElement("#lockConfirmRow", HTMLLabelElement),
+    lockError: pageElement("#lockError", HTMLParagraphElement),
+    lockCancelBtn: pageElement("#lockCancelBtn", HTMLButtonElement),
+    lockSubmitBtn: pageElement("#lockSubmitBtn", HTMLButtonElement),
+    liveRow: pageElement("#liveRow", HTMLDivElement),
+    liveText: pageElement("#liveText", HTMLSpanElement),
+    liveLinkBtn: pageElement("#liveLinkBtn", HTMLButtonElement),
+    liveStopBtn: pageElement("#liveStopBtn", HTMLButtonElement),
+    shareLiveHost: pageElement("#shareLiveHost", HTMLButtonElement),
+    shareLiveStop: pageElement("#shareLiveStop", HTMLButtonElement),
+    liveDialog: pageElement("#liveDialog", HTMLDialogElement),
+    liveForm: pageElement("#liveForm", HTMLFormElement),
+    liveDialogTitle: pageElement("#liveDialogTitle", HTMLHeadingElement),
+    liveDialogHint: pageElement("#liveDialogHint", HTMLParagraphElement),
+    liveLinkLabel: pageElement("#liveLinkLabel", HTMLSpanElement),
+    liveLinkInput: pageElement("#liveLinkInput", HTMLInputElement),
+    liveError: pageElement("#liveError", HTMLParagraphElement),
+    liveCopyBtn: pageElement("#liveCopyBtn", HTMLButtonElement),
+    liveCancelBtn: pageElement("#liveCancelBtn", HTMLButtonElement),
+    liveSubmitBtn: pageElement("#liveSubmitBtn", HTMLButtonElement),
+    pageMenu: pageElement("#pageMenu", HTMLDivElement),
+    bookMenu: pageElement("#bookMenu", HTMLDivElement),
+    newBookBtn: pageElement("#newBookBtn", HTMLButtonElement),
+    splitBtn: pageElement("#splitBtn", HTMLButtonElement),
+    splitDialog: pageElement("#splitDialog", HTMLDialogElement),
+    splitForm: pageElement("#splitForm", HTMLFormElement),
+    splitLead: pageElement("#splitLead", HTMLParagraphElement),
+    splitPages: pageElement("#splitPages", HTMLOListElement),
+    splitName: pageElement("#splitName", HTMLInputElement),
+    splitKeep: pageElement("#splitKeep", HTMLInputElement),
+    splitCancelBtn: pageElement("#splitCancelBtn", HTMLButtonElement),
+    bookReader: pageElement("#bookReader", HTMLElement),
+    bookReaderTitle: pageElement("#bookReaderTitle", HTMLSpanElement),
+    bookReaderToc: pageElement("#bookReaderToc", HTMLElement),
+    bookReaderBody: pageElement("#bookReaderBody", HTMLDivElement),
+    bookReaderScroll: pageElement("#bookReaderScroll", HTMLDivElement),
+    bookReaderPdfBtn: pageElement("#bookReaderPdfBtn", HTMLButtonElement),
+    bookReaderPrintBtn: pageElement("#bookReaderPrintBtn", HTMLButtonElement),
+    bookReaderCloseBtn: pageElement("#bookReaderCloseBtn", HTMLButtonElement),
+    bookStrip: pageElement("#bookStrip", HTMLElement),
+    bookName: pageElement("#bookName", HTMLButtonElement),
+    bookTabs: pageElement("#bookTabs", HTMLDivElement),
+    bookPrevBtn: pageElement("#bookPrevBtn", HTMLButtonElement),
+    bookNextBtn: pageElement("#bookNextBtn", HTMLButtonElement),
+    bookAddBtn: pageElement("#bookAddBtn", HTMLButtonElement),
+    relatedPanel: pageElement("#relatedPanel", HTMLElement),
+    relatedOut: pageElement("#relatedOut", HTMLDivElement),
+    relatedIn: pageElement("#relatedIn", HTMLDivElement),
+    relatedTags: pageElement("#relatedTags", HTMLDivElement),
+    folderMenuBook: pageElement("#folderMenuBook", HTMLButtonElement),
+    lockScreen: pageElement("#lockScreen", HTMLFormElement),
+    lockScreenPassword: pageElement("#lockScreenPassword", HTMLInputElement),
+    lockScreenBtn: pageElement("#lockScreenBtn", HTMLButtonElement),
+    lockScreenError: pageElement("#lockScreenError", HTMLParagraphElement),
+    tagList: pageElement("#tagList", HTMLElement),
+    themeBtn: pageElement("#themeBtn", HTMLButtonElement),
+    settingsBtn: pageElement("#settingsBtn", HTMLButtonElement),
+    hotkeyHint: pageElement("#hotkeyHint", HTMLSpanElement),
+    hotkeyHint2: pageElement("#hotkeyHint2", HTMLSpanElement),
+    searchInput: pageElement("#searchInput", HTMLInputElement),
+    sortSelect: pageElement("#sortSelect", HTMLSelectElement),
+    listTitle: pageElement("#listTitle", HTMLHeadingElement),
+    emptyTrashBtn: pageElement("#emptyTrashBtn", HTMLButtonElement),
+    noteList: pageElement("#noteList", HTMLUListElement),
+    listEmpty: pageElement("#listEmpty", HTMLDivElement),
+    editorEmpty: pageElement("#editorEmpty", HTMLDivElement),
+    editor: pageElement("#editor", HTMLDivElement),
+    editorPane: pageElement("#editorPane", HTMLElement),
+    paneMain: pageElement("#paneMain", HTMLDivElement),
+    tabBar: pageElement("#tabBar", HTMLDivElement),
+    tabList: pageElement("#tabList", HTMLDivElement),
+    tabAddBtn: pageElement("#tabAddBtn", HTMLButtonElement),
+    splitViewBtn: pageElement("#splitViewBtn", HTMLButtonElement),
+    paneCloseBtn: pageElement("#paneCloseBtn", HTMLButtonElement),
+    splitDivider: pageElement("#splitDivider", HTMLDivElement),
+    toggleSidebarBtn: pageElement("#toggleSidebarBtn", HTMLButtonElement),
+    toggleListBtn: pageElement("#toggleListBtn", HTMLButtonElement),
+    hideListBtn: pageElement("#hideListBtn", HTMLButtonElement),
+    pinBtn: pageElement("#pinBtn", HTMLButtonElement),
+    sourceBtn: pageElement("#sourceBtn", HTMLButtonElement),
+    editorColumn: pageElement("#editorColumn", HTMLDivElement),
+    richEditor: pageElement("#richEditor", HTMLDivElement),
+    linkDialog: pageElement("#linkDialog", HTMLDialogElement),
+    linkForm: pageElement("#linkForm", HTMLFormElement),
+    linkInput: pageElement("#linkInput", HTMLInputElement),
+    linkRemoveBtn: pageElement("#linkRemoveBtn", HTMLButtonElement),
+    linkCancelBtn: pageElement("#linkCancelBtn", HTMLButtonElement),
+    alignSeg: pageElement("#alignSeg", HTMLDivElement),
+    editorWidthInput: pageElement("#editorWidthInput", HTMLInputElement),
+    editorWidthValue: pageElement("#editorWidthValue", HTMLSpanElement),
+    editorFullWidthInput: pageElement("#editorFullWidthInput", HTMLInputElement),
+    gitEnabledInput: pageElement("#gitEnabledInput", HTMLInputElement),
+    gitRemoteInput: pageElement("#gitRemoteInput", HTMLInputElement),
+    gitStatus: pageElement("#gitStatus", HTMLSpanElement),
+    gitCommitBtn: pageElement("#gitCommitBtn", HTMLButtonElement),
+    gitPushBtn: pageElement("#gitPushBtn", HTMLButtonElement),
+    exportBtn: pageElement("#exportBtn", HTMLButtonElement),
+    duplicateBtn: pageElement("#duplicateBtn", HTMLButtonElement),
+    restoreBtn: pageElement("#restoreBtn", HTMLButtonElement),
+    deleteBtn: pageElement("#deleteBtn", HTMLButtonElement),
+    destroyBtn: pageElement("#destroyBtn", HTMLButtonElement),
+    titleInput: pageElement("#titleInput", HTMLInputElement),
+    tagsInput: pageElement("#tagsInput", HTMLInputElement),
+    bodyInput: pageElement("#bodyInput", HTMLTextAreaElement),
+    codeHost: pageElement("#codeHost", HTMLDivElement),
+    csvView: pageElement("#csvView", HTMLDivElement),
+    imageViewer: pageElement("#imageViewer", HTMLElement),
+    imageView: pageElement("#imageView", HTMLImageElement),
+    statusWords: pageElement("#statusWords", HTMLSpanElement),
+    statusChars: pageElement("#statusChars", HTMLSpanElement),
+    statusUpdated: pageElement("#statusUpdated", HTMLSpanElement),
+    statusSaved: pageElement("#statusSaved", HTMLSpanElement),
+    statusCode: pageElement("#statusCode", HTMLSpanElement),
+    settingsDialog: pageElement("#settingsDialog", HTMLDialogElement),
+    settingsForm: pageElement("#settingsForm", HTMLFormElement),
+    hotkeyInput: pageElement("#hotkeyInput", HTMLInputElement),
+    hotkeyError: pageElement("#hotkeyError", HTMLSpanElement),
+    themeSelect: pageElement("#themeSelect", HTMLSelectElement),
+    schemeGrid: pageElement("#schemeGrid", HTMLDivElement),
+    customModeNote: pageElement("#customModeNote", HTMLSpanElement),
+    customBgInput: pageElement("#customBgInput", HTMLInputElement),
+    customTextInput: pageElement("#customTextInput", HTMLInputElement),
+    customAccentInput: pageElement("#customAccentInput", HTMLInputElement),
+    schemeResetBtn: pageElement("#schemeResetBtn", HTMLButtonElement),
+    settingsDirtyNote: pageElement("#settingsDirtyNote", HTMLSpanElement),
+    cancelSettingsBtn: pageElement("#cancelSettingsBtn", HTMLButtonElement),
+    saveSettingsBtn: pageElement("#saveSettingsBtn", HTMLButtonElement),
+    settingsSaveDialog: pageElement("#settingsSaveDialog", HTMLDialogElement),
+    settingsSaveKeepBtn: pageElement("#settingsSaveKeepBtn", HTMLButtonElement),
+    settingsSaveDiscardBtn: pageElement("#settingsSaveDiscardBtn", HTMLButtonElement),
+    settingsSaveList: pageElement("#settingsSaveList", HTMLParagraphElement),
+    fontSizeInput: pageElement("#fontSizeInput", HTMLInputElement),
+    fontSizeValue: pageElement("#fontSizeValue", HTMLSpanElement),
+    openAtLoginInput: pageElement("#openAtLoginInput", HTMLInputElement),
+    alwaysOnTopInput: pageElement("#alwaysOnTopInput", HTMLInputElement),
+    importBtn: pageElement("#importBtn", HTMLButtonElement),
+    exportAllBtn: pageElement("#exportAllBtn", HTMLButtonElement),
+    dataFolderBtn: pageElement("#dataFolderBtn", HTMLButtonElement),
+    settingsInfo: pageElement("#settingsInfo", HTMLParagraphElement),
+    toast: pageElement("#toast", HTMLDivElement),
+    sidebarResizer: pageElement("#sidebarResizer", HTMLDivElement),
+    listResizer: pageElement("#listResizer", HTMLDivElement),
+    newFolderBtn: pageElement("#newFolderBtn", HTMLButtonElement),
+    folderTree: pageElement("#folderTree", HTMLElement),
+    folderSelect: pageElement("#folderSelect", HTMLSelectElement),
+    folderMenu: pageElement("#folderMenu", HTMLDivElement),
+    navAll: pageElement('.nav-item[data-view="all"]', HTMLButtonElement),
+    openFileBtn: pageElement("#openFileBtn", HTMLButtonElement),
+    fileRow: pageElement("#fileRow", HTMLDivElement),
+    fileKind: pageElement("#fileKind", HTMLSpanElement),
+    filePath: pageElement("#filePath", HTMLSpanElement),
+    fileRevealBtn: pageElement("#fileRevealBtn", HTMLButtonElement),
+    fileOpenBtn: pageElement("#fileOpenBtn", HTMLButtonElement),
+    fileReloadBtn: pageElement("#fileReloadBtn", HTMLButtonElement),
+    docxView: pageElement("#docxView", HTMLIFrameElement),
+    docxEditor: pageElement("#docxEditor", HTMLDivElement),
+    docxSaveBtn: pageElement("#docxSaveBtn", HTMLButtonElement),
+    fileConvertBtn: pageElement("#fileConvertBtn", HTMLButtonElement),
+    convertMenu: pageElement("#convertMenu", HTMLDivElement),
+    fileBanner: pageElement("#fileBanner", HTMLDivElement),
+    pdfEditor: pageElement("#pdfEditor", HTMLDivElement),
+    pdfSaveBtn: pageElement("#pdfSaveBtn", HTMLButtonElement),
+    pdfUndoBtn: pageElement("#pdfUndoBtn", HTMLButtonElement),
+    pdfRedoBtn: pageElement("#pdfRedoBtn", HTMLButtonElement),
+    pdfZoomLabel: pageElement("#pdfZoom", HTMLButtonElement),
+    pdfPages: pageElement("#pdfPages", HTMLDivElement),
+    pdfComments: pageElement("#pdfComments", HTMLElement),
+    pdfCommentsBtn: pageElement("#pdfCommentsBtn", HTMLButtonElement),
+    pdfCommentsClose: pageElement("#pdfCommentsClose", HTMLButtonElement),
+    agentFilesBtn: pageElement("#agentFilesBtn", HTMLButtonElement),
+    agentFilesStatus: pageElement("#agentFilesStatus", HTMLSpanElement),
+    signDialog: pageElement("#signDialog", HTMLDialogElement),
+    signForm: pageElement("#signForm", HTMLFormElement),
+    signPad: pageElement("#signPad", HTMLCanvasElement),
+    signRemember: pageElement("#signRemember", HTMLInputElement),
+    signClearBtn: pageElement("#signClearBtn", HTMLButtonElement),
+    signForgetBtn: pageElement("#signForgetBtn", HTMLButtonElement),
+    signCancelBtn: pageElement("#signCancelBtn", HTMLButtonElement),
+    signPlaceBtn: pageElement("#signPlaceBtn", HTMLButtonElement),
+    signName: pageElement("#signName", HTMLInputElement),
+    signTypeBtn: pageElement("#signTypeBtn", HTMLButtonElement),
+    signStatus: pageElement("#signStatus", HTMLParagraphElement),
+    readAloudBtn: pageElement("#readAloudBtn", HTMLButtonElement),
+    dictateBtn: pageElement("#dictateBtn", HTMLButtonElement),
+    ttsVoiceSelect: pageElement("#ttsVoiceSelect", HTMLSelectElement),
+    ttsRateInput: pageElement("#ttsRateInput", HTMLInputElement),
+    ttsRateValue: pageElement("#ttsRateValue", HTMLSpanElement),
+    vaultList: pageElement("#vaultList", HTMLDivElement),
+    vaultAddFolderBtn: pageElement("#vaultAddFolderBtn", HTMLButtonElement),
+    vaultCloneBtn: pageElement("#vaultCloneBtn", HTMLButtonElement),
+    vaultDialog: pageElement("#vaultDialog", HTMLDialogElement),
+    vaultForm: pageElement("#vaultForm", HTMLFormElement),
+    vaultUrlInput: pageElement("#vaultUrlInput", HTMLInputElement),
+    vaultDestInput: pageElement("#vaultDestInput", HTMLInputElement),
+    vaultDestBtn: pageElement("#vaultDestBtn", HTMLButtonElement),
+    vaultNameInput: pageElement("#vaultNameInput", HTMLInputElement),
+    vaultError: pageElement("#vaultError", HTMLSpanElement),
+    vaultCancelBtn: pageElement("#vaultCancelBtn", HTMLButtonElement),
+    vaultCloneSubmitBtn: pageElement("#vaultCloneSubmitBtn", HTMLButtonElement),
+    folderMenuSync: pageElement("#folderMenuSync", HTMLButtonElement),
+    folderMenuOpen: pageElement("#folderMenuOpen", HTMLButtonElement),
+    stickyBtn: pageElement("#stickyBtn", HTMLButtonElement),
+    botBtn: pageElement("#botBtn", HTMLButtonElement),
+    printBtn: pageElement("#printBtn", HTMLButtonElement),
+    findBar: pageElement("#findBar", HTMLDivElement),
+    findInput: pageElement("#findInput", HTMLInputElement),
+    findCount: pageElement("#findCount", HTMLSpanElement),
+    findPrevBtn: pageElement("#findPrevBtn", HTMLButtonElement),
+    findNextBtn: pageElement("#findNextBtn", HTMLButtonElement),
+    findCloseBtn: pageElement("#findCloseBtn", HTMLButtonElement),
+    findReplaceToggle: pageElement("#findReplaceToggle", HTMLButtonElement),
+    replaceRow: pageElement("#replaceRow", HTMLDivElement),
+    replaceInput: pageElement("#replaceInput", HTMLInputElement),
+    replaceOneBtn: pageElement("#replaceOneBtn", HTMLButtonElement),
+    replaceAllBtn: pageElement("#replaceAllBtn", HTMLButtonElement),
+    attachBtn: pageElement("#attachBtn", HTMLButtonElement),
+    recordBtn: pageElement("#recordBtn", HTMLButtonElement),
+    historyBtn: pageElement("#historyBtn", HTMLButtonElement),
+    linkNoteSelect: pageElement("#linkNoteSelect", HTMLSelectElement),
+    historyDialog: pageElement("#historyDialog", HTMLDialogElement),
+    historyList: pageElement("#historyList", HTMLUListElement),
+    historyPreview: pageElement("#historyPreview", HTMLPreElement),
+    historyStatus: pageElement("#historyStatus", HTMLSpanElement),
+    historyCloseBtn: pageElement("#historyCloseBtn", HTMLButtonElement),
+    historyRestoreBtn: pageElement("#historyRestoreBtn", HTMLButtonElement),
+    botPanel: pageElement("#botPanel", HTMLElement),
+    botScope: pageElement("#botScope", HTMLSpanElement),
+    botAllowEdits: pageElement("#botAllowEdits", HTMLInputElement),
+    botTerminalBtn: pageElement("#botTerminalBtn", HTMLButtonElement),
+    botCloseBtn: pageElement("#botCloseBtn", HTMLButtonElement),
+    botPrompt: pageElement("#botPrompt", HTMLTextAreaElement),
+    botRunBtn: pageElement("#botRunBtn", HTMLButtonElement),
+    botOutput: pageElement("#botOutput", HTMLPreElement),
+    moreBtn: pageElement("#moreBtn", HTMLButtonElement),
+    moreMenu: pageElement("#moreMenu", HTMLDivElement),
+    paletteBtn: pageElement("#paletteBtn", HTMLButtonElement),
+    palette: pageElement("#palette", HTMLDialogElement),
+    paletteInput: pageElement("#paletteInput", HTMLInputElement),
+    paletteList: pageElement("#paletteList", HTMLUListElement),
+    inlineMenu: pageElement("#inlineMenu", HTMLDivElement),
+    wordcraftFrame: pageElement("#wordcraftFrame", HTMLIFrameElement),
+    gridcraftFrame: pageElement("#gridcraftFrame", HTMLIFrameElement),
+    sidebarTop: pageElement("#sidebarTop", HTMLDivElement),
+    barToggles: pageElement("#barToggles", HTMLDivElement),
+    sidebarEdge: pageElement("#sidebarEdge", HTMLDivElement),
+    noteTree: pageElement("#noteTree", HTMLDivElement),
+    noteActions: pageElement("#noteActions", HTMLDivElement),
+    tagsFold: pageElement("#tagsFold", HTMLButtonElement),
+    listModeSeg: pageElement("#listModeSeg", HTMLDivElement),
+    sidebarFloatInput: pageElement("#sidebarFloatInput", HTMLInputElement),
+    activityBar: pageElement("#activityBar", HTMLDivElement),
+    emptyNewNoteBtn: pageElement("#emptyNewNoteBtn", HTMLButtonElement),
+    settingsNav: pageElement("#settingsNav", HTMLElement),
+    settingsScroll: pageElement("#settingsScroll", HTMLDivElement),
+    settingsSearch: pageElement("#settingsSearch", HTMLInputElement),
+    settingsEmpty: pageElement("#settingsEmpty", HTMLDivElement)
   };
 
   // src/renderer/state.ts
@@ -1394,7 +1411,7 @@
     const group = document.createElement("div");
     group.className = "tree-children" + (isHere ? " is-here" : "");
     group.setAttribute("role", "group");
-    group.style.setProperty("--depth", parentDepth);
+    group.style.setProperty("--depth", String(parentDepth));
     return group;
   }
   function visibleRows(root) {
@@ -1422,7 +1439,7 @@
   }
   function bindTreeKeys(root) {
     root.addEventListener("keydown", (e) => {
-      if (e.target.closest("input, select, textarea") || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.altKey || e.ctrlKey || e.metaKey) return;
       const row = e.target.closest(".tree-row");
       if (!row || !root.contains(row) || e.target !== row) return;
       const rows = visibleRows(root);
@@ -1449,7 +1466,7 @@
         else {
           const group = row.parentElement && row.parentElement.closest(".tree-children");
           const parent = group && group.previousElementSibling;
-          if (parent && parent.classList.contains("tree-row")) focusRow(root, parent);
+          if (parent instanceof HTMLElement && parent.classList.contains("tree-row")) focusRow(root, parent);
         }
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -1457,7 +1474,7 @@
       }
     });
     root.addEventListener("focusin", (e) => {
-      const r = e.target.closest(".tree-row");
+      const r = e.target instanceof Element ? e.target.closest(".tree-row") : null;
       if (r) {
         for (const x of root.querySelectorAll('.tree-row[tabindex="0"]')) if (x !== r) x.tabIndex = -1;
         r.tabIndex = 0;
@@ -1721,7 +1738,7 @@
             toast("Could not undo the split: " + ipcErrorText(err));
             return;
           }
-          const inBook = state.view === "folder" && state.folderId === r.folder.id || r.pageIds.includes(state.currentId);
+          const inBook = state.view === "folder" && state.folderId === r.folder.id || state.currentId !== null && r.pageIds.includes(state.currentId);
           if (!inBook) {
             await refresh();
             return;
@@ -1733,19 +1750,23 @@
       });
     }
     async function placePageAfter(id, afterId) {
-      const pages = await api.notes.list({ folderId: book.id });
+      const bookId = book.id;
+      if (!bookId) return;
+      const pages = await api.notes.list({ folderId: bookId });
       const ids = pages.map((p) => p.id).filter((x) => x !== id);
       const at = ids.indexOf(afterId);
       ids.splice(at === -1 ? ids.length : at + 1, 0, id);
-      await api.folders.reorderPages(book.id, ids);
+      await api.folders.reorderPages(bookId, ids);
     }
     function openPageMenu(id, anchor, ev) {
       closeAllBookMenus();
       state.menuPageId = id;
       state.menuBookId = book.id;
       const idx = book.pages.findIndex((p) => p.id === id);
-      el.pageMenu.querySelector('[data-action="move-left"]').disabled = idx <= 0;
-      el.pageMenu.querySelector('[data-action="move-right"]').disabled = idx === -1 || idx >= book.pages.length - 1;
+      const moveLeft = el.pageMenu.querySelector('[data-action="move-left"]');
+      const moveRight = el.pageMenu.querySelector('[data-action="move-right"]');
+      if (moveLeft) moveLeft.disabled = idx <= 0;
+      if (moveRight) moveRight.disabled = idx === -1 || idx >= book.pages.length - 1;
       placePopover(el.pageMenu, anchor, ev);
     }
     function openBookMenu() {
@@ -1967,6 +1988,7 @@
       }
       const fill = (group, items) => {
         const ul = group.querySelector("ul");
+        if (!ul) return;
         ul.innerHTML = "";
         for (const it of items) {
           const li = document.createElement("li");
@@ -2035,11 +2057,12 @@
   // src/renderer/reminders.ts
   function createReminders({ api, flushSave, refreshCurrentMeta }) {
     function renderRemindButton(note) {
-      const on = !!(note && note.remindAt);
+      const remindAt = note ? note.remindAt : null;
+      const on = !!remindAt;
       el.remindBtn.classList.toggle("hidden", !note || !!note.trashedAt);
       el.remindBtn.classList.toggle("is-on", on);
-      setLabel(el.remindBtn, on ? "Reminder: " + formatWhen(note.remindAt) : "Remind me\u2026");
-      el.remindBtn.title = on ? "Reminder set for " + formatWhen(note.remindAt) + " (Ctrl+Shift+M to change)" : "Remind me about this note (Ctrl+Shift+M)";
+      setLabel(el.remindBtn, on ? "Reminder: " + formatWhen(remindAt) : "Remind me\u2026");
+      el.remindBtn.title = on ? "Reminder set for " + formatWhen(remindAt) + " (Ctrl+Shift+M to change)" : "Remind me about this note (Ctrl+Shift+M)";
     }
     function openRemindDialog() {
       const note = state.current;
@@ -2068,39 +2091,38 @@
   }
 
   // src/renderer/peer-notice.ts
-  function withPeerNotice(raw, onWrite) {
-    const WRITES = {
-      notes: ["create", "update", "togglePin", "duplicate", "splitIntoBook", "undoSplit", "trash", "restore", "destroy", "emptyTrash"],
-      folders: ["create", "rename", "setBook", "reorderPages", "move", "delete"],
-      lock: ["set", "unlock", "relock", "remove"],
-      files: ["link", "refresh", "savePdf", "pdfApplyPages", "pdfRestore", "saveDocx", "saveCraft", "convert", "asMarkdown"],
-      attachments: ["pick", "addPaths", "saveRecording"],
-      stickies: ["open", "close", "create", "setColor", "setOnTop"],
-      live: ["host", "join", "stop"],
-      vaults: ["add", "clone", "update", "remove", "sync", "scan", "initRepo"],
-      agentFiles: ["link"],
-      bot: ["importWorkspace"],
-      app: ["importMarkdown"]
-    };
-    if (!raw) return raw;
-    const out = {};
-    for (const ns of Object.keys(raw)) {
-      const writes = WRITES[ns];
-      if (!writes) {
-        out[ns] = raw[ns];
-        continue;
-      }
-      out[ns] = Object.assign({}, raw[ns]);
-      for (const name of writes) {
-        const fn = raw[ns][name];
-        if (typeof fn === "function") out[ns][name] = (...args) => {
-          const r = fn(...args);
-          Promise.resolve(r).then(onWrite, () => {
-          });
-          return r;
-        };
-      }
+  function wrapWrites(ns, writes, onWrite) {
+    const out = Object.assign({}, ns);
+    for (const name of writes) {
+      const fn = ns[name];
+      if (typeof fn !== "function") continue;
+      const wrapped = (...args) => {
+        const r = fn(...args);
+        Promise.resolve(r).then(onWrite, () => {
+        });
+        return r;
+      };
+      Object.defineProperty(out, name, { value: wrapped, enumerable: true, writable: true, configurable: true });
     }
+    return out;
+  }
+  function withPeerNotice(raw, onWrite) {
+    if (!raw) return raw;
+    const out = Object.assign({}, raw);
+    const wrap = (ns, writes) => {
+      if (raw[ns]) out[ns] = wrapWrites(raw[ns], writes, onWrite);
+    };
+    wrap("notes", ["create", "update", "togglePin", "duplicate", "splitIntoBook", "undoSplit", "trash", "restore", "destroy", "emptyTrash"]);
+    wrap("folders", ["create", "rename", "setBook", "reorderPages", "move", "delete"]);
+    wrap("lock", ["set", "unlock", "relock", "remove"]);
+    wrap("files", ["link", "refresh", "savePdf", "pdfApplyPages", "pdfRestore", "saveDocx", "saveCraft", "convert", "asMarkdown"]);
+    wrap("attachments", ["pick", "addPaths", "saveRecording"]);
+    wrap("stickies", ["open", "close", "create", "setColor", "setOnTop"]);
+    wrap("live", ["host", "join", "stop"]);
+    wrap("vaults", ["add", "clone", "update", "remove", "sync", "scan", "initRepo"]);
+    wrap("agentFiles", ["link"]);
+    wrap("bot", ["importWorkspace"]);
+    wrap("app", ["importMarkdown"]);
     return out;
   }
 
@@ -2125,7 +2147,7 @@
         return;
       }
       await refreshCurrentMeta();
-      openLiveDialog("link", r.status.url);
+      if (r.status) openLiveDialog("link", r.status.url);
     }
     async function stopLive() {
       const note = state.current;
@@ -2136,7 +2158,7 @@
       await refreshCurrentMeta();
       toast("Live share ended. The note stays.");
     }
-    function openLiveDialog(mode, url) {
+    function openLiveDialog(mode, url = "") {
       el.liveDialog.dataset.mode = mode;
       const hosting = mode === "link";
       el.liveDialogTitle.textContent = hosting ? "Live share link" : "Join a live share";
@@ -2167,11 +2189,11 @@
       try {
         const r = await api.live.join(url, state.view === "folder" ? state.folderId : null);
         if (!r.ok) {
-          el.liveError.textContent = r.error;
+          el.liveError.textContent = r.error ?? "";
           return;
         }
         el.liveDialog.close();
-        state.liveStatus[r.noteId] = r.status;
+        if (r.status) state.liveStatus[r.noteId] = r.status;
         await setView("all");
         await selectNoteNow(r.noteId);
         toast("Joined. Edits on either side show up here as they happen.");
@@ -2339,7 +2361,7 @@
       el.botOutput.textContent = "";
       if (!prompt) {
         const r = await api.bot.importWorkspace();
-        botAppend(r.error ? "Import failed: " + r.error + "\n" : "Pulled in workspace edits. " + importSummary(r) + "\n" + (r.details || []).map((d) => "  " + d).join("\n") + (r.details && r.details.length ? "\n" : ""), r.error ? "bot-err" : "bot-meta");
+        botAppend(!("updated" in r) || r.error ? "Import failed: " + r.error + "\n" : "Pulled in workspace edits. " + importSummary(r) + "\n" + (r.details || []).map((d) => "  " + d).join("\n") + (r.details && r.details.length ? "\n" : ""), r.error ? "bot-err" : "bot-meta");
         await refresh({ keepEditor: true });
         el.botPrompt.focus();
         return;
@@ -2357,7 +2379,7 @@
         el.botRunBtn.textContent = "Stop";
         botAppend("Claude Code, on your Claude " + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + " " : "") + "subscription (no API credits)\n", "bot-meta");
         botAppend("Working in " + ev.cwd + (ev.focus ? "  (looking at " + ev.focus + ")" : "") + "\n", "bot-meta");
-        if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
+        if (ev.imported && "updated" in ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
       } else if (ev.type === "out") {
         botAppend(ev.text);
       } else if (ev.type === "err") {
@@ -2369,9 +2391,9 @@
         if (ev.error) botAppend("\n" + ev.error + "\n", "bot-err");
         else {
           const imp = ev.imported;
-          const summary = imp && !imp.error ? " " + importSummary(imp) : "";
+          const summary = imp && "updated" in imp && !imp.error ? " " + importSummary(imp) : "";
           botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + "." + summary + "\n", "bot-meta");
-          if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
+          if (imp && "conflicts" in imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
         }
         refresh({ keepEditor: true }).then(async () => {
           if (state.currentId && !state.dirty) {
@@ -2536,17 +2558,19 @@
     const MAX_COLS = 200;
     const MAX_CELLS = 6e4;
     const NUMBER = /^[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?%?$/;
+    const DELIMITERS = [",", ";", "	"];
     function detectDelimiter(text, ext) {
       if (ext === "tsv") return "	";
       const counts = { ",": 0, ";": 0, "	": 0 };
+      const isDelimiter = (c) => c in counts;
       let quoted = false;
       for (let i = 0; i < text.length; i++) {
         const c = text[i];
         if (c === '"') quoted = !quoted;
         else if (!quoted && (c === "\n" || c === "\r")) break;
-        else if (!quoted && c in counts) counts[c]++;
+        else if (!quoted && isDelimiter(c)) counts[c]++;
       }
-      return Object.keys(counts).reduce((best, d) => counts[d] > counts[best] ? d : best, ",");
+      return DELIMITERS.reduce((best, d) => counts[d] > counts[best] ? d : best, ",");
     }
     function parse2(text, delim, limit) {
       const rows = [];
@@ -2696,7 +2720,7 @@
         }
       });
       el.richEditor.addEventListener("click", (e) => {
-        const a = e.target.closest("a[href]");
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
         if (a && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
           followLink(a.getAttribute("href"));
@@ -2848,7 +2872,7 @@
           rich.insertTextAt(range, "[[");
           return;
         }
-        rich.insertBlock(range, it.kind);
+        if (it.kind) rich.insertBlock(range, it.kind);
         return;
       }
       if (it.create) {
@@ -2883,7 +2907,7 @@
       el.bodyInput.classList.toggle("hidden", none || !state.sourceMode);
       el.csvView.classList.toggle("hidden", !table);
       fillPane(table || !!note && note.fileKind === "image" && !lockedNow());
-      if (table) renderTable(note);
+      if (table && note) renderTable(note);
     }
     let tableDrawn = null;
     let tableStats = null;
@@ -3116,7 +3140,7 @@
         remote.value = v.remote || v.status.remote || "";
         remote.addEventListener("change", async () => {
           const r = await api.vaults.update(v.id, { remote: remote.value.trim() });
-          if (r && r.ok === false) toast(r.error);
+          if (r && "ok" in r && r.ok === false) toast(r.error);
           renderVaultList();
         });
         actions.append(remote);
@@ -3131,6 +3155,7 @@
         mk("Sync now", () => syncVault(v.id));
         mk("Rescan", async () => {
           const r = await api.vaults.scan(v.id);
+          if (!r) return;
           toast("Rescanned: +" + r.added + " changed " + r.updated + " removed " + r.removed);
           await refresh({ keepEditor: true });
         });
@@ -3336,10 +3361,12 @@
 
   // src/renderer/attachments.ts
   var { isViewerOnlyFile: isViewerOnlyFile5 } = helpers_exports;
+  var failed = (x) => "error" in x && !!x.error;
+  var attached = (x) => !!x && !failed(x);
   function createAttachments({ api, flushSave, refresh }) {
     function insertAttachmentLinks(items) {
-      const ok = items.filter((x) => x && !x.error);
-      const bad = items.filter((x) => x && x.error);
+      const ok = items.filter(attached);
+      const bad = items.filter((x) => !!x && failed(x));
       for (const it of ok) insertLinkIntoNote("\u{1F4CE} " + it.name, it.href);
       if (ok.length) toast(ok.length === 1 ? "Attached " + ok[0].name : "Attached " + ok.length + " files");
       for (const b of bad) toast("Could not attach " + b.name + ": " + b.error);
@@ -3381,7 +3408,7 @@
         insertAttachmentLinks(items);
         return;
       }
-      const ok = items.filter((x) => x && !x.error);
+      const ok = items.filter(attached);
       if (!ok.length) {
         insertAttachmentLinks(items);
         return;
@@ -3394,7 +3421,7 @@
         refresh({ keepEditor: true });
       } else toast("Attached files are kept in the attachments folder; that note can no longer take them.");
     }
-    const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
+    const rec = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: "", starting: false };
     async function toggleRecording() {
       if (rec.recorder) {
         rec.recorder.stop();
@@ -3520,7 +3547,7 @@
     }
     function showVersion(i) {
       hist.index = i;
-      for (const li of el.historyList.children) li.classList.toggle("is-active", Number(li.dataset.index) === i);
+      for (const li of el.historyList.children) if (li instanceof HTMLElement) li.classList.toggle("is-active", Number(li.dataset.index) === i);
       el.historyPreview.textContent = hist.versions[i].body;
       el.historyRestoreBtn.disabled = false;
     }
@@ -3952,6 +3979,11 @@
   }
 
   // src/renderer/pdf-editor.ts
+  function requireChild(root, selector, type) {
+    const node = root.querySelector(selector);
+    if (!(node instanceof type)) throw new Error("The PDF panel is missing " + selector + ".");
+    return node;
+  }
   var NotesPdfEditor = (function() {
     "use strict";
     const PV = window.PdfView;
@@ -3983,6 +4015,7 @@
       await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
     }
     const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
+    const isModeName = (name) => name in MODES;
     const MARKUP = /* @__PURE__ */ new Set([
       "Text",
       "Line",
@@ -4005,7 +4038,7 @@
       return m ? [Number(m[1]), Number(m[2] || 0)] : null;
     }
     function create(root, hooks2) {
-      const container = root.querySelector(".pdf-viewport");
+      const container = requireChild(root, ".pdf-viewport", HTMLDivElement);
       const eventBus = new PV.EventBus();
       const linkService = new PV.PDFLinkService({ eventBus });
       const viewer = new PV.PDFViewer({
@@ -4063,12 +4096,12 @@
       const EDIT_LAYERS = ".annotationLayer, .annotationEditorLayer";
       for (const type of ["pointerdown", "keydown"]) {
         container.addEventListener(type, (e) => {
-          if (e.target && e.target.closest && e.target.closest(EDIT_LAYERS)) touched = true;
+          if (e.target instanceof Element && e.target.closest(EDIT_LAYERS)) touched = true;
         }, true);
       }
       for (const type of ["pointerup", "keyup", "input", "change", "focusout"]) container.addEventListener(type, () => setTimeout(refreshDirty, 0));
       container.addEventListener("click", (e) => {
-        const a = e.target && e.target.closest && e.target.closest("a[href]");
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
         if (!a) return;
         const href = a.getAttribute("href") || "";
         if (href.startsWith("#")) return;
@@ -4130,8 +4163,9 @@
         location2 = null;
         touched = false;
         savedHash = currentHash();
-        doc.annotationStorage.onSetModified = refreshDirty;
-        doc.annotationStorage.onResetModified = refreshDirty;
+        const storage = doc.annotationStorage;
+        storage.onSetModified = refreshDirty;
+        storage.onResetModified = refreshDirty;
         viewer.setDocument(doc);
         linkService.setDocument(doc, null);
         mode = "select";
@@ -4143,7 +4177,7 @@
         await unload();
       }
       function setMode(name, internal) {
-        if (!doc || !(name in MODES)) return false;
+        if (!doc || !isModeName(name)) return false;
         try {
           viewer.annotationEditorMode = { mode: MODES[name] };
         } catch (_) {
@@ -4199,7 +4233,7 @@
         root.classList.add("picking");
         return new Promise((resolve2) => {
           const onDown = (e) => {
-            const pageEl = e.button === 0 && e.target.closest && e.target.closest(".page[data-page-number]");
+            const pageEl = e.button === 0 && e.target instanceof Element ? e.target.closest(".page[data-page-number]") : null;
             if (!pageEl) return;
             e.preventDefault();
             e.stopPropagation();
@@ -4319,25 +4353,30 @@
     "use strict";
     const THUMB_W = 130, THUMB_H = 170;
     function create(panel, ctl, hooks2) {
-      const grid = panel.querySelector(".pdf-pages-grid");
+      const grid = requireChild(panel, ".pdf-pages-grid", HTMLElement);
       let items = [], sources = /* @__PURE__ */ new Map(), canvases = /* @__PURE__ */ new Map(), added = 0, working = false;
       function open() {
         items = [];
         for (let i = 0; i < ctl.pageCount(); i++) items.push({ src: "self", index: i, turn: 0 });
-        sources = /* @__PURE__ */ new Map([["self", { name: "", draw: ctl.drawPage }]]);
+        sources = /* @__PURE__ */ new Map([["self", { name: "", draw: ctl.drawPage, bytes: null }]]);
         canvases = /* @__PURE__ */ new Map();
         added = 0;
         render();
       }
+      function sourceOf(src2) {
+        const source = sources.get(src2);
+        if (!source) throw new Error("No page source " + src2 + ".");
+        return source;
+      }
       function canvasFor(it) {
         const key = it.src + ":" + it.index;
-        if (!canvases.has(key)) {
-          const c = document.createElement("canvas");
-          canvases.set(key, c);
-          sources.get(it.src).draw(it.index, c, THUMB_W).then(() => fit(c), () => {
-          });
-        }
-        return canvases.get(key);
+        const known = canvases.get(key);
+        if (known) return known;
+        const c = document.createElement("canvas");
+        canvases.set(key, c);
+        sourceOf(it.src).draw(it.index, c, THUMB_W).then(() => fit(c), () => {
+        });
+        return c;
       }
       function fit(c) {
         const turn = Number(c.dataset.turn || 0);
@@ -4349,7 +4388,7 @@
         const b = document.createElement("button");
         b.className = "tool-btn icon-only";
         b.dataset.act = act2;
-        b.dataset.k = k;
+        b.dataset.k = String(k);
         b.innerHTML = import_icons4.default.svg(icon);
         b.title = title;
         b.setAttribute("aria-label", title);
@@ -4362,12 +4401,12 @@
           const box = document.createElement("div");
           box.className = "pdf-page-thumb";
           const c = canvasFor(it);
-          c.dataset.turn = it.turn;
+          c.dataset.turn = String(it.turn);
           fit(c);
           box.append(c);
           const cap = document.createElement("figcaption");
           cap.className = "pdf-page-num";
-          const from = sources.get(it.src).name;
+          const from = sourceOf(it.src).name;
           cap.textContent = k + 1 + (from ? " \xB7 " + from + " p. " + (it.index + 1) : it.index !== k ? " \xB7 was " + (it.index + 1) : "");
           cap.title = cap.textContent;
           const acts = document.createElement("div");
@@ -4426,12 +4465,16 @@
         if (reordered) {
           const bySrc = /* @__PURE__ */ new Map();
           items.forEach((it, pos) => {
-            if (!bySrc.has(it.src)) bySrc.set(it.src, []);
-            bySrc.get(it.src).push({ index: it.index, pos });
+            let list = bySrc.get(it.src);
+            if (!list) {
+              list = [];
+              bySrc.set(it.src, list);
+            }
+            list.push({ index: it.index, pos });
           });
           pageInfos = [...bySrc].map(([src2, list]) => {
             list.sort((a, b) => a.index - b.index);
-            return { document: src2 === "self" ? null : sources.get(src2).bytes, includePages: list.map((e) => e.index), pageIndices: list.map((e) => e.pos) };
+            return { document: src2 === "self" ? null : sourceOf(src2).bytes, includePages: list.map((e) => e.index), pageIndices: list.map((e) => e.pos) };
           });
         }
         working = true;
@@ -4444,11 +4487,11 @@
         }
       }
       grid.addEventListener("click", (e) => {
-        const b = e.target.closest("button[data-act]");
-        if (b && !working) act(b.dataset.act, Number(b.dataset.k));
+        const b = e.target instanceof Element ? e.target.closest("button[data-act]") : null;
+        if (b && b.dataset.act && !working) act(b.dataset.act, Number(b.dataset.k));
       });
-      panel.querySelector(".pdf-pages-bar").addEventListener("click", (e) => {
-        const b = e.target.closest("button[data-pages-act]");
+      requireChild(panel, ".pdf-pages-bar", HTMLElement).addEventListener("click", (e) => {
+        const b = e.target instanceof Element ? e.target.closest("button[data-pages-act]") : null;
         if (!b || working) return;
         if (b.dataset.pagesAct === "add") addFromPdf();
         else if (b.dataset.pagesAct === "cancel") hooks2.close();
@@ -4481,9 +4524,9 @@
     };
     const DATE_FORMAT = new Intl.DateTimeFormat(void 0, { dateStyle: "medium", timeStyle: "short" });
     function create(panel, ctl, hooks2) {
-      const listEl = panel.querySelector(".pdf-comments-list");
-      const addBtn = panel.querySelector('[data-comments-act="add"]');
-      const hint = panel.querySelector(".pdf-comments-hint");
+      const listEl = requireChild(panel, ".pdf-comments-list", HTMLElement);
+      const addBtn = requireChild(panel, '[data-comments-act="add"]', HTMLButtonElement);
+      const hint = requireChild(panel, ".pdf-comments-hint", HTMLElement);
       let list = [], editing = null, draft = null, picking = false, working = false, readSeq = 0;
       function el2(tag, cls, text) {
         const e = document.createElement(tag);
@@ -4547,8 +4590,12 @@
         if (editing === "new" && draft) cards.push(editorCard("", "New comment \xB7 page " + (draft.page + 1)));
         const replies = /* @__PURE__ */ new Map();
         for (const c of list) if (c.replyTo) {
-          if (!replies.has(c.replyTo)) replies.set(c.replyTo, []);
-          replies.get(c.replyTo).push(c);
+          let answers = replies.get(c.replyTo);
+          if (!answers) {
+            answers = [];
+            replies.set(c.replyTo, answers);
+          }
+          answers.push(c);
         }
         const ids = new Set(list.map((c) => c.id));
         const shown2 = /* @__PURE__ */ new Set();
@@ -4652,7 +4699,7 @@
         await run([{ op: "delete", page: c.page, ref: c.ref }]);
       }
       listEl.addEventListener("click", (e) => {
-        if (working) return;
+        if (working || !(e.target instanceof Element)) return;
         const b = e.target.closest("button[data-c-act]");
         const card = e.target.closest(".pdf-comment");
         const c = card && card.dataset.id ? list.find((x) => x.id === card.dataset.id) : null;
@@ -4694,7 +4741,9 @@
     const INK = "#1b1f4a";
     const PAD = 6;
     function create(canvas) {
-      const ctx = canvas.getContext("2d");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("The signature pad needs a 2D canvas.");
+      const ctx = context;
       let drawing = false, last = null, box = null, scale = 1;
       function fit() {
         const r = canvas.getBoundingClientRect();
@@ -4742,7 +4791,7 @@
         dot(last);
       });
       canvas.addEventListener("pointermove", (e) => {
-        if (!drawing) return;
+        if (!drawing || !last) return;
         const p = point(e);
         line(last, p);
         last = p;
@@ -4897,8 +4946,9 @@
         return false;
       }
     }
+    const savedAsCopy = (r) => !!r.savedAs;
     function reportFileSaved(target, r, explicit, what) {
-      if (r.savedAs) {
+      if (savedAsCopy(r)) {
         if (r.newCopy || explicit) toast("This " + what + " changed on disk while you edited it, so your changes were saved as " + r.savedAs.split(/[\\/]/).pop() + ".", { label: "Open", run: () => openFiles([r.savedAs]) });
         return false;
       }
@@ -4928,7 +4978,7 @@
     }
     async function pickPdfForPages() {
       const r = await callOk(api.files.pdfPickPages());
-      if (r.canceled) return null;
+      if ("canceled" in r && r.canceled) return null;
       if (!r.ok) {
         toast("Could not add pages: " + r.error);
         return null;
@@ -5030,7 +5080,7 @@
     const pdfCommentsShown = () => !!pdfComments && el.pdfEditor.classList.contains("commenting");
     function showPdfComments(show) {
       if (show && (!pdf || !pdfNote || !NotesPdfComments)) return;
-      if (show && !pdfComments) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
+      if (show && !pdfComments && pdf) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
       el.pdfEditor.classList.toggle("commenting", show);
       el.pdfCommentsBtn.classList.toggle("is-on", show);
       if (!pdfComments) return;
@@ -5114,6 +5164,7 @@
       }
     }
     function onPdfToolbarClick(e) {
+      if (!(e.target instanceof Element)) return;
       const b = e.target.closest("button");
       if (!b || !pdf || !pdfNote) return;
       if (b.dataset.pdfMode) {
@@ -5141,7 +5192,7 @@
       pdfShownKey = null;
     }
     function bindPdfEvents() {
-      el.pdfEditor.querySelector(".pdf-toolbar").addEventListener("click", onPdfToolbarClick);
+      requireChild(el.pdfEditor, ".pdf-toolbar", HTMLElement).addEventListener("click", onPdfToolbarClick);
       el.pdfCommentsClose.addEventListener("click", () => showPdfComments(false));
       el.signForm.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -5179,6 +5230,7 @@
 
   // src/renderer/craft-frame.ts
   var NotesCraftFrame = /* @__PURE__ */ (function() {
+    const isRecord2 = (value) => typeof value === "object" && value !== null;
     function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
       let ready = false;
       let loaded = false;
@@ -5194,8 +5246,9 @@
         if (frame.contentWindow) frame.contentWindow.postMessage(msg, origin, transfer || []);
       }
       window.addEventListener("message", (e) => {
-        if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !e.data || typeof e.data !== "object") return;
-        const m = e.data;
+        const data = e.data;
+        if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !isRecord2(data)) return;
+        const m = data;
         if (gaveUp) return;
         if (m.type === "ready") {
           clearTimeout(readyTimer);
@@ -5219,9 +5272,10 @@
           if (onDirty) onDirty(dirty || unsaved);
         } else if (m.type === "save" && m.bytes instanceof Uint8Array && typeof m.name === "string") {
           const editedBefore = dirty || unsaved;
+          const { name, bytes } = m;
           const doc = current.doc;
           const context = current.context;
-          saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
+          saving = saving.then(() => onSave(name, bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
             if (!current || current.doc !== doc) return;
             if (res.own) {
               unsaved = !res.ok;
@@ -5293,6 +5347,10 @@
   })();
 
   // src/renderer/craft-notes.ts
+  var baseName = (path) => {
+    const parts = path.split(/[\\/]/);
+    return parts[parts.length - 1];
+  };
   function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow }) {
     const CRAFT_UI = {
       wordcraft: { label: "WordCraft", what: "Word document", frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: "Word", without: "Word documents open in the simple editor for now." },
@@ -5350,7 +5408,8 @@
         try {
           const bytes = await ui.bytes(n.id);
           if (s !== seq || !state.current || state.current.id !== n.id) return;
-          const name = n.filePath.split(/[\\/]/).pop();
+          if (!n.filePath) throw new Error("the note has no file");
+          const name = baseName(n.filePath);
           note = { id: n.id, fileMtime: n.fileMtime, name };
           controller().open(name, bytes, note);
         } catch (err) {
@@ -5370,16 +5429,16 @@
         if (!target) return { ok: false, own: true };
         try {
           const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
-          if (r.exported) {
-            const copy = r.exported.split(/[\\/]/).pop();
+          if ("exported" in r) {
+            const copy = baseName(r.exported);
             toast(r.own ? "Saved as " + copy + " beside this file, which is unchanged." : "Saved " + copy + " next to the " + ui.what + ".", { label: "Open", run: () => openFiles([r.exported]) });
             return { ok: true, own: !!r.own };
           }
-          if (r.relinked) {
+          if ("relinked" in r) {
             movedTo(target, r);
             return { ok: true, own: true };
           }
-          if (!r.savedAs) {
+          if (!("savedAs" in r)) {
             target.fileMtime = r.mtime;
             if (note === target) shownKey = target.id + ":" + r.mtime;
           }
@@ -5392,7 +5451,7 @@
       }
       function movedTo(target, r) {
         target.fileMtime = r.mtime;
-        toast("Saved as " + r.relinked.split(/[\\/]/).pop() + " beside the original, which is unchanged. This note is that file now.");
+        toast("Saved as " + baseName(r.relinked) + " beside the original, which is unchanged. This note is that file now.");
         setTimeout(async () => {
           const fresh = await api.notes.get(target.id);
           await refresh({ keepEditor: true });
@@ -5410,7 +5469,7 @@
       };
       return { usable, show, clear, dirty, flush, forget };
     }
-    const crafts = Object.fromEntries(Object.keys(CRAFT_UI).map((key) => [key, craftViewer(key)]));
+    const crafts = { wordcraft: craftViewer("wordcraft"), gridcraft: craftViewer("gridcraft") };
     const useWordCraft = () => crafts.wordcraft.usable();
     const craftFor = (n) => {
       const key = n && n.filePath && n.fileKind ? CRAFT_OF[n.fileKind] : void 0;
@@ -5423,7 +5482,8 @@
       return ok;
     }
     function showCraftOnly(n) {
-      const key = CRAFT_OF[n.fileKind];
+      const key = n.fileKind ? CRAFT_OF[n.fileKind] : void 0;
+      if (!key) return;
       if (crafts[key].usable()) {
         showBanner("");
         crafts[key].show(n);
@@ -5440,6 +5500,9 @@
     const DV = window.DocxView;
     if (!DV || !DV.Ooxml || !DV.JSZip) return;
     const X = DV.Ooxml;
+    const isElement = (node) => node.nodeType === Node.ELEMENT_NODE;
+    const isText = (node) => node.nodeType === Node.TEXT_NODE;
+    const isHtmlElement = (node) => node.namespaceURI === "http://www.w3.org/1999/xhtml";
     const TAB_SHOWN = "\u2003";
     const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false };
     const NOT_TEXT = /* @__PURE__ */ new Set([X.PAGE_BREAK, X.PICTURE]);
@@ -5502,6 +5565,7 @@
         const cached = styleCache.get(el2);
         if (cached) return cached;
         const win = el2.ownerDocument.defaultView;
+        if (!win) throw new Error("the Word document has no window");
         const cs = win.getComputedStyle(el2);
         let u = false;
         for (let e = el2; e && !u; e = e.parentElement) {
@@ -5517,12 +5581,12 @@
         styleCache = /* @__PURE__ */ new WeakMap();
         const walk = (node) => {
           for (let n = node.firstChild; n; n = n.nextSibling) {
-            if (n.nodeType === 3) {
-              const fmt = fmtOf(n.parentElement);
+            if (isText(n)) {
+              const fmt = fmtOf(node);
               for (let k = 0; k < n.data.length; k++) if (!NOT_TEXT.has(n.data[k])) out.push({ ch: n.data[k] === TAB_SHOWN ? "	" : n.data[k], fmt, br: false });
-            } else if (n.nodeType === 1) {
-              if (n.tagName === "BR") out.push({ ch: "\n", fmt: fmtOf(n.parentElement), br: true, real: n.hasAttribute(REAL_BR) });
-              else if (n.tagName === "DIV") out.push({ ch: X.PICTURE, fmt: fmtOf(n.parentElement), br: false, picture: n.getAttribute(PIC) });
+            } else if (isElement(n)) {
+              if (n.tagName === "BR") out.push({ ch: "\n", fmt: fmtOf(node), br: true, real: n.hasAttribute(REAL_BR) });
+              else if (n.tagName === "DIV") out.push({ ch: X.PICTURE, fmt: fmtOf(node), br: false, picture: n.getAttribute(PIC) });
               else walk(n);
             }
           }
@@ -5537,7 +5601,7 @@
       let pictureSeq = 0;
       function namePictures(p) {
         for (const d of p.querySelectorAll("div")) {
-          if (d.parentElement.closest("div, p") !== p || d.hasAttribute(PIC)) continue;
+          if (d.parentElement?.closest("div, p") !== p || d.hasAttribute(PIC)) continue;
           d.setAttribute(PIC, String(++pictureSeq));
           d.contentEditable = "false";
         }
@@ -5581,7 +5645,7 @@
             }
             if (nextScan && !nextScan.prefix) block = "it is not a standard Word document";
           }
-          if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
+          if (!block && nextScan && nextScan.prefix && nextScan.paragraphs.some((p) => p.editable)) {
             zip.file("word/document.xml", X.markForDisplay(nextXml, nextScan));
             display = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
           }
@@ -5649,8 +5713,8 @@
       function shownAs(para, p, rest, pages) {
         if (!para.pageBreaks.length) return { chars: charsOf(p) };
         if (para.pageBreaks.length > 1) return null;
-        const page = p.parentElement, k = pages.indexOf(page);
-        if (k < 0 || page.lastElementChild !== p) return null;
+        const page = p.parentElement, k = page ? pages.indexOf(page) : -1;
+        if (!page || k < 0 || page.lastElementChild !== p) return null;
         if (!rest) return { chars: [...charsOf(p), BREAK], mark: () => {
           page.dataset.notesEnd = "";
         } };
@@ -5664,7 +5728,7 @@
         for (const el2 of container.children) {
           if (map.has(el2)) continue;
           if (holders.has(el2)) fix(el2, holders);
-          else el2.contentEditable = "false";
+          else if (isHtmlElement(el2)) el2.contentEditable = "false";
         }
       }
       function close() {
@@ -5682,7 +5746,7 @@
         setDirty(false);
       }
       const paraOf = (node) => {
-        const el2 = node && (node.nodeType === 1 ? node : node.parentElement);
+        const el2 = node && (isElement(node) ? node : node.parentElement);
         const p = el2 && el2.closest("p");
         return p && !p.closest('[contenteditable="false"]') && p.closest('article[contenteditable="true"]') ? p : null;
       };
@@ -5742,7 +5806,7 @@
       function onInput(e) {
         edits++;
         setDirty(true);
-        if (e.inputType === "insertLineBreak") {
+        if ("inputType" in e && e.inputType === "insertLineBreak") {
           const sel = shownDoc().getSelection();
           const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
           if (p && sel) {
@@ -5966,7 +6030,8 @@
       });
     }
     function onDocxLinkClick(e) {
-      const a = e.target && e.target.closest && e.target.closest("a[href]");
+      const frameWindow = el.docxView.contentDocument?.defaultView;
+      const a = frameWindow && e.target instanceof frameWindow.Element ? e.target.closest("a[href]") : null;
       if (!a) return;
       e.preventDefault();
       const href = a.getAttribute("href") || "";
@@ -6084,7 +6149,7 @@
       }
     }
     function onDocxToolbarClick(e) {
-      const b = e.target.closest("button");
+      const b = e.target instanceof Element ? e.target.closest("button") : null;
       if (!b || !docx || !docxNote) return;
       if (b === el.docxSaveBtn) {
         flushDocx({ explicit: true });
@@ -6100,8 +6165,9 @@
     }
     function bindDocxEvents() {
       const docxTools = el.docxEditor.querySelector(".docx-toolbar");
+      if (!docxTools) return;
       docxTools.addEventListener("mousedown", (e) => {
-        if (e.target.closest("button")) e.preventDefault();
+        if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
       });
       docxTools.addEventListener("click", onDocxToolbarClick);
     }
@@ -6186,7 +6252,8 @@
         return b;
       }));
       placePopover(el.convertMenu, el.fileConvertBtn);
-      el.convertMenu.querySelector("button").focus();
+      const firstItem = el.convertMenu.querySelector("button");
+      if (firstItem) firstItem.focus();
     }
     function closeConvertMenu() {
       el.convertMenu.classList.add("hidden");
@@ -6283,10 +6350,12 @@
   }
 
   // src/renderer/app.ts
+  var isListView = (v) => v === "all" || v === "pinned" || v === "trash" || v === "tag" || v === "folder" || v === "reminders";
   (function() {
     "use strict";
     const api = withPeerNotice(window.notesApi, peerChanged);
     const { isViewerOnlyFile: isViewerOnlyFile9, isPlainTextFile: isPlainTextFile6, isNonMarkdownFile: isNonMarkdownFile4 } = helpers_exports;
+    const closestTo = (e, selector) => e.target instanceof Element ? e.target.closest(selector) : null;
     function effectiveTheme(settings) {
       const s = settings || state.settings;
       const t = s ? s.theme : "system";
@@ -6433,7 +6502,7 @@
         }, 350);
       };
       document.addEventListener("mousemove", (e) => {
-        const overSidebar = el.sidebar.contains(e.target);
+        const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
         const near = e.clientX <= PEEK_EDGE_PX;
         if (near && !sidebarPeek) {
           clearTimeout(peekTimer);
@@ -6453,7 +6522,8 @@
         if (sidebarPeek === "hover") leaveSoon();
       });
       document.addEventListener("pointerdown", (e) => {
-        if (!sidebarPeek || el.sidebar.contains(e.target) || el.sidebarEdge.contains(e.target) || el.barToggles.contains(e.target) || el.folderMenu.contains(e.target)) return;
+        const target = e.target instanceof Node ? e.target : null;
+        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.barToggles.contains(target) || el.folderMenu.contains(target)) return;
         unpeekSidebar();
       }, true);
     }
@@ -6553,7 +6623,7 @@
         api.notes.counts(),
         api.notes.tags(),
         api.folders.tree(),
-        state.view === "folder" ? api.folders.path(state.folderId) : Promise.resolve([]),
+        state.view === "folder" && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
         wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null)
       ]);
       state.notes = notes;
@@ -6589,10 +6659,10 @@
       }
     }
     function renderCounts(c) {
-      el.countAll.textContent = c.all;
-      el.countPinned.textContent = c.pinned;
-      el.countTrash.textContent = c.trash;
-      el.countReminders.textContent = c.reminders;
+      el.countAll.textContent = String(c.all);
+      el.countPinned.textContent = String(c.pinned);
+      el.countTrash.textContent = String(c.trash);
+      el.countReminders.textContent = String(c.reminders);
       for (const b of [el.countPinned, el.countTrash, el.countReminders]) b.classList.toggle("is-zero", b.textContent === "0");
       el.countReminders.classList.toggle("is-overdue", !!c.overdue);
     }
@@ -6696,8 +6766,10 @@
     }
     function renderListEmpty() {
       const [title, sub] = state.query ? ["No matches", 'Nothing in this list has "' + state.query + '". Ctrl+P searches everything.'] : state.view === "trash" ? ["Trash is empty", "Notes you delete wait here until you empty the trash."] : state.view === "pinned" ? ["Nothing pinned", "Pin a note (Ctrl+D) to keep it at the top."] : state.view === "reminders" ? ["No reminders", "Set one from a note\u2019s More menu, or press Ctrl+Shift+M."] : state.view === "tag" ? ["No notes with this tag", ""] : state.view === "folder" ? ["This folder is empty", "Press Ctrl+N to write a note here."] : ["No notes yet", "Press Ctrl+N to write your first note."];
-      el.listEmpty.querySelector(".empty-title").textContent = title;
-      el.listEmpty.querySelector(".empty-sub").textContent = sub;
+      const emptyTitle = el.listEmpty.querySelector(".empty-title");
+      const emptySub = el.listEmpty.querySelector(".empty-sub");
+      if (emptyTitle) emptyTitle.textContent = title;
+      if (emptySub) emptySub.textContent = sub;
     }
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
@@ -6755,7 +6827,7 @@
       li.title = deriveTitle(note);
       if (pageNo) li.prepend(pageNo);
     }
-    async function setView(view, arg, refreshOpts) {
+    async function setView(view, arg = null, refreshOpts) {
       await flushSave();
       state.view = view;
       state.tag = view === "tag" ? arg : null;
@@ -6821,7 +6893,7 @@
       if (open) next = pathTo(id);
       else {
         const cur = Array.from(expandedSet());
-        const i = cur.indexOf(id);
+        const i = id === null ? -1 : cur.indexOf(id);
         next = i >= 0 ? cur.slice(0, i) : cur;
       }
       await updateSettings({ expandedFolders: next });
@@ -6836,7 +6908,7 @@
       return out;
     }
     function editKey(edit) {
-      return edit ? edit.mode + ":" + (edit.id || edit.parentId || "root") : "";
+      return edit ? edit.mode + ":" + (edit.mode === "rename" ? edit.id : edit.parentId || "root") : "";
     }
     function renderFolders() {
       const open = expandedSet();
@@ -6862,7 +6934,7 @@
         row.className = "folder-row tree-row" + (state.view === "folder" && state.folderId === node.id ? " is-active" : "") + (node.id === holding ? " holds-note" : "");
         row.dataset.id = node.id;
         row.dataset.key = "f:" + node.id;
-        row.style.setProperty("--depth", node.depth);
+        row.style.setProperty("--depth", String(node.depth));
         row.setAttribute("role", "treeitem");
         row.setAttribute("aria-level", String(node.depth + 1));
         if (kids) row.setAttribute("aria-expanded", String(isOpen));
@@ -6891,7 +6963,7 @@
           row.append(name);
           if (node.book) row.insertAdjacentHTML("beforeend", bookMark());
           if (node.isVaultRoot) {
-            const st = state.vaultStatus[node.vaultId] || {};
+            const st = node.vaultId && state.vaultStatus[node.vaultId] || {};
             const badge = document.createElement("span");
             badge.className = "vault-badge" + (st.syncing ? " is-syncing" : "") + (st.lastError || st.conflict ? " is-error" : "");
             badge.innerHTML = I(st.isRepo ? "refresh-cw" : "folder-open");
@@ -6900,7 +6972,7 @@
           }
           const count = document.createElement("span");
           count.className = "count";
-          count.textContent = node.count;
+          count.textContent = String(node.count);
           row.append(count);
           const menu = document.createElement("button");
           menu.className = "folder-menu-btn";
@@ -6915,7 +6987,7 @@
           row.append(menu);
         }
         row.addEventListener("click", () => {
-          if (editing && editing.id === node.id) return;
+          if (editing && editing.mode === "rename" && editing.id === node.id) return;
           if (kids && !isOpen) setExpanded(node.id, true);
           setView("folder", node.id);
         });
@@ -6950,12 +7022,12 @@
       const createRow = (depth) => {
         const row = document.createElement("div");
         row.className = "folder-row is-active";
-        row.style.setProperty("--depth", depth);
+        row.style.setProperty("--depth", String(depth));
         const chevron = document.createElement("span");
         chevron.className = "folder-chevron is-leaf";
         row.append(chevron);
         row.append(folderInput("", (value) => commitFolderEdit(value)));
-        if (editing && editing.book) row.insertAdjacentHTML("beforeend", bookMark());
+        if (editing && editing.mode === "create" && editing.book) row.insertAdjacentHTML("beforeend", bookMark());
         return row;
       };
       const frag = document.createDocumentFragment();
@@ -7047,7 +7119,7 @@
         row.className = "tree-row tree-note note-row" + (active2 ? " is-active" : "");
         row.dataset.id = n.id;
         row.dataset.key = "n:" + n.id;
-        row.style.setProperty("--depth", depth);
+        row.style.setProperty("--depth", String(depth));
         row.setAttribute("role", "treeitem");
         row.setAttribute("aria-level", String(depth + 1));
         row.setAttribute("aria-selected", String(active2));
@@ -7082,7 +7154,7 @@
             const hr = document.createElement("div");
             hr.className = "tree-row tree-heading";
             hr.dataset.key = "h:" + n.id + ":" + i;
-            hr.style.setProperty("--depth", depth + 1 + (h.level - minLevel));
+            hr.style.setProperty("--depth", String(depth + 1 + (h.level - minLevel)));
             hr.setAttribute("role", "treeitem");
             hr.setAttribute("aria-level", String(depth + 2 + (h.level - minLevel)));
             hr.tabIndex = -1;
@@ -7106,7 +7178,7 @@
         row.className = "tree-row tree-folder" + (here.has(node.id) ? " is-here" : "");
         row.dataset.id = node.id;
         row.dataset.key = "f:" + node.id;
-        row.style.setProperty("--depth", depth);
+        row.style.setProperty("--depth", String(depth));
         row.setAttribute("role", "treeitem");
         row.setAttribute("aria-level", String(depth + 1));
         if (kids) row.setAttribute("aria-expanded", String(isOpen));
@@ -7191,7 +7263,7 @@
       input.className = "folder-input";
       input.dataset.editKey = editKey(state.editingFolder);
       input.value = value;
-      const what = state.editingFolder && state.editingFolder.book ? "Book name" : "Folder name";
+      const what = state.editingFolder && state.editingFolder.mode === "create" && state.editingFolder.book ? "Book name" : "Folder name";
       input.placeholder = what;
       input.setAttribute("aria-label", what);
       input.spellcheck = false;
@@ -7281,9 +7353,9 @@
       if (!window.confirm('Delete folder "' + node.name + '"?' + detail)) return;
       await flushSave();
       const res = await api.folders.delete(id);
-      if (state.current && state.current.folderId === id) state.current.folderId = res ? res.parentId : null;
+      if (state.current && state.current.folderId === id) state.current.folderId = res && "parentId" in res ? res.parentId : null;
       if (state.view === "folder" && (state.folderId === id || !flattenTree(state.tree).some((n) => n.id === state.folderId))) {
-        if (res && res.parentId) await setView("folder", res.parentId);
+        if (res && "parentId" in res && res.parentId) await setView("folder", res.parentId);
         else await setView("all");
       } else await refresh({ keepEditor: true });
       toast("Folder deleted");
@@ -7308,7 +7380,7 @@
     }
     async function moveFolderTo(folderId, parentId) {
       const res = await api.folders.move(folderId, parentId || null);
-      if (res && res.error) {
+      if (res && "error" in res) {
         toast(res.error);
         return;
       }
@@ -7320,12 +7392,13 @@
       target.addEventListener("dragover", (e) => {
         if (!accepts(e)) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
         target.classList.add("is-drop-target");
       });
       target.addEventListener("dragleave", () => target.classList.remove("is-drop-target"));
       target.addEventListener("drop", (e) => {
         target.classList.remove("is-drop-target");
+        if (!e.dataTransfer) return;
         const noteId = e.dataTransfer.getData("text/x-note-id");
         const movingFolder = e.dataTransfer.getData("text/x-folder-id");
         if (!noteId && !movingFolder) return;
@@ -7364,7 +7437,8 @@
       el.folderMenuSync.classList.toggle("hidden", !node.isVaultRoot);
       el.folderMenuBook.textContent = node.book ? "Turn back into a folder" : "Turn into a book";
       el.folderMenuOpen.classList.toggle("hidden", !node.vaultId);
-      menu.querySelector('[data-action="delete"]').textContent = node.isVaultRoot ? "Remove vault (keeps files)" : "Delete folder";
+      const deleteItem = menu.querySelector('[data-action="delete"]');
+      if (deleteItem) deleteItem.textContent = node.isVaultRoot ? "Remove vault (keeps files)" : "Delete folder";
       placePopover(menu, anchor, ev);
     }
     function closeFolderMenu() {
@@ -7384,7 +7458,7 @@
       else if (action === "toggle-book") toggleBook(id, !node.book);
       else if (action === "sync" && node.vaultId) syncVault(node.vaultId);
       else if (action === "open-folder" && node.vaultId) api.vaults.openFolder(node.vaultId);
-      else if (action === "delete" && node.isVaultRoot) removeVault(node.vaultId);
+      else if (action === "delete" && node.isVaultRoot && node.vaultId) removeVault(node.vaultId);
       else if (action === "delete") deleteFolder(id);
     }
     const { syncVault, removeVault, addVaultFolder, openCloneDialog, submitClone, renderVaultList, describeVaultStatus } = createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded });
@@ -7444,12 +7518,17 @@
       peerChangedTimer = setTimeout(() => toPeer({ type: "changed" }), 250);
     }
     const mainEvents = {};
-    function fromMain(name, handler) {
-      mainEvents[name] = handler;
-      api.on[name]((arg) => {
-        handler(arg);
-        if (tabs.split) toPeer({ type: "event", name, arg });
+    function fromMain(name, subscribe, handler) {
+      const slots = mainEvents;
+      slots[name] = handler;
+      subscribe((...args) => {
+        handler(...args);
+        if (tabs.split) toPeer({ type: "event", name, args });
       });
+    }
+    function replayMainEvent(name, args) {
+      const handler = mainEvents[name];
+      return handler ? handler(...args) : void 0;
     }
     function panesOf(settings) {
       return settings && settings.panes || { split: false, ratio: 0.5, active: "left", left: { ids: [], current: null }, right: { ids: [], current: null } };
@@ -7790,8 +7869,8 @@
           el.paneMain.classList.toggle("is-active-side", tabs.activeHere);
           return;
         case "event":
-          if (m.name === "editCommand") runEditCommand(m.arg);
-          else if (mainEvents[m.name]) await mainEvents[m.name](m.arg);
+          if (m.name === "editCommand" && (m.args[0] === "undo" || m.args[0] === "redo")) runEditCommand(m.args[0]);
+          else await replayMainEvent(m.name, m.args);
           return;
         case "flush": {
           let ok = false;
@@ -7858,14 +7937,14 @@
     }
     function runEditCommand(cmd) {
       if (!GUEST && tabs.frame && document.activeElement === tabs.frame) {
-        toPeer({ type: "event", name: "editCommand", arg: cmd });
+        toPeer({ type: "event", name: "editCommand", args: [cmd] });
         return;
       }
       if (state.rich && !state.sourceMode && el.richEditor.contains(document.activeElement)) state.rich.editor.chain().focus()[cmd === "redo" ? "redo" : "undo"]().run();
       else if (!src.undoRedo(cmd)) document.execCommand(cmd === "redo" ? "redo" : "undo");
     }
     function dropIndex(e) {
-      const t = e.target.closest(".tab");
+      const t = closestTo(e, ".tab");
       return t ? Number(t.dataset.index) : tabs.ids.length;
     }
     function onTabDrop(e) {
@@ -7886,7 +7965,7 @@
         tabsChanged();
         return;
       }
-      const id = e.dataTransfer.getData("text/x-note-id") || tabs.peerDrag;
+      const id = (e.dataTransfer ? e.dataTransfer.getData("text/x-note-id") : "") || tabs.peerDrag;
       tabs.peerDrag = null;
       if (!id) return;
       e.preventDefault();
@@ -7899,14 +7978,14 @@
     }
     function bindTabs() {
       el.tabList.addEventListener("click", (e) => {
-        const t = e.target.closest(".tab");
+        const t = closestTo(e, ".tab");
         if (!t) return;
         const i = Number(t.dataset.index);
-        if (e.target.closest(".tab-close")) closeTab(i);
+        if (closestTo(e, ".tab-close")) closeTab(i);
         else showTab(i);
       });
       el.tabList.addEventListener("auxclick", (e) => {
-        const t = e.target.closest(".tab");
+        const t = closestTo(e, ".tab");
         if (t && e.button === 1) {
           e.preventDefault();
           closeTab(Number(t.dataset.index));
@@ -7916,7 +7995,7 @@
         if (e.button === 1) e.preventDefault();
       });
       el.tabList.addEventListener("dragstart", (e) => {
-        const t = e.target.closest(".tab");
+        const t = closestTo(e, ".tab");
         if (!t) return;
         tabs.dragIndex = Number(t.dataset.index);
         if (e.dataTransfer) {
@@ -7930,13 +8009,13 @@
         toPeer({ type: "drag", id: null });
       });
       el.tabBar.addEventListener("dragover", (e) => {
-        if (tabs.dragIndex === null && !tabs.peerDrag && !e.dataTransfer.types.includes("text/x-note-id")) return;
+        if (tabs.dragIndex === null && !tabs.peerDrag && !(e.dataTransfer && e.dataTransfer.types.includes("text/x-note-id"))) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
         el.tabBar.classList.add("is-drop-target");
       });
       el.tabBar.addEventListener("dragleave", (e) => {
-        if (!el.tabBar.contains(e.relatedTarget)) el.tabBar.classList.remove("is-drop-target");
+        if (!el.tabBar.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) el.tabBar.classList.remove("is-drop-target");
       });
       el.tabBar.addEventListener("drop", onTabDrop);
       el.tabAddBtn.addEventListener("click", newEmptyTab);
@@ -8177,7 +8256,8 @@
     }
     const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
     function fileBadge(note) {
-      if (["docx", "sheet", "image"].includes(note.fileKind)) return extOf(note.filePath).toUpperCase();
+      const documentKinds = ["docx", "sheet", "image"];
+      if (documentKinds.includes(note.fileKind)) return extOf(note.filePath).toUpperCase();
       if (note.fileKind !== "text") return (note.fileKind || "file").toUpperCase();
       if (!isPlainTextFile6(note)) return "Markdown";
       if (isTableFile(note)) return extOf(note.filePath).toUpperCase();
@@ -8192,7 +8272,7 @@
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
-      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!CRAFT_OF[note.fileKind]));
+      el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!(note.fileKind && CRAFT_OF[note.fileKind])));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const craft = isFile ? craftFor(note) : null;
       const inCraft = !!craft && craft.usable();
@@ -8207,7 +8287,7 @@
       }).catch(() => {
       });
       el.filePath.textContent = note.filePath;
-      el.filePath.title = note.filePath;
+      el.filePath.title = note.filePath || "";
       if (note.fileKind === "pdf") {
         el.pdfEditor.classList.remove("hidden");
         showBanner("Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.");
@@ -8247,7 +8327,7 @@
         toast("Could not open: " + (err.message || err));
         return;
       }
-      if (res.canceled) return;
+      if ("canceled" in res && res.canceled) return;
       if (res.linked.length) {
         state.query = "";
         el.searchInput.value = "";
@@ -8256,13 +8336,13 @@
           el.navItems.forEach((b) => b.classList.toggle("is-active", b.dataset.view === "all"));
         }
         await refresh({ keepEditor: true });
-        if (res.firstId === state.currentId) {
+        if (res.firstId && res.firstId === state.currentId) {
           const fresh = await api.notes.get(res.firstId);
           if (fresh && state.current && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id) && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
-        } else await openNote(res.firstId);
+        } else if (res.firstId) await openNote(res.firstId);
       }
-      const failed = res.failed.length ? " Could not open: " + res.failed.join(", ") : "";
-      toast((res.linked.length ? "Opened " + res.linked.length + (res.linked.length === 1 ? " file" : " files") : "Nothing opened") + failed);
+      const failed2 = res.failed.length ? " Could not open: " + res.failed.join(", ") : "";
+      toast((res.linked.length ? "Opened " + res.linked.length + (res.linked.length === 1 ? " file" : " files") : "Nothing opened") + failed2);
     }
     async function pollCurrentFile() {
       const note = state.current;
@@ -8315,6 +8395,7 @@
       await commitPdf();
       if ((state.dirty || documentDirty()) && !window.confirm("Discard your unsaved edits and reload from disk?")) return;
       const id = state.currentId;
+      if (!id) return;
       state.dirty = false;
       forgetShownPdf();
       forgetShownDocx();
@@ -8402,7 +8483,7 @@
       }, 1e4);
     }
     async function retryPending() {
-      let failed = false;
+      let failed2 = false;
       for (const id of Array.from(state.pending.keys())) {
         if (id === state.currentId) continue;
         const patch = state.pending.get(id);
@@ -8423,11 +8504,11 @@
             offerConflictChoice(id, patch);
             continue;
           }
-          failed = true;
+          failed2 = true;
           reportSaveFailure(err);
         }
       }
-      if (failed) scheduleRetry();
+      if (failed2) scheduleRetry();
     }
     function stashIfDirty() {
       if (state.dirty && state.currentId) state.pending.set(state.currentId, currentPatch());
@@ -8533,8 +8614,11 @@
     async function togglePin() {
       if (!state.current || state.current.trashedAt) return;
       await flushSave();
-      const updated = await api.notes.togglePin(state.currentId);
+      const pinId = state.currentId;
+      if (!pinId) return;
+      const updated = await api.notes.togglePin(pinId);
       state.current = updated;
+      if (!updated) return;
       renderPinButton(updated.pinned);
       await refresh({ keepEditor: true });
       toast(updated.pinned ? "Pinned" : "Unpinned");
@@ -8542,6 +8626,7 @@
     async function trashCurrent() {
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
+      if (!id) return;
       const title = deriveTitle(state.current);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
@@ -8557,17 +8642,19 @@
     async function restoreCurrent() {
       if (!state.current || !state.current.trashedAt) return;
       const id = state.currentId;
+      if (!id) return;
       await api.notes.restore(id);
       clearEditor();
       await refresh();
       toast("Restored");
     }
     async function destroyCurrent() {
-      if (!state.current) return;
+      const id = state.currentId;
+      if (!state.current || !id) return;
       if (!window.confirm('Delete "' + deriveTitle(state.current) + '" forever? This cannot be undone.')) return;
-      if (state.currentId) state.pending.delete(state.currentId);
+      state.pending.delete(id);
       state.dirty = false;
-      await api.notes.destroy(state.currentId);
+      await api.notes.destroy(id);
       clearEditor();
       await refresh();
       toast("Deleted");
@@ -8588,9 +8675,11 @@
     async function duplicateCurrent() {
       if (!state.current) return;
       await flushSave();
+      const id = state.currentId;
+      if (!id) return;
       let copy;
       try {
-        copy = await api.notes.duplicate(state.currentId);
+        copy = await api.notes.duplicate(id);
       } catch (err) {
         toast("Could not duplicate: " + (err.message || err));
         return;
@@ -8603,7 +8692,9 @@
       if (!state.current) return;
       await flushSave();
       try {
-        const res = await api.app.exportNote(state.currentId);
+        const id = state.currentId;
+        if (!id) return;
+        const res = await api.app.exportNote(id);
         if (res.ok) toast("Exported to " + res.filePath);
       } catch (err) {
         toast("Export failed: " + (err.message || err));
@@ -8619,7 +8710,7 @@
       el.themeSelect.value = s.theme;
       renderSchemeGrid();
       syncSettingsDirty();
-      el.fontSizeInput.value = s.fontSize;
+      el.fontSizeInput.value = String(s.fontSize);
       el.fontSizeValue.textContent = s.fontSize + "px";
       el.openAtLoginInput.checked = s.openAtLogin;
       el.alwaysOnTopInput.checked = s.alwaysOnTop;
@@ -8627,7 +8718,7 @@
       el.sidebarFloatInput.checked = !!s.sidebarCollapsed;
       el.editorFullWidthInput.checked = !s.editorWidth;
       el.editorWidthInput.disabled = !s.editorWidth;
-      el.editorWidthInput.value = s.editorWidth || 760;
+      el.editorWidthInput.value = String(s.editorWidth || 760);
       el.editorWidthValue.textContent = (s.editorWidth || 760) + "px";
       el.gitEnabledInput.checked = s.gitEnabled;
       el.gitRemoteInput.value = s.gitRemote;
@@ -8636,7 +8727,7 @@
       filterSettings();
       el.settingsDialog.showModal();
       renderVaultList();
-      el.ttsRateInput.value = s.ttsRate;
+      el.ttsRateInput.value = String(s.ttsRate);
       el.ttsRateValue.textContent = Number(s.ttsRate).toFixed(1) + "\xD7";
       refreshGitStatus();
       el.settingsScroll.scrollTop = 0;
@@ -8644,7 +8735,7 @@
       el.settingsSearch.focus();
     }
     let draft = {};
-    const settingKeys = (o) => Object.keys(o);
+    const settingKeys = (o) => Object.keys(o).filter((k) => k in settingsNow());
     const same = (a, b) => JSON.stringify(a === void 0 ? null : a) === JSON.stringify(b === void 0 ? null : b);
     const draftSettings = () => Object.assign({}, state.settings, draft);
     function settingsDirty() {
@@ -8653,7 +8744,7 @@
     function setDraft(patch) {
       for (const k of settingKeys(patch)) {
         if (same(patch[k], settingsNow()[k])) delete draft[k];
-        else draft[k] = patch[k];
+        else Object.assign(draft, { [k]: patch[k] });
       }
       previewSettings();
       syncSettingsDirty();
@@ -8696,7 +8787,7 @@
     }
     function discardSettings() {
       draft = {};
-      applySettings(state.settings);
+      if (state.settings) applySettings(state.settings);
       closeSettings();
     }
     function closeSettings() {
@@ -8762,14 +8853,16 @@
           el.schemeGrid.append(b);
         }
       }
-      for (const b of el.schemeGrid.children) {
+      for (const b of el.schemeGrid.querySelectorAll(":scope > *")) {
         const id = b.dataset.scheme;
         const picked = s.customColors && s.customColors[mode];
-        const sw = id === T().CUSTOM && !picked ? T().swatch(s.colorScheme, s.customColors, mode) : T().swatch(id, s.customColors, mode);
+        const sw = id === T().CUSTOM && !picked ? T().swatch(s.colorScheme, s.customColors, mode) : T().swatch(id ?? "", s.customColors, mode);
         const sample = b.firstChild;
+        if (!(sample instanceof HTMLElement)) continue;
+        const accent = sample.querySelector(".swatch-accent");
         sample.style.background = sw.paper;
         sample.style.color = sw.text;
-        sample.querySelector(".swatch-accent").style.background = sw.accent;
+        if (accent) accent.style.background = sw.accent;
         const on = id === s.colorScheme;
         b.setAttribute("aria-checked", String(on));
         b.tabIndex = on ? 0 : -1;
@@ -8793,15 +8886,16 @@
     }
     function bindAppearance() {
       el.schemeGrid.addEventListener("click", (e) => {
-        const b = e.target.closest(".scheme-swatch");
+        const b = closestTo(e, ".scheme-swatch");
         if (b) chooseScheme(b.dataset.scheme);
       });
       el.schemeGrid.addEventListener("keydown", (e) => {
         const cols = getComputedStyle(el.schemeGrid).gridTemplateColumns.split(" ").length;
-        const step = { ArrowRight: 1, ArrowDown: cols, ArrowLeft: -1, ArrowUp: -cols }[e.key];
+        const steps = { ArrowRight: 1, ArrowDown: cols, ArrowLeft: -1, ArrowUp: -cols };
+        const step = steps[e.key];
         if (!step) return;
         e.preventDefault();
-        const all = [...el.schemeGrid.children];
+        const all = [...el.schemeGrid.querySelectorAll(":scope > *")];
         const i = all.findIndex((b) => b.getAttribute("aria-checked") === "true");
         const next = all[Math.max(0, Math.min(all.length - 1, i + step))];
         if (next === all[i]) return;
@@ -8821,14 +8915,15 @@
     }
     function bindSettingsNav() {
       el.settingsNav.addEventListener("click", (e) => {
-        const a = e.target.closest('a[href^="#"]');
+        const a = closestTo(e, 'a[href^="#"]');
         if (!a) return;
         e.preventDefault();
         if (a.classList.contains("is-dim")) {
           el.settingsSearch.value = "";
           filterSettings();
         }
-        const sec = el.settingsScroll.querySelector(a.getAttribute("href"));
+        const href = a.getAttribute("href");
+        const sec = href ? el.settingsScroll.querySelector(href) : null;
         if (sec) sec.scrollIntoView({ block: "start" });
       });
       el.settingsScroll.addEventListener("scroll", markSettingsSection, { passive: true });
@@ -8858,7 +8953,7 @@
         let hits = 0;
         for (const unit of sec.children) {
           if (unit.tagName === "H3") continue;
-          const text = unit.textContent.toLowerCase();
+          const text = (unit.textContent || "").toLowerCase();
           const ok = tokens.every((t) => text.includes(t));
           unit.classList.toggle("is-filtered", !ok);
           if (!ok) continue;
@@ -8915,7 +9010,7 @@
       if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
       else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
       else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + relativeTime(s.lastCommitAt) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + relativeTime(s.lastPushAt) : ", not pushed yet" : "");
+      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + relativeTime(s.lastCommitAt ?? 0) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + relativeTime(s.lastPushAt) : ", not pushed yet" : "");
       if (s.lastError) text += "  Error: " + s.lastError;
       el.gitStatus.textContent = text;
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -8986,7 +9081,7 @@
         ...[...el.moreMenu.querySelectorAll(".menu-item")].map((b) => fromButton(b, "This note")),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
-        ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action) })),
+        ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action ?? "") })),
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
         cmd("list-mode", "View", settingsNow().listMode === "tree" ? "Note list: show as a list" : "Note list: show folders with their notes", settingsNow().listMode === "tree" ? "list" : "folder-open", "", () => updateSettings({ listMode: settingsNow().listMode === "tree" ? "list" : "tree" }).then(() => refresh({ keepEditor: true })), !GUEST, "tree outline view"),
@@ -8998,7 +9093,7 @@
         cmd("theme", "View", effectiveTheme() === "dark" ? "Switch to light" : "Switch to dark", "sun-moon", "Ctrl+Shift+L", () => updateSettings({ theme: effectiveTheme() === "dark" ? "light" : "dark" }), true, "theme dark light mode"),
         ...["all", "pinned", "reminders", "trash"].map((v) => cmd("go-" + v, "Go to", { all: "All notes", pinned: "Pinned", reminders: "Reminders", trash: "Trash" }[v], { all: "notebook-text", pinned: "star", reminders: "bell", trash: "trash-2" }[v], "", () => setView(v), !GUEST)),
         ...flattenTree(state.tree).map((f) => cmd("folder-" + f.id, "Go to", (f.book ? "Book: " : "Folder: ") + f.name, f.book ? "book-open" : "folder", "", () => setView("folder", f.id), !GUEST)),
-        ...[...el.tagList.querySelectorAll(".nav-item")].map((b) => cmd("tag-" + b.firstChild.textContent, "Go to", "Tag: #" + b.firstChild.textContent, "hash", "", () => b.click(), !GUEST)),
+        ...[...el.tagList.querySelectorAll(".nav-item")].map((b) => cmd("tag-" + b.firstChild?.textContent, "Go to", "Tag: #" + b.firstChild?.textContent, "hash", "", () => b.click(), !GUEST)),
         cmd("settings", "App", "Settings", "settings", "Ctrl+,", side("settings", openSettings), true, "preferences options hotkey font search"),
         ...Object.keys(SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && settingsNow().colorScheme !== id, "theme colors appearance")),
         cmd("scheme-custom", "View", "Colour scheme: custom colours\u2026", "palette", "", side("settings", () => {
@@ -9109,7 +9204,8 @@
       if (inDialog) return;
       if (GUEST && ctrl && !e.altKey) {
         const k = e.key.toLowerCase();
-        const cmd = e.shiftKey ? k === "n" ? "newFolder" : null : { n: "newNote", f: "search", o: "openFiles", ",": "settings" }[k];
+        const guestCommands = { n: "newNote", f: "search", o: "openFiles", ",": "settings" };
+        const cmd = e.shiftKey ? k === "n" ? "newFolder" : null : guestCommands[k];
         if (cmd) {
           e.preventDefault();
           toPeer({ type: "command", name: cmd });
@@ -9306,15 +9402,15 @@
       }
     }
     function bind() {
-      el.newNoteBtn.addEventListener("click", newNote);
-      el.emptyNewNoteBtn.addEventListener("click", newNote);
+      el.newNoteBtn.addEventListener("click", () => newNote());
+      el.emptyNewNoteBtn.addEventListener("click", () => newNote());
       el.paletteBtn.addEventListener("click", () => openPalette());
       el.moreBtn.addEventListener("click", () => {
         if (el.moreMenu.classList.contains("hidden")) openMoreMenu();
         else closeMoreMenu();
       });
       el.moreMenu.addEventListener("click", (e) => {
-        if (e.target.closest(".menu-item")) closeMoreMenu();
+        if (closestTo(e, ".menu-item")) closeMoreMenu();
       });
       bindMenuKeys();
       bindSettingsNav();
@@ -9323,8 +9419,9 @@
       bindTreeKeys(el.folderTree);
       bindTreeKeys(el.noteTree);
       el.listModeSeg.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-mode]");
-        if (b) updateSettings({ listMode: b.dataset.mode }).then(() => {
+        const b = closestTo(e, "[data-mode]");
+        const mode = b && b.dataset.mode;
+        if (mode === "list" || mode === "tree") updateSettings({ listMode: mode }).then(() => {
           syncListModeSeg();
           refresh({ keepEditor: true });
         });
@@ -9342,8 +9439,8 @@
         else closeConvertMenu();
       });
       el.convertMenu.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-to]");
-        if (b) convertCurrent(b.dataset.to);
+        const b = closestTo(e, "[data-to]");
+        if (b) convertCurrent(b.dataset.to ?? "");
       });
       el.fileOpenBtn.addEventListener("click", async () => {
         if (!state.currentId) return;
@@ -9375,7 +9472,7 @@
         e.preventDefault();
         submitClone();
       });
-      fromMain("vaultStatus", ({ id, status }) => {
+      fromMain("vaultStatus", api.on.vaultStatus, ({ id, status }) => {
         const before = state.vaultStatus[id] || {};
         state.vaultStatus[id] = status;
         if (status.lastError && status.lastError !== before.lastError) toast("Vault: " + status.lastError);
@@ -9400,26 +9497,26 @@
       el.bookAddBtn.addEventListener("click", addPage);
       el.bookName.addEventListener("click", openBookMenu);
       el.newBookBtn.addEventListener("click", () => startCreateFolder(null, true));
-      el.pageMenu.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => pageMenuAction(b.dataset.action)));
-      el.bookMenu.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => bookMenuAction(b.dataset.action)));
+      el.pageMenu.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => pageMenuAction(b.dataset.action ?? "")));
+      el.bookMenu.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => bookMenuAction(b.dataset.action ?? "")));
       el.bookReaderCloseBtn.addEventListener("click", closeReader);
       el.bookReaderPdfBtn.addEventListener("click", () => exportBook("pdf"));
       el.bookReaderPrintBtn.addEventListener("click", () => exportBook("print"));
       el.bookReaderToc.addEventListener("click", (e) => {
-        const a = e.target.closest("a[data-page]");
+        const a = closestTo(e, "a[data-page]");
         if (!a) return;
         const sec = document.getElementById("reader-page-" + a.dataset.page);
         if (sec) sec.scrollIntoView({ block: "start", behavior: "smooth" });
       });
       el.bookReaderBody.addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-edit]");
+        const btn = closestTo(e, "button[data-edit]");
         if (btn) {
-          const id = btn.dataset.edit;
+          const id = btn.dataset.edit ?? "";
           closeReader();
           selectNote(id);
           return;
         }
-        const link = e.target.closest("a[href]");
+        const link = closestTo(e, "a[href]");
         if (link) {
           e.preventDefault();
           followLink(link.getAttribute("href"));
@@ -9440,7 +9537,7 @@
         toast("Link copied");
       });
       el.liveDialog.addEventListener("close", () => focusBody());
-      fromMain("liveStatus", ({ id, status }) => {
+      fromMain("liveStatus", api.on.liveStatus, ({ id, status }) => {
         if (status && status.ended) {
           delete state.liveStatus[id];
           if (state.current && state.current.id === id) {
@@ -9457,8 +9554,8 @@
         }
       });
       el.lockMenu.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-action]");
-        if (b) lockMenuAction(b.dataset.action);
+        const b = closestTo(e, "[data-action]");
+        if (b) lockMenuAction(b.dataset.action ?? "");
       });
       el.lockForm.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -9470,7 +9567,7 @@
         e.preventDefault();
         unlockFromScreen();
       });
-      fromMain("relocked", async (ids) => {
+      fromMain("relocked", api.on.relocked, async (ids) => {
         for (const id of ids) state.pending.delete(id);
         for (const id of ids) tabs.titles.delete(id);
         renderTabs();
@@ -9483,8 +9580,8 @@
         refresh({ keepEditor: true });
       });
       el.remindQuick.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-pick]");
-        if (b) setReminder(quickPick(b.dataset.pick));
+        const b = closestTo(e, "[data-pick]");
+        if (b) setReminder(quickPick(b.dataset.pick ?? ""));
       });
       el.remindForm.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -9514,8 +9611,8 @@
         else closeShareMenu();
       });
       el.shareMenu.addEventListener("click", (e) => {
-        const b = e.target.closest("[data-action]");
-        if (b) shareAction(b.dataset.action);
+        const b = closestTo(e, "[data-action]");
+        if (b) shareAction(b.dataset.action ?? "");
       });
       el.findNextBtn.addEventListener("click", () => runFind(true));
       el.findReplaceToggle.addEventListener("click", () => toggleReplace());
@@ -9559,7 +9656,7 @@
           closeFind();
         }
       });
-      fromMain("stickiesChanged", () => {
+      fromMain("stickiesChanged", api.on.stickiesChanged, () => {
         refreshCurrentMeta();
       });
       api.on.openNote(async (id) => {
@@ -9613,10 +9710,13 @@
         el.app.classList.remove("is-dropping");
         if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
         e.preventDefault();
-        const paths = Array.from(e.dataTransfer.files).map((f) => api.files.pathFor(f)).filter(Boolean);
+        const paths = Array.from(e.dataTransfer.files).map((f) => api.files.pathFor(f)).filter((p) => !!p);
         if (paths.length) openFiles(paths);
       });
-      el.navItems.forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+      el.navItems.forEach((b) => b.addEventListener("click", () => {
+        const view = b.dataset.view;
+        if (isListView(view)) setView(view);
+      }));
       el.themeBtn.addEventListener("click", () => updateSettings({ theme: effectiveTheme() === "dark" ? "light" : "dark" }));
       el.settingsBtn.addEventListener("click", openSettings);
       el.toggleSidebarBtn.addEventListener("click", toggleSidebar);
@@ -9630,12 +9730,13 @@
       });
       el.folderMenu.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => folderMenuAction(b.dataset.action)));
       document.addEventListener("pointerdown", (e) => {
-        if (state.menuFolderId && !el.folderMenu.contains(e.target)) closeFolderMenu();
-        if ((!el.pageMenu.classList.contains("hidden") || !el.bookMenu.classList.contains("hidden")) && !el.pageMenu.contains(e.target) && !el.bookMenu.contains(e.target) && !el.bookName.contains(e.target)) closeAllBookMenus();
-        if (!el.shareMenu.classList.contains("hidden") && !el.shareMenu.contains(e.target) && !el.shareBtn.contains(e.target)) closeShareMenu();
-        if (!el.moreMenu.classList.contains("hidden") && !el.moreMenu.contains(e.target) && !el.moreBtn.contains(e.target)) closeMoreMenu();
-        if (!el.convertMenu.classList.contains("hidden") && !el.convertMenu.contains(e.target) && !el.fileConvertBtn.contains(e.target)) closeConvertMenu();
-        if (!el.lockMenu.classList.contains("hidden") && !el.lockMenu.contains(e.target) && !el.lockBtn.contains(e.target)) el.lockMenu.classList.add("hidden");
+        const target = e.target instanceof Node ? e.target : null;
+        if (state.menuFolderId && !el.folderMenu.contains(target)) closeFolderMenu();
+        if ((!el.pageMenu.classList.contains("hidden") || !el.bookMenu.classList.contains("hidden")) && !el.pageMenu.contains(target) && !el.bookMenu.contains(target) && !el.bookName.contains(target)) closeAllBookMenus();
+        if (!el.shareMenu.classList.contains("hidden") && !el.shareMenu.contains(target) && !el.shareBtn.contains(target)) closeShareMenu();
+        if (!el.moreMenu.classList.contains("hidden") && !el.moreMenu.contains(target) && !el.moreBtn.contains(target)) closeMoreMenu();
+        if (!el.convertMenu.classList.contains("hidden") && !el.convertMenu.contains(target) && !el.fileConvertBtn.contains(target)) closeConvertMenu();
+        if (!el.lockMenu.classList.contains("hidden") && !el.lockMenu.contains(target) && !el.lockBtn.contains(target)) el.lockMenu.classList.add("hidden");
       });
       wireDropTarget(el.navAll, null);
       window.addEventListener("resize", () => {
@@ -9656,7 +9757,10 @@
           selectNote(state.notes[0].id).then(() => focusBody());
         }
       });
-      el.sortSelect.addEventListener("change", () => updateSettings({ sort: el.sortSelect.value }).then(() => refresh({ keepEditor: true })));
+      el.sortSelect.addEventListener("change", () => {
+        const sort = el.sortSelect.value;
+        if (sort === "updated" || sort === "created" || sort === "title") updateSettings({ sort }).then(() => refresh({ keepEditor: true }));
+      });
       el.emptyTrashBtn.addEventListener("click", emptyTrash);
       el.pinBtn.addEventListener("click", togglePin);
       el.sourceBtn.addEventListener("click", () => toggleSource());
@@ -9680,8 +9784,11 @@
       el.linkCancelBtn.addEventListener("click", () => el.linkDialog.close());
       el.linkDialog.addEventListener("close", () => focusBody());
       el.alignSeg.querySelectorAll("button[data-align]").forEach((b) => b.addEventListener("click", () => {
-        setDraft({ editorAlign: b.dataset.align });
-        syncAlignSeg(b.dataset.align);
+        const align = b.dataset.align;
+        if (align === "left" || align === "center" || align === "right") {
+          setDraft({ editorAlign: align });
+          syncAlignSeg(align);
+        }
       }));
       el.editorWidthInput.addEventListener("input", () => {
         el.editorWidthValue.textContent = el.editorWidthInput.value + "px";
@@ -9713,7 +9820,7 @@
         toast(r.ok ? "Pushed" : "Push failed: " + (r.error || r.skipped));
         refreshGitStatus();
       });
-      fromMain("gitStatus", (s) => renderGitStatus(s));
+      fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
       el.exportBtn.addEventListener("click", exportCurrent);
       el.duplicateBtn.addEventListener("click", duplicateCurrent);
       el.splitBtn.addEventListener("click", openSplitDialog);
@@ -9744,14 +9851,14 @@
           focusBody();
         }
       });
-      el.tagsInput.addEventListener("blur", flushSave);
+      el.tagsInput.addEventListener("blur", () => flushSave());
       el.bodyInput.addEventListener("keydown", handleEditorKeydown);
       document.addEventListener("keydown", onKeydown);
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) flushSave({ fromBlur: true });
       });
       window.addEventListener("blur", () => flushSave({ fromBlur: true }));
-      window.addEventListener("beforeunload", flushSave);
+      window.addEventListener("beforeunload", () => flushSave());
       el.hotkeyInput.addEventListener("keydown", (e) => {
         if (e.key === "Tab") return;
         e.preventDefault();
@@ -9768,7 +9875,10 @@
         if (v && !v.endsWith("+") && v !== displayAccelerator(draftSettings().hotkey).replace(/ /g, "")) commitHotkey(v);
         else if (!v || v.endsWith("+")) el.hotkeyInput.value = displayAccelerator(draftSettings().hotkey).replace(/ /g, "");
       });
-      el.themeSelect.addEventListener("change", () => setDraft({ theme: el.themeSelect.value }));
+      el.themeSelect.addEventListener("change", () => {
+        const theme = el.themeSelect.value;
+        if (theme === "system" || theme === "light" || theme === "dark") setDraft({ theme });
+      });
       el.fontSizeInput.addEventListener("input", () => {
         el.fontSizeValue.textContent = el.fontSizeInput.value + "px";
         document.documentElement.style.setProperty("--editor-font-size", el.fontSizeInput.value + "px");
@@ -9790,8 +9900,8 @@
           await refresh({ keepEditor: true });
           if (res.firstId) await selectNote(res.firstId);
         }
-        const failed = res.failed && res.failed.length ? ". Could not read: " + res.failed.join(", ") : "";
-        toast((res.count ? "Imported " + res.count + (res.count === 1 ? " note" : " notes") : "Nothing imported") + failed);
+        const failed2 = res.failed && res.failed.length ? ". Could not read: " + res.failed.join(", ") : "";
+        toast((res.count ? "Imported " + res.count + (res.count === 1 ? " note" : " notes") : "Nothing imported") + failed2);
       });
       el.exportAllBtn.addEventListener("click", async () => {
         try {
@@ -9826,7 +9936,8 @@
         el.settingsSaveDialog.close();
         discardSettings();
       });
-      el.settingsSaveDialog.querySelector("form").addEventListener("submit", (e) => {
+      const saveForm = el.settingsSaveDialog.querySelector("form");
+      if (saveForm) saveForm.addEventListener("submit", (e) => {
         e.preventDefault();
         el.settingsSaveDialog.close();
         saveSettings();
@@ -9863,7 +9974,7 @@
           api.app.flushDone();
         }
       });
-      fromMain("reloaded", async (info) => {
+      fromMain("reloaded", api.on.reloaded, async (info) => {
         const reason = info && info.reason;
         await refresh({ keepEditor: true });
         tabs.titles.clear();
@@ -9898,8 +10009,8 @@
         }
         if (reason === "recovered") toast("Your notes file is readable again; saving resumed.");
       });
-      fromMain("settingsChanged", (s) => applySettings(s));
-      fromMain("systemTheme", (t) => {
+      fromMain("settingsChanged", api.on.settingsChanged, (s) => applySettings(s));
+      fromMain("systemTheme", api.on.systemTheme, (t) => {
         state.systemDark = t === "dark";
         applyTheme();
       });

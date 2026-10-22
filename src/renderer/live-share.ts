@@ -2,8 +2,16 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { toast } from './toast.ts';
 
-export function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow }) {
-  function renderLiveRow(note) {
+interface LiveShareDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  refreshCurrentMeta: () => Promise<unknown>;
+  setView: (view: RendererState['view']) => Promise<unknown>;
+  selectNoteNow: (id: string) => Promise<unknown>;
+}
+
+export function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow }: LiveShareDeps) {
+  function renderLiveRow(note: PublicNote | null) {
     const live = note && note.live;
     el.liveRow.classList.toggle('hidden', !live);
     if (!live) return;
@@ -22,7 +30,7 @@ export function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, s
     const r = await api.live.host(note.id);
     if (!r.ok) { toast('Could not share: ' + r.error); return; }
     await refreshCurrentMeta();
-    openLiveDialog('link', r.status.url);
+    if (r.status) openLiveDialog('link', r.status.url);
   }
 
   async function stopLive() {
@@ -35,7 +43,7 @@ export function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, s
     toast('Live share ended. The note stays.');
   }
 
-  function openLiveDialog(mode, url) {
+  function openLiveDialog(mode: 'link' | 'join', url = '') {
     el.liveDialog.dataset.mode = mode;
     const hosting = mode === 'link';
     el.liveDialogTitle.textContent = hosting ? 'Live share link' : 'Join a live share';
@@ -62,9 +70,9 @@ export function createLiveShare({ api, flushSave, refreshCurrentMeta, setView, s
     el.liveError.textContent = 'Connecting…';
     try {
       const r = await api.live.join(url, state.view === 'folder' ? state.folderId : null);
-      if (!r.ok) { el.liveError.textContent = r.error; return; }
+      if (!r.ok) { el.liveError.textContent = r.error ?? ''; return; }
       el.liveDialog.close();
-      state.liveStatus[r.noteId] = r.status;
+      if (r.status) state.liveStatus[r.noteId] = r.status;
       await setView('all');
       await selectNoteNow(r.noteId);
       toast('Joined. Edits on either side show up here as they happen.');

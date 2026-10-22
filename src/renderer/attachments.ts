@@ -8,10 +8,20 @@ import { tableShown } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
 
-export function createAttachments({ api, flushSave, refresh }) {
-  function insertAttachmentLinks(items) {
-    const ok = items.filter((x) => x && !x.error);
-    const bad = items.filter((x) => x && x.error);
+type AttachmentFailure = Extract<AttachmentResult, { error: string }>;
+const failed = (x: AttachmentResult): x is AttachmentFailure => 'error' in x && !!x.error;
+const attached = (x: AttachmentResult): x is Attachment => !!x && !failed(x);
+
+interface AttachmentsDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  refresh: (opts: { keepEditor: boolean }) => Promise<unknown>;
+}
+
+export function createAttachments({ api, flushSave, refresh }: AttachmentsDeps) {
+  function insertAttachmentLinks(items: AttachmentResult[]) {
+    const ok = items.filter(attached);
+    const bad = items.filter((x) => !!x && failed(x));
     for (const it of ok) insertLinkIntoNote('📎 ' + it.name, it.href);
     if (ok.length) toast(ok.length === 1 ? 'Attached ' + ok[0].name : 'Attached ' + ok.length + ' files');
     for (const b of bad) toast('Could not attach ' + b.name + ': ' + b.error);
@@ -26,7 +36,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     return true;
   }
 
-  function insertLinkIntoNote(text, href) {
+  function insertLinkIntoNote(text: string, href: string) {
     if (!state.current || lockedNow()) return;
     if (refuseInTable()) return;
     if (state.sourceMode || !state.rich) {
@@ -54,7 +64,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     const items = await api.attachments.pick();
     if (state.currentId === forNote) { insertAttachmentLinks(items); return; }
     // The person moved to another note while the picker was open: the files belong to the note they chose.
-    const ok = items.filter((x) => x && !x.error);
+    const ok = items.filter(attached);
     if (!ok.length) { insertAttachmentLinks(items); return; }
     const target = await api.notes.get(forNote);
     if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
@@ -65,7 +75,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     } else toast('Attached files are kept in the attachments folder; that note can no longer take them.');
   }
 
-  const rec: { recorder: MediaRecorder | null, chunks: Blob[], startedAt: number, timer: ReturnType<typeof setInterval> | null, noteId: string | null, starting: boolean } = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: null, starting: false };
+  const rec: { recorder: MediaRecorder | null, chunks: Blob[], startedAt: number, timer: ReturnType<typeof setInterval> | null, noteId: string, starting: boolean } = { recorder: null, chunks: [], startedAt: 0, timer: null, noteId: '', starting: false };
 
   async function toggleRecording() {
     if (rec.recorder) { rec.recorder.stop(); return; }

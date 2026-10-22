@@ -11,7 +11,9 @@ import { tableShown, focusBody } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
 
-export function createFindBar({ api, flushSave, GUEST }) {
+type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean };
+
+export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
   function openFind() {
     if (!state.current) return;
     find.open = true;
@@ -27,7 +29,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
     runFind(true, true);
   }
 
-  function toggleReplace(force?) {
+  function toggleReplace(force?: boolean) {
     const on = typeof force === 'boolean' ? force : el.replaceRow.classList.contains('hidden');
     el.replaceRow.classList.toggle('hidden', !on);
     el.findReplaceToggle.setAttribute('aria-pressed', String(on));
@@ -133,10 +135,10 @@ export function createFindBar({ api, flushSave, GUEST }) {
   }
 
   // Ranges over the rendered editor's text nodes (matches may span node boundaries).
-  function findRangesIn(root, q) {
+  function findRangesIn(root: HTMLDivElement, q: string) {
     const nodes: ({ node: Node; start: number; })[] = []; let text = '';
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-    const blockOf = (n) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
+    const blockOf = (n: Node) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       if (n instanceof Element) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
@@ -145,7 +147,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
       lastBlock = b;
       nodes.push({ node: n, start: text.length }); text += n.nodeValue;
     }
-    const locate = (pos) => {
+    const locate = (pos: number) => {
       let lo = 0, hi = nodes.length - 1;
       while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (nodes[mid].start <= pos) lo = mid; else hi = mid - 1; }
       if (!nodes.length) return null;
@@ -165,7 +167,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
   }
 
   // quiet: recount and re-highlight after the text changed, without moving the selection or scrolling.
-  function runFind(forward, fresh?, quiet?) {
+  function runFind(forward?: boolean, fresh?: boolean, quiet?: boolean) {
     const q = el.findInput.value;
     const sameQuery = q === find.query;
     find.query = q;
@@ -215,12 +217,12 @@ export function createFindBar({ api, flushSave, GUEST }) {
 
   // The textarea auto-grows and .editor-scroll scrolls, so the match's visual position is measured with a
   // mirror element that wraps exactly like the textarea (newline counting would undershoot on long lines).
-  function scrollTextareaToSelection(at) {
+  function scrollTextareaToSelection(at: number) {
     const ta = el.bodyInput;
     const scroller = ta.closest('.editor-scroll') || ta;
     const cs = getComputedStyle(ta);
     const mirror = document.createElement('div');
-    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'padding', 'border', 'boxSizing', 'whiteSpace', 'wordBreak', 'overflowWrap', 'tabSize']) mirror.style[prop] = cs[prop];
+    for (const prop of (['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'padding', 'border', 'boxSizing', 'whiteSpace', 'wordBreak', 'overflowWrap', 'tabSize'] as const)) mirror.style[prop] = cs[prop];
     mirror.style.whiteSpace = 'pre-wrap';
     mirror.style.position = 'absolute'; mirror.style.visibility = 'hidden'; mirror.style.top = '0'; mirror.style.left = '-99999px';
     mirror.style.width = ta.clientWidth + 'px';

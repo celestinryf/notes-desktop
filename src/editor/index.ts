@@ -1,7 +1,9 @@
 /* Rendered Markdown editor built on Tiptap. Bundled by esbuild into src/renderer/vendor/editor.bundle.js
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
-import { Editor, Extension, InputRule, mergeAttributes, type Attributes } from '@tiptap/core';
+import { Editor, Extension, InputRule, mergeAttributes, type Attributes, type ChainedCommands, type FocusPosition, type Range as TextRange } from '@tiptap/core';
+import type { MarkdownSerializerState } from '@tiptap/pm/markdown';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { EditorState, TextSelection, Plugin, PluginKey } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
@@ -18,7 +20,7 @@ import { Markdown } from 'tiptap-markdown';
 
 // Content fingerprint used to decide whether the rendered view can show a note without changing it.
 // Escapes and formatting punctuation are ignored; the letters, digits, and URLs must survive.
-function fingerprint(md) {
+function fingerprint(md: string | null | undefined) {
   let s = String(md || '').replace(/\r/g, '');
   // YAML front matter (a key: value block fenced by ---) turns into a rule plus paragraphs; never lossless.
   // A single key line counts too ("---\ntitle: x\n---" is the common case).
@@ -50,7 +52,7 @@ const PlainText = Text.extend({
     return {
       markdown: {
         // Escape a "<" that could open a tag and an "&" that would read as an entity; everything else as typed.
-        serialize(state, node) {
+        serialize(state: MarkdownSerializerState, node: PMNode) {
           state.text(String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;'));
         },
         parse: {},
@@ -91,7 +93,7 @@ const TaskListTight = Extension.create({
       attributes: {
         tight: {
           default: true,
-          parseHTML: (el) => el.getAttribute('data-tight') === 'true' || !el.querySelector('li > div > p + p'),
+          parseHTML: (el: HTMLElement) => el.getAttribute('data-tight') === 'true' || !el.querySelector('li > div > p + p'),
           renderHTML: (attrs) => ({ 'data-tight': attrs.tight ? 'true' : null }),
         },
       },
@@ -119,11 +121,19 @@ const DashCheckbox = Extension.create({
   },
 });
 
+type TriggerOptions = {
+  onTrigger?: (trigger: (Trigger & { rect: TriggerRect }) | null) => void,
+  onTriggerKey?: (event: KeyboardEvent) => boolean | void,
+};
+
 // Inline triggers: "/" at the start of a word (the block menu) and "[[" (link to a note). The editor only notices
 // them and reports where they are; the app draws the menu. While a trigger is open the app gets first say on keys
 // (arrows, Enter, Tab, Escape), so they drive the menu instead of moving the caret.
 // Not in code blocks or inline code, and never with a selection.
-export function detectTrigger(state) {
+export type Trigger = { kind: 'slash' | 'link', query: string, from: number, to: number };
+export type TriggerRect = { left: number, top: number, bottom: number };
+
+export function detectTrigger(state: EditorState): Trigger | null {
   const sel = state.selection;
   if (!sel.empty) return null;
   const $p = sel.$from;
@@ -138,7 +148,7 @@ export function detectTrigger(state) {
   return null;
 }
 
-function triggers(options) {
+function triggers(options: TriggerOptions) {
   return Extension.create({
     name: 'notesTriggers',
     addProseMirrorPlugins() {
@@ -168,7 +178,7 @@ function triggers(options) {
 }
 
 // The blocks the "/" menu can make. Each replaces the typed "/query" with that block at the caret.
-const BLOCKS = {
+const BLOCKS: Record<string, (c: ChainedCommands) => ChainedCommands> = {
   h1: (c) => c.setNode('heading', { level: 1 }),
   h2: (c) => c.setNode('heading', { level: 2 }),
   h3: (c) => c.setNode('heading', { level: 3 }),
@@ -190,7 +200,7 @@ export { fingerprint };
 // loaded: Windows would fetch it over SMB and send the login to whoever runs that server. The check runs on the URL
 // as the browser parses it, not on the raw text, since the parser drops whitespace and reads "\" as "/".
 const NO_BASE = 'file:///notes-app-no-base/';
-export function resolveImageSrc(src, base) {
+export function resolveImageSrc(src: string | null | undefined, base: string | null | undefined) {
   const s = String(src || '');
   if (/^\s*(data|https?|attachment|blob):/i.test(s)) return s; // cannot reach a share
   let u;
@@ -202,11 +212,11 @@ export function resolveImageSrc(src, base) {
 
 // options.imageBase(): the file:/// folder URL relative pictures resolve against, or null for none.
 // The written src travels in data-src, so copying a picture and pasting it back keeps the path as written.
-function pictures(imageBase) {
+function pictures(imageBase: (() => string | null) | undefined) {
   return Image.extend({
     addAttributes() {
       const parent: Partial<Attributes> = this.parent ? this.parent() : {};
-      return Object.assign({}, parent, { src: Object.assign({}, parent.src, { parseHTML: (el) => el.getAttribute('data-src') || el.getAttribute('src') }) });
+      return Object.assign({}, parent, { src: Object.assign({}, parent.src, { parseHTML: (el: HTMLElement) => el.getAttribute('data-src') || el.getAttribute('src') }) });
     },
     renderHTML({ HTMLAttributes }) {
       const written = HTMLAttributes.src;
@@ -216,7 +226,14 @@ function pictures(imageBase) {
   }).configure({ inline: true, allowBase64: true });
 }
 
-export function create(element, options) {
+export type EditorOptions = TriggerOptions & {
+  content?: string,
+  placeholder?: string,
+  imageBase?: () => string | null,
+  onUpdate?: (markdown: string) => void,
+};
+
+export function create(element: HTMLElement, options: EditorOptions) {
   options = options || {};
   let suppress = false;
   const editor = new Editor({
@@ -261,7 +278,7 @@ export function create(element, options) {
   // Shift+Home (or a mouse drag) can run before that copy, so read the live DOM selection when it is ours.
   function liveRange() {
     const sel = element.ownerDocument.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editor.view.dom.contains(sel.anchorNode) || !editor.view.dom.contains(sel.focusNode)) return null;
+    if (!sel || sel.rangeCount === 0 || !sel.anchorNode || !sel.focusNode || !editor.view.dom.contains(sel.anchorNode) || !editor.view.dom.contains(sel.focusNode)) return null;
     try {
       const a = editor.view.posAtDOM(sel.anchorNode, sel.anchorOffset);
       const f = editor.view.posAtDOM(sel.focusNode, sel.focusOffset);
@@ -277,7 +294,7 @@ export function create(element, options) {
   // document gives back the same content, false when some construct would be rewritten or dropped.
   let lastExact = true;
   // opts.keepSelection: an in-place reload of the same note keeps the caret; opening another note starts at the top.
-  function setMarkdown(md, opts?) {
+  function setMarkdown(md: string, opts?: { keepSelection?: boolean }) {
     const keepSelection = !!(opts && opts.keepSelection);
     suppress = true;
     try {
@@ -286,7 +303,7 @@ export function create(element, options) {
       // Loading a note is not an edit: a fresh state means Ctrl+Z cannot bring the previous note's text back.
       // The caret goes back where it was (clamped), so a remote or vault reload does not jump it to the end.
       const doc = editor.state.doc;
-      const clamp = (p) => Math.max(0, Math.min(p, doc.content.size));
+      const clamp = (p: number) => Math.max(0, Math.min(p, doc.content.size));
       let selection;
       try { selection = keepSelection ? TextSelection.create(doc, clamp(prev.from), clamp(prev.to)) : undefined; } catch (_) { selection = undefined; }
       editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins, selection }));
@@ -304,14 +321,14 @@ export function create(element, options) {
     setMarkdown,
     // Tiptap's focus command defers the DOM focus to the next animation frame; a key pressed right after
     // Enter in the title would land in the title. Focus the DOM synchronously first, then place the caret.
-    focus: (where?) => { editor.view.focus(); return editor.commands.focus(where || null); },
+    focus: (where?: FocusPosition) => { editor.view.focus(); return editor.commands.focus(where || null); },
     // Second argument false: setEditable would otherwise emit an update, and an update on a freshly loaded
     // note would write the editor's serialization back over the stored Markdown just for viewing it.
-    setEditable: (on) => editor.setEditable(!!on, false),
+    setEditable: (on: boolean) => editor.setEditable(!!on, false),
     isEmpty: () => editor.isEmpty,
     // range: {from,to} captured with selectionRange() when the dialog opened, so the link lands on the text
     // the user had selected even though focus moved to the dialog in between.
-    setLink: (href, range) => {
+    setLink: (href: string, range: TextRange | null | undefined) => {
       let chain = editor.chain().focus();
       if (range && range.from !== range.to) chain = chain.setTextSelection(range);
       if (!href) return chain.extendMarkRange('link').unsetLink().run();
@@ -322,7 +339,7 @@ export function create(element, options) {
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
     // Replaces the text of DOM ranges (as produced by the app's find) in one transaction, last first so
     // earlier positions stay valid. Returns how many were replaced.
-    replaceRanges: (domRanges, text) => {
+    replaceRanges: (domRanges: Range[], text: string) => {
       const spans: { from: number, to: number }[] = [];
       for (const r of domRanges) {
         try { spans.push({ from: editor.view.posAtDOM(r.startContainer, r.startOffset), to: editor.view.posAtDOM(r.endContainer, r.endOffset) }); } catch (_) { /* detached range */ }
@@ -335,20 +352,20 @@ export function create(element, options) {
       return spans.length;
     },
     // Inserts a link at the caret (or over the selection), as Markdown would: [text](href).
-    insertLink: (text, href) => editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run(),
+    insertLink: (text: string, href: string) => editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run(),
     hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
     // The "/" menu: replace the typed trigger (range) with a block. Returns false for an unknown block.
-    insertBlock: (range, kind) => {
+    insertBlock: (range: TextRange, kind: string) => {
       const make = BLOCKS[kind];
       if (!make) return false;
       return make(editor.chain().focus().deleteRange(range)).run();
     },
     blockKinds: () => Object.keys(BLOCKS),
-    textAt: (range) => { try { return editor.state.doc.textBetween(range.from, range.to, undefined, '\ufffc'); } catch (_) { return null; } },
+    textAt: (range: TextRange) => { try { return editor.state.doc.textBetween(range.from, range.to, undefined, '\ufffc'); } catch (_) { return null; } },
     // Plain text at the trigger (the "/" menu's date), as if typed.
-    insertTextAt: (range, text) => editor.chain().focus().deleteRange(range).insertContent(text).run(),
+    insertTextAt: (range: TextRange, text: string) => editor.chain().focus().deleteRange(range).insertContent(text).run(),
     // "[[": replace the typed trigger with a link to a note.
-    insertLinkAt: (range, text, href) => editor.chain().focus().deleteRange(range)
+    insertLinkAt: (range: TextRange, text: string, href: string) => editor.chain().focus().deleteRange(range)
       .insertContent([{ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }, { type: 'text', text: ' ' }]).run(),
     destroy: () => editor.destroy(),
   };

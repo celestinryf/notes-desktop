@@ -8,16 +8,29 @@ import { placePopover } from './popover.ts';
 
 const { isNonMarkdownFile } = H;
 
-export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar }) {
+type BookDeps = {
+  api: NotesApi,
+  flattenTree: (nodes: FolderNode[]) => FolderNode[],
+  selectNote: (id: string) => Promise<unknown>,
+  selectNoteNow: (id: string) => Promise<unknown>,
+  refresh: (opts?: { keepEditor?: boolean }) => Promise<unknown>,
+  flushSave: () => Promise<unknown>,
+  clearEditor: () => void,
+  setView: (view: RendererState['view'], arg?: string | null, refreshOpts?: { keepEditor?: boolean }) => Promise<unknown>,
+  trashCurrent: () => Promise<unknown>,
+  syncTitleBar: () => void,
+};
+
+export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar }: BookDeps) {
   const book: { id: string | null, pages: PublicNote[], dragId: string | null, seq: number } = { id: null, pages: [], dragId: null, seq: 0 };
 
-  function bookOf(note) {
+  function bookOf(note: PublicNote | null) {
     if (!note || !note.folderId || note.trashedAt) return null;
     const f = flattenTree(state.tree).find((x) => x.id === note.folderId);
     return f && f.book ? f : null;
   }
 
-  async function renderBookStrip(note) {
+  async function renderBookStrip(note: PublicNote) {
     const seq = ++book.seq; // only the newest call may draw: an older one resolving late must not revive a book
     const b = bookOf(note);
     el.bookStrip.classList.toggle('hidden', !b);
@@ -63,7 +76,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   // Moves page dragId so it sits just before page beforeId.
-  async function movePage(dragId, beforeId) {
+  async function movePage(dragId: string | null, beforeId: string) {
     if (!book.id || !dragId || dragId === beforeId) return;
     const ids = book.pages.map((p) => p.id).filter((x) => x !== dragId);
     const at = ids.indexOf(beforeId);
@@ -73,7 +86,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     if (state.current) renderBookStrip(state.current);
   }
 
-  function stepPage(delta) {
+  function stepPage(delta: number) {
     if (!book.id || !state.currentId) return false;
     const idx = book.pages.findIndex((p) => p.id === state.currentId);
     const next = book.pages[idx + delta];
@@ -93,7 +106,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     el.titleInput.focus();
   }
 
-  async function toggleBook(folderId, on) {
+  async function toggleBook(folderId: string, on: boolean) {
     try { await api.folders.setBook(folderId, on); }
     catch (err) { toast('Could not change the folder: ' + (err.message || err)); return; }
     await refresh({ keepEditor: true });
@@ -150,7 +163,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
         try { await api.notes.undoSplit(r.folder.id, r.pageIds, r.originalTrashed ? id : null); }
         catch (err) { toast('Could not undo the split: ' + ipcErrorText(err)); return; }
         // Go back to the original only if the person is still in the book; otherwise leave their view alone.
-        const inBook = (state.view === 'folder' && state.folderId === r.folder.id) || r.pageIds.includes(state.currentId);
+        const inBook = (state.view === 'folder' && state.folderId === r.folder.id) || (state.currentId !== null && r.pageIds.includes(state.currentId));
         if (!inBook) { await refresh(); return; }
         clearEditor();
         await setView('all', null, { keepEditor: true });
@@ -160,21 +173,25 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   // Puts page id right after page afterId in the book's reading order.
-  async function placePageAfter(id, afterId) {
-    const pages = await api.notes.list({ folderId: book.id });
+  async function placePageAfter(id: string, afterId: string) {
+    const bookId = book.id;
+    if (!bookId) return;
+    const pages = await api.notes.list({ folderId: bookId });
     const ids = pages.map((p) => p.id).filter((x) => x !== id);
     const at = ids.indexOf(afterId);
     ids.splice(at === -1 ? ids.length : at + 1, 0, id);
-    await api.folders.reorderPages(book.id, ids);
+    await api.folders.reorderPages(bookId, ids);
   }
 
-  function openPageMenu(id, anchor, ev) {
+  function openPageMenu(id: string, anchor: HTMLDivElement, ev: PointerEvent) {
     closeAllBookMenus();
     state.menuPageId = id;
     state.menuBookId = book.id;
     const idx = book.pages.findIndex((p) => p.id === id);
-    el.pageMenu.querySelector('[data-action="move-left"]').disabled = idx <= 0;
-    el.pageMenu.querySelector('[data-action="move-right"]').disabled = idx === -1 || idx >= book.pages.length - 1;
+    const moveLeft = el.pageMenu.querySelector<HTMLButtonElement>('[data-action="move-left"]');
+    const moveRight = el.pageMenu.querySelector<HTMLButtonElement>('[data-action="move-right"]');
+    if (moveLeft) moveLeft.disabled = idx <= 0;
+    if (moveRight) moveRight.disabled = idx === -1 || idx >= book.pages.length - 1;
     placePopover(el.pageMenu, anchor, ev);
   }
 
@@ -191,7 +208,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     el.bookMenu.classList.add('hidden');
   }
 
-  async function pageMenuAction(action) {
+  async function pageMenuAction(action: string) {
     const id = state.menuPageId;
     const bookId = state.menuBookId;
     closeAllBookMenus();
@@ -240,7 +257,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     }
   }
 
-  async function bookMenuAction(action) {
+  async function bookMenuAction(action: string) {
     closeAllBookMenus();
     if (!book.id) return;
     if (action === 'read') openReader();
@@ -261,7 +278,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     input.value = folder.name;
     input.setAttribute('aria-label', 'Book name');
     let done = false;
-    const finish = async (save) => {
+    const finish = async (save: boolean) => {
       if (done) return; done = true;
       const name = input.value.trim();
       input.replaceWith(el.bookName);
@@ -278,7 +295,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
 
   // Gathers the current book: its name and pages in order, each with Markdown and HTML.
   // Locked pages stay locked: only their title goes in.
-  async function collectBook(bookId) {
+  async function collectBook(bookId: string) {
     await flushSave();
     const folder = flattenTree(state.tree).find((f) => f.id === bookId);
     const pages = await api.notes.list({ folderId: bookId });
@@ -295,9 +312,11 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     };
   }
 
+  type BookSnapshot = Awaited<ReturnType<typeof collectBook>>;
+
   // A page as Markdown. An opened file that is not Markdown (plain text, Word, PDF) is converted the way "Convert
   // to… Markdown" would, so its text is never read as Markdown by accident.
-  async function pageMarkdown(p) {
+  async function pageMarkdown(p: PublicNote) {
     if (!isNonMarkdownFile(p)) return String(p.body || '');
     try {
       const r = await api.files.asMarkdown(p.id);
@@ -305,21 +324,21 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     } catch (err) { return '*Could not show this file: ' + ipcErrorText(err) + '*'; }
   }
 
-  function bookMarkdown(b) {
+  function bookMarkdown(b: BookSnapshot) {
     const toc = b.pages.map((p) => p.no + '. ' + p.title).join('\n');
     const parts = b.pages.map((p) => '## ' + p.title + '\n\n' + (p.locked ? '_This page is locked._' : p.body.trim()) + '\n');
     return '# ' + b.name + '\n\n**Contents**\n\n' + toc + '\n\n' + parts.join('\n');
   }
 
   // The book as HTML: its name, a contents list linking to the pages, then one section per page.
-  function bookHtml(b) {
+  function bookHtml(b: BookSnapshot) {
     const toc = '<nav class="book-toc"><h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a href="#page-' + p.no + '" data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol></nav>';
     const pages = b.pages.map((p) => '<section class="book-page" id="page-' + p.no + '"><h2>' + escapeHtml(p.title) + '</h2>' +
       (p.locked ? '<p class="book-page-locked">This page is locked.</p>' : p.html) + '</section>').join('\n');
     return '<h1>' + escapeHtml(b.name) + '</h1>' + toc + pages;
   }
 
-  async function exportBook(format) {
+  async function exportBook(format: string) {
     const bookId = readerOpen() ? reader.bookId : book.id; // the reader's buttons export the book being read
     if (!bookId) return;
     const b = await collectBook(bookId);

@@ -11,12 +11,21 @@ import { escapeHtml } from './text.ts';
 
 type PaletteItem = { id: string, title: string, group: string, hint?: string, keys?: string, icon?: string, run: (opts: { newTab?: boolean }) => void };
 
+type PaletteCommand = PaletteItem & { keywords?: string };
+type PaletteNote = PaletteItem & { matches: (query: string) => boolean };
+type PaletteDeps = {
+  dialog: HTMLDialogElement,
+  input: HTMLInputElement,
+  list: HTMLUListElement,
+  source: (query: string) => PaletteItem[] | Promise<PaletteItem[]>,
+};
+
 export const NotesPalette = (function () {
-  const I = (name) => (name ? NotesIcons.svg(name) : '');
-  const esc = (s) => escapeHtml(s == null ? '' : s);
+  const I = (name: string) => (name ? NotesIcons.svg(name) : '');
+  const esc = (s: string) => escapeHtml(s == null ? '' : s);
 
   // Bold the characters of the label that the query matched, in order.
-  function marked(text, query) {
+  function marked(text: string, query: string) {
     const q = String(query || '').toLowerCase().replace(/\s+/g, '');
     if (!q) return esc(text);
     const lower = text.toLowerCase();
@@ -29,13 +38,13 @@ export const NotesPalette = (function () {
     return out;
   }
 
-  function create({ dialog, input, list, source }) {
+  function create({ dialog, input, list, source }: PaletteDeps) {
     let items: PaletteItem[] = [];
     let active = 0;
     let ticket = 0;
     let returnFocus: HTMLElement | null = null;
 
-    function render(query) {
+    function render(query: string) {
       list.innerHTML = '';
       if (!items.length) {
         const li = document.createElement('li');
@@ -93,13 +102,13 @@ export const NotesPalette = (function () {
       render(query);
     }
 
-    function move(delta) {
+    function move(delta: number) {
       if (!items.length) return;
       active = (active + delta + items.length) % items.length;
       paint();
     }
 
-    function choose(i, opts) {
+    function choose(i: number, opts?: { newTab?: boolean }) {
       const it = items[i];
       if (!it) return;
       close(false);
@@ -107,7 +116,7 @@ export const NotesPalette = (function () {
       setTimeout(() => it.run(opts || {}), 0);
     }
 
-    function open(query) {
+    function open(query?: string) {
       if (dialog.open) { input.select(); return; }
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       input.value = query || '';
@@ -119,7 +128,7 @@ export const NotesPalette = (function () {
       update();
     }
 
-    function close(restore?) {
+    function close(restore?: boolean) {
       if (!dialog.open) return;
       dialog.close();
       if (restore !== false && returnFocus && returnFocus.isConnected) returnFocus.focus();
@@ -146,21 +155,21 @@ export const NotesPalette = (function () {
   }
 
   // Ranks commands and notes for a query: commands by label (and keywords), notes by title, then by body text.
-  function rank(query, commands, notes) {
+  function rank(query: string, commands: PaletteCommand[], notes: PaletteNote[] | null): PaletteItem[] {
     const raw = String(query || '');
     const commandsOnly = /^\s*>/.test(raw);
     const q = raw.replace(/^\s*>\s*/, '').trim();
-    const scored = (arr, text) => arr.map((x) => ({ x, s: H.fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
+    const scored = <T>(arr: T[], text: (x: T) => string) => arr.map((x) => ({ x, s: H.fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
     const cmds = scored(commands, (c) => c.title + (c.keywords ? ' ' + c.keywords : ''));
     if (commandsOnly || !notes) return cmds;
-    if (!q) return notes.slice(0, 6).concat(cmds);
+    if (!q) return [...notes.slice(0, 6), ...cmds];
     const byTitle = scored(notes, (n) => n.title);
     const seen = new Set(byTitle.map((n) => n.id));
     const byBody = notes.filter((n) => !seen.has(n.id) && n.matches(q)).slice(0, 6);
     const noteHits = byTitle.slice(0, 8).concat(byBody);
     // A strong command match (prefix or word start) goes first; otherwise notes lead, since finding notes is the main job.
     const strong = cmds.length && H.fuzzyScore(q, cmds[0].title) >= 500;
-    return strong ? cmds.slice(0, 10).concat(noteHits) : noteHits.concat(cmds.slice(0, 8));
+    return strong ? [...cmds.slice(0, 10), ...noteHits] : [...noteHits, ...cmds.slice(0, 8)];
   }
 
   return { create, rank };

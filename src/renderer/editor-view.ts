@@ -32,7 +32,21 @@ export function autoGrow() {
   ta.style.height = Math.max(320, ta.scrollHeight + 2) + 'px';
 }
 
-export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }) {
+type InlineTrigger = { kind: 'slash' | 'link', query: string, from: number, to: number, rect: { left: number, top: number, bottom: number } };
+
+type EditorViewDeps = {
+  api: NotesApi,
+  refresh: (opts?: { keepEditor?: boolean }) => Promise<unknown>,
+  updateStatus: (note: PublicNote) => void,
+  updateSettings: (patch: SettingsPatch) => Promise<unknown>,
+  scopeListToNote: (note: PublicNote | null) => Promise<unknown>,
+  selectNoteNow: (id: string) => Promise<unknown>,
+  scheduleSave: () => void,
+  runFind: (forward: boolean, fresh?: boolean, quiet?: boolean) => void,
+  clearFindHighlights: () => void,
+};
+
+export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }: EditorViewDeps) {
   // The textarea (#bodyInput) always mirrors the Markdown, whichever view is showing,
   // so saving, word counts, and the source view all read one place.
   function createRichEditor() {
@@ -40,9 +54,9 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     state.rich = window.NotesEditor.create(el.richEditor, {
       placeholder: 'Start writing. Type / for headings, lists and tables, or [[ to link a note.',
       imageBase: () => H.imageBaseFor(state.current),
-      onTrigger: (t) => showInlineMenu(t),
-      onTriggerKey: (e) => inlineMenuKey(e),
-      onUpdate: (md) => {
+      onTrigger: (t: InlineTrigger | null) => showInlineMenu(t),
+      onTriggerKey: (e: KeyboardEvent) => inlineMenuKey(e),
+      onUpdate: (md: string) => {
         // A plain file (a CSV in its table view, say) is never the rendered editor's to write: its text is its own.
         if (state.sourceMode || !state.currentId || isPlainTextFile(state.current)) return;
         if (md === el.bodyInput.value) return;
@@ -52,7 +66,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       },
     });
     el.richEditor.addEventListener('click', (e) => {
-      const a = e.target.closest('a[href]');
+      const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
       if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); followLink(a.getAttribute('href')); }
     });
   }
@@ -76,15 +90,14 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
     { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
   ];
-  type InlineTrigger = { kind: 'slash' | 'link', query: string, from: number, to: number, rect: { left: number, right: number, top: number, bottom: number } };
   type InlineItem = { id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: PublicNote, create?: string };
   const inline: { trigger: InlineTrigger | null, items: InlineItem[], active: number, dismissedAt: string | null, notes: PublicNote[] | null, seq: number } = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
 
-  async function showInlineMenu(t) {
+  async function showInlineMenu(t: InlineTrigger | null) {
     const seq = ++inline.seq;
     if (!t || state.sourceMode || !state.rich) { if (!t) inline.dismissedAt = null; hideInlineMenu(); return; }
     if (inline.dismissedAt === t.kind + ':' + t.from) { hideInlineMenu(); return; }
-    let items;
+    let items: InlineItem[];
     if (t.kind === 'slash') {
       items = SLASH.map((b) => ({ b, s: H.fuzzyScore(t.query, b.title + ' ' + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
       if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
@@ -152,7 +165,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   }
 
   // Keys while the menu is open. Returns true when the menu used the key.
-  function inlineMenuKey(e) {
+  function inlineMenuKey(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return false;
     const trigger = inline.trigger;
     if (!trigger || el.inlineMenu.classList.contains('hidden')) return false;
@@ -173,7 +186,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     return false;
   }
 
-  async function chooseInline(i) {
+  async function chooseInline(i: number) {
     const it = inline.items[i];
     const t = inline.trigger;
     const rich = state.rich;
@@ -183,7 +196,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (t.kind === 'slash') {
       if (it.kind === 'date') { rich.insertTextAt(range, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return; }
       if (it.kind === 'link') { rich.insertTextAt(range, '[['); return; } // reopens as the note picker
-      rich.insertBlock(range, it.kind);
+      if (it.kind) rich.insertBlock(range, it.kind);
       return;
     }
     if (it.create) {
@@ -208,7 +221,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   // its place). A PDF, Word or other binary file shows neither (its own viewer does), and nor does a locked note.
   // Set from the note every time, never left over from the last one: in source mode a text file opened after a Word
   // or PDF file used to keep the textarea hidden, and showed nothing.
-  function syncTextViews(note) {
+  function syncTextViews(note: PublicNote | null) {
     const none = lockedNow() || isViewerOnlyFile(note);
     const isTable = H.isTableFile(note);
     const table = isTable && !state.sourceMode && !none;
@@ -216,13 +229,13 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     el.bodyInput.classList.toggle('hidden', none || !state.sourceMode);
     el.csvView.classList.toggle('hidden', !table);
     fillPane(table || (!!note && note.fileKind === 'image' && !lockedNow()));
-    if (table) renderTable(note);
+    if (table && note) renderTable(note);
   }
 
   // A CSV or TSV file as a table (csv-view.js), from the text as it is now. Read-only: Ctrl+E edits it as text.
   let tableDrawn: { id: string, text: string } | null = null; // last drawn, so a redraw (a mode switch, a poll) keeps the scroll
   let tableStats: { rows: number; cols: number; } | null = null;
-  function renderTable(note) {
+  function renderTable(note: PublicNote) {
     const text = el.bodyInput.value;
     if (!tableDrawn || tableDrawn.id !== note.id || tableDrawn.text !== text) {
       tableStats = NotesCsv.render(el.csvView, text, H.extOf(note.filePath));
@@ -231,7 +244,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     updateStatus(note);
   }
   // A table or an image takes the rest of the pane, with its own scrolling, rather than a box scrolling in a page.
-  function fillPane(on) {
+  function fillPane(on: boolean) {
     el.editorColumn.classList.toggle('fills-pane', on);
     el.editor.classList.toggle('fills-pane', on);
   }
@@ -247,7 +260,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     el.sourceBtn.title = what + ' (Ctrl+E)';
   }
 
-  function applyEditorMode(source) {
+  function applyEditorMode(source: boolean) {
     state.sourceMode = !!source;
     if (source) hideInlineMenu();
     if (find.open) { clearFindHighlights(); setTimeout(() => { if (find.open) runFind(true, true); }, 0); }
@@ -259,7 +272,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     else if (state.rich && state.currentId && !isViewerOnlyFile(state.current) && !isPlainTextFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
 
-  function toggleSource(force?) {
+  function toggleSource(force?: boolean) {
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (isViewerOnlyFile(state.current)) { toast('This file is shown as it is; it has no Markdown view to switch to.'); return; }
     if (next === state.sourceMode) return;
@@ -281,7 +294,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   }
 
   // Ctrl+click on a link: a note link opens that note, an attachment opens with its app, the web goes outside.
-  async function followLink(href) {
+  async function followLink(href: string | null) {
     href = String(href || '');
     if (/^note:\/\//i.test(href)) {
       const id = href.replace(/^note:\/\//i, '').replace(/\/$/, '');

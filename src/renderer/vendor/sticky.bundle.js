@@ -121,13 +121,19 @@
           const s = size || 16;
           return '<svg class="icon" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + body + "</svg>";
         }
+        function hasDataset(node) {
+          return node instanceof HTMLElement || node instanceof SVGElement;
+        }
         function hydrate(root) {
           (root || document).querySelectorAll("[data-icon]").forEach((el) => {
+            if (!hasDataset(el)) return;
             const first = el.firstElementChild;
-            if (first && first.classList.contains("icon") && first.dataset.name === el.dataset.icon) return;
-            if (first && first.classList.contains("icon")) first.remove();
-            el.insertAdjacentHTML("afterbegin", svg(el.dataset.icon));
-            el.firstElementChild.dataset.name = el.dataset.icon;
+            const firstIcon = hasDataset(first) && first.classList.contains("icon") ? first : null;
+            if (firstIcon && firstIcon.dataset.name === el.dataset.icon) return;
+            if (firstIcon) firstIcon.remove();
+            el.insertAdjacentHTML("afterbegin", svg(String(el.dataset.icon)));
+            const inserted = el.firstElementChild;
+            if (hasDataset(inserted)) inserted.dataset.name = el.dataset.icon;
           });
         }
         const api = { svg, hydrate, names: Object.keys(PATHS) };
@@ -149,18 +155,26 @@
 
   // src/renderer/sticky.ts
   var import_icons = __toESM(require_icons());
+
+  // src/renderer/page-element.ts
+  function pageElement(selector, type) {
+    const node = document.querySelector(selector);
+    if (!(node instanceof type)) throw new Error("The page is missing " + selector + ".");
+    return node;
+  }
+
+  // src/renderer/sticky.ts
   (function() {
     const api = window.notesApi;
-    const $ = (s) => document.querySelector(s);
     const el = {
-      title: $("#stickyTitle"),
-      colors: $("#stickyColors"),
-      topBtn: $("#stickyTopBtn"),
-      openBtn: $("#stickyOpenBtn"),
-      closeBtn: $("#stickyCloseBtn"),
-      editor: $("#stickyEditor"),
-      missing: $("#stickyMissing"),
-      status: $("#stickyStatus")
+      title: pageElement("#stickyTitle", HTMLSpanElement),
+      colors: pageElement("#stickyColors", HTMLDivElement),
+      topBtn: pageElement("#stickyTopBtn", HTMLButtonElement),
+      openBtn: pageElement("#stickyOpenBtn", HTMLButtonElement),
+      closeBtn: pageElement("#stickyCloseBtn", HTMLButtonElement),
+      editor: pageElement("#stickyEditor", HTMLDivElement),
+      missing: pageElement("#stickyMissing", HTMLDivElement),
+      status: pageElement("#stickyStatus", HTMLSpanElement)
     };
     import_icons.default.hydrate(document);
     const id = new URLSearchParams(location.search).get("id") || "";

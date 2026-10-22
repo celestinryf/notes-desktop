@@ -8,8 +8,7 @@
       "dom",
       "dom.iterable"
     ],
-    "types": [],
-    "noImplicitAny": false
+    "types": []
   },
   "include": [
     "src/types.d.ts",

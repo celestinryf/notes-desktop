@@ -4,13 +4,20 @@ import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { toLocalInputValue } from './remind-times.ts';
 
-export function createReminders({ api, flushSave, refreshCurrentMeta }) {
-  function renderRemindButton(note) {
-    const on = !!(note && note.remindAt);
+interface RemindersDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  refreshCurrentMeta: () => Promise<unknown>;
+}
+
+export function createReminders({ api, flushSave, refreshCurrentMeta }: RemindersDeps) {
+  function renderRemindButton(note: PublicNote | null) {
+    const remindAt = note ? note.remindAt : null;
+    const on = !!remindAt;
     el.remindBtn.classList.toggle('hidden', !note || !!note.trashedAt);
     el.remindBtn.classList.toggle('is-on', on);
-    setLabel(el.remindBtn, on ? 'Reminder: ' + H.formatWhen(note.remindAt) : 'Remind me…');
-    el.remindBtn.title = on ? 'Reminder set for ' + H.formatWhen(note.remindAt) + ' (Ctrl+Shift+M to change)' : 'Remind me about this note (Ctrl+Shift+M)';
+    setLabel(el.remindBtn, on ? 'Reminder: ' + H.formatWhen(remindAt) : 'Remind me…');
+    el.remindBtn.title = on ? 'Reminder set for ' + H.formatWhen(remindAt) + ' (Ctrl+Shift+M to change)' : 'Remind me about this note (Ctrl+Shift+M)';
   }
 
   function openRemindDialog() {
@@ -24,7 +31,7 @@ export function createReminders({ api, flushSave, refreshCurrentMeta }) {
     el.remindInput.focus();
   }
 
-  async function setReminder(at) {
+  async function setReminder(at: number | null) {
     const note = state.current;
     if (!note) return;
     el.remindDialog.close();

@@ -21,7 +21,8 @@ interface Window {
   NotesIcons?: { svg(name: string, size?: number): string; hydrate(root?: ParentNode | null): void; names: string[] };
 }
 
-interface FolderEdit { mode: 'create' | 'rename'; id?: string; parentId?: string | null; book?: boolean }
+type FolderEdit = { mode: 'create'; parentId: string | null; book: boolean } | { mode: 'rename'; id: string };
+interface FieldsPatch { title: string; body?: string; tags: string }
 
 // The main page's state (state.js). Everything the page remembers between events lives here.
 interface RendererState {
@@ -47,7 +48,7 @@ interface RendererState {
   lastTypedAt: number;
   liveStatus: Record<string, LiveStatus>;
   vaultStatus: Record<string, VaultStatus>;
-  pending: Map<string, NotePatch>;
+  pending: Map<string, FieldsPatch>;
   inflight: Map<string, Promise<unknown>>;
   selecting: Promise<unknown>;
   // Set while the page runs, not at start.

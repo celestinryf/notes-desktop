@@ -7,7 +7,19 @@ import { escapeHtml } from './text.ts';
 import { toast } from './toast.ts';
 import { placePopover } from './popover.ts';
 
-export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }) {
+interface SharingDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  closeFind: () => void;
+  GUEST: boolean;
+  exportOfCurrent: () => { name: string; html: string };
+  exportCurrent: () => Promise<unknown>;
+  startLiveHost: () => Promise<unknown>;
+  openLiveDialog: (mode: 'link' | 'join') => void;
+  stopLive: () => Promise<unknown>;
+}
+
+export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }: SharingDeps) {
   // Which share actions apply to the open note; the share menu and the command palette both use it.
   function syncShareMenu() {
     const n = state.current;
@@ -27,7 +39,7 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
     el.shareMenu.classList.add('hidden');
   }
 
-  async function shareAction(action) {
+  async function shareAction(action: string) {
     closeShareMenu();
     let note = state.current;
     if (!note) return;

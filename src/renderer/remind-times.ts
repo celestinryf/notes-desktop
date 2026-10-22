@@ -1,10 +1,10 @@
-export function toLocalInputValue(ts) {
+export function toLocalInputValue(ts: number) {
   const d = new Date(ts);
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
-export function quickPick(kind) {
+export function quickPick(kind: string) {
   const d = new Date();
   d.setSeconds(0, 0);
   if (kind === '1h') { d.setTime(d.getTime() + 3600 * 1000); return d.getTime(); }

@@ -1,8 +1,10 @@
 import { el } from './dom.ts';
 import { find } from './find-state.ts';
 
-export function createEditorText({ runFind, scheduleSave }) {
-  function wrapSelection(before, after) {
+type EditorTextDeps = { runFind: (forward?: boolean, fresh?: boolean, quiet?: boolean) => void, scheduleSave: () => void };
+
+export function createEditorText({ runFind, scheduleSave }: EditorTextDeps) {
+  function wrapSelection(before: string, after: string) {
     const ta = el.bodyInput;
     if (ta.readOnly) return;
     const { selectionStart: s, selectionEnd: e, value } = ta;
@@ -17,7 +19,7 @@ export function createEditorText({ runFind, scheduleSave }) {
     scheduleSave();
   }
 
-  function handleEditorKeydown(e) {
+  function handleEditorKeydown(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return; // an IME is composing (CJK input): Enter and Tab belong to it
     // While the find bar is open, Enter in the text steps between matches instead of replacing the selected
     // match with a newline (focus lands here after Enter in the bar, so that would eat the match).
