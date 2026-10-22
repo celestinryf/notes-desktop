@@ -1219,6 +1219,7 @@ class Store {
       if (!parent) continue;
       let sub = folderByKey.get(d.key);
       if (!sub) {
+        if (this.revision !== readAtRevision && !fs.existsSync(d.full)) continue;
         sub = { id: crypto.randomUUID(), name: d.name, parentId: parent.id, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
         this.folders.push(sub);
         folderByKey.set(d.key, sub);

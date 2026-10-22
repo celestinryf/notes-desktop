@@ -80,8 +80,8 @@ class VaultManager {
     const v = this.store.getVault(id);
     if (!v) return;
     await this.refreshRepoStatus(id);
-    try { await this.store.scanVault(id); } catch (err) { this._set(id, { lastError: 'scan: ' + err.message }); }
     this.watch(id);
+    try { await this.store.scanVault(id); } catch (err) { this._set(id, { lastError: 'scan: ' + err.message }); }
     this.schedulePull(id);
     if (opts.pull && v.remote && v.autoSync) this.sync(id, 'startup').catch(() => {});
   }
