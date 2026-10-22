@@ -43,7 +43,7 @@ export const src = {
   },
 };
 
-// An opened text file that is not Markdown (.txt, LaTeX, code, config) is edited in CodeMirror (src/code/index.js),
+// An opened text file that is not Markdown (.txt, LaTeX, code, config) is edited in CodeMirror (src/code/index.ts),
 // shown in the textarea's place. The textarea still holds the text: saving, the title and the counts read it there,
 // and the person's edits in the code editor are copied into it as they happen (with the textarea's input event).
 

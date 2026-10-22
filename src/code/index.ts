@@ -1,12 +1,11 @@
-'use strict';
 // NotesCode: the editor (CodeMirror 6) for opened text files that are not Markdown: .txt, LaTeX, code and config.
 // Notes keeps the text in its own textarea too (saving, the title and the counts read it there); this edits and
 // shows it, and reports the person's edits with onChange. Edits Notes makes itself (load, setValue, setRangeText)
 // are not reported back. Colours and sizes come from the app's CSS tokens (styles.css, "code editor").
-import { EditorState, EditorSelection, Compartment, Annotation, Transaction } from '@codemirror/state';
+import { EditorState, EditorSelection, Compartment, Annotation, Transaction, type TransactionSpec } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder } from '@codemirror/view';
 import { history, historyKeymap, standardKeymap, indentMore, indentLess, toggleComment, undo, redo } from '@codemirror/commands';
-import { StreamLanguage, syntaxHighlighting, HighlightStyle, indentUnit, bracketMatching } from '@codemirror/language';
+import { StreamLanguage, syntaxHighlighting, HighlightStyle, indentUnit, bracketMatching, type StreamParser } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
 import { javascript, json, typescript } from '@codemirror/legacy-modes/mode/javascript';
@@ -30,7 +29,7 @@ import { r } from '@codemirror/legacy-modes/mode/r';
 import { perl } from '@codemirror/legacy-modes/mode/perl';
 
 // The languages Notes highlights, by file extension (as H.extOf gives it). Anything else is plain text.
-const LANGUAGES = [
+const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
   ['LaTeX', stex, ['tex', 'latex', 'sty', 'cls', 'ltx']],
   ['JavaScript', javascript, ['js', 'mjs', 'cjs', 'jsx']],
   ['TypeScript', typescript, ['ts', 'tsx']],
@@ -61,7 +60,7 @@ const LANGUAGES = [
   ['R', r, ['r']],
   ['Perl', perl, ['pl']],
 ];
-const BY_EXT = new Map();
+const BY_EXT = new Map<string, { name: string, mode: StreamParser<unknown>, language?: StreamLanguage<unknown> }>();
 for (const [name, mode, exts] of LANGUAGES) for (const ext of exts) BY_EXT.set(ext, { name, mode });
 
 // The language for a file extension: its name (for the status line) and its parser (made once), or plain text.
@@ -189,7 +188,7 @@ export function create({ parent, onChange, onSelection, onEnter }) {
     // As a textarea's setRangeText: mode is 'select', 'start', 'end' or 'preserve' (the default).
     setRangeText(text, from, to, mode) {
       const a = clamp(from), b = Math.max(a, clamp(to)), insert = String(text);
-      const spec = { changes: { from: a, to: b, insert }, annotations: fromNotes.of(true) };
+      const spec: TransactionSpec = { changes: { from: a, to: b, insert }, annotations: fromNotes.of(true) };
       if (mode === 'select') spec.selection = EditorSelection.single(a, a + insert.length);
       else if (mode === 'start') spec.selection = EditorSelection.cursor(a);
       else if (mode === 'end') spec.selection = EditorSelection.cursor(a + insert.length);

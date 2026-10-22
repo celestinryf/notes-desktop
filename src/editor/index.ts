@@ -1,7 +1,7 @@
 /* Rendered Markdown editor built on Tiptap. Bundled by esbuild into src/renderer/vendor/editor.bundle.js
    and exposed as window.NotesEditor. Markdown stays the storage format: content goes in as Markdown and
    every change comes back out as Markdown. */
-import { Editor, Extension, InputRule, mergeAttributes } from '@tiptap/core';
+import { Editor, Extension, InputRule, mergeAttributes, type Attributes } from '@tiptap/core';
 import { EditorState, TextSelection, Plugin, PluginKey } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
@@ -114,7 +114,6 @@ const DashCheckbox = Extension.create({
         const checked = (match[1] || '').toLowerCase() === 'x';
         chain().deleteRange(range).toggleTaskList().run();
         if (checked) chain().updateAttributes('taskItem', { checked: true }).run();
-        return true;
       },
     })];
   },
@@ -143,7 +142,7 @@ function triggers(options) {
   return Extension.create({
     name: 'notesTriggers',
     addProseMirrorPlugins() {
-      let lastKey = null;
+      let lastKey: string | null = null;
       return [new Plugin({
         key: new PluginKey('notesTriggers'),
         view: () => ({
@@ -206,7 +205,7 @@ export function resolveImageSrc(src, base) {
 function pictures(imageBase) {
   return Image.extend({
     addAttributes() {
-      const parent = this.parent ? this.parent() : {};
+      const parent: Partial<Attributes> = this.parent ? this.parent() : {};
       return Object.assign({}, parent, { src: Object.assign({}, parent.src, { parseHTML: (el) => el.getAttribute('data-src') || el.getAttribute('src') }) });
     },
     renderHTML({ HTMLAttributes }) {
@@ -278,7 +277,7 @@ export function create(element, options) {
   // document gives back the same content, false when some construct would be rewritten or dropped.
   let lastExact = true;
   // opts.keepSelection: an in-place reload of the same note keeps the caret; opening another note starts at the top.
-  function setMarkdown(md, opts) {
+  function setMarkdown(md, opts?) {
     const keepSelection = !!(opts && opts.keepSelection);
     suppress = true;
     try {
@@ -305,7 +304,7 @@ export function create(element, options) {
     setMarkdown,
     // Tiptap's focus command defers the DOM focus to the next animation frame; a key pressed right after
     // Enter in the title would land in the title. Focus the DOM synchronously first, then place the caret.
-    focus: (where) => { editor.view.focus(); return editor.commands.focus(where || null); },
+    focus: (where?) => { editor.view.focus(); return editor.commands.focus(where || null); },
     // Second argument false: setEditable would otherwise emit an update, and an update on a freshly loaded
     // note would write the editor's serialization back over the stored Markdown just for viewing it.
     setEditable: (on) => editor.setEditable(!!on, false),
@@ -324,7 +323,7 @@ export function create(element, options) {
     // Replaces the text of DOM ranges (as produced by the app's find) in one transaction, last first so
     // earlier positions stay valid. Returns how many were replaced.
     replaceRanges: (domRanges, text) => {
-      const spans = [];
+      const spans: { from: number, to: number }[] = [];
       for (const r of domRanges) {
         try { spans.push({ from: editor.view.posAtDOM(r.startContainer, r.startOffset), to: editor.view.posAtDOM(r.endContainer, r.endOffset) }); } catch (_) { /* detached range */ }
       }
