@@ -183,6 +183,7 @@
     mailtoFor: () => mailtoFor,
     markdownToNote: () => markdownToNote,
     matchesQuery: () => matchesQuery,
+    msSince: () => msSince,
     noteLinkIds: () => noteLinkIds,
     noteToMarkdown: () => noteToMarkdown,
     parseAccelerator: () => parseAccelerator,
@@ -194,8 +195,10 @@
     sortNotes: () => sortNotes,
     speechChunks: () => speechChunks,
     splitAtHeadings: () => splitAtHeadings,
+    tenths: () => tenths,
     toggleTaskAt: () => toggleTaskAt,
     tokenize: () => tokenize,
+    traceClock: () => traceClock,
     truncate: () => truncate
   });
   var UNTITLED = "Untitled";
@@ -597,6 +600,9 @@
   }
   var isObjectLike = (v) => !!v && typeof v === "object";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
+  var tenths = (n) => Math.round(n * 10) / 10;
+  var traceClock = () => tenths(performance.timeOrigin + performance.now());
+  var msSince = (start) => tenths(performance.now() - start);
 
   // src/shared/themes.mts
   var themes_exports = {};
@@ -5220,7 +5226,7 @@
       });
       const numbers = (m, keys) => Object.fromEntries(keys.flatMap((k) => {
         const v = m[k];
-        return typeof v === "number" ? [[k, Math.round(v * 10) / 10]] : [];
+        return typeof v === "number" ? [[k, tenths(v)]] : [];
       }));
       let ready = false;
       let loaded = false;
@@ -5347,7 +5353,6 @@
   })();
 
   // src/renderer/craft-trace.ts
-  var traceClock = () => Math.round((performance.timeOrigin + performance.now()) * 10) / 10;
   function craftTrace(event, fields) {
     if (!state.info || !state.info.craftTrace) return;
     window.notesApi.app.trace(event, Object.assign({ t: traceClock() }, fields));
@@ -5415,7 +5420,7 @@
         try {
           const asked = performance.now();
           const bytes = await ui.bytes(n.id);
-          trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: Math.round(performance.now() - asked) });
+          trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: msSince(asked) });
           if (s !== seq || !state.current || state.current.id !== n.id) return;
           if (!n.filePath) throw new Error("the note has no file");
           const name = baseName(n.filePath);
@@ -5478,7 +5483,7 @@
         const started = performance.now();
         trace("flush", { id: note ? note.id : null });
         const ok = await fc.requestSave(15e3);
-        trace("flush-done", { ok, ms: Math.round(performance.now() - started) });
+        trace("flush-done", { ok, ms: msSince(started) });
         return ok;
       }
       const forget = () => {
@@ -8239,7 +8244,7 @@
     function traceSwitch(from, to, started, left) {
       const kindOf = (n) => n && n.fileKind || "note";
       if (![from, to].some((n) => n && n.fileKind && CRAFT_OF[n.fileKind])) return;
-      craftTrace("switch", { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: Math.round(left - started), ms: Math.round(performance.now() - started) });
+      craftTrace("switch", { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: tenths(left - started), ms: msSince(started) });
     }
     function markActiveRow(id) {
       el.noteList.querySelectorAll(".note-row").forEach((r) => setRowActive(r, !!id && r.dataset.id === id));

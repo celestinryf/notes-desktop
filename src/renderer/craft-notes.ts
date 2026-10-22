@@ -78,7 +78,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       try {
         const asked = performance.now();
         const bytes = await ui.bytes(n.id);
-        trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: Math.round(performance.now() - asked) });
+        trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: H.msSince(asked) });
         if (s !== seq || !state.current || state.current.id !== n.id) return;
         if (!n.filePath) throw new Error('the note has no file');
         const name = baseName(n.filePath);
@@ -138,7 +138,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       const started = performance.now();
       trace('flush', { id: note ? note.id : null });
       const ok = await fc.requestSave(15000);
-      trace('flush-done', { ok, ms: Math.round(performance.now() - started) });
+      trace('flush-done', { ok, ms: H.msSince(started) });
       return ok;
     }
     const forget = () => { shownKey = null; };

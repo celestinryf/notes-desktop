@@ -413,8 +413,12 @@ function fuzzyScore(query: string | null | undefined, text: string | null | unde
 const isObjectLike = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
 const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
 
+const tenths = (n: number) => Math.round(n * 10) / 10;
+const traceClock = () => tenths(performance.timeOrigin + performance.now());
+const msSince = (start: number) => tenths(performance.now() - start);
+
 export {
-  isObjectLike, isRecord,
+  isObjectLike, isRecord, tenths, traceClock, msSince,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

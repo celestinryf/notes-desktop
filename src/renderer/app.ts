@@ -1773,7 +1773,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function traceSwitch(from: PublicNote | null, to: PublicNote, started: number, left: number) {
     const kindOf = (n: PublicNote | null) => (n && n.fileKind) || 'note';
     if (![from, to].some((n) => n && n.fileKind && H.CRAFT_OF[n.fileKind])) return;
-    craftTrace('switch', { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: Math.round(left - started), ms: Math.round(performance.now() - started) });
+    craftTrace('switch', { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: H.tenths(left - started), ms: H.msSince(started) });
   }
 
   function markActiveRow(id: string | null) {

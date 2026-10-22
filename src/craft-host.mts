@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { msSince } from './craft-trace.mts';
+import { msSince } from './shared/helpers.mts';
 
 const APPS: Record<string, { label: string, env: string }> = {
   wordcraft: { label: 'WordCraft', env: 'WORDCRAFT' },

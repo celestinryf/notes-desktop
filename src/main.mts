@@ -12,7 +12,7 @@ import * as H from './shared/helpers.mts';
 import * as convert from './convert.mts';
 import { runWorker } from './run-worker.mts';
 import * as crafts from './craft-host.mts';
-import { createCraftTrace, msSince } from './craft-trace.mts';
+import { createCraftTrace } from './craft-trace.mts';
 import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
@@ -668,13 +668,13 @@ function main() {
     const mtime = mtimeOf(file);
     const buf = await readDocumentBuffer(file);
     rememberDocx(id, buf, mtime);
-    trace.write('read-bytes', { id, kind: 'docx', bytes: buf.length, ms: msSince(started) });
+    trace.write('read-bytes', { id, kind: 'docx', bytes: buf.length, ms: H.msSince(started) });
     return buf;
   });
   handle('files:documentBytes', async (_e, id) => {
     const started = performance.now();
     const buf = await readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath);
-    trace.write('read-bytes', { id, kind: 'sheet', bytes: buf.length, ms: msSince(started) });
+    trace.write('read-bytes', { id, kind: 'sheet', bytes: buf.length, ms: H.msSince(started) });
     return buf;
   });
   const CRAFT_SAVES = {
@@ -713,10 +713,10 @@ function main() {
       const started = performance.now();
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
       if (n.fileKind === 'docx') rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
-      trace.write('save-write', { id, kind: n.fileKind, bytes: buf.length, ms: msSince(started), savedAs: !!saved.savedAs });
+      trace.write('save-write', { id, kind: n.fileKind, bytes: buf.length, ms: H.msSince(started), savedAs: !!saved.savedAs });
       if (!saved.savedAs) {
         const reread = performance.now();
-        store.fillFileText(id).then(() => trace.write('text-reread', { id, kind: n.fileKind, ms: msSince(reread) }));
+        store.fillFileText(id).then(() => trace.write('text-reread', { id, kind: n.fileKind, ms: H.msSince(reread) }));
       }
       return saved;
     }

@@ -1,4 +1,5 @@
 'use strict';
+import { tenths } from '../shared/helpers.mts';
 export const NotesCraftFrame = (function () {
   const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -6,7 +7,7 @@ export const NotesCraftFrame = (function () {
     onSave: (name: string, bytes: Uint8Array, context: Context) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
     onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void, trace?: (event: string, fields?: TraceFields) => void }) {
     const mark = trace || (() => {});
-    const numbers = (m: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.flatMap((k) => { const v = m[k]; return typeof v === 'number' ? [[k, Math.round(v * 10) / 10]] : []; }));
+    const numbers = (m: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.flatMap((k) => { const v = m[k]; return typeof v === 'number' ? [[k, tenths(v)]] : []; }));
     let ready = false;
     let loaded = false;
     let gaveUp = false;
