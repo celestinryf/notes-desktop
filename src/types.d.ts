@@ -270,10 +270,10 @@ type IpcResult<K extends IpcChannel> = Awaited<ReturnType<IpcContract[K]>>;
 type Invoker<K extends IpcChannel> = (...args: IpcArgs<K>) => Promise<IpcResult<K>>;
 
 type BotEvent =
-  | { type: 'start'; cwd: string; kind: string; focus?: string; imported?: WorkspaceImport | null; plan?: string }
+  | { type: 'start'; cwd: string; kind: string; focus?: string; imported?: WorkspaceImport | { error: string } | null; plan?: string }
   | { type: 'out' | 'err'; text: string }
-  | { type: 'end'; error?: string; code?: number | null; imported?: WorkspaceImport | null }
-  | { type: 'reloaded' };
+  | { type: 'end'; ok: boolean; error?: string; code?: number | null; imported?: WorkspaceImport | { error: string } | null }
+  | ({ type: 'reloaded' } & VaultScan);
 
 interface MainEvents {
   'app:shown': [];

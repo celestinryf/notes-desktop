@@ -2379,7 +2379,7 @@
         el.botRunBtn.textContent = "Stop";
         botAppend("Claude Code, on your Claude " + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + " " : "") + "subscription (no API credits)\n", "bot-meta");
         botAppend("Working in " + ev.cwd + (ev.focus ? "  (looking at " + ev.focus + ")" : "") + "\n", "bot-meta");
-        if (ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
+        if (ev.imported && "updated" in ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
       } else if (ev.type === "out") {
         botAppend(ev.text);
       } else if (ev.type === "err") {
@@ -2391,9 +2391,9 @@
         if (ev.error) botAppend("\n" + ev.error + "\n", "bot-err");
         else {
           const imp = ev.imported;
-          const summary = imp && !imp.error ? " " + importSummary(imp) : "";
+          const summary = imp && "updated" in imp && !imp.error ? " " + importSummary(imp) : "";
           botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + "." + summary + "\n", "bot-meta");
-          if (imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
+          if (imp && "conflicts" in imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
         }
         refresh({ keepEditor: true }).then(async () => {
           if (state.currentId && !state.dirty) {
