@@ -203,14 +203,22 @@ function baseMatches(file: string, header: Record<string, unknown>) {
 
 function readLibrary(dir: string): Record<string, unknown> | null {
   const file = path.join(dir, 'notes.json');
-  const base = readWithRetry(file);
-  const raw = base.text === null ? null : parseLine(base.text);
-  if (!isRecord(raw)) return null;
-  const read = readWithRetry(path.join(dir, 'notes.journal'));
-  if (read.text === null) return raw;
-  const journal = parseJournal(read.text);
-  if (!journal.header || !journal.journalId || raw.journalId !== journal.journalId) return raw;
-  return replayJournal(raw, journal.records, !baseMatches(file, journal.header));
+  const readBase = () => {
+    const base = readWithRetry(file);
+    const raw = base.text === null ? null : parseLine(base.text);
+    return isRecord(raw) ? raw : null;
+  };
+  let raw = readBase();
+  for (let attempt = 0; raw && attempt < 3; attempt++) {
+    const read = readWithRetry(path.join(dir, 'notes.journal'));
+    if (read.text === null) return raw;
+    const journal = parseJournal(read.text);
+    if (journal.header && journal.journalId && raw.journalId === journal.journalId) return replayJournal(raw, journal.records, !baseMatches(file, journal.header));
+    const again = readBase();
+    if (!again || again.journalId === raw.journalId) return raw;
+    raw = again;
+  }
+  return raw;
 }
 
 function restoreFields<T extends object>(target: T, copy: T) {
