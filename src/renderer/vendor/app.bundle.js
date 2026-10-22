@@ -5236,6 +5236,7 @@
       let current = null;
       let parked = null;
       let confirmed = false;
+      let parkedDirty = false;
       let dirty = false;
       let unsaved = false;
       let waiters = [];
@@ -5261,6 +5262,7 @@
           }
           return;
         }
+        if (parked && m.doc === parked.doc && m.type === "dirty" && m.dirty) parkedDirty = true;
         if (!current || m.doc !== current.doc) return;
         if (m.type === "opened") {
           mark("opened", Object.assign({ ok: !!m.ok }, numbers(m, ["ms"])));
@@ -5350,12 +5352,13 @@
           return false;
         }
         parked = current;
+        parkedDirty = false;
         current = null;
         queued = null;
         return true;
       }
       function resume(context) {
-        if (!parked || gaveUp || !ready) return false;
+        if (!parked || parkedDirty || gaveUp || !ready) return false;
         current = { doc: parked.doc, name: parked.name, context };
         parked = null;
         confirmed = true;

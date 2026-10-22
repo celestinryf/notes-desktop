@@ -16,6 +16,7 @@ export const NotesCraftFrame = (function () {
     let current: { doc: string, name: string, context: Context } | null = null;
     let parked: { doc: string, name: string, context: Context } | null = null;
     let confirmed = false;
+    let parkedDirty = false;
     let dirty = false;
     let unsaved = false;
     let waiters: ((ok: boolean) => void)[] = [];
@@ -39,6 +40,7 @@ export const NotesCraftFrame = (function () {
         if (queued) { const q = queued; queued = null; open(q.name, q.bytes, q.context); }
         return;
       }
+      if (parked && m.doc === parked.doc && m.type === 'dirty' && m.dirty) parkedDirty = true;
       if (!current || m.doc !== current.doc) return;
       if (m.type === 'opened') {
         mark('opened', Object.assign({ ok: !!m.ok }, numbers(m, ['ms'])));
@@ -118,13 +120,14 @@ export const NotesCraftFrame = (function () {
     function park() {
       if (!current || !ready || !confirmed || dirty || unsaved) { close(); return false; }
       parked = current;
+      parkedDirty = false;
       current = null;
       queued = null;
       return true;
     }
 
     function resume(context: Context) {
-      if (!parked || gaveUp || !ready) return false;
+      if (!parked || parkedDirty || gaveUp || !ready) return false;
       current = { doc: parked.doc, name: parked.name, context };
       parked = null;
       confirmed = true;
