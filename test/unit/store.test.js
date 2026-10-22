@@ -151,7 +151,7 @@ test('corrupt data file is quarantined and the newest backup is used', () => {
   const a = store.create({ title: 'keep me' });
   clock.tick(11 * 60 * 1000);
   store.create({ title: 'triggers backup' });
-  assert.equal(fs.readdirSync(store.backupDir).length, 1);
+  assert.equal(fs.readdirSync(store.backupDir).length, 2, 'one backup after each of the two writes of notes.json');
   fs.writeFileSync(store.file, '{not json', 'utf8');
   const recovered = new Store(store.dir).load();
   assert.ok(recovered.loadError);
@@ -169,7 +169,7 @@ test('a corrupt file that cannot be moved aside is never backed up and prunes no
   clock.tick(11 * 60 * 1000);
   store.create({ title: 'makes a backup' });
   const goodBackups = fs.readdirSync(store.backupDir);
-  assert.equal(goodBackups.length, 1);
+  assert.equal(goodBackups.length, 2);
   fs.writeFileSync(store.file, '{broken', 'utf8');
   const realRename = fs.renameSync;
   fs.renameSync = (from, to) => { if (String(to).includes('.corrupt-')) throw Object.assign(new Error('EPERM: locked'), { code: 'EPERM' }); return realRename(from, to); };

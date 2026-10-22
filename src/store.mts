@@ -221,7 +221,8 @@ const copySettings = (s: Settings): Settings => Object.assign({}, s, { expandedF
 const touchesContent = (c: Change) => !!((c.notes && c.notes.length) || (c.dropped && c.dropped.length) || c.folders);
 const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function replayJournal(doc: Record<string, unknown>, records: unknown[], baseWasEdited: boolean): Record<string, unknown> {
+function replayJournal(doc: Record<string, unknown>, lines: unknown[], baseWasEdited: boolean): Record<string, unknown> {
+  const records = lines.flatMap((line) => (isRecord(line) && Array.isArray(line.change) ? line.change : []));
   const out = Object.assign({}, doc);
   const notes: unknown[] = Array.isArray(doc.notes) ? doc.notes.slice() : [];
   const idOf = (n: unknown) => (isObjectLike(n) && typeof n.id === 'string' ? n.id : null);
@@ -485,6 +486,7 @@ class Store {
   journalBytes: number;
   journalRecords: number;
   baseBytes: number;
+  revision: number;
   constructor(dir: string, opts?: { now?: () => number }) {
     opts = opts || {};
     this.dir = dir;
@@ -509,6 +511,7 @@ class Store {
     this.journalBytes = 0;
     this.journalRecords = 0;
     this.baseBytes = 0;
+    this.revision = 0;
   }
 
   load() {
@@ -589,7 +592,8 @@ class Store {
     try {
       const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort().reverse();
       for (const f of files) {
-        try { return JSON.parse(fs.readFileSync(path.join(this.backupDir, f), 'utf8')); } catch (_) {  }
+        const doc = parseLine(fs.readFileSync(path.join(this.backupDir, f), 'utf8'));
+        if (isRecord(doc)) return doc;
       }
     } catch (_) {  }
     return null;
@@ -628,6 +632,7 @@ class Store {
 
   save(change?: Change) {
     this._assertCanSave();
+    this.revision++;
     if (change) {
       const budget = this.journalReady && !this._compactionDue() ? Math.max(JOURNAL_MIN_BYTES, this.baseBytes * JOURNAL_SHARE_OF_BASE) - this.journalBytes : 0;
       const records = this._records(change, budget);
@@ -653,7 +658,7 @@ class Store {
 
   _compact() {
     fs.mkdirSync(this.dir, { recursive: true });
-    this._maybeBackup();
+    const overwritesUnmovedCorruptFile = !!this.backupSuspended;
     const journalId = crypto.randomUUID();
     const text = JSON.stringify(this.serialize(journalId), null, 2);
     writeFileAtomic(this.file, text);
@@ -661,6 +666,7 @@ class Store {
     this.baseBytes = text.length;
     this.lastCompactedAt = this.now();
     this.backupSuspended = false;
+    if (!overwritesUnmovedCorruptFile) this._maybeBackup();
     this.journalRecords = 0;
     try {
       const st = fs.statSync(this.file);
@@ -693,19 +699,21 @@ class Store {
     if (change.folders) records.push({ folders: this.folders });
     if (change.vaults) records.push({ vaults: this.vaults });
     if (change.settings) records.push({ settings: this.settings });
-    let text = '', bytes = 0;
+    if (!records.length) return { text: '', bytes: 0 };
+    const parts: string[] = [];
+    let bytes = 0;
     for (const r of records) {
-      const line = '\n' + JSON.stringify(r);
-      bytes += Buffer.byteLength(line);
+      const part = JSON.stringify(r);
+      bytes += Buffer.byteLength(part) + 1;
       if (bytes > budget) return null;
-      text += line;
+      parts.push(part);
     }
-    return { text, bytes };
+    const text = '\n{"change":[' + parts.join(',') + ']}';
+    return { text, bytes: Buffer.byteLength(text) };
   }
 
   _maybeBackup() {
     const now = this.now();
-    if (this.backupSuspended) return;
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
     const stamp = H.fileStamp(now);
@@ -1170,6 +1178,7 @@ class Store {
     const vault = this.getVault(id);
     if (!vault) return null;
     const known = this._notesByPathKey();
+    const revision = this.revision;
     let disk: DiskView | null = null;
     if (opts.paths && opts.paths.length <= SCAN_TARGETED_MAX && this.vaultRootFolder(id)) {
       const root = await fs.promises.stat(vault.path).catch(() => null);
@@ -1182,7 +1191,7 @@ class Store {
     if (!current) return null;
     const view = disk;
     const change: ScanChange = { notes: [], dropped: [], folders: false };
-    return this._guarded({ notes: [], folders: true, vaults: false, settings: false }, (remember) => this._applyScan(current, view, allowRemovals, change, remember), change);
+    return this._guarded({ notes: [], folders: true, vaults: false, settings: false }, (remember) => this._applyScan(current, view, revision, allowRemovals, change, remember), change);
   }
 
   _vaultFoldersByKey(id: string) {
@@ -1191,7 +1200,7 @@ class Store {
     return byKey;
   }
 
-  _applyScan(vault: Vault, disk: DiskView, allowRemovals: boolean, change: ScanChange, remember: (n: Note) => void): VaultScan {
+  _applyScan(vault: Vault, disk: DiskView, readAtRevision: number, allowRemovals: boolean, change: ScanChange, remember: (n: Note) => void): VaultScan {
     const id = vault.id;
     const now = this.now();
     const byKey = this._notesByPathKey();
@@ -1267,6 +1276,7 @@ class Store {
         seenNotes.add(note.id);
         continue;
       }
+      if (this.revision !== readAtRevision && !fs.existsSync(file.full)) continue;
       const read = file.text !== undefined ? { text: file.text, mtime: file.mtime } : readVaultText(file.full, file.mtime);
       if (read.text === null) continue;
       const orphan = orphanFor(read.text);

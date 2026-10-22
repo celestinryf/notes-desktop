@@ -165,6 +165,7 @@ Everything else is in `%APPDATA%\notes-app\` (the tray's "Open data folder" open
 | Path | What it holds |
 |---|---|
 | `notes.json` | Notes' own notes, folders and settings. Written to a temporary file first, then renamed into place |
+| `notes.journal` | The changes saved since `notes.json` was last written, one line each. Notes folds them into `notes.json` when the journal grows, ten minutes after the last fold, before each history commit, and when it quits |
 | `backups\` | A copy of `notes.json` at most every 10 minutes; the newest 10 are kept |
 | `history\` | The git repository behind Earlier versions |
 | `attachments\` | Attached files and voice memos |

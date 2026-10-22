@@ -136,9 +136,10 @@ class VaultManager {
       try {
         const busy = this.busy.has(id);
         const r = await this.store.scanVault(id, { allowRemovals: !busy, paths: paths || undefined });
-        if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r);
+        if (r && r.unavailable) this.diskChanged(id, paths);
+        else if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r);
         if (busy) { this.diskChanged(id, paths); this.scheduleRescan(id); }
-      } catch (err) { this._set(id, { lastError: 'scan: ' + err.message }); }
+      } catch (err) { this.diskChanged(id, paths); this._set(id, { lastError: 'scan: ' + err.message }); }
     }, this.rescanDebounceMs);
   }
 
