@@ -19,6 +19,7 @@ type CraftNotesDeps = {
   reportFileSaved: (target: CraftDoc, r: SavedFile, explicit: boolean, what: string) => boolean,
   refresh: (opts?: { keepEditor?: boolean }) => Promise<unknown>,
   renderFileRow: (note: PublicNote) => void,
+  checkCurrentFile: () => Promise<unknown>,
 };
 
 const baseName = (path: string) => {
@@ -26,7 +27,7 @@ const baseName = (path: string) => {
   return parts[parts.length - 1];
 };
 
-export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow }: CraftNotesDeps) {
+export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile }: CraftNotesDeps) {
   const CRAFT_UI: Record<CraftKey, CraftUi> = {
     wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
     gridcraft: { label: 'GridCraft', what: 'spreadsheet', frame: () => el.gridcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'Excel', without: 'spreadsheets cannot be shown for now.' },
@@ -35,6 +36,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const ui = CRAFT_UI[key];
     const frame = () => ui.frame();
     let fc: CraftFrame | null = null, note: CraftDoc | null = null, shownKey: string | null = null, seq = 0, down = false;
+    let parkedKey: string | null = null, parkedNote: CraftDoc | null = null;
     const trace = (event: string, fields?: TraceFields) => craftTrace(event, Object.assign({ app: key }, fields));
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
@@ -47,7 +49,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           onDirty: (d) => { if (note && state.currentId === note.id) setSaved(d ? 'Edited' : 'Saved'); },
           onOpened: () => { frame().classList.remove('is-opening'); if (note && state.currentId === note.id) showBanner(''); },
           onOpenFailed: (err) => {
-            clear();
+            drop();
             showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
           },
           theme: 'dark',
@@ -55,7 +57,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           trace,
           onUnavailable: () => {
             down = true;
-            clear();
+            drop();
             const n = state.current;
             if (n && n.filePath && n.fileKind && H.CRAFT_OF[n.fileKind] === key) renderFileRow(n);
             toast(ui.label + ' did not start, so ' + ui.without);
@@ -69,6 +71,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       frame().classList.remove('hidden');
       trace('show', { id: n.id, kept: shownKey === k, frame: !!fc });
       if (shownKey === k) return;
+      if (resumeParked(k)) { trace('resume', { id: n.id }); checkCurrentFile(); return; }
       shownKey = k;
       const s = ++seq;
       note = null;
@@ -86,17 +89,41 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
         controller().open(name, bytes, note);
       } catch (err) {
         if (s !== seq) return;
-        clear();
+        drop();
         showBanner('Could not open this ' + ui.what + ' in ' + ui.label + ': ' + ipcErrorText(err) + ' Use "Open with…" to open it in ' + ui.openWith + '.');
       }
     }
-    function clear() {
-      if (shownKey !== null || note !== null) trace('clear', { id: note ? note.id : null });
+    function resumeParked(k: string) {
+      const kept = parkedKey === k ? parkedNote : null;
+      parkedKey = null;
+      parkedNote = null;
+      if (!kept || !fc || !fc.resume(kept)) return false;
+      seq++;
+      shownKey = k;
+      note = kept;
+      frame().classList.remove('is-opening');
+      showBanner('');
+      return true;
+    }
+    function hide() {
       seq++;
       shownKey = null;
       note = null;
-      if (fc) fc.close();
       frame().classList.add('hidden');
+    }
+    function clear() {
+      if (shownKey === null && note === null) { hide(); return; }
+      trace('clear', { id: note ? note.id : null });
+      const leaving = note, leavingKey = shownKey;
+      if (fc && leaving && leavingKey && fc.park()) { parkedKey = leavingKey; parkedNote = leaving; }
+      else { parkedKey = null; parkedNote = null; if (fc) fc.close(); }
+      hide();
+    }
+    function drop() {
+      parkedKey = null;
+      parkedNote = null;
+      if (fc) fc.close();
+      hide();
     }
     async function saveFromFrame(name: string, bytes: Uint8Array, target: CraftDoc | null) {
       if (!target) return { ok: false, own: true };
@@ -141,7 +168,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       trace('flush-done', { ok, ms: H.msSince(started) });
       return ok;
     }
-    const forget = () => { shownKey = null; };
+    const forget = () => { shownKey = null; parkedKey = null; parkedNote = null; };
     return { usable, show, clear, dirty, flush, forget };
   }
   const crafts = { wordcraft: craftViewer('wordcraft'), gridcraft: craftViewer('gridcraft') };
