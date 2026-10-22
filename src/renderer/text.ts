@@ -1,4 +1,4 @@
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const H = require('../../src/shared/helpers.ts');
+const H = require('../../src/shared/helpers.mts');
 
 test('deriveTitle prefers explicit title, then first body line, then Untitled', () => {
   assert.equal(H.deriveTitle({ title: '  Groceries ', body: 'milk' }), 'Groceries');
@@ -152,7 +152,7 @@ test('safeFilename strips characters Windows rejects', () => {
 });
 
 test('safeFilename never cuts through a surrogate pair', () => {
-  const H = require('../../src/shared/helpers.ts');
+  const H = require('../../src/shared/helpers.mts');
   const name = 'a'.repeat(79) + '😀' + 'b'.repeat(10);
   const out = H.safeFilename(name);
   assert.equal(out, 'a'.repeat(79) + '😀', 'cut by code point');

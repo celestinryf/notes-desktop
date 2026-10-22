@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Store } = require('../../src/store');
-const W = require('../../src/workspace');
+const { Store } = require('../../src/store.mts');
+const W = require('../../src/workspace.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-ws-'); // removed when the test process exits

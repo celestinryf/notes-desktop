@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const F = require('../../src/files');
-const { Store } = require('../../src/store');
+const F = require('../../src/files.mts');
+const { Store } = require('../../src/store.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-files-'); // removed when the test process exits

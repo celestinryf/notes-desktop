@@ -141,7 +141,7 @@
     }
   });
 
-  // src/shared/helpers.ts
+  // src/shared/helpers.mts
   var helpers_exports = {};
   __export(helpers_exports, {
     CRAFT_OF: () => CRAFT_OF,
@@ -588,7 +588,7 @@
     return Math.max(1, score - t.length / 20);
   }
 
-  // src/shared/themes.ts
+  // src/shared/themes.mts
   var themes_exports = {};
   __export(themes_exports, {
     BUILT_IN: () => BUILT_IN,

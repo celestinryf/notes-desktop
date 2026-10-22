@@ -1,13 +1,19 @@
-// @ts-check
-'use strict';
 /* Desktop stickies: one small frameless window per note that has note.sticky set. Main process only.
    Position, size, tint and the on-top flag are persisted on the note, so stickies come back at login. */
-const path = require('path');
-const { BrowserWindow, screen } = require('electron');
+import path from 'node:path';
+import { BrowserWindow, screen, Menu, shell, clipboard } from 'electron';
+import * as windowInput from './window-input.mts';
 
 const THEME_BG = { light: '#f6dcc3', dark: '#2a1a12' };
 
 class StickyManager {
+  store: any;
+  windows: Map<any, any>;
+  timers: Map<any, any>;
+  themeFor: any;
+  showInactive: boolean;
+  onChange: any;
+  quitting: boolean;
   constructor(store, opts) {
     opts = opts || {};
     this.store = store;
@@ -29,7 +35,7 @@ class StickyManager {
   }
 
   // Shows the sticky for a note, creating the window if needed. Marks the note sticky if it was not.
-  open(id, opts) {
+  open(id, opts?) {
     opts = opts || {};
     const note = this.store.get(id);
     if (!note || note.trashedAt || note.lock) return null; // a locked note never sits on the desktop
@@ -54,7 +60,7 @@ class StickyManager {
       title: 'Sticky',
       backgroundColor: THEME_BG[this.themeFor()] || THEME_BG.light,
       webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
+        preload: path.join(import.meta.dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -63,14 +69,12 @@ class StickyManager {
     });
     this.windows.set(id, w);
     // Same guards as the main window: nothing navigates or opens windows from the privileged page.
-    w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); return { action: 'deny' }; });
-    w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) require('electron').shell.openExternal(url); });
+    w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+    w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); });
     // Same zoom keys and right-click menu as the main window (zoom is per sticky and not remembered).
-    const windowInput = require('./window-input');
-    const { Menu, shell, clipboard } = require('electron');
     windowInput.attachZoom(w.webContents);
     windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard });
-    w.loadFile(path.join(__dirname, 'renderer', 'sticky.html'), { query: { id } });
+    w.loadFile(path.join(import.meta.dirname, 'renderer', 'sticky.html'), { query: { id } });
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;
       if (this.showInactive || opts.focus === false) w.showInactive(); else { w.show(); w.focus(); }
@@ -96,7 +100,7 @@ class StickyManager {
   }
 
   // Closes the window. With forget, the note stops being a sticky (it stays a note).
-  close(id, opts) {
+  close(id, opts?) {
     opts = opts || {};
     if (opts.forget) { try { this.store.setSticky(id, null); } catch (_) { /* paused */ } }
     const w = this.windows.get(id);
@@ -135,7 +139,7 @@ class StickyManager {
   }
 
   // Tells every sticky (except the sender) that a note changed, so it can reload if it shows that note.
-  broadcast(channel, payload, exceptContents) {
+  broadcast(channel, payload?, exceptContents?) {
     for (const w of this.windows.values()) {
       if (w.isDestroyed()) continue;
       if (exceptContents && w.webContents.id === exceptContents.id) continue;
@@ -165,4 +169,4 @@ class StickyManager {
   }
 }
 
-module.exports = { StickyManager };
+export { StickyManager };

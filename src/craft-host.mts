@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* The Craft apps edit office files inside Notes: WordCraft (Word documents) and GridCraft (spreadsheets), the user's
    forks of ArtCraft's Rust office apps (github.com/celestinryf/<name>), each built to WebAssembly and shown in a
    frame of its own. A build is served from its folder under a private scheme named after the app (wordcraft://app,
@@ -9,9 +7,9 @@
    This module only finds and serves the builds. Without one, Notes shows what it can on its own: its simple Word
    editor; for spreadsheets, a banner and "Open with…".
    Build one with `trunk build --release` in the fork's apps/<name>-web; the output is <repo>\dist\web. */
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // NOTES_APP_<NAME>_DIR names a build folder; NOTES_APP_NO_<NAME>=1 (or NOTES_APP_NO_CRAFTS=1 for all of them) means
 // none, which the tests use to drive Notes' own editors whatever is built on this computer.
@@ -51,8 +49,7 @@ function resolve(dir, url) {
 
 // Serves every app's build. Returns which are there: { wordcraft, gridcraft }.
 function serve(protocol) {
-  /** @type {Record<string, boolean>} */
-  const ready = {};
+  const ready: Record<string, boolean> = {};
   for (const key of KEYS) {
     const dir = buildDir(key);
     ready[key] = !!dir;
@@ -71,4 +68,4 @@ function serve(protocol) {
   return ready;
 }
 
-module.exports = { APPS, KEYS, buildDir, registerSchemes, resolve, serve };
+export { APPS, KEYS, buildDir, registerSchemes, resolve, serve };

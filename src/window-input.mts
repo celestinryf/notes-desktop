@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* Zoom keys and the right-click menu for app windows. Main process only.
 
    Why this exists: the app sets no menu of its own, so Electron's default menu supplies the shortcuts. Its
@@ -31,7 +29,7 @@ function nextZoom(level, action) {
 }
 
 // Wires the keys on one window. onChange(level) lets the caller remember the level.
-function attachZoom(webContents, opts) {
+function attachZoom(webContents, opts?) {
   opts = opts || {};
   if (Number.isFinite(opts.initial)) webContents.once('did-finish-load', () => { try { webContents.setZoomLevel(opts.initial); } catch (_) { /* window gone */ } });
   webContents.on('before-input-event', (event, input) => {
@@ -47,12 +45,11 @@ function attachZoom(webContents, opts) {
 // Builds the right-click menu for one context-menu event. Pure: no Electron objects, so it is testable.
 // params: Electron's context-menu params. Returns an array of menu item descriptions; items with an
 // `action` are wired by attachContextMenu, items with a `role` are Electron's standard edit roles.
-/** @typedef {{ label?: string, action?: string, arg?: string, enabled?: boolean, type?: 'separator', role?: string, accelerator?: string, click?: () => void }} MenuItemSpec */
+type MenuItemSpec = { label?: string, action?: string, arg?: string, enabled?: boolean, type?: 'separator', role?: string, accelerator?: string, click?: () => void };
 function contextMenuTemplate(params) {
   const p = params || {};
   const flags = p.editFlags || {};
-  /** @type {MenuItemSpec[]} */
-  const items = [];
+  const items: MenuItemSpec[] = [];
   const word = String(p.misspelledWord || '');
   if (p.isEditable && word) {
     const suggestions = (p.dictionarySuggestions || []).slice(0, 6);
@@ -103,8 +100,7 @@ function attachContextMenu(webContents, getWindow, deps) {
   webContents.on('context-menu', (_event, params) => {
     const template = contextMenuTemplate(params).map((item) => {
       if (!item.action) return item;
-      /** @type {MenuItemSpec} */
-      const out = Object.assign({}, item);
+      const out: MenuItemSpec = Object.assign({}, item);
       delete out.action; delete out.arg;
       out.click = () => {
         const arg = item.arg || '';
@@ -131,4 +127,4 @@ function attachContextMenu(webContents, getWindow, deps) {
   });
 }
 
-module.exports = { zoomAction, nextZoom, attachZoom, contextMenuTemplate, attachContextMenu, ZOOM_MIN, ZOOM_MAX };
+export { zoomAction, nextZoom, attachZoom, contextMenuTemplate, attachContextMenu, ZOOM_MIN, ZOOM_MAX };

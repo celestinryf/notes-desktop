@@ -3,7 +3,7 @@ import { state, lockedNow } from './state.ts';
 import { find } from './find-state.ts';
 import { src } from './code-editor.ts';
 import { currentHtml } from './note-html.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 import { toast } from './toast.ts';
 import { findOffsets, isQueryText } from './find-text.ts';

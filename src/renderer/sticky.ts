@@ -1,6 +1,6 @@
 'use strict';
 /* Sticky window page: one note, rendered editor, autosave. Talks to main through the same notesApi bridge. */
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import NotesIcons from './icons.js';
 
 (function () {

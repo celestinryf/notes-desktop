@@ -1,8 +1,6 @@
-// @ts-check
-'use strict';
 /* Note locking: the body is encrypted with AES-256-GCM under a key derived from a password with scrypt.
    The record on disk keeps only the ciphertext; plaintext lives in memory for the session once unlocked. */
-const crypto = require('crypto');
+import crypto from 'node:crypto';
 
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
@@ -38,12 +36,11 @@ function unlock(blob, password) {
   try { return { body: decrypt(blob, key), key }; } catch (_) { return null; }
 }
 
-/** @returns {NoteLock | null} */
-function sanitizeLock(raw) {
+function sanitizeLock(raw): NoteLock | null {
   if (!raw || typeof raw !== 'object') return null;
   const ok = ['salt', 'iv', 'tag', 'ct'].every((k) => typeof raw[k] === 'string' && raw[k].length > 0);
   if (!ok) return null;
   return { v: 1, kdf: 'scrypt', N: Number.isFinite(raw.N) ? raw.N : SCRYPT.N, salt: raw.salt, iv: raw.iv, tag: raw.tag, ct: raw.ct };
 }
 
-module.exports = { lock, unlock, encrypt, decrypt, deriveKey, sanitizeLock };
+export { lock, unlock, encrypt, decrypt, deriveKey, sanitizeLock };

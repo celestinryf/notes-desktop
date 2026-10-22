@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const CB = require('../../src/claude-bin');
+const CB = require('../../src/claude-bin.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-cb-'); // removed when the test process exits

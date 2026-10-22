@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    "module": "commonjs",
+    "module": "nodenext",
     "lib": [
       "es2022",
       "dom"
@@ -16,18 +16,17 @@
       "node"
     ],
     "useUnknownInCatchVariables": false,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "nodenext",
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
   },
   "include": [
     "src/types.d.ts",
-    "src/store.js",
     "src/preload.js",
-    "src/main.js",
-    "src/shared/themes.js",
-    "src/*.js",
-    "src/shared/*.js",
-    "src/docx-edit/*.js",
-    "src/shared/*.ts",
+    "src/*.mts",
+    "src/shared/*.mts",
+    "src/docx-edit/*.mts",
     "src/renderer/globals.d.ts"
   ]
 }

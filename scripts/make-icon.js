@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app, nativeImage } = require('electron');
-const { drawIconBitmap } = require('../src/icon');
+const { drawIconBitmap } = require('../src/icon.mts');
 
 function pngToIco(pngBuffers) {
   // ICO header + one directory entry per image, each entry pointing at a PNG payload.

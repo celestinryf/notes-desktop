@@ -2,7 +2,7 @@
   "name": "notes-app",
   "version": "1.0.0",
   "description": "Tray-resident notes app launched by a global hotkey",
-  "main": "src/main.js",
+  "main": "src/main.mts",
   "private": true,
   "scripts": {
     "start": "electron .",
@@ -24,6 +24,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^22.20.5",
     "electron": "^44.7.2",
     "esbuild": "^0.28.2",

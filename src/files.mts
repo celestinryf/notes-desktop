@@ -1,10 +1,8 @@
-// @ts-check
-'use strict';
 /* File-backed notes: which files the app can show or edit, how to read them, and where your agent files live. */
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const zlib = require('zlib');
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import zlib from 'node:zlib';
 
 const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'rst', 'adoc', 'org',
   'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'csv', 'tsv', 'log',
@@ -14,8 +12,12 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 // Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
-const { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } = require('./shared/helpers.ts');
-const markitdown = require('./markitdown');
+import { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
+import * as markitdown from './markitdown.mts';
+import { createRequire } from 'node:module';
+
+const requireWhenNeeded = createRequire(import.meta.url);
+
 
 // Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
 // 'image' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
@@ -86,14 +88,14 @@ function detectEol(filePath) {
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
 const MAX_ZIP_UNPACKED = 100 * 1024 * 1024; // what the viewer parses on the page's own thread
 const MAX_ZIP_ENTRIES = 20000;
-const inflateRaw = (buf, opts) => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
+const inflateRaw = (buf: Buffer, opts: zlib.ZlibOptions): Promise<Buffer> => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
 const zipError = (msg) => Object.assign(new Error(msg), { code: 'EZIP' });
 const TOO_BIG_UNPACKED = 'This document unpacks to more than 100 MB, so Notes will not open it.';
 
 // A Word document is a zip. A crafted one can unpack to gigabytes from a few kilobytes and hang the app, and its
 // directory can lie about sizes, so every entry is really inflated here (on the thread pool, capped) before any
 // library is allowed to open it. want: names of parts to hand back, inflated ({ name: Buffer }).
-async function assertSafeZip(buf, want) {
+async function assertSafeZip(buf, want?) {
   const parts = {};
   let eocd = -1;
   for (let i = buf.length - 22, min = Math.max(0, buf.length - 22 - 65535); i >= min; i--) {
@@ -115,7 +117,7 @@ async function assertSafeZip(buf, want) {
     if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw zipError('This document is damaged (bad zip entry).');
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
     if (start + packed > buf.length) throw zipError('This document is damaged (truncated).');
-    let data = null;
+    let data: Buffer | null = null;
     if (method === 0) { total += packed; data = buf.subarray(start, start + packed); }
     else if (method === 8) {
       try { data = await inflateRaw(buf.subarray(start, start + packed), { maxOutputLength: MAX_ZIP_UNPACKED - total + 1 }); total += data.length; }
@@ -150,7 +152,7 @@ async function readDocxText(filePath) {
   const ext = extOf(filePath);
   let body = '';
   if (OOXML_EXT.has(ext)) {
-    const mammoth = require('mammoth');
+    const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
     body = String((await mammoth.extractRawText({ buffer: await readDocumentBuffer(filePath) })).value || '');
   } else if (ext === 'odt') {
     const parts = await assertSafeZip(await readDocumentBuffer(filePath), ['content.xml']);
@@ -168,8 +170,7 @@ async function readDocxText(filePath) {
 const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
 async function readOfficeText(filePath) {
   const stat = fs.statSync(filePath);
-  /** @type {{ body: string | undefined, mtime: number, size: number }} */
-  const out = { body: '', mtime: stat.mtimeMs, size: stat.size };
+  const out: { body: string | undefined, mtime: number, size: number } = { body: '', mtime: stat.mtimeMs, size: stat.size };
   if (!markitdown.available() || !markitdown.reads(extOf(filePath))) return out;
   try {
     await readDocumentBuffer(filePath); // the size limit and the zip guard, before anything unpacks the file
@@ -223,7 +224,7 @@ const CP1252 = new TextDecoder('windows-1252');
 function rtfText(buf) {
   const s = buf.toString('latin1');
   let out = '', skip = false, uc = 1, pending = 0;
-  const stack = [];
+  const stack: (boolean)[] = [];
   const put = (text) => { if (skip) return; if (pending > 0) { pending--; return; } out += text; };
   for (let i = 0; i < s.length;) {
     const c = s[i];
@@ -271,12 +272,12 @@ function pathKey(p) {
 
 // The files that steer coding agents on this machine: global and per-project instruction files, plus the
 // user's Claude Code commands, output styles, and memory notes. Scans one level of project folders under home.
-function discoverAgentFiles(opts) {
+function discoverAgentFiles(opts?) {
   opts = opts || {};
   const home = opts.home || os.homedir();
-  const out = [];
+  const out: { filePath: string, label: string }[] = [];
   const seen = new Set();
-  const add = (filePath, label) => {
+  const add = (filePath: string, label: string) => {
     if (!filePath || !fs.existsSync(filePath)) return;
     const key = pathKey(filePath);
     if (seen.has(key)) return;
@@ -334,4 +335,4 @@ function safeList(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-module.exports = { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+export { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

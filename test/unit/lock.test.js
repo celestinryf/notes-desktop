@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Store } = require('../../src/store');
-const L = require('../../src/lock');
+const { Store } = require('../../src/store.mts');
+const L = require('../../src/lock.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-lock-'); // removed when the test process exits

@@ -1,7 +1,7 @@
 /* Editing an opened Word document in place, exposed as window.NotesDocxEditor. The document is shown by docx-preview
    inside the sandboxed frame (nothing in it runs); this page makes its paragraphs editable and listens from outside.
 
-   Only paragraphs the Ooxml model can write back exactly are editable (see src/docx-edit/ooxml.js); the rest of the
+   Only paragraphs the Ooxml model can write back exactly are editable (see src/docx-edit/ooxml.mts); the rest of the
    page cannot be changed. Each editable paragraph is found again on the page through a bookmark added to a display
    copy of the document, and checked to show exactly the text the file holds. Saving compares what is shown now with
    what was first shown, character by character, and sends main the span of paragraphs from the first to the last
@@ -285,7 +285,7 @@ export const NotesDocxEditor = (function () {
       const p = el && el.closest('p');
       return p && !p.closest('[contenteditable="false"]') && p.closest('article[contenteditable="true"]') ? p : null;
     };
-    // A range may change text only inside one chain of paragraphs (see ooxml.js): never across a table, a picture,
+    // A range may change text only inside one chain of paragraphs (see ooxml.mts): never across a table, a picture,
     // a read-only paragraph or a section break.
     function rangeAllowed(range) {
       const a = paraOf(range.startContainer), b = paraOf(range.endContainer);

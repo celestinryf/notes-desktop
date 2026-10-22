@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { GitSync } = require('../../src/gitSync');
+const { GitSync } = require('../../src/gitSync.mts');
 
 let gitAvailable = true;
 try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch (_) { gitAvailable = false; }

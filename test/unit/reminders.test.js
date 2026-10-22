@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Store } = require('../../src/store');
-const { ReminderScheduler } = require('../../src/reminders');
-const H = require('../../src/shared/helpers.ts');
+const { Store } = require('../../src/store.mts');
+const { ReminderScheduler } = require('../../src/reminders.mts');
+const H = require('../../src/shared/helpers.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-rem-'); // removed when the test process exits

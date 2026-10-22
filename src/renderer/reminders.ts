@@ -1,6 +1,6 @@
 import { el, setLabel } from './dom.ts';
 import { state } from './state.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { toLocalInputValue } from './remind-times.ts';
 

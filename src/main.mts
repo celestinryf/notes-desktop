@@ -1,28 +1,35 @@
-// @ts-check
-'use strict';
-const path = require('path');
-const fs = require('fs');
-const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } = require('electron');
-const { Store } = require('./store');
-const { GitSync } = require('./gitSync');
-const windowInput = require('./window-input');
-const { VaultManager } = require('./vaults');
-const { drawIconBitmap } = require('./icon');
-const crypto = require('crypto');
-const os = require('os');
-const H = require('./shared/helpers.ts');
-const convert = require('./convert');
-const { runWorker } = require('./run-worker');
-const crafts = require('./craft-host');
+import path from 'node:path';
+import fs from 'node:fs';
+import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
+import { Store } from './store.mts';
+import { GitSync } from './gitSync.mts';
+import * as windowInput from './window-input.mts';
+import { VaultManager } from './vaults.mts';
+import { drawIconBitmap } from './icon.mts';
+import crypto from 'node:crypto';
+import os from 'node:os';
+import * as H from './shared/helpers.mts';
+import * as convert from './convert.mts';
+import { runWorker } from './run-worker.mts';
+import * as crafts from './craft-host.mts';
+import { ReminderScheduler } from './reminders.mts';
+import { LiveShare } from './live.mts';
+import { StickyManager } from './stickies.mts';
+import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } from './files.mts';
+import * as workspace from './workspace.mts';
+import * as claudeBin from './claude-bin.mts';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-const APP_ROOT = path.resolve(__dirname, '..');
+const APP_ROOT = path.resolve(import.meta.dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
 const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_START_HIDDEN === '1';
 // Test harnesses set this so the window never takes keyboard focus away from whoever is using the machine.
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
-const Themes = require('./shared/themes.ts');
+import * as Themes from './shared/themes.mts';
 const TITLE_BAR_H = 40; // styles.css --bar-h
 
 app.setName('Notes');
@@ -52,16 +59,15 @@ function main() {
     if (h !== lastContentHash) { lastContentHash = h; git.noteChanged(); }
     return store;
   };
-  let win = null;
-  let tray = null;
+  let win: BrowserWindow | null = null;
+  let tray: Tray | null = null;
   let quitting = false;
-  let pendingOpenNote = null;
+  let pendingOpenNote: string | null = null;
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
     onNotesChanged: () => { lastContentHash = contentHash(); fanReloaded({ reason: 'vault' }); },
   });
-  const { ReminderScheduler } = require('./reminders');
   const reminders = new ReminderScheduler(store, {
     tickMs: Number(process.env.NOTES_APP_REMINDER_TICK_MS) || 30000,
     notify: (note) => {
@@ -70,30 +76,28 @@ function main() {
       if (win && !win.isDestroyed()) win.webContents.send('reminder:fired', { id: note.id, title });
       if (process.env.NOTES_APP_DRY_NOTIFY === '1' || !Notification.isSupported()) return;
       const n = new Notification({ title: '⏰ ' + title, body: H.plainTextFromMarkdown(note.body).slice(0, 200) || 'Open your note', icon: iconImage() });
-      n.on('click', () => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', note.id); else pendingOpenNote = note.id; });
+      n.on('click', () => { const w = showWindow(); if (rendererReady) w.webContents.send('app:open-note', note.id); else pendingOpenNote = note.id; });
       n.show();
     },
   });
-  const { LiveShare } = require('./live');
   const live = new LiveShare(store, {
     pushDelayMs: Number(process.env.NOTES_APP_LIVE_PUSH_MS) || 250,
     // A remote edit landed in the store: the open editor and any sticky showing the note follow it.
     onRemote: (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
     onStatus: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('live:status', { id, status }); },
   });
-  const { StickyManager } = require('./stickies');
   const stickies = new StickyManager(store, {
     themeFor: effectiveTheme,
     showInactive: SHOW_INACTIVE,
     onChange: () => { refreshTray(); if (win && !win.isDestroyed()) win.webContents.send('stickies:changed'); },
   });
-  let hotkeyState = { hotkey: store.settings.hotkey, registered: false };
-  let boundsTimer = null;
+  let hotkeyState: { hotkey: string, registered: boolean, fallback?: boolean } = { hotkey: store.settings.hotkey, registered: false };
+  let boundsTimer: NodeJS.Timeout | undefined;
 
   const iconImage = () => nativeImage.createFromBitmap(drawIconBitmap(32), { width: 32, height: 32 });
 
   let rendererShown = false; // first paint done; survives later runtime writes
-  function writeRuntime(extra) {
+  function writeRuntime(extra?) {
     if (extra && extra.ready) rendererShown = true;
     const data = Object.assign({
       ready: rendererShown,
@@ -113,7 +117,7 @@ function main() {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   }
 
-  // The editor's paper and text colours in the colour scheme in use (src/shared/themes.js), shown before the page
+  // The editor's paper and text colours in the colour scheme in use (src/shared/themes.mts), shown before the page
   // paints; the page repaints the caption buttons to match whatever sits under them (app:titleBar).
   function windowColors() {
     return Themes.windowColors(store.settings, effectiveTheme());
@@ -132,7 +136,7 @@ function main() {
   }
 
   function createWindow() {
-    win = new BrowserWindow(Object.assign({
+    const w = new BrowserWindow(Object.assign({
       minWidth: 760,
       minHeight: 480,
       show: false,
@@ -145,7 +149,7 @@ function main() {
       titleBarOverlay: { color: windowColors().background, symbolColor: windowColors().foreground, height: TITLE_BAR_H },
       alwaysOnTop: store.settings.alwaysOnTop,
       webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
+        preload: path.join(import.meta.dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -154,73 +158,75 @@ function main() {
         nodeIntegrationInSubFrames: true,
       },
     }, safeBounds(store.settings.window)));
+    win = w;
 
-    win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    w.loadFile(path.join(import.meta.dirname, 'renderer', 'index.html'));
 
-    win.once('ready-to-show', () => {
+    w.once('ready-to-show', () => {
       if (!START_HIDDEN) showWindow();
       writeRuntime({ ready: true });
     });
 
-    win.on('close', (e) => {
+    w.on('close', (e) => {
       if (quitting) return;
       e.preventDefault();
-      win.hide();
+      w.hide();
       writeRuntime();
     });
 
     const persistBounds = () => {
       clearTimeout(boundsTimer);
       boundsTimer = setTimeout(() => {
-        if (win && !win.isDestroyed() && !win.isMinimized() && !win.isMaximized()) {
-          try { store.setSettings({ window: win.getBounds() }); } catch (_) { /* saving paused or disk busy; bounds are not worth an error dialog */ }
+        if (!w.isDestroyed() && !w.isMinimized() && !w.isMaximized()) {
+          try { store.setSettings({ window: w.getBounds() }); } catch (_) { /* saving paused or disk busy; bounds are not worth an error dialog */ }
         }
       }, 400);
     };
-    win.on('resize', persistBounds);
-    win.on('move', persistBounds);
-    win.on('show', () => writeRuntime());
+    w.on('resize', persistBounds);
+    w.on('move', persistBounds);
+    w.on('show', () => writeRuntime());
     // Windows logoff/shutdown does not emit before-quit; do what can be done synchronously.
-    win.on('session-end', () => {
-      try { win.webContents.send('app:flush'); } catch (_) { /* ignore */ }
+    w.on('session-end', () => {
+      try { w.webContents.send('app:flush'); } catch (_) { /* ignore */ }
       stickies.broadcast('app:flush');
       git.flush().catch(() => {});
     });
-    win.on('hide', () => { writeRuntime(); relockOnHide(); });
-    win.on('focus', () => {
+    w.on('hide', () => { writeRuntime(); relockOnHide(); });
+    w.on('focus', () => {
       // Windows may refuse a topmost change requested while another app held the foreground; retry on focus.
-      if (store.settings.alwaysOnTop && !win.isAlwaysOnTop()) win.setAlwaysOnTop(true);
+      if (store.settings.alwaysOnTop && !w.isAlwaysOnTop()) w.setAlwaysOnTop(true);
       writeRuntime();
     });
-    win.on('blur', () => writeRuntime());
+    w.on('blur', () => writeRuntime());
 
-    win.webContents.setWindowOpenHandler(({ url }) => {
+    w.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) shell.openExternal(url);
       return { action: 'deny' };
     });
     // Ctrl+= / Ctrl+- / Ctrl+0 and the right-click menu (Electron supplies neither properly on its own).
     // Debounced: holding Ctrl+= repeats ~30 times a second, and each save writes notes.json.
-    let zoomSaveTimer = null;
+    let zoomSaveTimer: NodeJS.Timeout | undefined;
     const rememberZoom = (level) => {
       clearTimeout(zoomSaveTimer);
       zoomSaveTimer = setTimeout(() => { if (store.settings.zoomLevel === level) return; try { store.setSettings({ zoomLevel: level }); } catch (_) { /* saving paused */ } }, 400);
     };
-    windowInput.attachZoom(win.webContents, { initial: store.settings.zoomLevel, onChange: rememberZoom });
-    windowInput.attachContextMenu(win.webContents, () => win, { Menu, shell, clipboard, onZoom: rememberZoom });
-    win.webContents.on('will-navigate', (e, url) => {
+    windowInput.attachZoom(w.webContents, { initial: store.settings.zoomLevel, onChange: rememberZoom });
+    windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard, onZoom: rememberZoom });
+    w.webContents.on('will-navigate', (e, url) => {
       e.preventDefault(); // the app page never navigates (a dropped file must not replace it)
       if (/^https?:/i.test(url)) shell.openExternal(url);
     });
 
-    if (process.env.NOTES_APP_DEVTOOLS === '1') win.webContents.openDevTools({ mode: 'detach' });
+    if (process.env.NOTES_APP_DEVTOOLS === '1') w.webContents.openDevTools({ mode: 'detach' });
     if (process.env.NOTES_APP_LOG_CONSOLE === '1') {
-      win.webContents.on('console-message', (ev, ...rest) => {
+      w.webContents.on('console-message', (ev, ...rest) => {
         const d = ev && typeof ev.level !== 'undefined' ? ev : { level: rest[0], message: rest[1], lineNumber: rest[2], sourceId: rest[3] };
         const level = typeof d.level === 'number' ? ['debug', 'info', 'warning', 'error'][d.level] || d.level : d.level;
         console.log('[renderer:' + level + '] ' + d.message + ' (' + d.sourceId + ':' + d.lineNumber + ')');
       });
-      win.webContents.on('render-process-gone', (_e, details) => console.log('[renderer:error] render process gone: ' + details.reason));
+      w.webContents.on('render-process-gone', (_e, details) => console.log('[renderer:error] render process gone: ' + details.reason));
     }
+    return w;
   }
 
   // While saving is paused because the file was unreadable at startup, try again whenever the window is shown.
@@ -248,17 +254,26 @@ function main() {
 
   function showWindow() {
     retryLoadIfBlocked();
-    if (!win || win.isDestroyed()) createWindow();
-    if (win.isMinimized()) win.restore();
+    const w = win && !win.isDestroyed() ? win : createWindow();
+    if (w.isMinimized()) w.restore();
     if (SHOW_INACTIVE) {
-      win.showInactive();
+      w.showInactive();
     } else {
-      win.show();
-      win.focus();
+      w.show();
+      w.focus();
       app.focus({ steal: true });
     }
-    win.webContents.send('app:shown');
+    w.webContents.send('app:shown');
     writeRuntime();
+    return w;
+  }
+
+  function openDialog(options: Electron.OpenDialogOptions) {
+    return win && !win.isDestroyed() ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
+  }
+
+  function saveDialog(options: Electron.SaveDialogOptions) {
+    return win && !win.isDestroyed() ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
   }
 
   function hideWindow() {
@@ -326,10 +341,10 @@ function main() {
   }
 
   function stickyMenu() {
-    const items = /** @type {Electron.MenuItemConstructorOptions[]} */ (store.stickies().map((n) => ({
+    const items = (store.stickies().map((n) => ({
       label: (stickies.isOpen(n.id) ? '' : '(hidden) ') + (H.deriveTitle(n) || 'Untitled').slice(0, 60),
       click: () => stickies.open(n.id),
-    })));
+    })) as Electron.MenuItemConstructorOptions[]);
     if (!items.length) items.push({ label: 'No stickies yet', enabled: false });
     items.push({ type: 'separator' });
     items.push({ label: 'Show all', enabled: store.stickies().length > 0, click: () => { for (const n of store.stickies()) stickies.open(n.id, { focus: false }); } });
@@ -349,8 +364,7 @@ function main() {
     stickies.broadcast('settings:changed', store.getSettings());
   }
 
-  /** @type {Record<string, boolean>} */
-  let craftsReady = {}; // which Craft apps' builds are there: { wordcraft, gridcraft }
+  let craftsReady: Record<string, boolean> = {}; // which Craft apps' builds are there: { wordcraft, gridcraft }
   function info() {
     return {
       version: app.getVersion(),
@@ -372,12 +386,7 @@ function main() {
   // ---- IPC ----------------------------------------------------------------
 
   const pub = (n) => store.publicNote(n);
-  /**
-   * @template {IpcChannel} K
-   * @param {K} channel
-   * @param {(event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>} fn
-   */
-  const handle = (channel, fn) => ipcMain.handle(channel, fn);
+  const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
   handle('notes:list', (_e, opts) => store.list(opts).map(pub));
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => pub(store.get(id)));
@@ -421,7 +430,7 @@ function main() {
   // A file note's text arrived after the note did (a spreadsheet's, read by MarkItDown): the list shows it.
   store.onFileText = (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'file', id }); };
 
-  let trayRefreshTimer = null;
+  let trayRefreshTimer: NodeJS.Timeout | undefined;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
 
   function notifyNoteChanged(id, sender) {
@@ -456,7 +465,7 @@ function main() {
   handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
   handle('notes:restore', (_e, id) => pub(store.restore(id)));
   handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
-  function forgetWorkspaceCopy(id) { try { require('./workspace').forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
+  function forgetWorkspaceCopy(id) { try { workspace.forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
   handle('notes:emptyTrash', () => store.emptyTrash());
 
   // ---- desktop stickies ------------------------------------------------------
@@ -482,7 +491,7 @@ function main() {
   handle('stickies:create', () => newSticky());
   handle('stickies:setColor', (_e, id, color) => stickies.setColor(id, color));
   handle('stickies:setOnTop', (_e, id, onTop) => stickies.setOnTop(id, onTop));
-  handle('stickies:openInNotes', (_e, id) => { showWindow(); if (rendererReady) win.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
+  handle('stickies:openInNotes', (_e, id) => { const w = showWindow(); if (rendererReady) w.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   handle('notes:tags', () => store.tags());
   handle('notes:counts', () => store.counts());
   handle('notes:related', (_e, id) => store.related(id));
@@ -492,9 +501,9 @@ function main() {
   // ---- file-backed notes ---------------------------------------------------
 
   const APP_ERROR_CODES = new Set(['EZIP', 'ETOOBIG', 'EENCODING']);
-  async function linkPaths(paths, opts) {
-    const linked = [];
-    const failed = [];
+  async function linkPaths(paths, opts?) {
+    const linked: (Awaited<ReturnType<typeof store.linkFile>>)[] = [];
+    const failed: string[] = [];
     for (const p of paths) {
       try { linked.push(await store.linkFile(p, opts)); }
       // The app's own errors explain themselves; a system error is shown by its code (ENOENT, EACCES).
@@ -504,7 +513,7 @@ function main() {
   }
 
   handle('files:openDialog', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    const { canceled, filePaths } = await openDialog({
       title: 'Open files as notes',
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -649,9 +658,9 @@ function main() {
       return { ok: false, error: err.message };
     }
   }
-  // A pdf-lib change (pdf-edit-worker.js) to bytes; resolves to the new bytes, or throws with the reason.
+  // A pdf-lib change (pdf-edit-worker.mts) to bytes; resolves to the new bytes, or throws with the reason.
   async function pdfLibTask(bytes, task, extra, what) {
-    const res = await runWorker('pdf-edit-worker.js', Object.assign({ bytes, task }, extra), 2 * 60 * 1000, what + ' took too long.');
+    const res = await runWorker<{ bytes?: Uint8Array }>('pdf-edit-worker.mts', Object.assign({ bytes, task }, extra), 2 * 60 * 1000, what + ' took too long.');
     if (!res.ok) throw new Error(res.error);
     return res.bytes;
   }
@@ -667,7 +676,7 @@ function main() {
       return rotations.some((r) => r) ? pdfLibTask(buf, 'rotate', { rotations }, 'Turning the pages') : buf;
     });
   });
-  // Comments: sticky notes added, retyped or deleted (ops as pdf-edit-worker.js takes them). A new note is signed
+  // Comments: sticky notes added, retyped or deleted (ops as pdf-edit-worker.mts takes them). A new note is signed
   // with the Windows user name, as other PDF apps do.
   function commentAuthor() {
     try { return os.userInfo().username || ''; } catch (_) { return ''; }
@@ -681,7 +690,7 @@ function main() {
   handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     const dir = backupDirFor(file);
-    let names = [];
+    let names: string[] = [];
     try { names = fs.readdirSync(dir); } catch (_) { /* no backups */ }
     if (typeof name !== 'string' || !names.includes(name)) return { ok: false, error: 'that backup is gone.' };
     if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier versions are in the backups folder.' };
@@ -693,7 +702,7 @@ function main() {
   });
   // A PDF to take pages from: the person picks it; its bytes go to the renderer for thumbnails and for pdf.js.
   handle('files:pdfPickPages', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    const { canceled, filePaths } = await openDialog({ title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (canceled || !filePaths.length) return { ok: false, canceled: true };
     const file = filePaths[0];
     if (fs.statSync(file).size > MAX_PDF_BYTES) return { ok: false, error: 'that PDF is larger than 100 MB.' };
@@ -805,7 +814,7 @@ function main() {
     // The edits were made on the version the renderer was shown; never apply them to another one.
     if (!base || base.mtime !== expectedMtime) throw new Error('the document shown here is not the version Notes last read. Reload it, then make the change again.');
     if (!Array.isArray(patches) || !patches.length || patches.reduce((n, p) => n + String((p && p.xml) || '').length + String((p && p.old) || '').length, 0) > MAX_DOCX_PATCH_CHARS) throw new Error('the changes could not be read, so nothing was written.');
-    const res = await runWorker('docx-edit-worker.js', { bytes: base.buf, patches }, 2 * 60 * 1000, 'Saving the document took too long.');
+    const res = await runWorker<{ bytes: Uint8Array }>('docx-edit-worker.mts', { bytes: base.buf, patches }, 2 * 60 * 1000, 'Saving the document took too long.');
     if (!res.ok) throw new Error(res.error);
     const buf = Buffer.from(res.bytes);
     const saved = saveEdits(id, file, buf, expectedMtime);
@@ -814,7 +823,6 @@ function main() {
     return saved;
   });
 
-  const { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } = require('./files');
   handle('agentFiles:discover', () => discoverAgentFiles());
   handle('agentFiles:link', async () => {
     const folder = store.ensureFolder('Agent files', null);
@@ -826,7 +834,7 @@ function main() {
       if (!n) continue;
       const base = path.basename(f.filePath);
       const autoTitled = n.title === base || n.title.startsWith(base + ' — ');
-      const patch = { tags: Array.from(new Set((n.tags || []).concat(['agent']))) };
+      const patch: { tags: string[], title?: string, folderId?: string } = { tags: Array.from(new Set((n.tags || []).concat(['agent']))) };
       if (autoTitled) patch.title = f.label;
       if (!n.folderId) patch.folderId = folder.id;
       store.update(n.id, patch);
@@ -839,7 +847,7 @@ function main() {
   const vaultView = (v) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
   handle('vaults:list', () => store.vaults.map(vaultView));
   handle('vaults:pickFolder', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
+    const { canceled, filePaths } = await openDialog({ title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
     return canceled || !filePaths.length ? null : filePaths[0];
   });
   handle('vaults:add', async (_e, data) => {
@@ -880,8 +888,6 @@ function main() {
 
   // ---- bot: Claude Code over the notes -------------------------------------
 
-  const workspace = require('./workspace');
-  const claudeBin = require('./claude-bin');
   const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
   let botChild = null;
   let botStarting = false; // a run is past its checks but its process is not spawned yet
@@ -897,8 +903,9 @@ function main() {
     const note = noteId ? store.get(noteId) : null;
     if (note && note.vaultId) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
     if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
-    const { imported, manifest } = workspace.refreshWorkspace(store, WORKSPACE_DIR);
-    if (!manifest) throw new Error('the earlier workspace could not be read back (' + imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
+    const refreshed = workspace.refreshWorkspace(store, WORKSPACE_DIR);
+    if (!refreshed.manifest) throw new Error('the earlier workspace could not be read back (' + refreshed.imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
+    const { imported, manifest } = refreshed;
     for (const nid of imported.updatedIds || []) live.noteChanged(nid);
     if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentHash = contentHash(); fanReloaded({ reason: 'bot' }); }
     const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
@@ -923,7 +930,7 @@ function main() {
     if (Date.now() < authOkUntil) return { ok: true, plan: authPlan };
     const launch = claudeBin.launchSpec(spec, ['auth', 'status']);
     const text = await new Promise((resolve) => {
-      require('child_process').execFile(launch.file, launch.args, { windowsHide: true, timeout: 20000, env: Object.assign(cleanEnv(), launch.env) }, (_err, stdout) => resolve(String(stdout || '')));
+      execFile(launch.file, launch.args, { windowsHide: true, timeout: 20000, env: Object.assign(cleanEnv(), launch.env) }, (_err, stdout) => resolve(String(stdout || '')));
     });
     const r = claudeBin.checkSubscriptionAuth(text);
     if (r.ok) { authOkUntil = Date.now() + 60 * 1000; authPlan = r.plan; }
@@ -938,7 +945,7 @@ function main() {
     if (!child || child.exitCode !== null) return;
     if (process.platform === 'win32') {
       // kill() alone would leave grandchildren (and their edits) running.
-      try { require('child_process').execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {}); } catch (_) { /* ignore */ }
+      try { execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {}); } catch (_) { /* ignore */ }
     } else {
       try { child.kill('SIGTERM'); } catch (_) { /* ignore */ }
     }
@@ -967,7 +974,6 @@ function main() {
     // Never through a shell: the prompt is one argv entry, whatever it contains.
     const launch = claudeBin.launchSpec(spec, args);
     botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, imported: target.imported, plan: auth.plan });
-    const { spawn } = require('child_process');
     let child;
     try {
       // stdin closed: with a pipe left open, claude waits a few seconds for piped input before starting.
@@ -980,14 +986,13 @@ function main() {
     let ended = false;
     const end = (data) => { if (ended) return; ended = true; if (botChild === child) botChild = null; botSend('end', data); };
     // Streaming decoders: a multibyte character split across two chunks must not show as a replacement sign.
-    const { StringDecoder } = require('string_decoder');
     const outDec = new StringDecoder('utf8'), errDec = new StringDecoder('utf8');
     child.stdout.on('data', (d) => { const t = outDec.write(d); if (t) botSend('out', { text: t }); });
     child.stderr.on('data', (d) => { const t = errDec.write(d); if (t) botSend('err', { text: t }); });
     child.on('error', (err) => end({ ok: false, error: 'Could not start "' + launch.file + '": ' + err.message }));
     child.on('close', (code) => {
       if (ended) return;
-      let imported = null;
+      let imported: workspace.ImportResult | { error: string } | null = null;
       if (target.kind === 'workspace') {
         try { imported = workspace.importNotes(store, WORKSPACE_DIR); for (const nid of imported.updatedIds || []) live.noteChanged(nid); } catch (err) { imported = { error: err.message }; }
       } else if (target.kind === 'vault') {
@@ -1012,7 +1017,6 @@ function main() {
     let auth;
     try { auth = await ensureSubscription(spec); } finally { botStarting = false; }
     if (!auth.ok) return { ok: false, error: auth.reason };
-    const { spawn } = require('child_process');
     try {
       // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.
       // Paths never go through PowerShell's parser or wt's `;` splitting: they sit inside single-quoted
@@ -1028,7 +1032,7 @@ function main() {
       fs.writeFileSync(script, '﻿' + lines.join('\r\n') + '\r\n', 'utf8');
       if (process.env.NOTES_APP_DRY_TERMINAL) return { ok: true, cwd: target.cwd, kind: target.kind, script }; // tests: no window
       const psArgs = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', script];
-      const hasWt = (() => { try { require('child_process').execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
+      const hasWt = (() => { try { execFileSync('where', ['wt'], { stdio: 'ignore', windowsHide: true }); return true; } catch (_) { return false; } })();
       if (hasWt) spawn('wt', ['powershell'].concat(psArgs), { detached: true, stdio: 'ignore', windowsHide: false, env: cleanEnv() }).unref();
       else spawn('powershell', psArgs, { detached: true, stdio: 'ignore', windowsHide: false, shell: false, env: cleanEnv() }).unref();
       return { ok: true, cwd: target.cwd, kind: target.kind };
@@ -1056,7 +1060,7 @@ function main() {
   handle('settings:set', async (_e, patch) => {
     patch = patch || {};
     const before = store.getSettings();
-    let error = null;
+    let error: string | undefined | null = null;
     if (typeof patch.hotkey === 'string' && patch.hotkey !== before.hotkey) {
       const parsed = H.parseAccelerator(patch.hotkey);
       if (!parsed.ok) { error = parsed.reason; delete patch.hotkey; }
@@ -1108,7 +1112,7 @@ function main() {
         '[K]::keybd_event(0x5B,0,0,[UIntPtr]::Zero); [K]::keybd_event(0x48,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [K]::keybd_event(0x48,0,2,[UIntPtr]::Zero); [K]::keybd_event(0x5B,0,2,[UIntPtr]::Zero)',
       ].join('; ');
       await new Promise((resolve, reject) => {
-        require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err) => (err ? reject(err) : resolve(undefined)));
+        execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err) => (err ? reject(err) : resolve(undefined)));
       });
       return { ok: true, method: 'windows-dictation' };
     } catch (err) {
@@ -1134,7 +1138,8 @@ function main() {
   let pendingNewNote = false;
   handle('app:rendererReady', () => {
     rendererReady = true;
-    const visible = !!(win && !win.isDestroyed() && win.isVisible());
+    if (!win || win.isDestroyed()) return { visible: false };
+    const visible = win.isVisible();
     if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
     if (visible) win.webContents.send('app:shown');
     if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
@@ -1142,8 +1147,8 @@ function main() {
     return { visible };
   });
   function requestNewNote() {
-    showWindow();
-    if (rendererReady) win.webContents.send('app:new-note'); else pendingNewNote = true;
+    const w = showWindow();
+    if (rendererReady) w.webContents.send('app:new-note'); else pendingNewNote = true;
   }
   handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
   handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
@@ -1151,7 +1156,7 @@ function main() {
   handle('app:exportNote', async (_e, id) => {
     const out = store.exportNote(id);
     if (!out) return { ok: false };
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    const { canceled, filePath } = await saveDialog({
       title: 'Export note as Markdown',
       defaultPath: path.join(app.getPath('documents'), out.filename),
       filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
@@ -1187,7 +1192,7 @@ function main() {
   handle('app:pdfPath', async (_e, id) => {
     const note = store.publicNote(store.get(id));
     if (!note) return { ok: false, error: 'Note not found' };
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    const { canceled, filePath } = await saveDialog({
       title: 'Save as PDF',
       defaultPath: path.join(app.getPath('documents'), H.safeFilename(H.deriveTitle(note)) + '.pdf'),
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -1210,7 +1215,7 @@ function main() {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     const title = H.deriveTitle(note) || 'Note';
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    const { canceled, filePath } = await saveDialog({
       title: 'Save as HTML',
       defaultPath: path.join(app.getPath('documents'), H.safeFilename(title) + '.html'),
       filters: [{ name: 'HTML', extensions: ['html'] }],
@@ -1231,12 +1236,11 @@ function main() {
   // and opts.allowFiles; it gives up after opts.timeoutMs.
   async function withHiddenPage(doc, opts, fn) {
     const tmp = path.join(app.getPath('temp'), 'notes-page-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.html');
-    let w = null, contentsId = null;
-    /** @type {NodeJS.Timeout | undefined} */
-    let timer;
+    let w: BrowserWindow | null = null, contentsId: number | null = null;
+    let timer: NodeJS.Timeout | undefined;
     try {
       fs.writeFileSync(tmp, doc, 'utf8');
-      const webPreferences = { javascript: !!opts.javascript, sandbox: true, contextIsolation: true };
+      const webPreferences: Electron.WebPreferences = { javascript: !!opts.javascript, sandbox: true, contextIsolation: true };
       if (opts.isolated) webPreferences.session = isolatedSession();
       // Parented to the main window so the print dialog comes up in front of it.
       w = new BrowserWindow({ show: false, parent: win || undefined, webPreferences });
@@ -1244,12 +1248,12 @@ function main() {
       if (opts.isolated) {
         isolatedAccess.set(contentsId, { page: tmp, files: opts.allowFiles || [], dir: opts.readDir || null });
         w.webContents.on('will-navigate', (e) => e.preventDefault());
-        w.webContents.on('will-frame-navigate', (e) => { if (e.isMainFrame && e.url !== require('url').pathToFileURL(tmp).href) e.preventDefault(); });
+        w.webContents.on('will-frame-navigate', (e) => { if (e.isMainFrame && e.url !== pathToFileURL(tmp).href) e.preventDefault(); });
         w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       }
       const work = (async () => { await w.loadFile(tmp); return fn(w); })();
       if (!opts.timeoutMs) return await work;
-      const timeout = /** @type {Promise<never>} */ (new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to render')), opts.timeoutMs); }));
+      const timeout = (new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the page took too long to render')), opts.timeoutMs); }) as Promise<never>);
       return await Promise.race([work, timeout]);
     } finally {
       clearTimeout(timer);
@@ -1261,7 +1265,7 @@ function main() {
   // What each isolated page may load: data: URLs, its own page, the listed files, and files inside its folder.
   // Never the network, and never a file: URL with a host, which Windows would fetch over SMB and so send the login.
   const isolatedAccess = new Map(); // webContents id -> { page, files, dir }
-  let convertSession = null;
+  let convertSession: Electron.Session | null = null;
   function isolatedSession() {
     if (!convertSession) {
       convertSession = session.fromPartition('notes-isolated-pages');
@@ -1274,7 +1278,7 @@ function main() {
     const access = isolatedAccess.get(d.webContentsId);
     if (!access || !/^file:\/\/\//i.test(d.url)) return false;
     let file;
-    try { file = require('url').fileURLToPath(d.url); } catch (_) { return false; }
+    try { file = fileURLToPath(d.url); } catch (_) { return false; }
     const same = (a) => path.resolve(a).toLowerCase() === path.resolve(file).toLowerCase();
     if (same(access.page) || access.files.some(same)) return true;
     // From the folder only what a page shows as part of itself; never a frame or an embedded document.
@@ -1286,7 +1290,7 @@ function main() {
   // The CSP repeats the request filter inside the page (defence in depth: it also stops DNS prefetch and preconnect).
   const ISOLATED_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src file: data:; style-src \'unsafe-inline\' file:; font-src file: data:; media-src file: data:">';
   function withBase(doc, baseDir) {
-    const head = ISOLATED_CSP + '<meta http-equiv="x-dns-prefetch-control" content="off"><base href="' + convert.escHtml(require('url').pathToFileURL(baseDir + path.sep).href) + '">';
+    const head = ISOLATED_CSP + '<meta http-equiv="x-dns-prefetch-control" content="off"><base href="' + convert.escHtml(pathToFileURL(baseDir + path.sep).href) + '">';
     if (/<head(\s[^>]*)?>/i.test(doc)) return doc.replace(/<head(\s[^>]*)?>/i, (m) => m + head);
     // No <head>: put one after the doctype (or <html>), so the page keeps standards mode.
     const lead = /^\s*(<!doctype[^>]*>)?\s*(<html(\s[^>]*)?>)?/i.exec(doc);
@@ -1295,8 +1299,8 @@ function main() {
   }
 
   // Word to PDF: the document laid out by docx-preview, as the app shows it, then printed.
-  const DOCX_BUNDLE_PATH = path.join(__dirname, 'renderer', 'vendor', 'docx.bundle.js');
-  const DOCX_BUNDLE_URL = require('url').pathToFileURL(DOCX_BUNDLE_PATH).href;
+  const DOCX_BUNDLE_PATH = path.join(import.meta.dirname, 'renderer', 'vendor', 'docx.bundle.js');
+  const DOCX_BUNDLE_URL = pathToFileURL(DOCX_BUNDLE_PATH).href;
   const DOCX_PRINT_PAGE = '<!doctype html><html><head><meta charset="utf-8">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src file:; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
     + '<style>html, body { margin: 0; background: #fff; }</style><script src="' + DOCX_BUNDLE_URL + '"></script></head><body></body></html>';
@@ -1355,7 +1359,7 @@ function main() {
       }
       const ext = { md: 'md', html: 'html', pdf: 'pdf' }[format];
       if (!ext) return { ok: false, error: 'Unknown format' };
-      const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      const { canceled, filePath } = await saveDialog({
         title: data.dialogTitle ? String(data.dialogTitle).slice(0, 100) : 'Export book',
         defaultPath: path.join(app.getPath('documents'), H.safeFilename(name) + '.' + ext),
         filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
@@ -1374,7 +1378,7 @@ function main() {
   });
 
   handle('app:exportAll', async () => {
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    const { canceled, filePath } = await saveDialog({
       title: 'Export all notes',
       defaultPath: path.join(app.getPath('documents'), 'notes-export-' + new Date().toISOString().slice(0, 10) + '.json'),
       filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -1385,14 +1389,14 @@ function main() {
   });
 
   // ---- per-note version history (from the git snapshots of notes.json) ------------
-  handle('history:versions', /** @returns {Promise<HistoryVersions>} */ async (_e, id, limit) => {
+  handle('history:versions', async (_e, id, limit): Promise<HistoryVersions> => {
     const note = store.get(id);
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
     if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Commit every change to a git repo" in Settings.' };
     const commits = await git.history(Math.min(200, Math.max(1, limit || 80)));
-    const versions = [];
-    let lastBody = null;
+    const versions: HistoryVersion[] = [];
+    let lastBody: string | null = null;
     for (const c of commits) {
       const text = await git.showNotesAt(c.hash);
       if (!text) continue;
@@ -1427,7 +1431,7 @@ function main() {
     return { name, href: 'attachment://' + encodeURIComponent(name), size: fs.statSync(path.join(ATTACH_DIR, name)).size };
   }
   handle('attachments:pick', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Attach files', properties: ['openFile', 'multiSelections'] });
+    const { canceled, filePaths } = await openDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
     if (canceled || !filePaths.length) return [];
     return filePaths.map((p) => { try { return addAttachment(p); } catch (err) { return { error: err.message, name: path.basename(p) }; } });
   });
@@ -1459,15 +1463,15 @@ function main() {
   });
 
   handle('app:importMarkdown', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    const { canceled, filePaths } = await openDialog({
       title: 'Import Markdown or text files',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Markdown / Text', extensions: ['md', 'markdown', 'txt'] }],
     });
     if (canceled || !filePaths.length) return { ok: false, canceled: true, count: 0 };
-    let first = null;
+    let first: Note | null = null;
     let count = 0;
-    const failed = [];
+    const failed: string[] = [];
     for (const fp of filePaths) {
       try {
         const note = store.importMarkdown(path.basename(fp), fs.readFileSync(fp, 'utf8'));

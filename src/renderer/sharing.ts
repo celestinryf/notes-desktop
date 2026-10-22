@@ -2,7 +2,7 @@ import { el } from './dom.ts';
 import { state, lockedNow } from './state.ts';
 import { currentHtml } from './note-html.ts';
 import { find } from './find-state.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 import { toast } from './toast.ts';
 import { placePopover } from './popover.ts';
