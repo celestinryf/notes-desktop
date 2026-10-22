@@ -2,8 +2,6 @@
 <html><head><meta charset="utf-8"><title>Fake Craft</title></head>
 <body style="margin:0;background:#222;color:#eee;font:14px sans-serif"><div id="s">fake craft: waiting</div>
 <script>
-// A stand-in for a Craft app's web build: speaks the hosted protocol (see Notes' renderer/craft-frame.js) and nothing
-// else. Used by a probe to drive Notes' Craft-app paths without building any Rust.
 let doc = null, name = null, bytes = null;
 const say = (m, t) => parent.postMessage(m, '*', t || []);
 const log = (t) => { document.getElementById('s').textContent = t; };

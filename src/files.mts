@@ -1,4 +1,3 @@
-/* File-backed notes: which files the app can show or edit, how to read them, and where your agent files live. */
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -11,7 +10,6 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
   'lua', 'luau', 'r', 'm', 'pl', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
-// Shared with the renderer: the code editor picks its language by extOf, and both sides agree on which file is which.
 import { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
 import * as markitdown from './markitdown.mts';
 import { createRequire } from 'node:module';
@@ -19,8 +17,6 @@ import { createRequire } from 'node:module';
 const requireWhenNeeded = createRequire(import.meta.url);
 
 
-// Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
-// 'image' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
 function kindOf(filePath: string): FileKind {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
@@ -42,7 +38,6 @@ function kindOf(filePath: string): FileKind {
 
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
-// Strict UTF-8: a file that is not valid UTF-8 (Latin-1, UTF-16, binary) must never be rewritten as UTF-8 garbage.
 function readText(filePath: string) {
   const stat = fs.statSync(filePath);
   if (stat.size > MAX_TEXT_BYTES) throw Object.assign(new Error('File is larger than 4 MB'), { code: 'ETOOBIG' });
@@ -62,8 +57,6 @@ function hasBom(filePath: string) {
   } catch (_) { return false; }
 }
 
-// Writes in place (truncate + write), never via rename, so hard links such as CLAUDE.md <-> AGENTS.md stay joined.
-// Keeps the file's line-ending style and its byte-order mark if it had one.
 function writeTextInPlace(filePath: string, body: string) {
   const eol = detectEol(filePath);
   const bom = hasBom(filePath);
@@ -86,15 +79,12 @@ function detectEol(filePath: string) {
 }
 
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
-const MAX_ZIP_UNPACKED = 100 * 1024 * 1024; // what the viewer parses on the page's own thread
+const MAX_ZIP_UNPACKED = 100 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 20000;
 const inflateRaw = (buf: Buffer, opts: zlib.ZlibOptions): Promise<Buffer> => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
 const zipError = (msg: string) => Object.assign(new Error(msg), { code: 'EZIP' });
 const TOO_BIG_UNPACKED = 'This document unpacks to more than 100 MB, so Notes will not open it.';
 
-// A Word document is a zip. A crafted one can unpack to gigabytes from a few kilobytes and hang the app, and its
-// directory can lie about sizes, so every entry is really inflated here (on the thread pool, capped) before any
-// library is allowed to open it. want: names of parts to hand back, inflated ({ name: Buffer }).
 async function assertSafeZip(buf: Buffer, want?: string[]) {
   const parts: Record<string, Buffer> = {};
   let eocd = -1;
@@ -134,8 +124,6 @@ async function assertSafeZip(buf: Buffer, want?: string[]) {
 
 const isZipDocument = (filePath: string) => ZIP_DOC_EXT.has(extOf(filePath));
 
-// The bytes of a Word document or spreadsheet, checked for size and (for the zip formats) for zip bombs.
-// Everything that opens one goes through here.
 async function readDocumentBuffer(filePath: string) {
   if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
   const buf = fs.readFileSync(filePath);
@@ -143,10 +131,6 @@ async function readDocumentBuffer(filePath: string) {
   return buf;
 }
 
-// The plain text of a Word document, kept as the note's body for search, the list snippet and links. The document
-// itself is shown from its own bytes (files:docxBytes), never from this text.
-// Word's zip formats are read by mammoth, ODT and RTF by the small readers below; the old binary .doc gives no text
-// (WordCraft still opens it in full).
 async function readDocxText(filePath: string) {
   const stat = fs.statSync(filePath);
   const ext = extOf(filePath);
@@ -163,17 +147,13 @@ async function readDocxText(filePath: string) {
   return { body: body.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size };
 }
 
-// The text of a spreadsheet, kept as the note's body for search, the list snippet and the bot (the file itself is
-// shown by GridCraft from its own bytes). MarkItDown reads it when it is installed and
-// reads the format; otherwise the body is '' and the file still opens. When MarkItDown fails on a file it could read
-// (a timeout, a crash), body is undefined: the caller keeps whatever text it had rather than erase it.
-const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
+const MAX_OFFICE_TEXT = 1024 * 1024;
 async function readOfficeText(filePath: string) {
   const stat = fs.statSync(filePath);
   const out: { body: string | undefined, mtime: number, size: number } = { body: '', mtime: stat.mtimeMs, size: stat.size };
   if (!markitdown.available() || !markitdown.reads(extOf(filePath))) return out;
   try {
-    await readDocumentBuffer(filePath); // the size limit and the zip guard, before anything unpacks the file
+    await readDocumentBuffer(filePath);
     out.body = (await markitdown.toMarkdown(filePath)).markdown.slice(0, MAX_OFFICE_TEXT);
   } catch (err) {
     console.warn('[files] no text for ' + filePath + ': ' + err.message);
@@ -182,10 +162,7 @@ async function readOfficeText(filePath: string) {
   return out;
 }
 
-// The kinds of file note that carry the file's text as their body.
 const TEXTED_KINDS = new Set(['text', 'docx', 'sheet']);
-// The body a file note of this kind keeps, with the file's time: { body, mtime }. Other kinds (a PDF, an image, a
-// binary) keep none.
 async function readNoteText(kind: FileKind | null, filePath: string) {
   if (kind === 'text') return readText(filePath);
   if (kind === 'docx') return readDocxText(filePath);
@@ -200,7 +177,6 @@ const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|ap
   return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
 });
 
-// The text of an ODT's content.xml: paragraphs and headings on their own lines, its tab, space and break elements.
 function odtText(xml: string) {
   const bodyAt = xml.indexOf('<office:body');
   const body = bodyAt >= 0 ? xml.slice(bodyAt) : xml;
@@ -213,14 +189,12 @@ function odtText(xml: string) {
     .replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// RTF groups that hold no document text (fonts, colours, styles, metadata, pictures, field codes).
 const RTF_SKIP = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'themedata', 'colorschememapping',
   'latentstyles', 'datastore', 'xmlnstbl', 'listtable', 'listoverridetable', 'rsidtbl', 'generator', 'fldinst',
   'header', 'headerl', 'headerr', 'headerf', 'footer', 'footerl', 'footerr', 'footerf', 'filetbl', 'revtbl']);
 const RTF_CHARS: Record<string, string> = { emdash: '\u2014', endash: '\u2013', lquote: '\u2018', rquote: '\u2019', ldblquote: '\u201c', rdblquote: '\u201d', bullet: '\u2022' };
 const CP1252 = new TextDecoder('windows-1252');
 
-// The text of an RTF document, for the note's search text and list snippet (the document itself is shown by WordCraft).
 function rtfText(buf: Buffer) {
   const s = buf.toString('latin1');
   let out = '', skip = false, uc = 1, pending = 0;
@@ -234,7 +208,7 @@ function rtfText(buf: Buffer) {
     if (c !== '\\') { put(c); i++; continue; }
     const n = s[i + 1];
     if (n === '\\' || n === '{' || n === '}') { put(n); i += 2; continue; }
-    if (n === '*') { skip = true; i += 2; continue; } // an ignorable destination: its group holds no text
+    if (n === '*') { skip = true; i += 2; continue; }
     if (n === "'") { put(CP1252.decode(Uint8Array.of(parseInt(s.substr(i + 2, 2), 16) || 0x3f))); i += 4; continue; }
     if (n === '~') { put('\u00a0'); i += 2; continue; }
     if (n === '\r' || n === '\n') { if (!skip) out += '\n'; i += 2; continue; }
@@ -253,7 +227,6 @@ function rtfText(buf: Buffer) {
   return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// An image file's bytes and media type, for the image viewer.
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
 function readImage(filePath: string) {
   const stat = fs.statSync(filePath);
@@ -265,13 +238,10 @@ function mtimeOf(filePath: string) {
   try { return fs.statSync(filePath).mtimeMs; } catch (_) { return null; }
 }
 
-// Case-insensitive, separator-normalised identity for paths on Windows.
 function pathKey(p: string) {
   return path.resolve(String(p)).replace(/\//g, '\\').toLowerCase();
 }
 
-// The files that steer coding agents on this machine: global and per-project instruction files, plus the
-// user's Claude Code commands, output styles, and memory notes. Scans one level of project folders under home.
 function discoverAgentFiles(opts?: { home?: string, extraRoots?: string[] }) {
   opts = opts || {};
   const home = opts.home || os.homedir();
@@ -286,11 +256,10 @@ function discoverAgentFiles(opts?: { home?: string, extraRoots?: string[] }) {
   };
   const claudeDir = path.join(home, '.claude');
   add(path.join(claudeDir, 'CLAUDE.md'), 'CLAUDE.md — global (same file as AGENTS.md)');
-  // ~/.claude/AGENTS.md is a hard link of CLAUDE.md on this machine; one note covers both. Add it only if it is a separate file.
   try {
     const a = path.join(claudeDir, 'AGENTS.md'), c = path.join(claudeDir, 'CLAUDE.md');
     if (fs.existsSync(a) && fs.existsSync(c) && fs.statSync(a).ino !== fs.statSync(c).ino) add(a, 'AGENTS.md — global');
-  } catch (_) { /* ignore */ }
+  } catch (_) {  }
   add(path.join(home, '.codex', 'AGENTS.md'), 'AGENTS.md — Codex global');
   for (const sub of ['commands', 'output-styles', 'rules', 'agents']) {
     const dir = path.join(claudeDir, sub);
@@ -300,7 +269,6 @@ function discoverAgentFiles(opts?: { home?: string, extraRoots?: string[] }) {
   const memDir = path.join(claudeDir, 'projects');
   for (const proj of safeList(memDir)) {
     const m = path.join(memDir, proj, 'memory');
-    // Project folders are named after the path, e.g. "C--Users-celes-tennis"; keep the tail as the label.
     const slug = proj.replace(/^[A-Za-z]--Users-[^-]+-?/, '') || 'home';
     for (const f of safeList(m)) if (/\.md$/i.test(f)) add(path.join(m, f), f + ' — Claude memory (' + slug + ')');
   }
@@ -318,7 +286,7 @@ function discoverAgentFiles(opts?: { home?: string, extraRoots?: string[] }) {
         if (fs.existsSync(p)) {
           const other = name === 'CLAUDE.md' ? path.join(dir, 'AGENTS.md') : null;
           let dup = false;
-          try { if (other && fs.existsSync(other) && fs.statSync(other).ino === fs.statSync(p).ino) dup = true; } catch (_) { /* ignore */ }
+          try { if (other && fs.existsSync(other) && fs.statSync(other).ino === fs.statSync(p).ino) dup = true; } catch (_) {  }
           add(p, name + ' — ' + entry + (dup ? ' (same file as AGENTS.md)' : ''));
         }
       }

@@ -1,13 +1,10 @@
 'use strict';
-/* Run with: npx electron scripts/make-icon.js
-   Writes assets/icon.png and assets/icon.ico (PNG-compressed ICO) from the procedural icon. */
 const fs = require('fs');
 const path = require('path');
 const { app, nativeImage } = require('electron');
 const { drawIconBitmap } = require('../src/icon.mts');
 
 function pngToIco(pngBuffers) {
-  // ICO header + one directory entry per image, each entry pointing at a PNG payload.
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
   header.writeUInt16LE(1, 2);

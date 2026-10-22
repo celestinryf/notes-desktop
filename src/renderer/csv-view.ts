@@ -1,16 +1,10 @@
 'use strict';
-/* CSV and TSV files as a table. Read-only: editing is in the text view (Ctrl+E), so the file is never rewritten by
-   looking at it. Parsing follows RFC 4180 (quoted fields may hold the delimiter, line breaks and doubled quotes) and is
-   lenient about the rest. Every cell is set with textContent, never as HTML.
-
-   NotesCsv.render(container, text, ext) */
 export const NotesCsv = (function () {
-  const MAX_ROWS = 2000; // rows drawn; the rest are counted and the text view has them all
+  const MAX_ROWS = 2000;
   const MAX_COLS = 200;
-  const MAX_CELLS = 60000; // a wide file draws fewer rows, so the page never builds a huge table at once
+  const MAX_CELLS = 60000;
   const NUMBER = /^[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?%?$/;
 
-  // The delimiter: a tab for .tsv; otherwise whichever of , ; and tab is most common outside quotes on the first line.
   type Delimiter = ',' | ';' | '\t';
   const DELIMITERS: Delimiter[] = [',', ';', '\t'];
   function detectDelimiter(text: string, ext: string): Delimiter {
@@ -27,8 +21,6 @@ export const NotesCsv = (function () {
     return DELIMITERS.reduce<Delimiter>((best, d) => (counts[d] > counts[best] ? d : best), ',');
   }
 
-  // Rows of fields, the first `limit` kept; total counts them all. Each row knows the text line it starts on (a quoted
-  // field can span lines), so the table's numbers are the text view's line numbers.
   type Row = string[] & { line?: number };
   function parse(text: string, delim: string, limit: number) {
     const rows: Row[] = [];
@@ -45,13 +37,13 @@ export const NotesCsv = (function () {
         else quoted = false;
         continue;
       }
-      if (c === '"' && field === '') quoted = true; // a quote opens a field only at its start
+      if (c === '"' && field === '') quoted = true;
       else if (c === delim) { row.push(field); field = ''; }
       else if (c === '\r') { if (text[i + 1] === '\n') { i++; line++; } else line++; endRow(); }
       else if (c === '\n') endRow();
       else field += c;
     }
-    if (field !== '' || row.length) endRow(); // a last line without a line break
+    if (field !== '' || row.length) endRow();
     return { rows, total };
   }
 
@@ -60,11 +52,10 @@ export const NotesCsv = (function () {
     const c = document.createElement(tag);
     c.textContent = text;
     if (className) c.className = className;
-    if (text.length > 30) c.title = text; // long values are cut short in the cell; the whole of it on hover
+    if (text.length > 30) c.title = text;
     return c;
   };
 
-  // Draws the table and returns its counts: { rows (data rows, all of them), cols }.
   function render(container: HTMLElement, text: string, ext: string) {
     container.replaceChildren();
     const src = String(text || '');
@@ -76,7 +67,6 @@ export const NotesCsv = (function () {
     const widest = rows.reduce((n, r) => Math.max(n, r.length), 0);
     const cols = Math.min(widest, MAX_COLS);
     const shown = rows.slice(1, 1 + Math.max(1, Math.floor(MAX_CELLS / Math.max(cols, 1))));
-    // A column of numbers is right-aligned as a whole, its header too: most of its filled cells must be numbers.
     const numeric = Array.from({ length: cols }, (_, c) => {
       let filled = 0, nums = 0;
       for (const r of shown) { const v = (r[c] || '').trim(); if (!v) continue; filled++; if (NUMBER.test(v)) nums++; }

@@ -740,14 +740,12 @@
       selected,
       "selected-fg": selectedFg,
       well: rgba(fg, light ? 0.05 : 0.06),
-      // Lines are darker than the surfaces they sit on, never light (the user's rule); none round floating layers in dark.
       line: light ? rgba(fg, 0.1) : "rgba(0, 0, 0, 0.42)",
       "line-2": light ? rgba(fg, 0.16) : "rgba(0, 0, 0, 0.55)",
       field: light ? rgba(fg, 0.45) : "rgba(0, 0, 0, 0.6)",
       "field-bg": light ? raised : mix(bg, "#000000", 0.35),
       "float-line": light ? rgba(fg, 0.16) : "transparent",
       "float-shadow": light ? "0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14)" : "none",
-      // not a colour: the lift under a floating layer, light only
       "scroll-thumb": rgba(fg, light ? 0.2 : 0.16),
       accent,
       "accent-fg": accentFg,
@@ -1344,9 +1342,7 @@
     currentId: null,
     current: null,
     sourceMode: false,
-    // false: rendered editor, true: raw Markdown textarea
     rich: null,
-    // rendered editor instance (window.NotesEditor)
     settings: null,
     info: null,
     systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
@@ -2443,7 +2439,6 @@
       const c = shown();
       if (c) c.setValue(el.bodyInput.value);
     },
-    // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
     reload(text) {
       el.bodyInput.value = text;
       const c = shown();
@@ -2474,20 +2469,17 @@
       const c = shown();
       return c ? c.hasFocus() : document.activeElement === el.bodyInput;
     },
-    // Scrolls a position into view (a find match, a heading).
     reveal(at) {
       const c = shown();
       if (c) c.reveal(at);
       else hooks.scrollTextareaToSelection(at);
     },
-    // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
     dispatchEvent(event) {
       return el.bodyInput.dispatchEvent(event);
     },
     get codeOn() {
       return !!shown();
     },
-    // Undo or redo in the code editor when the keyboard is in it; false when it is not.
     undoRedo(cmd) {
       const c = shown();
       if (!c || !c.contains(document.activeElement)) return false;
@@ -2507,7 +2499,6 @@
           el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
         },
         onSelection: renderCodePosition,
-        // While the find bar is open, Enter steps between matches, as it does in the textarea.
         onEnter: (shift) => {
           if (!find.open) return false;
           hooks.runFind(!shift);
@@ -4048,7 +4039,6 @@
         annotationMode: lib.AnnotationMode.ENABLE_FORMS,
         annotationEditorMode: T.NONE,
         imageResourcesPath: PKG + "web/images/",
-        // pdf.js's default palette (its viewer's highlightEditorColors). Without it the highlight tool throws.
         annotationEditorHighlightColors: "yellow=#FFFF98,green=#53FFBC,blue=#80EBFF,pink=#FFCBE6,red=#FF4F5F,yellow_HCM=#FFFFCC,green_HCM=#53FFBC,blue_HCM=#80EBFF,pink_HCM=#F6B8FF,red_HCM=#C50043"
       });
       linkService.setViewer(viewer);
@@ -4319,8 +4309,6 @@
         drawPage: (i, canvas, width) => doc ? drawPage(doc, i, canvas, width) : Promise.resolve(),
         openOther,
         closeOthers,
-        // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
-        // the kept pages use is written, so a removed page leaves nothing behind in the file.
         extractPages: (pageInfos) => {
           if (!doc) throw new Error("no PDF is open");
           return doc.extractPages(pageInfos);
@@ -4333,7 +4321,6 @@
         },
         isOpen: () => !!doc,
         isDirty: () => !!doc && currentHash() !== savedHash,
-        // Unsaved edits, or a tool in use whose stroke or text is not committed yet.
         hasPendingWork: () => !!doc && (currentHash() !== savedHash || mode !== "select"),
         undo: () => eventBus.dispatch("editingaction", { source: null, name: "undo" }),
         redo: () => eventBus.dispatch("editingaction", { source: null, name: "redo" }),
@@ -4722,13 +4709,11 @@
       });
       return {
         refresh,
-        // Stops picking a place (the panel is closing, or another PDF is shown).
         stop() {
           ctl.cancelPick();
           editing = null;
           draft = null;
         },
-        // A comment is being written: the PDF must not be reloaded under it.
         busy: () => !!editing || working
       };
     }
@@ -4866,7 +4851,6 @@
     function pdfController() {
       if (!pdf && NotesPdfEditor) {
         pdf = NotesPdfEditor.create(el.pdfEditor, {
-          // Never disabled: a stroke or text box still in progress only counts once it is committed, which Save does.
           onDirty: (d) => {
             el.pdfSaveBtn.textContent = d ? "Save" : "Saved";
           },
@@ -5379,11 +5363,8 @@
               clear();
               showBanner(ui.label + " could not open this " + ui.what + ": " + err + '. Use "Open with\u2026" to open it in ' + ui.openWith + ".");
             },
-            // The Craft apps are always dark: dark chrome and a dark page, whatever Notes' own theme (the user's choice,
-            // 2026-10-19). The page's darkness is only how the app shows it; the file is unchanged.
             theme: "dark",
             darkPage: true,
-            // The build is there but did not start: its documents do without it until Notes restarts.
             onUnavailable: () => {
               down = true;
               clear();
@@ -6051,7 +6032,6 @@
           },
           say: toast,
           onBlur: () => flushSave({ fromBlur: true }),
-          // Keys pressed in the document never reach this page: Ctrl+S saves, Escape hides the window as elsewhere.
           onKey: (e) => {
             const ctrl = e.ctrlKey || e.metaKey;
             if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
@@ -7466,31 +7446,19 @@
     const SIDE = GUEST ? "right" : "left";
     const tabs = {
       ids: [],
-      // note ids in tab order; null is an empty tab
       at: 0,
-      // the tab on screen
       titles: /* @__PURE__ */ new Map(),
-      // id -> title shown on a tab that is not on screen
       split: false,
-      // left side: the right side is open
       active: "left",
-      // left side: the side the list opens notes in (the one last clicked or typed in)
       activeHere: false,
-      // right side: this side is the active one
       ratio: 0.5,
-      // left side: its share of the width
       frame: null,
-      // left side: the right side's iframe
       peerReady: false,
       queue: [],
-      // left side: messages for the right side sent before it was ready
       peerIds: [],
-      // the other side's open notes
       peerCurrent: null,
       dragIndex: null,
-      // a tab of this side being dragged
       peerDrag: null
-      // a tab or note card being dragged on the other side
     };
     function peerWindow() {
       return GUEST ? window.parent : tabs.frame && tabs.frame.contentWindow;
@@ -9275,14 +9243,12 @@
             e.preventDefault();
             toggleSidebar();
             return;
-          // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
           case "delete":
             if (!inTextField()) {
               e.preventDefault();
               trashCurrent();
             }
             return;
-          // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
           case "b":
             if (document.activeElement === el.bodyInput && !isPlainTextFile6(state.current)) {
               e.preventDefault();

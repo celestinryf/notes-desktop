@@ -28,7 +28,6 @@ export function createSpeech({ api }: SpeechDeps) {
     const selected = selectedTextForSpeech().trim();
     if (selected) return selected;
     const title = el.titleInput.value.trim();
-    // Only Markdown has marks to strip; a plain-text or Word file is read as the text it is.
     const note = state.current;
     const body = isNonMarkdownFile(note) ? el.bodyInput.value : H.plainTextFromMarkdown(el.bodyInput.value);
     return (title ? title + '.\n' : '') + body;
@@ -62,7 +61,7 @@ export function createSpeech({ api }: SpeechDeps) {
     u.rate = (state.settings && state.settings.ttsRate) || 1;
     u.onend = () => speakNext();
     u.onerror = (e) => { if (e.error !== 'interrupted' && e.error !== 'canceled') toast('Read aloud stopped: ' + e.error); setReadAloudState(false); };
-    if (state.info && state.info.drySpeech) return; // tests and screenshots: the mode runs, nothing is said out loud
+    if (state.info && state.info.drySpeech) return;
     window.speechSynthesis.speak(u);
   }
 

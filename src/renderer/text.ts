@@ -6,7 +6,6 @@ export function escapeHtml(s: unknown) {
   return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
-// Match on the raw text and escape each piece afterwards, so entities in notes are never split by a mark.
 export function highlight(text: unknown, query: string) {
   const raw = String(text);
   const tokens = H.tokenize(query);
@@ -15,7 +14,6 @@ export function highlight(text: unknown, query: string) {
   return raw.split(re).map((part, i) => (i % 2 ? '<span class="mark">' + escapeHtml(part) + '</span>' : escapeHtml(part))).join('');
 }
 
-// The message of an error thrown in the main process, without Electron's "Error invoking remote method" prefix.
 export function ipcErrorText(err: unknown) {
   const message = typeof err === 'object' && err !== null && 'message' in err ? err.message : undefined;
   return String(message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');

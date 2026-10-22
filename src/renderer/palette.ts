@@ -1,10 +1,4 @@
 'use strict';
-/* The command palette (Ctrl+P): one box that finds notes and runs every command the app has.
-   It knows nothing about notes or commands itself: app.js hands it a source of items each time it opens.
-
-   NotesPalette.create({ dialog, input, list, source }) returns { open(query), close(), isOpen() }.
-   source(query) returns (or resolves to) items: { id, title, group, hint, keys, icon, run(opts) }.
-   The list keeps the order source gives; run gets { newTab } (Ctrl+Enter or Ctrl+click). */
 import * as H from '../shared/helpers.mts';
 import NotesIcons from './icons.js';
 import { escapeHtml } from './text.ts';
@@ -24,7 +18,6 @@ export const NotesPalette = (function () {
   const I = (name: string) => (name ? NotesIcons.svg(name) : '');
   const esc = (s: string) => escapeHtml(s == null ? '' : s);
 
-  // Bold the characters of the label that the query matched, in order.
   function marked(text: string, query: string) {
     const q = String(query || '').toLowerCase().replace(/\s+/g, '');
     if (!q) return esc(text);
@@ -93,8 +86,7 @@ export const NotesPalette = (function () {
       const mine = ++ticket;
       let got: PaletteItem[];
       try { got = await source(query); } catch (err) { got = []; console.error('palette: ' + (err && err.message || err)); }
-      if (mine !== ticket) return; // a newer keystroke won
-      // Keep each group together, in the order the groups first appear, so no heading shows twice.
+      if (mine !== ticket) return;
       const order: string[] = [];
       for (const it of got || []) if (!order.includes(it.group)) order.push(it.group);
       items = order.flatMap((g) => (got || []).filter((it) => it.group === g));
@@ -112,7 +104,6 @@ export const NotesPalette = (function () {
       const it = items[i];
       if (!it) return;
       close(false);
-      // After the dialog has closed, so a command that opens its own dialog or moves focus keeps it.
       setTimeout(() => it.run(opts || {}), 0);
     }
 
@@ -137,24 +128,22 @@ export const NotesPalette = (function () {
 
     input.addEventListener('input', update);
     input.addEventListener('keydown', (e) => {
-      e.stopPropagation(); // the app's own shortcuts must not fire while typing here
+      e.stopPropagation();
       if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
       else if (e.key === 'PageDown') { e.preventDefault(); move(Math.min(8, items.length - 1 - active) || 0); }
       else if (e.key === 'PageUp') { e.preventDefault(); move(-Math.min(8, active)); }
       else if (e.key === 'Enter') { e.preventDefault(); choose(active, { newTab: e.ctrlKey || e.metaKey }); }
       else if (e.key === 'Escape') { e.preventDefault(); close(); }
-      else if (e.key === 'Tab') e.preventDefault(); // one field: Tab must not leave the dialog
+      else if (e.key === 'Tab') e.preventDefault();
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); close(); }
     });
     dialog.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
-    // A click on the backdrop (the dialog element itself, outside its box) closes it.
     dialog.addEventListener('mousedown', (e) => { if (e.target === dialog) close(); });
 
     return { open, close, isOpen: () => dialog.open };
   }
 
-  // Ranks commands and notes for a query: commands by label (and keywords), notes by title, then by body text.
   function rank(query: string, commands: PaletteCommand[], notes: PaletteNote[] | null): PaletteItem[] {
     const raw = String(query || '');
     const commandsOnly = /^\s*>/.test(raw);
@@ -167,7 +156,6 @@ export const NotesPalette = (function () {
     const seen = new Set(byTitle.map((n) => n.id));
     const byBody = notes.filter((n) => !seen.has(n.id) && n.matches(q)).slice(0, 6);
     const noteHits = byTitle.slice(0, 8).concat(byBody);
-    // A strong command match (prefix or word start) goes first; otherwise notes lead, since finding notes is the main job.
     const strong = cmds.length && H.fuzzyScore(q, cmds[0].title) >= 500;
     return strong ? [...cmds.slice(0, 10), ...noteHits] : [...noteHits, ...cmds.slice(0, 8)];
   }

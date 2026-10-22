@@ -41,7 +41,7 @@ export function createConvertMenu({ api, flushSave, openFiles }: ConvertMenuDeps
     converting = true;
     el.fileConvertBtn.disabled = true;
     try {
-      await flushSave(); // a text file converts what is on disk, so unsaved typing goes there first
+      await flushSave();
       toast('Converting…');
       const r = await api.files.convert(note.id, to);
       if (!r.ok) { toast('Could not convert: ' + r.error); return; }

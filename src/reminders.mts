@@ -1,8 +1,5 @@
 import type { Store } from './store.mts';
 
-/* Reminders: a note can carry a remindAt time; when it passes, the note is marked reminded and the
-   notifier is called once. Main process only; the clock and the notifier are injectable for tests. */
-
 class ReminderScheduler {
   store: Store;
   now: () => number;
@@ -30,19 +27,17 @@ class ReminderScheduler {
     this.timer = null;
   }
 
-  // Live notes whose reminder time has passed and has not been announced for that time yet.
   due() {
     const now = this.now();
     return this.store.notes.filter((n) => !n.trashedAt && n.remindAt && n.remindAt <= now && !(n.remindedAt && n.remindedAt >= n.remindAt));
   }
 
-  // Marks first, notifies second: a notifier that throws must not cause a reminder to fire again and again.
   tick() {
     const fired: Note[] = [];
     for (const n of this.due()) {
-      try { this.store.markReminded(n.id, this.now()); } catch (_) { continue; } // saving paused: try again next tick
+      try { this.store.markReminded(n.id, this.now()); } catch (_) { continue; }
       fired.push(n);
-      try { this.notify(n); } catch (_) { /* a broken notifier must not stop the others */ }
+      try { this.notify(n); } catch (_) {  }
     }
     return fired;
   }

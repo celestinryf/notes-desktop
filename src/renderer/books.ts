@@ -31,18 +31,17 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   async function renderBookStrip(note: PublicNote) {
-    const seq = ++book.seq; // only the newest call may draw: an older one resolving late must not revive a book
+    const seq = ++book.seq;
     const b = bookOf(note);
     el.bookStrip.classList.toggle('hidden', !b);
     if (!b) { book.id = null; book.pages = []; return; }
     const forNote = note.id;
     const pages = await api.notes.list({ folderId: b.id });
-    if (seq !== book.seq || state.currentId !== forNote) return; // superseded, or moved on while loading
+    if (seq !== book.seq || state.currentId !== forNote) return;
     book.id = b.id; book.pages = pages;
     el.bookName.textContent = b.name;
     el.bookTabs.innerHTML = '';
     pages.forEach((p, i) => {
-      // A focusable div, not a <button>: Chromium does not start a drag from a button, and tabs reorder by dragging.
       const tab = document.createElement('div');
       tab.tabIndex = 0;
       tab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tab.click(); } });
@@ -75,7 +74,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
-  // Moves page dragId so it sits just before page beforeId.
   async function movePage(dragId: string | null, beforeId: string) {
     if (!book.id || !dragId || dragId === beforeId) return;
     const ids = book.pages.map((p) => p.id).filter((x) => x !== dragId);
@@ -113,8 +111,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     if (state.current) renderBookStrip(state.current);
     toast(on ? 'This folder is now a book: its notes are pages you can page through and reorder.' : 'Back to an ordinary folder.');
   }
-
-  // ---- split a long note into a book at its headings -------------------------------
 
   async function openSplitDialog() {
     const note = state.current;
@@ -162,7 +158,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
         await flushSave();
         try { await api.notes.undoSplit(r.folder.id, r.pageIds, r.originalTrashed ? id : null); }
         catch (err) { toast('Could not undo the split: ' + ipcErrorText(err)); return; }
-        // Go back to the original only if the person is still in the book; otherwise leave their view alone.
         const inBook = (state.view === 'folder' && state.folderId === r.folder.id) || (state.currentId !== null && r.pageIds.includes(state.currentId));
         if (!inBook) { await refresh(); return; }
         clearEditor();
@@ -172,7 +167,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     });
   }
 
-  // Puts page id right after page afterId in the book's reading order.
   async function placePageAfter(id: string, afterId: string) {
     const bookId = book.id;
     if (!bookId) return;
@@ -214,7 +208,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     closeAllBookMenus();
     if (!id || !bookId) return;
     await flushSave();
-    if (book.id !== bookId) return; // the person moved to another book meanwhile: act on nothing
+    if (book.id !== bookId) return;
     const idx = book.pages.findIndex((p) => p.id === id);
     const page = book.pages[idx];
     try {
@@ -269,7 +263,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     else if (action === 'unbook') toggleBook(book.id, false);
   }
 
-  // Renames the book in place: the strip's name becomes a text field.
   function renameBookInline() {
     const folder = flattenTree(state.tree).find((f) => f.id === book.id);
     if (!folder) return;
@@ -293,13 +286,10 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     input.focus(); input.select();
   }
 
-  // Gathers the current book: its name and pages in order, each with Markdown and HTML.
-  // Locked pages stay locked: only their title goes in.
   async function collectBook(bookId: string) {
     await flushSave();
     const folder = flattenTree(state.tree).find((f) => f.id === bookId);
     const pages = await api.notes.list({ folderId: bookId });
-    // One file at a time: a book of PDFs must not start a reader for every page at once.
     const bodies: string[] = [];
     for (const p of pages) bodies.push(p.locked && !p.unlocked ? '' : await pageMarkdown(p));
     return {
@@ -314,8 +304,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
 
   type BookSnapshot = Awaited<ReturnType<typeof collectBook>>;
 
-  // A page as Markdown. An opened file that is not Markdown (plain text, Word, PDF) is converted the way "Convert
-  // to… Markdown" would, so its text is never read as Markdown by accident.
   async function pageMarkdown(p: PublicNote) {
     if (!isNonMarkdownFile(p)) return String(p.body || '');
     try {
@@ -330,7 +318,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     return '# ' + b.name + '\n\n**Contents**\n\n' + toc + '\n\n' + parts.join('\n');
   }
 
-  // The book as HTML: its name, a contents list linking to the pages, then one section per page.
   function bookHtml(b: BookSnapshot) {
     const toc = '<nav class="book-toc"><h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a href="#page-' + p.no + '" data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol></nav>';
     const pages = b.pages.map((p) => '<section class="book-page" id="page-' + p.no + '"><h2>' + escapeHtml(p.title) + '</h2>' +
@@ -339,7 +326,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   async function exportBook(format: string) {
-    const bookId = readerOpen() ? reader.bookId : book.id; // the reader's buttons export the book being read
+    const bookId = readerOpen() ? reader.bookId : book.id;
     if (!bookId) return;
     const b = await collectBook(bookId);
     if (!b.pages.length) { toast('This book has no pages yet.'); return; }
@@ -348,9 +335,6 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     else if (!r.canceled) toast('Could not export the book: ' + r.error);
   }
 
-  // ---- the reading view: the whole book on one page ----
-
-  // The reading view is a snapshot of one book; reader.bookId says which.
   const reader: { bookId: string | null, seq: number } = { bookId: null, seq: 0 };
 
   async function openReader() {
@@ -358,7 +342,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     if (!bookId) return;
     const seq = ++reader.seq;
     const b = await collectBook(bookId);
-    if (seq !== reader.seq || book.id !== bookId) return; // moved on while the pages loaded
+    if (seq !== reader.seq || book.id !== bookId) return;
     reader.bookId = bookId;
     el.bookReaderTitle.textContent = b.name;
     el.bookReaderToc.innerHTML = '<h2>Contents</h2><ol>' + b.pages.map((p) => '<li><a data-page="' + p.no + '">' + escapeHtml(p.title) + '</a></li>').join('') + '</ol>';
@@ -372,7 +356,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   function closeReader() {
-    reader.seq++; // an opening still loading must not appear after this
+    reader.seq++;
     reader.bookId = null;
     el.bookReader.classList.add('hidden');
     el.bookReaderBody.innerHTML = '';

@@ -21,20 +21,11 @@ type WordNoteDeps = {
 };
 
 export function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }: WordNoteDeps) {
-  // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed
-  // (nothing in it runs), with a policy that allows only inline styles and data: images. So the file's styles
-  // cannot reach the app, and it loads nothing from the network, so opening it cannot tell anyone you did.
-  // docx-preview adds its own wrapper style after this one, so these rules are more specific to win. safe center: a page
-  // wider than the frame starts at its left edge and scrolls, instead of being cut off on the left.
   const DOCX_FRAME = '<!doctype html><html><head><meta charset="utf-8"><meta name="notes-docx-frame">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:">'
     + '<style>html, body { margin: 0; } html body .docx-wrapper { background: #e9e4da; padding: 16px; align-items: safe center; } html body .docx-wrapper > section.docx { box-shadow: none; }</style></head><body></body></html>';
-  // docxShownKey (note id + file version) skips re-rendering the same file; docxSeq drops a render that is
-  // overtaken by a newer one.
   let docxShownKey: string | null = null;
   let docxSeq = 0;
-  // docx: the editing controller; docxNote: the document on show and editable, { id, fileMtime } as loaded or saved;
-  // docxBanner: what the banner says about it (shown again when the same version is shown again).
   let docx: DocxController | null = null, docxNote: DocxOnShow | null = null, docxBanner = '';
   function clearDocx() {
     crafts.wordcraft.clear();
@@ -45,8 +36,6 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     el.docxEditor.classList.add('hidden');
     el.docxView.removeAttribute('srcdoc');
   }
-  // A fresh frame per document, so no styles from the last one linger. Only a load of this frame page counts: the
-  // about:blank load from an earlier clearDocx can still arrive and must not be taken for it.
   function freshDocxFrame(): Promise<Document> {
     return new Promise((resolve) => {
       const onLoad = () => {
@@ -59,8 +48,6 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
       el.docxView.srcdoc = DOCX_FRAME;
     });
   }
-  // Links in a document never navigate: a #bookmark scrolls to its place, a web link opens in the browser only
-  // on Ctrl+click (like links in notes), and a plain click says where it goes.
   function onDocxLinkClick(e: MouseEvent) {
     const frameWindow = el.docxView.contentDocument?.defaultView;
     const a = frameWindow && e.target instanceof frameWindow.Element ? e.target.closest('a[href]') : null;
@@ -82,7 +69,6 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
         onDirty: (d) => { el.docxSaveBtn.textContent = d ? 'Save' : 'Saved'; },
         say: toast,
         onBlur: () => flushSave({ fromBlur: true }),
-        // Keys pressed in the document never reach this page: Ctrl+S saves, Escape hides the window as elsewhere.
         onKey: (e) => {
           const ctrl = e.ctrlKey || e.metaKey;
           if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); flushDocx({ explicit: true }); }
@@ -132,8 +118,6 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     }
   }
 
-  // Writes the document's edits into the file, like flushPdf for PDFs: one save at a time, each re-checking, so
-  // typing during a save is saved too. opts.explicit: say so when done. Resolves false while edits are unsaved.
   const docxDirty = () => !!(docx && docxNote && docx.isDirty());
   const flushDocx = oneAtATime(async (opts: { explicit?: boolean }) => {
     let explicit = !!opts.explicit;
@@ -158,7 +142,6 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
       if (docxNote !== target) return true;
       const inPlace = reportFileSaved(target, r, explicit, 'document');
       if (inPlace) docxShownKey = target.id + ':' + r.mtime;
-      // The page now stands for the file as written; if it cannot be matched to it, the document is shown again.
       const synced = ed.markSaved();
       if (!synced.ok) {
         docxShownKey = null;
@@ -180,14 +163,12 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
   }
 
-  // The rest of the app's doors into the document on show.
   function docxOpen() { return !!docxNote; }
-  // The next showDocx shows the file again even if it did not change (a reload from disk drops the edits).
   function forgetShownDocx() { docxShownKey = null; }
   function bindDocxEvents() {
     const docxTools = el.docxEditor.querySelector<HTMLElement>('.docx-toolbar');
     if (!docxTools) return;
-    docxTools.addEventListener('mousedown', (e) => { if (e.target instanceof Element && e.target.closest('button')) e.preventDefault(); }); // keep the text selection in the document
+    docxTools.addEventListener('mousedown', (e) => { if (e.target instanceof Element && e.target.closest('button')) e.preventDefault(); });
     docxTools.addEventListener('click', onDocxToolbarClick);
   }
 

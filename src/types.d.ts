@@ -109,7 +109,6 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null;
 }
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
-// ---- What the channels below return (recorded from the handlers; a change there changes these first) ----
 interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean; sharedTags?: string[] }
 interface RelatedNotes { outgoing: RelatedItem[]; incoming: RelatedItem[]; byTags: RelatedItem[] }
 interface GitState {
@@ -121,7 +120,6 @@ interface GitCommit { hash: string; at: number; subject: string }
 type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
 type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
 type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };
-// A live share as the page shows it (live.mts reports it on every change).
 interface LiveStatus {
   role: 'host' | 'guest'; url: string; peers: number; connected: boolean; version?: number;
   error?: string | null; localOnly?: boolean; pending?: boolean; ended?: boolean;
@@ -139,8 +137,6 @@ type AttachmentResult = Attachment | { error: string; name: string };
 interface AgentFile { filePath: string; label: string }
 interface LinkResult { ok: boolean; linked: string[]; failed: string[]; firstId: string | null }
 interface DocxPatch { start: number; end: number; old: string; xml: string }
-// How main saved an edited file: in place (with the mtime, and whether the first backup of the session was taken),
-// or into a copy beside it because the file changed on disk since it was opened.
 type SavedFile = { mtime: number | null; backup: boolean; savedAs?: undefined } | { savedAs: string; newCopy: boolean; mtime?: undefined };
 type CraftSave = SavedFile | { exported: string; own?: boolean } | { relinked: string; mtime: number | null };
 interface ConvertOption { to: string; label: string; note: string }

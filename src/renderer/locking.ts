@@ -38,7 +38,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
       el.bodyInput.classList.add('hidden');
       if (state.rich) state.rich.setEditable(false);
     } else if (note) {
-      renderFileRow(note); // restores the right editor for the mode
+      renderFileRow(note);
       if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile(note) && !isPlainTextFile(note));
     }
   }
@@ -97,19 +97,15 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
     }
   }
 
-  // Swaps the open note for its fresh view after a lock change: body, editor, button, card.
   function applyLockedNote(updated: PublicNote | null) {
     if (!updated || updated.id !== state.currentId) return;
     state.current = updated;
-    // Keystrokes that landed while the lock call ran (scrypt takes a moment) are kept and saved again;
-    // a relocked note, on the other hand, must show no plaintext at all.
     const keepTyping = state.dirty && updated.unlocked;
     if (!keepTyping) {
       state.dirty = false;
       src.reload(updated.body);
       if (state.rich) {
         state.currentLossless = state.rich.setMarkdown(updated.body);
-        // Same rule as opening a note: text the rendered view would rewrite opens as source.
         if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) { applyEditorMode(true); toast('Switched to source: this note contains formatting the rendered view would change.'); }
       }
       state.pending.delete(updated.id);

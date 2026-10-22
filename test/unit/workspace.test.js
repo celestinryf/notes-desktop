@@ -8,14 +8,14 @@ const { Store } = require('../../src/store.mts');
 const W = require('../../src/workspace.mts');
 
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-ws-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-ws-');
 
 test('exportNotes mirrors plain notes and folders; file-backed and trashed notes are left out', () => {
   const store = new Store(tmp()).load();
   const work = store.createFolder({ name: 'Work' });
   const clients = store.createFolder({ name: 'Clients: A/B', parentId: work.id });
   const a = store.create({ title: 'Plan', body: 'plan body', folderId: work.id });
-  const b = store.create({ title: 'Plan', body: 'second plan', folderId: work.id }); // same title -> suffixed file
+  const b = store.create({ title: 'Plan', body: 'second plan', folderId: work.id });
   const c = store.create({ title: '', body: 'first line as title\nmore', folderId: clients.id });
   const t = store.create({ title: 'gone', body: 'x' }); store.trash(t.id);
   const file = path.join(tmp(), 'ext.md'); fs.writeFileSync(file, 'ext');
@@ -41,7 +41,7 @@ test('importNotes applies edits, creates notes for new files in the right folder
   fs.writeFileSync(path.join(dir, 'Work', 'Plan.md'), 'plan body\r\n\r\n- edited by the agent\r\n', 'utf8');
   fs.mkdirSync(path.join(dir, 'Work', 'Sub'));
   fs.writeFileSync(path.join(dir, 'Work', 'Sub', 'Fresh idea.md'), 'new note', 'utf8');
-  fs.writeFileSync(path.join(dir, 'notes.json'), '{}', 'utf8'); // not a note file: ignored
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{}', 'utf8');
   fs.rmSync(path.join(dir, 'Untouched.md'));
   const r = W.importNotes(store, dir);
   assert.equal(r.updated, 1);
@@ -52,7 +52,6 @@ test('importNotes applies edits, creates notes for new files in the right folder
   const fresh = store.notes.find((n) => n.title === 'Fresh idea');
   const sub = store.folders.find((f) => f.name === 'Sub');
   assert.ok(fresh && sub && fresh.folderId === sub.id && sub.parentId === work.id, 'new file became a note in a mirrored folder');
-  // A second import with no further changes is a no-op.
   const r2 = W.importNotes(store, dir);
   assert.deepEqual([r2.updated, r2.created], [0, 0]);
 });
@@ -62,7 +61,6 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   const a = store.create({ title: 'Plan', body: 'v1' });
   const dir = tmp();
   W.exportNotes(store, dir);
-  // Both sides change: the app saves first (later updatedAt than the export), the agent edits the file.
   store.update(a.id, { body: 'v2 (mine)' });
   fs.writeFileSync(path.join(dir, 'Plan.md'), 'v2 (agent)', 'utf8');
   const r = W.importNotes(store, dir);
@@ -72,7 +70,6 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   const copy = store.notes.find((n) => n.title === 'Plan (bot)');
   assert.ok(copy && copy.body === 'v2 (agent)', 'agent text saved beside it');
   assert.match(r.details.join('\n'), /conflict: Plan\.md/);
-  // Metadata-only changes in the app (pin, tags, folder) are not a conflict: the agent's edit applies.
   const b = store.create({ title: 'Meta', body: 'm1' });
   W.exportNotes(store, dir);
   store.update(b.id, { pinned: true, tags: 'work' });
@@ -81,7 +78,6 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   assert.equal(r1.conflicts, 0);
   assert.equal(store.get(b.id).body, 'm2 (agent)');
   assert.equal(store.get(b.id).pinned, true);
-  // A note trashed mid-run is skipped, not resurrected.
   const t = store.create({ title: 'Doomed', body: 'x' });
   W.exportNotes(store, dir);
   store.trash(t.id);
@@ -90,7 +86,6 @@ test('importNotes keeps the person\'s edit on a conflict and saves the agent\'s 
   assert.equal(r2.updated, 0);
   assert.ok(store.get(t.id).trashedAt, 'still trashed');
   assert.match(r2.details.join('\n'), /skipped \(note trashed meanwhile\): Doomed\.md/);
-  // refreshWorkspace: edits made in the folder since the last export (a terminal session) survive the rewrite.
   W.exportNotes(store, dir);
   fs.writeFileSync(path.join(dir, 'Plan.md'), 'v3 from terminal', 'utf8');
   fs.writeFileSync(path.join(dir, 'Terminal note.md'), 'typed in a terminal', 'utf8');
@@ -129,7 +124,6 @@ test('forgetNote removes a note\'s exported file and manifest entry', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, W.MANIFEST), 'utf8'));
   assert.deepEqual(manifest.files.map((f) => f.id), [b.id]);
   assert.equal(W.forgetNote(dir, a.id), false, 'already gone');
-  // A note locked after export is skipped on import rather than copied back in clear.
   W.exportNotes(store, dir);
   store.lockNote(b.id, 'pw');
   fs.writeFileSync(path.join(dir, 'Other.md'), 'agent edit');
@@ -164,9 +158,9 @@ test('manifest paths that point outside the workspace are ignored by import and 
   fs.writeFileSync(outside, 'private');
   const manifestPath = path.join(dir, W.MANIFEST);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const rel = path.relative(dir, outside); // ..\..\victim.txt
+  const rel = path.relative(dir, outside);
   manifest.files.push({ id: a.id, rel, hash: 'nope', folderId: null });
-  manifest.files.push({ id: a.id, rel: outside, hash: 'nope', folderId: null }); // absolute
+  manifest.files.push({ id: a.id, rel: outside, hash: 'nope', folderId: null });
   fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   const r = W.importNotes(store, dir);
   assert.equal(store.get(a.id).body, 'a body', 'nothing read from outside');

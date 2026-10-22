@@ -1,5 +1,3 @@
-/* Vault manager: watches vault directories for changes, keeps the store in step, and runs git sync
-   (commit local changes, pull with rebase, push) the way the Obsidian git plugin does. Main process only. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -35,16 +33,16 @@ class VaultManager {
   constructor(store: Store, opts?: { onChange?: (vaultId: string, status: VaultStatus) => void, onNotesChanged?: (vaultId: string, scan: VaultScan) => void, now?: () => number, debounceMs?: number, rescanDebounceMs?: number }) {
     opts = opts || {};
     this.store = store;
-    this.onChange = opts.onChange || (() => {});      // (vaultId, status) -> void
-    this.onNotesChanged = opts.onNotesChanged || (() => {}); // after a scan changed anything
+    this.onChange = opts.onChange || (() => {});
+    this.onNotesChanged = opts.onNotesChanged || (() => {});
     this.now = opts.now || Date.now;
     this.debounceMs = opts.debounceMs == null ? 8000 : opts.debounceMs;
     this.rescanDebounceMs = opts.rescanDebounceMs == null ? 700 : opts.rescanDebounceMs;
-    this.watchers = new Map();     // vaultId -> fs.FSWatcher
-    this.timers = new Map();       // vaultId -> { rescan, commit, pull }
-    this.status = new Map();       // vaultId -> status object
-    this.busy = new Map();         // vaultId -> promise
-    this.queued = new Map();       // vaultId -> promise of the follow-up sync
+    this.watchers = new Map();
+    this.timers = new Map();
+    this.status = new Map();
+    this.busy = new Map();
+    this.queued = new Map();
   }
 
   _status(id: string): VaultStatus {
@@ -71,8 +69,6 @@ class VaultManager {
     return t;
   }
 
-  // ---- lifecycle -----------------------------------------------------------
-
   async start() {
     for (const v of this.store.vaults) await this.open(v.id, { pull: true });
   }
@@ -90,7 +86,7 @@ class VaultManager {
 
   close(id: string) {
     const w = this.watchers.get(id);
-    if (w) { try { w.close(); } catch (_) { /* ignore */ } this.watchers.delete(id); }
+    if (w) { try { w.close(); } catch (_) {  } this.watchers.delete(id); }
     const t: Record<string, NodeJS.Timeout | undefined> = this.timers.get(id) || {};
     for (const k of Object.keys(t)) clearTimeout(t[k]);
     this.timers.delete(id);
@@ -100,8 +96,6 @@ class VaultManager {
   closeAll() {
     for (const id of Array.from(this.watchers.keys())) this.close(id);
   }
-
-  // ---- watching ------------------------------------------------------------
 
   watch(id: string) {
     const v = this.store.getVault(id);
@@ -125,7 +119,6 @@ class VaultManager {
     clearTimeout(t.rescan);
     t.rescan = setTimeout(async () => {
       try {
-        // While a sync is replaying commits, files come and go; never treat that as deletions.
         const r = await this.store.scanVault(id, { allowRemovals: !this.busy.has(id) });
         if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r);
         if (this.busy.has(id)) this.scheduleRescan(id);
@@ -133,7 +126,6 @@ class VaultManager {
     }, this.rescanDebounceMs);
   }
 
-  // Called by the app after it writes a vault file itself.
   noteChanged(id: string) {
     const v = this.store.getVault(id);
     if (v && v.autoSync) this.scheduleCommit(id);
@@ -153,8 +145,6 @@ class VaultManager {
     t.pull = setTimeout(() => { this.sync(id, 'interval').catch(() => {}).finally(() => this.schedulePull(id)); }, v.syncMinutes * 60 * 1000);
   }
 
-  // ---- git -----------------------------------------------------------------
-
   async refreshRepoStatus(id: string) {
     const v = this.store.getVault(id);
     if (!v) return null;
@@ -168,8 +158,6 @@ class VaultManager {
     let ahead = 0, behind = 0;
     const ab = await git(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], v.path, 10000);
     if (ab.ok) { const m = ab.stdout.trim().split(/\s+/); ahead = parseInt(m[0], 10) || 0; behind = parseInt(m[1], 10) || 0; }
-    // Unmerged paths count too: an autostash that failed to re-apply leaves them with no rebase or merge
-    // marker, and the flag must survive until the person resolves them (or the next Sync would commit markers).
     const unmerged = porcelain.ok && /^(UU|AA|DD|AU|UA|DU|UD) /m.test(porcelain.stdout);
     const conflict = unmerged || fs.existsSync(path.join(v.path, '.git', 'rebase-merge')) || fs.existsSync(path.join(v.path, '.git', 'rebase-apply')) || fs.existsSync(path.join(v.path, '.git', 'MERGE_HEAD'));
     this._set(id, { isRepo: true, branch, remote: remoteUrl || v.remote || '', dirty: porcelain.ok && porcelain.stdout.trim().length > 0, ahead, behind, conflict });
@@ -193,7 +181,6 @@ class VaultManager {
       else if (have !== remote) await git(['remote', 'set-url', '--', 'origin', remote], v.path);
       this.store.updateVault(id, { remote });
     } else if (remote === '') {
-      // An emptied Remote field detaches the repository: no origin, nothing pushed, history stays local.
       const have = (await git(['remote', 'get-url', 'origin'], v.path)).stdout.trim();
       if (have) await git(['remote', 'remove', 'origin'], v.path);
       this.store.updateVault(id, { remote: '' });
@@ -203,13 +190,9 @@ class VaultManager {
     return { ok: true };
   }
 
-  // Commit local changes, pull with rebase (autostash), push. Never destroys local work: a conflicting
-  // rebase is aborted and reported, leaving the local commit in place for the user to resolve.
   async sync(id: string, reason: string): Promise<VaultResult> {
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
-    // A sync asked for while one is running must not get that run's (possibly stale) result: it runs
-    // again afterwards, once, however many callers queued up meanwhile.
     const running = this.busy.get(id);
     if (running) {
       let next = this.queued.get(id);
@@ -234,13 +217,9 @@ class VaultManager {
           if (!commit.ok && !/nothing to commit/i.test(commit.error || '')) throw new Error(commit.error);
         }
         if (st.remote || v.remote) {
-          // The branch name is only real after the first commit (before that HEAD is unborn).
           const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], v.path, 10000)).stdout.trim() || 'main';
           const remoteHas = await git(['ls-remote', '--heads', 'origin', branch], v.path, 60000);
           const remoteHasBranch = remoteHas.ok && remoteHas.stdout.trim().length > 0;
-          // Rebase and autostash create commits too, so the identity goes on the pull as well.
-          // Pull, then push. If the remote moved between the two (another device pushed just now), pull
-          // once more and push again rather than reporting a rejection the next sync would clear anyway.
           for (let attempt = 0; attempt < 2; attempt++) {
             const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true } as const;
             if (!pull.ok) {
@@ -250,16 +229,13 @@ class VaultManager {
               this._set(id, { lastError: 'pull: ' + msg, syncing: false });
               return { ok: false, error: msg };
             }
-            // An autostash that failed to re-apply leaves unmerged paths with git exiting zero: that is a
-            // conflict too, and conflict markers must never be committed and pushed.
             const after = await git(['status', '--porcelain'], v.path, 20000);
             if (after.ok && /^(UU|AA|DD|AU|UA|DU|UD) /m.test(after.stdout)) {
               const msg = 'Conflicting changes from another device; open the folder and resolve them, then Sync again.';
               this._set(id, { lastError: 'pull: ' + msg, conflict: true, syncing: false });
               return { ok: false, error: msg };
             }
-            // Pulled files may be new or changed: bring the notes in line before pushing.
-            try { const r = await this.store.scanVault(id); if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r); } catch (_) { /* ignore */ }
+            try { const r = await this.store.scanVault(id); if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r); } catch (_) {  }
             const push = await git(['push', '-q', '-u', 'origin', 'HEAD'], v.path, 120000);
             if (push.ok) break;
             const rejected = /rejected|fetch first|non-fast-forward|failed to push some refs/i.test(push.error);

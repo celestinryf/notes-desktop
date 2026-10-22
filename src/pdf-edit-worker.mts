@@ -1,11 +1,3 @@
-/* Changes pdf-lib makes to a PDF, in a worker thread. workerData: { bytes, task, ... }, task one of
-     'check'     nothing is changed; refuses a digitally signed PDF (see below)
-     'rotate'    rotations: one entry per page, each 0, 90, 180 or 270 degrees clockwise, added to the page's own
-     'comments'  ops: [{ op: 'add', page, x, y, text } | { op: 'edit', page, ref, text } | { op: 'delete', page, ref }]
-                 with page 0-based, x and y the note's top-left corner in the page's PDF space, ref [num, gen] of
-                 the annotation (as pdf.js names it); author: the name a new note is signed with, or ''
-   Posts back { ok, bytes } (no bytes for 'check') or { ok: false, error }.
-   pdf-lib writes the whole file anew, which would break a digital signature, so a signed PDF is always refused. */
 import { parentPort, workerData } from 'node:worker_threads';
 const port = parentPort;
 if (!port) throw new Error('this script runs in a worker thread only');
@@ -16,12 +8,11 @@ const { PDFDocument, PDFName, PDFNumber, PDFHexString, PDFString, PDFRef, PDFArr
 type CommentOp = { op: 'add' | 'edit' | 'delete', page: number, x: number, y: number, text: string, ref: [number, number] };
 type WorkerTask = { bytes: Uint8Array, task: 'check' | 'rotate' | 'comments', rotations: number[], ops: CommentOp[], author: string };
 
-const NOTE_SIZE = 20; // points: the usual size of a sticky note's icon
-const NOTE_FLAGS = 4 | 8 | 16; // Print, NoZoom, NoRotate: printed, and the icon keeps its size and stays upright
+const NOTE_SIZE = 20;
+const NOTE_FLAGS = 4 | 8 | 16;
 const NOTE_COLOR = [1, 0.82, 0.2];
 const MAX_TEXT = 20000;
 
-// Signed: the form says signatures exist, a signature field has a value, or the PDF is certified (DocMDP).
 function isSigned(doc: pdfLibModule.PDFDocument) {
   const perms = doc.catalog.lookupMaybe(PDFName.of('Perms'), PDFDict);
   if (perms && perms.has(PDFName.of('DocMDP'))) return true;
@@ -54,13 +45,11 @@ function text(value: string) {
   return PDFHexString.fromText(value);
 }
 
-// The refs in a page's annotation list (the list itself may be an indirect object).
 function annotRefs(page: PDFPage) {
   const annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
   return annots ? annots.asArray().filter((r) => r instanceof PDFRef) : [];
 }
 
-// The annotation ref names on page, which must be one of that page's.
 function annotOn(page: PDFPage, ref: [number, number]) {
   if (!Array.isArray(ref) || !Number.isInteger(ref[0]) || !Number.isInteger(ref[1])) throw new Error('that comment could not be found');
   const r = PDFRef.of(ref[0], ref[1]);
@@ -72,7 +61,6 @@ function addNote(doc: pdfLibModule.PDFDocument, op: CommentOp, author: string) {
   const page = pageAt(doc, op.page);
   const { x: x0, y: y0, width, height } = page.getCropBox();
   if (!Number.isFinite(op.x) || !Number.isFinite(op.y)) throw new Error('the place for the comment was not valid');
-  // Kept wholly on the page.
   const x = Math.min(Math.max(op.x, x0), x0 + width - NOTE_SIZE);
   const y = Math.min(Math.max(op.y, y0 + NOTE_SIZE), y0 + height);
   const now = PDFString.fromDate(new Date());
@@ -94,7 +82,6 @@ function addNote(doc: pdfLibModule.PDFDocument, op: CommentOp, author: string) {
   page.node.addAnnot(doc.context.register(dict));
 }
 
-// Kinds whose comment can be retyped (PDF markup annotations, but not text boxes, whose text is on the page).
 const MARKUP = new Set<pdfLibModule.PDFObject | undefined>(['Text', 'Line', 'Square', 'Circle', 'Polygon', 'PolyLine', 'Highlight', 'Underline', 'Squiggly',
   'StrikeOut', 'Stamp', 'Caret', 'Ink', 'FileAttachment', 'Sound'].map((k) => PDFName.of(k)));
 
@@ -102,16 +89,14 @@ function editNote(doc: pdfLibModule.PDFDocument, op: CommentOp) {
   const { dict } = annotOn(pageAt(doc, op.page), op.ref);
   if (!MARKUP.has(dict.get(PDFName.of('Subtype')))) throw new Error('that mark has no comment to change');
   dict.set(PDFName.of('Contents'), text(op.text));
-  dict.delete(PDFName.of('RC')); // a rich-text copy of the old comment, which some apps would show instead
+  dict.delete(PDFName.of('RC'));
   dict.set(PDFName.of('M'), PDFString.fromDate(new Date()));
 }
 
-// Removes the note, its pop-up, and the replies to it (with theirs), from the page and from the file.
 function deleteNote(doc: pdfLibModule.PDFDocument, op: CommentOp) {
   const page = pageAt(doc, op.page);
   const { ref, dict } = annotOn(page, op.ref);
   if (dict.get(PDFName.of('Subtype')) !== PDFName.of('Text')) throw new Error('only sticky-note comments can be deleted here');
-  // The replies, and replies to those, until no more are found.
   const gone = new Set([ref]);
   for (let grew = true; grew;) {
     grew = false;
@@ -138,8 +123,6 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
     const input: WorkerTask = workerData;
     const { task } = input;
     if (task === 'check') {
-      // Only the signature matters here: a PDF pdf-lib cannot read (encrypted, or slightly damaged) is not refused,
-      // since what is written comes from pdf.js, which could read it.
       let signed = false;
       try { signed = isSigned(await PDFDocument.load(input.bytes, { updateMetadata: false, ignoreEncryption: true })); } catch (_) { signed = false; }
       if (signed) throw new Error(SIGNED);

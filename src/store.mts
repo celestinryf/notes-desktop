@@ -13,34 +13,34 @@ const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
-  theme: 'system',          // system | light | dark
-  colorScheme: 'notes',     // a scheme in src/shared/themes.mts SCHEMES, or 'custom'; 'notes' is styles.css itself
-  customColors: null,       // { light?, dark? }: { background, text, accent } (#rrggbb) each; used by 'custom'
+  theme: 'system',
+  colorScheme: 'notes',
+  customColors: null,
   fontSize: 16,
   openAtLogin: true,
   alwaysOnTop: false,
-  sort: 'updated',          // updated | created | title
-  sidebarCollapsed: false,   // hidden: it floats in when the pointer reaches the window's left edge (Zen's compact mode)
-  listCollapsed: false,      // note list hidden (only while a note is open)
-  listMode: 'tree',          // tree | list: the middle pane as folders with their notes (the default), or as one list
-  listLayout: 1,            // which one-time list migrations have run (see sanitizeSettings)
-  lastFolderId: null,       // folder the list showed last, restored at start
+  sort: 'updated',
+  sidebarCollapsed: false,
+  listCollapsed: false,
+  listMode: 'tree',
+  listLayout: 1,
+  lastFolderId: null,
   sidebarWidth: H.PANE_LIMITS.sidebarWidth.def,
   listWidth: H.PANE_LIMITS.listWidth.def,
-  expandedFolders: [],      // the sidebar's one open folder path (ids, outermost first)
-  treeExpanded: [],         // folder ids open in the middle pane's folder view
-  tagsCollapsed: false,     // the sidebar's Tags section folded away
-  editorMode: 'rendered',   // rendered | source
-  editorAlign: 'center',    // left | center | right: where the writing column sits in the editor pane
-  editorWidth: 760,         // max width of the writing column in px; 0 means full width
-  columnLayout: 3,          // which one-time column migrations have run (see sanitizeSettings)
-  panes: null,              // open tabs on each side of the editor and the split; see sanitizePanes
-  gitEnabled: true,         // commit notes.json to a git repo in the data folder after changes
-  gitRemote: '',            // optional remote URL to push to after each commit
-  ttsVoice: '',             // speechSynthesis voice name; '' = system default
-  ttsRate: 1,               // 0.5 .. 2
-  zoomLevel: 0,             // main window zoom (Chromium levels, -3 .. 5); Ctrl+= / Ctrl+- / Ctrl+0
-  window: null,             // { x, y, width, height }
+  expandedFolders: [],
+  treeExpanded: [],
+  tagsCollapsed: false,
+  editorMode: 'rendered',
+  editorAlign: 'center',
+  editorWidth: 760,
+  columnLayout: 3,
+  panes: null,
+  gitEnabled: true,
+  gitRemote: '',
+  ttsVoice: '',
+  ttsRate: 1,
+  zoomLevel: 0,
+  window: null,
 });
 
 const EDITOR_WIDTH = { min: 480, max: 1600 };
@@ -76,7 +76,6 @@ function cleanFolderName(name: unknown) {
   return (s || 'Untitled folder').slice(0, FOLDER_NAME_MAX);
 }
 
-// The longest reading order a book keeps, and so the most pages a split may make.
 const MAX_BOOK_PAGES = 5000;
 
 function sanitizeFolder(raw: unknown, now: number): Folder | null {
@@ -90,16 +89,13 @@ function folderFrom(raw: Record<string, unknown>, now: number): Folder {
     name: cleanFolderName(raw.name),
     parentId: typeof raw.parentId === 'string' && raw.parentId ? raw.parentId : null,
     createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
-    // Vault folders mirror a directory on disk.
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
-    // A book is a folder whose notes are pages, read in this order (ids not listed follow, oldest first).
     book: !!raw.book,
     pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x: unknown) => typeof x === 'string' && x).slice(0, MAX_BOOK_PAGES) : [],
   };
 }
 
-// A vault is a folder on disk (optionally a git repository) whose text files are notes.
 function sanitizeVault(raw: unknown, now: number): Vault | null {
   if (!isObjectLike(raw) || typeof raw.path !== 'string' || !raw.path) return null;
   return {
@@ -116,8 +112,6 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
 const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
 
-// Directories the scan skips must not be creatable or renamable from the app: their notes would vanish
-// from view while staying on disk.
 function assertVaultDirName(name: string) {
   const safe = H.safeFilename(name);
   if (/^\./.test(safe) || VAULT_SKIP_DIRS.has(safe.toLowerCase())) throw Object.assign(new Error('A vault folder cannot be named "' + safe + '": the app does not scan folders with that name.'), { code: 'ENAME' });
@@ -130,14 +124,11 @@ function uniqueName(dir: string, base: string, ext: string) {
   return candidate;
 }
 
-// Atomic replace with retries. On Windows a reader (git, antivirus, a sync client) holding the target
-// open makes rename fail with EPERM/EBUSY for a moment; wait briefly and try again before falling back to a copy.
 function sleepSync(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function replaceFile(tmp: string, target: string) {
-  // Short total wait (~300 ms): a reader's lock lasts milliseconds, and this blocks the main process.
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try { fs.renameSync(tmp, target); return; } catch (err) {
@@ -162,8 +153,6 @@ function clampFontSize(n: number) {
 
 const TABS_MAX = 50;
 
-// The editor's tabs: { split, ratio (left side's share), active ('left' | 'right'), left, right }, each side
-// { ids: note ids in tab order, current: the id shown }. Unknown ids are dropped when a tab is opened.
 function sanitizePanes(raw: unknown): Panes {
   const p: Record<string, unknown> = isRecord(raw) ? raw : {};
   const side = (v: unknown): PaneSide => {
@@ -173,7 +162,7 @@ function sanitizePanes(raw: unknown): Panes {
   };
   const left = side(p.left);
   const right = side(p.right);
-  right.ids = right.ids.filter((id) => !left.ids.includes(id)); // a note is open on one side only
+  right.ids = right.ids.filter((id) => !left.ids.includes(id));
   if (right.current && !right.ids.includes(right.current)) right.current = null;
   const ratio = Number(p.ratio);
   return {
@@ -199,7 +188,6 @@ function sanitizeSettings(input: unknown) {
   s.sidebarCollapsed = !!s.sidebarCollapsed;
   s.listCollapsed = !!s.listCollapsed;
   s.listMode = s.listMode === 'list' ? 'list' : 'tree';
-  // 1: the folder view became the default (user, 2026-10-19); every save had written 'list' whether or not it was picked.
   if ((Number(src.listLayout) || 0) < 1) s.listMode = 'tree';
   s.listLayout = 1;
   s.treeExpanded = Array.isArray(s.treeExpanded) ? s.treeExpanded.filter((x) => typeof x === 'string').slice(0, 5000) : [];
@@ -212,9 +200,6 @@ function sanitizeSettings(input: unknown) {
   s.editorMode = s.editorMode === 'source' ? 'source' : 'rendered';
   s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : DEFAULT_SETTINGS.editorAlign;
   s.editorWidth = clampEditorWidth(s.editorWidth);
-  // One-time moves, each marked by columnLayout so a later choice is never undone:
-  // 2: every save wrote the old defaults (760px, left) whether or not they were picked; those became full width, centred.
-  // 3: full width became a readable 760px column (user, 2026-10-18); full width stays a choice in Settings.
   const layout = Number(src.columnLayout) || 0;
   if (layout < 2 && s.editorWidth === 760 && s.editorAlign === 'left') s.editorAlign = DEFAULT_SETTINGS.editorAlign;
   if (layout < 3 && s.editorWidth === 0) s.editorWidth = DEFAULT_SETTINGS.editorWidth;
@@ -235,7 +220,6 @@ function sanitizeSettings(input: unknown) {
 
 const STICKY_COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
 
-// A note shown as a desktop sticky: where it sits, how big, which tint, whether it floats above other windows.
 function sanitizeSticky(raw: unknown): Sticky | null {
   if (!isObjectLike(raw)) return null;
   const num = <D,>(v: unknown, d: D): number | D => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : d);
@@ -247,7 +231,6 @@ function sanitizeSticky(raw: unknown): Sticky | null {
   };
 }
 
-// A live-share session recorded on a note so it can be resumed after a restart.
 function sanitizeLive(raw: unknown): Live | null {
   if (!isObjectLike(raw) || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
   return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: isFiniteNumber(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
@@ -266,7 +249,6 @@ function noteFrom(raw: Record<string, unknown>, now: number): Note {
     body: typeof raw.body === 'string' && !L.sanitizeLock(raw.lock) ? raw.body : '',
     tags: H.parseTags(raw.tags || []),
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
-    // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
     filePath: typeof raw.filePath === 'string' && raw.filePath ? raw.filePath : null,
     fileKind: isFileKind(raw.fileKind) ? raw.fileKind : null,
     fileMtime: isFiniteNumber(raw.fileMtime) ? raw.fileMtime : null,
@@ -274,7 +256,6 @@ function noteFrom(raw: Record<string, unknown>, now: number): Note {
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     sticky: sanitizeSticky(raw.sticky),
     live: sanitizeLive(raw.live),
-    // A locked note stores only ciphertext; its body field is always empty on disk.
     lock: L.sanitizeLock(raw.lock),
     remindAt: isFiniteNumber(raw.remindAt) ? Math.round(raw.remindAt) : null,
     remindedAt: isFiniteNumber(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
@@ -313,8 +294,8 @@ class Store {
     this.backupDir = path.join(dir, 'backups');
     this.now = opts.now || Date.now;
     this.notes = [];
-    this.plain = new Map(); // noteId -> decrypted body, for notes unlocked this session
-    this.keys = new Map();  // noteId -> derived key, so edits can be re-encrypted without the password
+    this.plain = new Map();
+    this.keys = new Map();
     this.folders = [];
     this.vaults = [];
     this.settings = Object.assign({}, DEFAULT_SETTINGS);
@@ -333,28 +314,23 @@ class Store {
     if (fs.existsSync(this.file)) {
       let text: string | null = null;
       let ioError = null;
-      // A locked or busy file is not a corrupt file: retry the read briefly before deciding anything.
       for (let attempt = 0; attempt < 6 && text === null; attempt++) {
         try { text = fs.readFileSync(this.file, 'utf8'); ioError = null; } catch (err) { ioError = err; sleepSync(50 * (attempt + 1)); }
       }
       if (text === null) {
-        // Still unreadable: never overwrite a file we could not read. Run with an empty view and refuse to save.
         this.loadError = ioError;
         this.saveBlocked = true;
       } else {
         try {
           raw = JSON.parse(text);
         } catch (err) {
-          // Genuinely corrupt: keep the file for the user and start from the newest backup.
           this.loadError = err;
           const quarantined = this.file + '.corrupt-' + this.now();
           try { fs.renameSync(this.file, quarantined); } catch (_) {
-            // The corrupt file is stuck in place: never copy it into backups/ or prune good ones for it.
             this.backupSuspended = true;
           }
           raw = this._loadNewestBackup();
           this.recoveredFromBackup = true;
-          // Nothing to recover from and the damaged file cannot be moved aside: never write over it.
           if (!raw && this.backupSuspended) this.saveBlocked = true;
         }
       }
@@ -375,14 +351,12 @@ class Store {
     const ids = new Set(this.folders.map((f) => f.id));
     this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
     this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
-    // Recovered from a backup: write it back now, so a quit without further edits does not start empty next time.
     if (this.recoveredFromBackup && !this.saveBlocked) {
-      try { this.save(); } catch (_) { /* a later save will persist it; memory is correct */ }
+      try { this.save(); } catch (_) {  }
     }
     return this;
   }
 
-  // Drop duplicate ids, dangling parents, and cycles so the tree always renders.
   _repairFolderGraph() {
     const seen = new Set();
     this.folders = this.folders.filter((f) => { if (seen.has(f.id)) return false; seen.add(f.id); return true; });
@@ -406,9 +380,9 @@ class Store {
     try {
       const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort().reverse();
       for (const f of files) {
-        try { return JSON.parse(fs.readFileSync(path.join(this.backupDir, f), 'utf8')); } catch (_) { /* try older */ }
+        try { return JSON.parse(fs.readFileSync(path.join(this.backupDir, f), 'utf8')); } catch (_) {  }
       }
-    } catch (_) { /* no backups */ }
+    } catch (_) {  }
     return null;
   }
 
@@ -425,25 +399,21 @@ class Store {
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this.serialize(), null, 2), 'utf8');
     replaceFile(tmp, this.file);
-    this.backupSuspended = false; // the live file is known-good again
+    this.backupSuspended = false;
     return this;
   }
 
   _maybeBackup() {
     const now = this.now();
-    if (this.backupSuspended) return; // the file on disk is the corrupt one we could not move aside
+    if (this.backupSuspended) return;
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
     const stamp = H.fileStamp(now);
-    // A backup that cannot be written must never block the note save itself.
     try { fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json')); } catch (_) { return; }
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
-    // Pruning must never block the note write itself; a backup held open by another program can wait.
     while (files.length > MAX_BACKUPS) { const oldest = files.shift(); if (!oldest) break; try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) { break; } }
   }
-
-  // ---- notes -------------------------------------------------------------
 
   list(opts?: ListOpts) {
     opts = opts || {};
@@ -463,8 +433,7 @@ class Store {
     }
     if (opts.reminders) out = out.filter((n) => n.remindAt);
     if (opts.query) out = out.filter((n) => H.matchesQuery(n, opts.query));
-    if (opts.reminders) return out.slice().sort((a, b) => (a.remindAt || 0) - (b.remindAt || 0)); // soonest first
-    // A book lists its pages in reading order, whatever the sort setting.
+    if (opts.reminders) return out.slice().sort((a, b) => (a.remindAt || 0) - (b.remindAt || 0));
     if (opts.folderId && !opts.recursive && !opts.query && !trashed) {
       const f = this.getFolder(opts.folderId);
       if (f && f.book) return this._orderPages(f, out);
@@ -485,7 +454,6 @@ class Store {
     try {
       this.save();
     } catch (err) {
-      // A note the disk refused must not linger in memory and ride along on a later, unrelated save.
       this.notes = this.notes.filter((n) => n !== note);
       throw err;
     }
@@ -498,11 +466,9 @@ class Store {
     patch = patch || {};
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
-    let fileWritten = false; // the body landed in the file
-    let plainBefore: string | undefined; // the cached plaintext to restore if the save fails
+    let fileWritten = false;
+    let plainBefore: string | undefined;
     if (note.lock && typeof patch.body === 'string') {
-      // A locked view can only ever send an empty body (that is all it has): ignore it, so title and tag
-      // edits still save. Any other body while locked is a mistake.
       if (!this.plain.has(id) && patch.body !== '') throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
       if (this.plain.has(id) && patch.body !== this.plain.get(id)) {
         plainBefore = this.plain.get(id);
@@ -510,24 +476,21 @@ class Store {
         this.plain.set(id, patch.body);
         changed = true;
       }
-      patch = Object.assign({}, patch); delete patch.body; // the record's body stays empty
+      patch = Object.assign({}, patch); delete patch.body;
     }
-    let fileMoved = false;   // the file was renamed, moved, or created on disk
-    // Refusals first, before anything touches the disk.
+    let fileMoved = false;
     if (patch.folderId !== undefined && note.vaultId && note.filePath && !patch.folderId && (note.folderId || null) !== null) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
     if (patch.folderId && note.filePath && !note.vaultId) {
       const t = this.getFolder(patch.folderId);
       if (t && t.vaultId) throw Object.assign(new Error('A linked file cannot be moved into a vault; copy its text into a new note there instead.'), { code: 'EVAULT' });
     }
-    // File-backed: the file is the source of truth and is written first, before any field changes.
     if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
       if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
-      // Someone else (git, another editor) changed the file since it was last read: do not overwrite them.
       if (!patch.force && note.fileMtime !== null) {
         const diskM = F.mtimeOf(note.filePath);
         if (diskM !== null && diskM !== note.fileMtime) {
           let onDisk = null;
-          try { onDisk = F.readText(note.filePath).body; } catch (_) { /* unreadable: treat as changed */ }
+          try { onDisk = F.readText(note.filePath).body; } catch (_) {  }
           if (onDisk !== note.body && onDisk !== patch.body) throw Object.assign(new Error('This file changed on disk since it was opened.'), { code: 'ECONFLICT' });
         }
       }
@@ -535,10 +498,9 @@ class Store {
       fileWritten = true;
     }
     if (typeof patch.title === 'string' && patch.title !== note.title) {
-      // In a vault the title is the file name: rename the file first, then record what it became.
       if (note.vaultId && isFileNote(note) && note.fileKind === 'text') {
         try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
-        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; } throw err; } // the body did land; keep memory honest
+        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; } throw err; }
       } else note.title = patch.title;
       changed = true;
     }
@@ -552,7 +514,6 @@ class Store {
       }
       delete patch.folderId;
     } else if (patch.folderId && !note.filePath) {
-      // A plain note dropped into a vault folder becomes a file there, so it is synced like the others.
       const target = this.getFolder(patch.folderId);
       if (target && target.vaultId && note.lock) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
       if (target && target.vaultId && target.dirPath) {
@@ -572,7 +533,7 @@ class Store {
     if (typeof patch.pinned === 'boolean' && patch.pinned !== note.pinned) { note.pinned = patch.pinned; changed = true; }
     if (patch.remindAt !== undefined) {
       const at = isFiniteNumber(patch.remindAt) ? Math.round(patch.remindAt) : null;
-      if (at !== note.remindAt) { note.remindAt = at; note.remindedAt = null; changed = true; } // a new time rings again
+      if (at !== note.remindAt) { note.remindAt = at; note.remindedAt = null; changed = true; }
     }
     if (patch.folderId !== undefined) {
       const fid = patch.folderId && this.getFolder(patch.folderId) ? patch.folderId : null;
@@ -583,9 +544,6 @@ class Store {
       try {
         this.save();
       } catch (err) {
-        // Roll back so a retry with the same patch is a real change and gets written. Whatever already
-        // happened on disk (a written body, a renamed or moved file) must stay reflected in memory: the
-        // user's text and the file's location are the truth, only the metadata write failed.
         const keep = {};
         if (fileWritten) Object.assign(keep, { body: note.body, fileMtime: note.fileMtime });
         if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime });
@@ -597,14 +555,11 @@ class Store {
     return note;
   }
 
-  // ---- locking ----------------------------------------------------------------
-
-  // What leaves the store: never the ciphertext; the body only while unlocked this session.
   publicNote(n: Note | PublicNote): PublicNote;
   publicNote(n: Note | PublicNote | null): PublicNote | null;
   publicNote(n: Note | PublicNote | null): PublicNote | null {
     if (!n) return n;
-    if (isPublicView(n)) return n; // already a public view: idempotent
+    if (isPublicView(n)) return n;
     const { lock, ...rest } = n;
     const unlocked = !!lock && this.plain.has(n.id);
     return Object.assign(rest, { locked: !!lock, unlocked }, lock ? { body: unlocked ? this.plain.get(n.id) ?? '' : '' } : {});
@@ -642,7 +597,6 @@ class Store {
     return was;
   }
 
-  // Forgets every unlocked body; returns the ids that were unlocked.
   relockAll() {
     const ids = Array.from(this.plain.keys());
     this.plain.clear();
@@ -660,14 +614,12 @@ class Store {
     return this.publicNote(note);
   }
 
-  // Called by the reminder scheduler when a reminder has been announced.
   markReminded(id: string, at: number) {
     const note = this.get(id);
     if (!note) return null;
     return this._commit(() => { note.remindedAt = at; return note; });
   }
 
-  // Desktop stickies. Only this path changes the field; update() ignores it.
   setSticky(id: string, sticky: Partial<Sticky> | null) {
     const note = this.get(id);
     if (!note) return null;
@@ -676,18 +628,15 @@ class Store {
     return this._commit(() => { note.sticky = next; return note; });
   }
 
-  // ---- books -------------------------------------------------------------------
-
   _orderPages(folder: Folder, notes: Note[]) {
     const rank = new Map<string, number>((folder.pageOrder || []).map((id, i) => [id, i]));
     return notes.slice().sort((a, b) => {
       const ra = rank.get(a.id) ?? Infinity, rb = rank.get(b.id) ?? Infinity;
       if (ra !== rb) return ra - rb;
-      return (a.createdAt - b.createdAt) || a.id.localeCompare(b.id); // unlisted pages: oldest first, i.e. new pages go last
+      return (a.createdAt - b.createdAt) || a.id.localeCompare(b.id);
     });
   }
 
-  // Live pages of a book, in reading order.
   bookPages(folderId: string) {
     const f = this.getFolder(folderId);
     if (!f) return [];
@@ -700,20 +649,17 @@ class Store {
     if (!!f.book === !!on) return f;
     return this._commit(() => {
       f.book = !!on;
-      // Turning a folder into a book fixes the current order (oldest first) so it stays put.
       if (f.book && !(f.pageOrder || []).length) f.pageOrder = this.bookPages(folderId).map((n) => n.id);
       return f;
     });
   }
 
-  // ids: the new reading order. Unknown ids are dropped; pages missing from the list keep their relative order after it.
   reorderPages(folderId: string, ids: string[]) {
     const f = this.getFolder(folderId);
     if (!f || !f.book) return null;
     const pages = this.bookPages(folderId).map((n) => n.id);
     const wanted = (Array.isArray(ids) ? ids : []).filter((id, i, a) => pages.includes(id) && a.indexOf(id) === i);
     const next = wanted.concat(pages.filter((id) => !wanted.includes(id)));
-    // Pages in the trash keep their place, so restoring one puts it back where it was.
     const old = f.pageOrder || [];
     old.forEach((id, i) => {
       if (next.includes(id)) return;
@@ -726,10 +672,6 @@ class Store {
     return this._commit(() => { f.pageOrder = next; return f; });
   }
 
-  // ---- related notes --------------------------------------------------------------
-
-  // What a note links to, what links to it, and notes that share its tags. Locked bodies are only read
-  // while unlocked this session (their stored body is empty); titles are always visible.
   related(id: string, limit?: number) {
     const note = this.get(id);
     if (!note) return null;
@@ -777,21 +719,16 @@ class Store {
       const plain = this.plain.get(id);
       if (plain === undefined) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
       const key = this._keyOf(id);
-      // One write: the copy is created already locked (a failed save leaves nothing behind).
       const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false, lock: L.encrypt(plain, key, note.lock.salt) });
       this.plain.set(copy.id, plain);
       this.keys.set(copy.id, key);
       return this.publicNote(copy);
     }
-    // A duplicate inside a vault is a new file there; of any other file-backed note, an ordinary note holding a copy.
     const folder = note.folderId ? this.getFolder(note.folderId) : null;
     if (note.vaultId && folder && folder.vaultId && folder.dirPath) return this.createVaultNote(folder.id, { title: note.title + ' (copy)', body: note.body, tags: note.tags });
     return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
 
-  // Turns a note into a book: a new folder (next to the note) whose pages are the note's sections, cut at its
-  // headings (H.splitAtHeadings). One write. opts: { name, keepOriginal }. The original goes to the trash unless
-  // kept. Returns { folder, pageIds, originalTrashed }.
   splitIntoBook(id: string, opts?: { name?: string; keepOriginal?: boolean }) {
     opts = opts || {};
     const note = this.get(id);
@@ -803,7 +740,7 @@ class Store {
     if (plan.pages.length > MAX_BOOK_PAGES) throw new Error('This note would make more than ' + MAX_BOOK_PAGES + ' pages, the most a book holds.');
     const now = this.now();
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
-    const parentId = parent && !parent.vaultId ? parent.id : null; // a vault folder holds files; the book sits at the top
+    const parentId = parent && !parent.vaultId ? parent.id : null;
     const folder = folderFrom({ name: String(opts.name || '').trim() || plan.name, parentId, createdAt: now, book: true }, now);
     const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
@@ -816,10 +753,6 @@ class Store {
     });
   }
 
-  // Takes back splitIntoBook: deletes the pages it made and the emptied book folder, and restores the original
-  // note if it was trashed. All or nothing: it refuses, changing nothing, when a page was edited since (undo would
-  // lose the edit) or the trashed original is gone (undo would lose everything). Only pages still in that book
-  // are touched; pages moved out meanwhile are left alone. Returns { restored, removedIds }.
   undoSplit(folderId: string, pageIds: string[], originalId: string | null) {
     const folder = typeof folderId === 'string' ? this.getFolder(folderId) : null;
     if (!folder || !folder.book || folder.vaultId) throw new Error('That book is gone, so there is nothing to undo.');
@@ -842,8 +775,6 @@ class Store {
     return found || this.createFolder({ name, parentId: parentId || null });
   }
 
-  // Run a mutation and persist it; if the write fails, put memory back exactly as it was so the store
-  // never claims a change the disk does not have.
   _commit<T>(mutate: () => T): T {
     const snapshot = {
       notes: this.notes.map((n) => Object.assign({}, n, { tags: n.tags.slice() })),
@@ -869,8 +800,6 @@ class Store {
     if (!key) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
     return key;
   }
-
-  // ---- vaults: folders on disk mirrored as notes ---------------------------
 
   getVault(id: string) {
     return this.vaults.find((v) => v.id === id) || null;
@@ -913,7 +842,6 @@ class Store {
     });
   }
 
-  // Removes the vault from the app. Files on disk are never touched.
   removeVault(id: string) {
     const v = this.getVault(id);
     if (!v) return false;
@@ -927,14 +855,11 @@ class Store {
     });
   }
 
-  // Makes the folder tree and notes match the directory. Returns counts. Idempotent and safe to call often.
-  // opts.allowRemovals=false keeps mirrors of files that are momentarily absent (e.g. during a git rebase).
   async scanVault(id: string, opts?: { allowRemovals?: boolean }) {
     opts = opts || {};
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
-    // An unplugged drive or an unmounted share is not an empty vault: touch nothing until it is back.
     let rootEntries: fs.Dirent<string>[] | null = null;
     try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
     const root = this.vaultRootFolder(id) || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path, book: false, pageOrder: [] }; this.folders.push(f); return f; });
@@ -957,8 +882,6 @@ class Store {
           if (!VAULT_EXT.has(F.extOf(e.name))) continue;
           let note = this.findByPath(full);
           if (!note) {
-            // A file renamed or moved outside the app: the note whose file vanished and whose text matches
-            // keeps its id, tags, pin, reminder and sticky instead of being deleted and re-created.
             let text = null;
             try { text = F.readText(full).body; } catch (_) { continue; }
             const orphan = this.notes.find((n) => n.vaultId === id && !n.trashedAt && n.filePath && !seenNotes.has(n.id) && n.body === text && !fs.existsSync(n.filePath));
@@ -974,7 +897,6 @@ class Store {
               } catch (_) { continue; }
             }
           } else {
-            // One unreadable file (too big, not UTF-8) must not stop the rest of the scan.
             let r;
             try { r = await this.refreshFileNote(note.id); } catch (_) { seenNotes.add(note.id); continue; }
             if (r.changed) updated++;
@@ -988,7 +910,6 @@ class Store {
       }
     };
     await walk(vault.path, root.id);
-    // Files or directories that vanished (deleted elsewhere, or moved out by git): drop their mirrors.
     const gone = allowRemovals ? this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !seenNotes.has(n.id) && !(n.filePath && fs.existsSync(n.filePath))) : [];
     const goneFolders = allowRemovals ? this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))) : [];
     if (gone.length || goneFolders.length) {
@@ -1003,7 +924,6 @@ class Store {
     return { added, updated, removed, notes: seenNotes.size, folders: seenFolders.size };
   }
 
-  // A new note inside a vault folder is a new file; the title is the file name.
   createVaultNote(folderId: string, data?: NoteInput) {
     const folder = this.getFolder(folderId);
     if (!folder || !folder.vaultId || !folder.dirPath) throw new Error('Not a vault folder');
@@ -1020,13 +940,11 @@ class Store {
     });
   }
 
-  // Renaming a vault note renames its file; a clash gets a numeric suffix. Returns the new title.
   _renameVaultFile(note: FileNote, title: string) {
     const dir = path.dirname(note.filePath);
     const ext = path.extname(note.filePath) || '.md';
     const base = H.safeFilename(String(title || '').trim() || 'Untitled');
     if (base === stem(path.basename(note.filePath))) return note.title;
-    // Only the case changed (notes -> Notes): Windows would find the file itself in the way; rename directly.
     const name = base.toLowerCase() === stem(path.basename(note.filePath)).toLowerCase() ? base + ext : uniqueName(dir, base, ext);
     const next = path.join(dir, name);
     fs.renameSync(note.filePath, next);
@@ -1042,7 +960,6 @@ class Store {
     return dir;
   }
 
-  // Moves a vault file into another vault folder's directory (same vault only). Returns the new path.
   _moveVaultFile(note: FileNote, targetFolderId: string) {
     const target = this.getFolder(targetFolderId);
     if (!target || target.vaultId !== note.vaultId || !target.dirPath) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
@@ -1054,11 +971,10 @@ class Store {
     return next;
   }
 
-  // Vault notes: trash moves the file into <vault>/.trash, restore moves it back, delete forever removes it.
   trash(id: string) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
-    this.relock(id); // a trashed locked note needs its password again
+    this.relock(id);
     let moved: { from: string, to: string } | null = null;
     if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
@@ -1069,12 +985,10 @@ class Store {
       note.filePath = next;
     }
     try {
-      return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; }); // pinned is kept for restore
+      return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; });
     } catch (err) {
-      // The metadata write failed: put the file back so disk and memory agree again.
-      // _commit's rollback swapped this.notes for its snapshot copies: fix up the object that is live now.
       const live = this.get(id) || note;
-      if (moved) { try { fs.renameSync(moved.to, moved.from); live.filePath = moved.from; delete live.trashedFrom; } catch (_) { /* best effort */ } }
+      if (moved) { try { fs.renameSync(moved.to, moved.from); live.filePath = moved.from; delete live.trashedFrom; } catch (_) {  } }
       throw err;
     }
   }
@@ -1082,7 +996,6 @@ class Store {
   restore(id: string) {
     const note = this.get(id);
     if (!note || !note.trashedAt) return note;
-    // Back to where it came from; if that is unknown (older data) or gone, the vault root is the fallback.
     const v = note.vaultId ? this.getVault(note.vaultId) : null;
     const origin = note.trashedFrom || (v && note.filePath ? path.join(v.path, path.basename(note.filePath)) : null);
     if (note.vaultId && note.filePath && origin && fs.existsSync(note.filePath) && /[\\/]\.trash[\\/]/.test(note.filePath)) {
@@ -1098,10 +1011,8 @@ class Store {
       try {
         return this._commit(() => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
       } catch (err) {
-        // Save failed: the file goes back to .trash and the record stays trashed, so "delete forever" can
-        // never remove a live file.
-        try { fs.renameSync(next, wasAt); } catch (_) { /* best effort */ }
-        const live = this.get(id) || note; // _commit's rollback swapped this.notes for its snapshot copies
+        try { fs.renameSync(next, wasAt); } catch (_) {  }
+        const live = this.get(id) || note;
         live.filePath = wasAt; live.trashedFrom = wasFrom; live.folderId = wasFolder; live.trashedAt = live.trashedAt || note.trashedAt;
         throw err;
       }
@@ -1114,7 +1025,6 @@ class Store {
     });
   }
 
-  // Only a file that sits in the vault's .trash is ours to delete for good.
   _inVaultTrash(note: Note): note is FileNote {
     return !!(note.vaultId && note.trashedAt && note.filePath && /[\\/]\.trash[\\/]/.test(note.filePath) && fs.existsSync(note.filePath));
   }
@@ -1131,7 +1041,7 @@ class Store {
   emptyTrash() {
     const before = this.notes.length;
     if (!this.notes.some((n) => n.trashedAt)) return 0;
-    for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) { /* leave it */ } }
+    for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) {  } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
     return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
   }
@@ -1155,15 +1065,11 @@ class Store {
     return { all, pinned, trash, reminders, overdue };
   }
 
-  // ---- file-backed notes -------------------------------------------------
-
   findByPath(filePath: string) {
     const key = F.pathKey(filePath);
     return this.notes.find((n) => n.filePath && F.pathKey(n.filePath) === key) || null;
   }
 
-  // Links a file as a note. Text files load their contents; Word files are converted (read-only); PDFs and
-  // other binaries are shown through the system viewer. Linking the same file twice returns the same note.
   async linkFile(filePath: string, opts?: LinkOptions) {
     opts = opts || {};
     const abs = path.resolve(filePath);
@@ -1176,7 +1082,6 @@ class Store {
     }
     let kind = F.kindOf(abs);
     let body = '', mtime = F.mtimeOf(abs);
-    // A spreadsheet's text takes MarkItDown seconds: the note appears now, and its text follows.
     const later = kind === 'sheet';
     if (!later) {
       try { const read = await F.readNoteText(kind, abs); body = read.body ?? ''; mtime = read.mtime; }
@@ -1195,8 +1100,6 @@ class Store {
     return note;
   }
 
-  // Reads a file note's text in the background and keeps it, if the file is still the one the note knew. Then
-  // onFileText(id) (set by main) tells the windows. Nothing is kept when the read gives no text.
   async fillFileText(id: string) {
     const before = this.get(id);
     if (!before || !before.filePath) return;
@@ -1209,8 +1112,6 @@ class Store {
     if (this.onFileText) this.onFileText(id);
   }
 
-  // A file the app itself just wrote (a PDF saved with its edits): its new time is recorded so the next refresh
-  // does not take the app's own write for an outside change. Returns that time.
   markFileWritten(id: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
@@ -1219,13 +1120,10 @@ class Store {
     return mtime;
   }
 
-  // Re-reads a file-backed note when the file changed on disk. Returns { changed, missing }.
   async refreshFileNote(id: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return { changed: false, missing: false };
     if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
-    // A file linked before Notes knew its kind (an image kept as "binary", an .rtf kept as plain text) moves to the
-    // kind its extension now names, and is read again as that.
     const known = F.kindOf(note.filePath);
     const rekind = ['docx', 'sheet', 'image'].includes(known) && known !== note.fileKind;
     const mtime = F.mtimeOf(note.filePath);
@@ -1234,18 +1132,13 @@ class Store {
     let body = rekind ? '' : note.body;
     if (kind !== null && F.TEXTED_KINDS.has(kind)) {
       const read = await F.readNoteText(kind, note.filePath);
-      if (typeof read.body === 'string') body = read.body; // no text read (MarkItDown failed): the old text stays
+      if (typeof read.body === 'string') body = read.body;
     }
-    // A PDF, Office file or image is shown from the file itself, so any new version is a change, even with the same text.
     const changed = rekind || body !== note.body || kind !== 'text';
-    // Cache update only: the file changed, the note's own edit time is not touched.
     this._commit(() => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
     return { changed, missing: false };
   }
 
-  // A Word document WordCraft saved as a .docx beside the original (an .odt, .rtf or .doc): the note now stands for the
-  // .docx, so later saves go there. Its title follows when it was the old file's name, and its text (the list snippet,
-  // search) is the new file's: the poll will not read it again, since the time it knows is the new file's. Returns the note.
   relinkFileNote(id: string, newPath: string, body?: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
@@ -1263,8 +1156,6 @@ class Store {
   fileNotes() {
     return this.notes.filter((n) => n.filePath && !n.trashedAt);
   }
-
-  // ---- folders -----------------------------------------------------------
 
   getFolder(id: string) {
     return this.folders.find((f) => f.id === id) || null;
@@ -1287,9 +1178,6 @@ class Store {
     return path;
   }
 
-  // Nested tree; count is the number of live notes directly in the folder (what the folder view lists).
-  // Every live note, lightly: what the folder trees draw (no bodies). Grouped by folder, in the list's sort
-  // order, books in page order.
   noteOutline(sort?: SortKey) {
     const by = new Map<string, Note[]>();
     for (const n of this.notes) {
@@ -1305,7 +1193,6 @@ class Store {
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
       out[k] = ordered.map((n) => {
         const p = this.publicNote(n);
-        // What a row shows: the title and its trailing marks (see rowInner in the renderer).
         return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
           fileKind: n.fileKind || null, filePath: n.filePath || null, remindAt: p.remindAt || null, live: p.live || null, updatedAt: n.updatedAt };
       });
@@ -1344,8 +1231,6 @@ class Store {
     const folder = folderFrom({ name: data.name, parentId }, this.now());
     const parent = parentId ? this.getFolder(parentId) : null;
     if (parent && parent.vaultId && parent.dirPath) {
-      // A subfolder of a vault folder is a directory. Dot-directories are skipped by the scan (.git, .trash,
-      // .obsidian), so a folder named that way would hold notes the app never sees again.
       assertVaultDirName(folder.name);
       const dirName = uniqueName(parent.dirPath, H.safeFilename(folder.name), '');
       folder.name = dirName;
@@ -1369,11 +1254,9 @@ class Store {
     let next = cleanFolderName(name);
     if (next === f.name) return f;
     if (f.vaultId && f.dirPath && f.parentId) {
-      // Rename the directory and re-point every note and subfolder underneath it.
       const parentDir = path.dirname(f.dirPath);
       assertVaultDirName(next);
       const wanted = H.safeFilename(next);
-      // Only the case changed (notes -> Notes): Windows would find the folder itself in the way; rename directly.
       next = wanted.toLowerCase() === path.basename(f.dirPath).toLowerCase() ? wanted : uniqueName(parentDir, wanted, '');
       const newDir = path.join(parentDir, next);
       fs.renameSync(f.dirPath, newDir);
@@ -1381,7 +1264,7 @@ class Store {
       f.dirPath = newDir;
     } else if (f.vaultId && !f.parentId) {
       const v = this.getVault(f.vaultId);
-      if (v) v.name = next; // the root mirrors the vault's display name, not the directory
+      if (v) v.name = next;
     }
     this._commit(() => { f.name = next; });
     return f;
@@ -1424,14 +1307,12 @@ class Store {
     return { folder: f };
   }
 
-  // Deleting a folder lifts its notes and subfolders into its parent; nothing is lost.
   deleteFolder(id: string) {
     const f = this.getFolder(id);
     if (!f) return null;
     const parent = f.parentId || null;
     if (f.vaultId && !parent) return { error: 'Remove a vault in Settings; its files stay on disk.' };
     if (f.vaultId && f.dirPath) {
-      // On disk: lift the directory's contents one level up, then remove the (now empty) directory.
       const parentDir = path.dirname(f.dirPath);
       for (const e of fs.readdirSync(f.dirPath, { withFileTypes: true })) {
         const from = path.join(f.dirPath, e.name);
@@ -1441,10 +1322,9 @@ class Store {
         if (e.isDirectory()) this._retargetVaultPaths(from, to);
         else { const n = this.findByPath(from); if (n) n.filePath = to; }
       }
-      // Trashed notes that came from this directory should restore into the parent now.
       const dirKey = F.pathKey(f.dirPath);
       for (const n of this.notes) if (n.trashedFrom && F.pathKey(path.dirname(n.trashedFrom)) === dirKey) n.trashedFrom = path.join(parentDir, path.basename(n.trashedFrom));
-      try { fs.rmdirSync(f.dirPath); } catch (_) { /* leave non-empty leftovers */ }
+      try { fs.rmdirSync(f.dirPath); } catch (_) {  }
     }
     return this._commit(() => {
       let movedNotes = 0, movedFolders = 0;
@@ -1457,8 +1337,6 @@ class Store {
     });
   }
 
-  // ---- settings ----------------------------------------------------------
-
   getSettings() {
     return Object.assign({}, this.settings);
   }
@@ -1470,8 +1348,6 @@ class Store {
     return this.getSettings();
   }
 
-  // ---- import / export ---------------------------------------------------
-
   exportNote(id: string) {
     const note = this.get(id);
     if (!note) return null;
@@ -1481,7 +1357,7 @@ class Store {
   }
 
   exportAll() {
-    const notes = this.notes.filter((n) => !n.trashedAt).map(({ live: _live, ...rest }) => rest); // live tokens stay on this machine
+    const notes = this.notes.filter((n) => !n.trashedAt).map(({ live: _live, ...rest }) => rest);
     return JSON.stringify({ exportedAt: this.now(), folders: this.folders, notes }, null, 2);
   }
 

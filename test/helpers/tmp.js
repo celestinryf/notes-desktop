@@ -1,6 +1,4 @@
 'use strict';
-/* Temporary folders for tests, removed again when the test process exits (pass, fail or forced exit), so
-   repeated runs do not pile up folders in %TEMP%. */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -13,13 +11,12 @@ function tmpDir(prefix) {
   return dir;
 }
 
-// Some files are read-only on Windows (git objects); make everything writable before removing.
 function makeWritable(dir) {
   let entries = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    try { fs.chmodSync(p, 0o666); } catch (_) { /* ignore */ }
+    try { fs.chmodSync(p, 0o666); } catch (_) {  }
     if (e.isDirectory()) makeWritable(p);
   }
 }
@@ -27,7 +24,7 @@ function makeWritable(dir) {
 function cleanup() {
   for (const dir of created.splice(0)) {
     try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); }
-    catch (_) { makeWritable(dir); try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch (_e) { /* leave it */ } }
+    catch (_) { makeWritable(dir); try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch (_e) {  } }
   }
 }
 

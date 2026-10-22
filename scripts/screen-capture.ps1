@@ -1,5 +1,3 @@
-# Saves a rectangle of the real screen (physical pixels) as a PNG. Used by scripts/shots.js --screen, so a
-# screenshot includes what only Windows draws: the window's caption buttons and its edges.
 param(
   [Parameter(Mandatory = $true)][int]$X,
   [Parameter(Mandatory = $true)][int]$Y,

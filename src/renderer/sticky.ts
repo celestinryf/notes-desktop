@@ -1,5 +1,4 @@
 'use strict';
-/* Sticky window page: one note, rendered editor, autosave. Talks to main through the same notesApi bridge. */
 import * as H from '../shared/helpers.mts';
 import NotesIcons from './icons.js';
 import { pageElement } from './page-element.ts';
@@ -11,7 +10,7 @@ import { pageElement } from './page-element.ts';
     closeBtn: pageElement('#stickyCloseBtn', HTMLButtonElement), editor: pageElement('#stickyEditor', HTMLDivElement), missing: pageElement('#stickyMissing', HTMLDivElement), status: pageElement('#stickyStatus', HTMLSpanElement),
   };
   NotesIcons.hydrate(document);
-  const id = new URLSearchParams(location.search).get('id') || ''; // main always opens a sticky with its note's id
+  const id = new URLSearchParams(location.search).get('id') || '';
   const COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
   const state: { note: PublicNote | null, rich: RichEditor | null, saveTimer: ReturnType<typeof setTimeout> | null, dirty: boolean, saving: boolean, readOnly: boolean, systemDark: boolean, settings: Settings | null, shownBody: string | null, shownOnce: boolean } = { note: null, rich: null, saveTimer: null, dirty: false, saving: false, readOnly: false, systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches, settings: null, shownBody: null, shownOnce: false };
 
@@ -43,11 +42,8 @@ import { pageElement } from './page-element.ts';
     document.title = title;
     applySticky(note.sticky);
     if (state.rich && !state.dirty && (note.body !== state.shownBody || !state.shownOnce)) {
-      state.shownBody = note.body; state.shownOnce = true; // an unchanged body is not re-set: the caret would jump
+      state.shownBody = note.body; state.shownOnce = true;
       const lossless = state.rich.setMarkdown(note.body);
-      // Same rule as the main window: the rendered view may only edit what it can reproduce. A real file
-      // gets the strict test. Otherwise the first keystroke would rewrite formatting the sticky cannot show.
-      // A plain-text file is text, not Markdown: the rendered sticky would rewrite it, so it is read-only here.
       const viewerOnly = H.isViewerOnlyFile(note);
       const plain = H.isPlainTextFile(note);
       const exactEnough = lossless && (!note.filePath || state.rich.lastRoundTripExact());
@@ -80,10 +76,9 @@ import { pageElement } from './page-element.ts';
       if (state.dirty) scheduleSave();
     } catch (err) {
       if (/changed on disk/i.test(String(err.message))) {
-        // The file moved on under us; a sticky has no room for a merge choice: take the disk version and say so.
         state.dirty = false;
-        try { await api.files.refresh(id); } catch (_) { /* the store copy may already be current */ } // read the disk version into the store
-        state.shownBody = null; // force the editor to take it even if the store text equals what was shown before
+        try { await api.files.refresh(id); } catch (_) {  }
+        state.shownBody = null;
         await reload();
         el.status.textContent = 'The file changed on disk; showing the new version. Your last edit was not saved.';
         return;
@@ -115,7 +110,7 @@ import { pageElement } from './page-element.ts';
     });
     window.addEventListener('blur', () => { if (state.dirty) flush(); });
     api.on.flush(async () => { try { await flush(); } finally { api.app.flushDone(); } });
-    window.addEventListener('beforeunload', () => { if (state.dirty && state.rich) { try { api.notes.update(id, { body: state.rich.getMarkdown() }); } catch (_) { /* best effort */ } } });
+    window.addEventListener('beforeunload', () => { if (state.dirty && state.rich) { try { api.notes.update(id, { body: state.rich.getMarkdown() }); } catch (_) {  } } });
 
     if (window.NotesEditor) {
       state.rich = window.NotesEditor.create(el.editor, {

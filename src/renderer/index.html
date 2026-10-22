@@ -11,7 +11,6 @@
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Sidebar -->
     <aside class="app-sidebar" id="sidebar">
       <div class="sidebar-top drag-region" id="sidebarTop">
         <div class="bar-toggles" id="barToggles">
@@ -56,7 +55,6 @@
 
     <div class="sidebar-edge" id="sidebarEdge" aria-hidden="true"></div>
 
-    <!-- Note list -->
     <section class="list-pane" aria-label="Note list">
       <div class="list-head drag-region">
         <label class="search-wrap" data-icon="list-filter">
@@ -88,7 +86,6 @@
       <div class="resizer" id="listResizer" title="Drag to resize. Double-click to reset."></div>
     </section>
 
-    <!-- Editor -->
     <section class="editor-pane" id="editorPane" aria-label="Editor">
       <div class="pane-main" id="paneMain">
       <div class="tab-bar drag-region" id="tabBar" role="toolbar" aria-label="Tabs and note actions">
@@ -122,7 +119,6 @@
       </div>
 
       <div class="editor hidden" id="editor">
-        <!-- Everything a note can do that is not needed every minute. Each item is also in the command palette (Ctrl+P). -->
         <div class="popover menu hidden" id="moreMenu" role="menu" aria-label="More actions">
           <div class="menu-group" role="group" aria-label="This note">
             <button role="menuitem" class="menu-item" id="remindBtn" data-icon="alarm-clock"><span class="lbl">Remind me…</span><span class="keys">Ctrl+Shift+M</span></button>
@@ -322,7 +318,6 @@
       <div class="split-divider hidden" id="splitDivider" title="Drag to resize. Double-click to make both sides equal."></div>
     </section>
 
-    <!-- Settings dialog -->
     <dialog id="settingsDialog" class="modal dialog-settings" aria-labelledby="settingsTitle">
       <form method="dialog" class="settings-layout" id="settingsForm">
         <nav class="settings-nav" id="settingsNav" aria-label="Settings sections">
@@ -480,7 +475,6 @@
       </form>
     </dialog>
 
-    <!-- Asked when Settings is closed with changes not yet saved -->
     <dialog id="settingsSaveDialog" class="modal dialog-small" aria-labelledby="settingsSaveTitle">
       <form method="dialog" class="dialog-form">
         <h2 class="dialog-title" id="settingsSaveTitle">Save your changes?</h2>

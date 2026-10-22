@@ -1,11 +1,3 @@
-// Drives Notes against a fake Craft build (fake-craft/index.html) standing in for WordCraft and GridCraft:
-//  1. a Word document opens in the frame (banner cleared, frame shown)
-//  2. Reload from disk works on it
-//  3. a workbook GridCraft does not write in place (.xlsm): an edit then a save under its own name lands in
-//     "<name> (from GridCraft).xlsm", the status says Saved, a second save rewrites the same copy, the original is
-//     unchanged, and leaving the note asks nothing
-// A probe, not part of the suite (like live-check.js): the UI suite runs with no Craft builds at all.
-// Run from the notes-app repo: NODE_PATH=node_modules node test/fixtures/craft-probe.js
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -26,7 +18,6 @@ async function main() {
   const { Document, Packer, Paragraph } = require('docx');
   const docxPath = path.join(filesDir, 'Probe report.docx');
   fs.writeFileSync(docxPath, await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph('Probe text')] }] })));
-  // The fake build does not read the bytes, so the .xlsx fixture serves as the .xlsm.
   const xlsmPath = path.join(filesDir, 'Probe book.xlsm');
   fs.copyFileSync(path.join(ROOT, 'scripts', 'fixtures', 'Trail readings.xlsx'), xlsmPath);
   const now = Date.now();
@@ -55,20 +46,17 @@ async function main() {
     const craftFrame = (id) => page.frames().find((f) => f.url().startsWith(id + '://'));
     const status = () => page.evaluate(() => document.getElementById('statusSaved').textContent.trim());
 
-    // 1. Word document opens in the (fake) WordCraft
     await page.click('.note-card:has-text("Probe report.docx")');
     await waitFor('wordcraft frame shown', () => frameShown('wordcraftFrame'));
     ok('Word document opened in the frame', true);
     ok('banner cleared after open', (await banner()) === '');
     ok('fake frame got the bytes', (await craftFrame('wordcraft').evaluate(() => document.getElementById('s').textContent)).startsWith('open Probe report.docx'));
 
-    // 2. Reload from disk
     await page.click('#fileReloadBtn');
     await sleep(1500);
     ok('reload from disk did not throw', !errors.some((e) => /ReferenceError/.test(e)));
     ok('frame shown again after reload', await frameShown('wordcraftFrame'));
 
-    // 3. A workbook saved beside the file: edit, save, save again, leave
     await page.click('.note-card:has-text("Probe book.xlsm")');
     await waitFor('gridcraft frame shown', () => frameShown('gridcraftFrame'));
     ok('banner cleared for the workbook', (await banner()) === '');
@@ -93,7 +81,7 @@ async function main() {
   } finally {
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await sleep(500);
-    try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+    try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (_) {  }
   }
   console.log(results.join('\n'));
   if (errors.length) { console.log('ERRORS:\n' + errors.join('\n')); process.exit(1); }

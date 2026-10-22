@@ -2,18 +2,27 @@
 'use strict';
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-/** @template {IpcChannel} K @param {K} channel @returns {Invoker<K>} */
+/**
+ * @template {IpcChannel} K
+ * @param {K} channel
+ * @returns {Invoker<K>}
+ */
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
-/** @template {keyof MainEvents} K @param {K} channel @returns {Listener<K>} */
+/**
+ * @template {keyof MainEvents} K
+ * @param {K} channel
+ * @returns {Listener<K>}
+ */
 const on = (channel) => (handler) => {
-  /** @param {unknown} _event @param {unknown[]} args */
+  /**
+ * @param {unknown} _event
+ * @param {unknown[]} args
+ */
   const wrapped = (_event, ...args) => handler(.../** @type {MainEvents[K]} */ (args));
   ipcRenderer.on(channel, wrapped);
   return () => ipcRenderer.removeListener(channel, wrapped);
 };
 
-// The split view loads the main page again in an iframe (?pane=right). Only the page itself and that copy get the
-// API, never a document, picture or PDF shown in a frame of its own.
 const isOurPage = window.top === window || (location.protocol === 'file:' && /\/renderer\/index\.html$/.test(location.pathname) &&
   new URLSearchParams(location.search).get('pane') === 'right');
 
@@ -62,7 +71,6 @@ const notesApi = {
     convertOptions: invoke('files:convertOptions'),
     convert: invoke('files:convert'),
     asMarkdown: invoke('files:asMarkdown'),
-    // Drag-and-drop gives File objects; this turns them into real paths without exposing Node to the page.
     pathFor: (file) => { try { return webUtils.getPathForFile(file); } catch (_) { return null; } },
   },
   agentFiles: {

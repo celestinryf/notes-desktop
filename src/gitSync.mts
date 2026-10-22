@@ -1,6 +1,3 @@
-/* Keeps a git history of notes.json with an optional remote to push to.
-   The repository lives in <dataDir>/history and holds a snapshot copy of notes.json. Git therefore never
-   opens the live file, which matters on Windows where an open file cannot be replaced by the atomic save. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -67,7 +64,6 @@ class GitSync {
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
     if (!(await this.available())) { this._set({ lastError: 'git is not installed or not on PATH.' }); return this.status(); }
     await this.ensureRepo();
-    // The remote only takes effect once git accepted it: a refused value must not leave pushes going anywhere.
     if (wantedRemote && /^-/.test(wantedRemote)) { this._set({ remote: '', lastError: 'That does not look like a repository URL.' }); await this.syncRemote(''); }
     else await this.syncRemote(wantedRemote);
     await this.refreshCounts();
@@ -88,7 +84,7 @@ class GitSync {
     if (!this.state.initialized) return;
     const current = await run(['remote', 'get-url', 'origin'], this.dir);
     const have = current.ok ? current.stdout.trim() : '';
-    if (url && /^\s*-/.test(String(url))) { this._set({ lastError: 'That does not look like a repository URL.' }); return; } // never read as a git option
+    if (url && /^\s*-/.test(String(url))) { this._set({ lastError: 'That does not look like a repository URL.' }); return; }
     if (!url && have) await run(['remote', 'remove', 'origin'], this.dir);
     else if (url && !have) await run(['remote', 'add', '--', 'origin', url], this.dir);
     else if (url && have !== url) await run(['remote', 'set-url', '--', 'origin', url], this.dir);
@@ -105,17 +101,14 @@ class GitSync {
     });
   }
 
-  // Copy the live file into the repo. The live file may be mid-replace for a few ms; retry briefly.
   async takeSnapshot() {
     let lastErr = null;
     for (let i = 0; i < COPY_RETRIES; i++) {
       try {
         if (!fs.existsSync(this.source)) return false;
-        // Windows copies the read-only attribute along with the file; a read-only snapshot would make
-        // every later copy fail and stop history silently. Keep the snapshot writable.
-        if (fs.existsSync(this.snapshot)) { try { fs.chmodSync(this.snapshot, 0o666); } catch (_) { /* ignore */ } }
+        if (fs.existsSync(this.snapshot)) { try { fs.chmodSync(this.snapshot, 0o666); } catch (_) {  } }
         fs.copyFileSync(this.source, this.snapshot);
-        try { fs.chmodSync(this.snapshot, 0o666); } catch (_) { /* ignore */ }
+        try { fs.chmodSync(this.snapshot, 0o666); } catch (_) {  }
         return true;
       } catch (err) {
         lastErr = err;
@@ -125,7 +118,6 @@ class GitSync {
     throw lastErr;
   }
 
-  // Called after every content save; coalesces a burst of edits into one commit.
   noteChanged() {
     if (!this.state.enabled) return;
     this._set({ pending: true });
@@ -141,10 +133,9 @@ class GitSync {
 
   async commit(message?: string) {
     if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
-    // Chain on whatever is running so two callers can never run git at the same time in this repo.
     const prev = this.busy;
     const work = (async () => {
-      if (prev) { try { await prev; } catch (_) { /* previous failure already recorded */ } }
+      if (prev) { try { await prev; } catch (_) {  } }
       if (!(await this.available())) return { ok: false, error: 'git unavailable' };
       if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
       try { if (!(await this.takeSnapshot())) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; } }

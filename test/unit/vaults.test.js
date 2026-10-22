@@ -11,7 +11,7 @@ const { VaultManager } = require('../../src/vaults.mts');
 let gitAvailable = true;
 try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch (_) { gitAvailable = false; }
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-vault-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-vault-');
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
 
 function makeVaultDir() {
@@ -43,10 +43,8 @@ test('scanVault mirrors directories as folders and text files as notes, skipping
   const deep = store.notes.find((n) => n.title === 'notes');
   assert.equal(deep.vaultId, v.id);
   assert.equal(deep.fileKind, 'text');
-  // Idempotent.
   const r2 = await store.scanVault(v.id);
   assert.deepEqual([r2.added, r2.updated, r2.removed], [0, 0, 0]);
-  // External additions and deletions are reflected.
   fs.writeFileSync(path.join(dir, 'New.md'), 'new\n');
   fs.rmSync(path.join(dir, 'Projects', 'Plan.md'));
   const r3 = await store.scanVault(v.id);
@@ -90,7 +88,6 @@ test('vault notes: create writes a file, rename renames it, move moves it, trash
   assert.ok(!fs.existsSync(path.join(dir, '.trash', 'Renamed.md')), 'delete forever removes the file');
   assert.equal(store.get(n.id), null);
 
-  // Folder operations mirror directories.
   const sub = store.createFolder({ name: 'Ideas', parentId: root.id });
   assert.ok(fs.existsSync(path.join(dir, 'Ideas')));
   const inSub = store.createVaultNote(sub.id, { title: 'One' });
@@ -121,7 +118,6 @@ test('vault trash survives a restart, restores to the original folder, and a pla
   const plan = store.notes.find((n) => n.title === 'Plan');
   store.trash(plan.id);
   assert.ok(fs.existsSync(path.join(dir, '.trash', 'Plan.md')));
-  // Restart.
   store = new Store(dataDir).load();
   const reloaded = store.get(plan.id);
   assert.ok(reloaded.trashedFrom, 'origin path persisted');
@@ -129,27 +125,23 @@ test('vault trash survives a restart, restores to the original folder, and a pla
   assert.ok(fs.existsSync(path.join(dir, 'Projects', 'Plan.md')), 'restored to its original directory, not left in .trash');
   assert.equal(store.get(plan.id).folderId, projects.id);
   assert.equal(store.get(plan.id).trashedFrom, undefined);
-  // A trashed note whose origin directory was deleted restores into the parent.
   const deep = store.notes.find((n) => n.title === 'notes');
   const deepFolder = store.getFolder(deep.folderId);
   store.trash(deep.id);
   store.deleteFolder(deepFolder.id);
   store.restore(deep.id);
   assert.ok(fs.existsSync(path.join(dir, 'Projects', 'notes.txt')), 'restored into the parent after its folder was deleted');
-  // Older data without trashedFrom restores to the vault root.
   const inbox = store.notes.find((n) => n.title === 'Inbox');
   store.trash(inbox.id);
   delete store.get(inbox.id).trashedFrom;
   store.restore(inbox.id);
   assert.ok(fs.existsSync(path.join(dir, 'Inbox.md')));
-  // Plain note into a vault folder: becomes a file, synced like the rest.
   const plain = store.create({ title: 'Loose idea', body: 'loose\n' });
   store.update(plain.id, { folderId: projects.id });
   const after = store.get(plain.id);
   assert.equal(after.vaultId, v.id);
   assert.equal(after.filePath, path.join(dir, 'Projects', 'Loose idea.md'));
   assert.equal(fs.readFileSync(after.filePath, 'utf8'), 'loose\n');
-  // allowRemovals=false keeps mirrors of momentarily missing files.
   fs.renameSync(path.join(dir, 'Inbox.md'), path.join(dir, 'Inbox.md.tmp'));
   const r = await store.scanVault(v.id, { allowRemovals: false });
   assert.equal(r.removed, 0);
@@ -167,7 +159,6 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   git(aDir, ['add', '-A']); git(aDir, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init']); git(aDir, ['push', '-q', '-u', 'origin', 'main']);
 
   const store = new Store(tmp()).load();
-  // autoSync off: the watcher would otherwise start background syncs that interleave with the explicit ones below.
   const v = store.addVault({ path: aDir, remote: bare, autoSync: false });
   const changes = [];
   const vm = new VaultManager(store, { debounceMs: 50, rescanDebounceMs: 50, onChange: (id, s) => changes.push(s) });
@@ -176,7 +167,6 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   assert.equal(vm.statusOf(v.id).branch, 'main');
   assert.ok(store.notes.some((n) => n.title === 'Start'));
 
-  // Local change -> commit + push.
   const root = store.vaultRootFolder(v.id);
   store.createVaultNote(root.id, { title: 'Local', body: 'local\n' });
   const r1 = await vm.sync(v.id, 'test');
@@ -184,7 +174,6 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   assert.equal(git(bare, ['rev-list', '--count', 'main']), '2');
   assert.equal(vm.statusOf(v.id).dirty, false);
 
-  // Remote change (another device) -> pull brings the note in.
   const b = tmp();
   execFileSync('git', ['clone', '-q', bare, path.join(b, 'v')]);
   const bDir = path.join(b, 'v');
@@ -195,8 +184,6 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   assert.ok(fs.existsSync(path.join(aDir, 'Remote.md')));
   assert.ok(store.notes.some((n) => n.title === 'Remote'), 'pulled file became a note');
 
-  // A sync requested while one is running gets its own run afterwards (not the in-flight result), so a
-  // remote change that lands mid-sync is still pulled by the second call.
   const first = vm.sync(v.id, 'first');
   fs.writeFileSync(path.join(bDir, 'Second.md'), 'second\n');
   git(bDir, ['add', '-A']); git(bDir, ['-c', 'user.name=b', '-c', 'user.email=b@b', 'commit', '-q', '-m', 'b-second']); git(bDir, ['push', '-q']);
@@ -206,7 +193,6 @@ test('VaultManager syncs with a bare remote: commit, push, pull from another clo
   assert.equal(s2.ok, true); assert.equal(s2.reason, 'second', 'queued caller got a fresh run');
   assert.ok(store.notes.some((n) => n.title === 'Second'), 'change pushed mid-sync was pulled');
 
-  // Conflict: both sides edit Start.md. Sync must fail cleanly, keep the local commit, and not leave a rebase in progress.
   fs.writeFileSync(path.join(bDir, 'Start.md'), 'b version\n');
   git(bDir, ['add', '-A']); git(bDir, ['-c', 'user.name=b', '-c', 'user.email=b@b', 'commit', '-q', '-m', 'b2']); git(bDir, ['push', '-q']);
   fs.writeFileSync(path.join(aDir, 'Start.md'), 'a version\n');
@@ -246,7 +232,6 @@ test('vault scan: an unavailable folder removes nothing; an external rename keep
   await store.scanVault(v.id);
   const plan = store.notes.find((n) => n.title === 'Plan');
   store.update(plan.id, { tags: 'keep', pinned: true });
-  // External rename: same content, new name -> same note id, tags and pin kept.
   fs.renameSync(path.join(dir, 'Projects', 'Plan.md'), path.join(dir, 'Projects', 'Roadmap.md'));
   const r1 = await store.scanVault(v.id);
   assert.equal(r1.removed, 0);
@@ -254,25 +239,21 @@ test('vault scan: an unavailable folder removes nothing; an external rename keep
   assert.equal(same.title, 'Roadmap');
   assert.deepEqual(same.tags, ['keep']);
   assert.equal(same.pinned, true);
-  // A file that is not UTF-8 any more does not abort the scan.
   fs.writeFileSync(path.join(dir, 'Inbox.md'), Buffer.from([0xff, 0xfe, 0x41]));
   fs.writeFileSync(path.join(dir, 'New.md'), 'new\n');
   const r2 = await store.scanVault(v.id);
   assert.equal(r2.added, 1, 'the new file after the bad one was still linked');
-  // The vault folder disappears: nothing is removed.
   const away = dir + '-away';
   fs.renameSync(dir, away);
   const r3 = await store.scanVault(v.id);
   assert.equal(r3.unavailable, true);
   assert.ok(store.notes.some((n) => n.id === plan.id), 'notes kept while the folder is away');
   fs.renameSync(away, dir);
-  // Overlapping vaults are refused.
   assert.throws(() => store.addVault({ path: path.join(dir, 'Projects') }), /overlaps/);
-  // Delete forever only removes files inside .trash: a trashed note pointing at a live file is left alone.
   const deep = store.notes.find((n) => n.title === 'notes');
   store.trash(deep.id);
   assert.ok(fs.existsSync(path.join(dir, '.trash', 'notes.txt')));
-  deep.filePath = path.join(dir, 'Projects', 'Roadmap.md'); // simulate a stale record pointing at a live file
+  deep.filePath = path.join(dir, 'Projects', 'Roadmap.md');
   store.destroy(deep.id);
   assert.ok(fs.existsSync(path.join(dir, 'Projects', 'Roadmap.md')), 'live file untouched');
 });
@@ -289,7 +270,6 @@ test('a file changed on disk is not overwritten by a stale save unless forced', 
   assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), '# Inbox\nedited by git\n', 'their edit kept');
   store.update(inbox.id, { body: 'my version\n', force: true });
   assert.equal(fs.readFileSync(path.join(dir, 'Inbox.md'), 'utf8'), 'my version\n');
-  // Reading the file first (as the app does on a rescan) makes a later save fine again.
   fs.writeFileSync(path.join(dir, 'Inbox.md'), 'theirs 2\n');
   await store.refreshFileNote(inbox.id);
   store.update(inbox.id, { body: 'theirs 2 plus mine\n' });
@@ -392,13 +372,12 @@ test('unmerged paths with no merge marker block every sync until resolved (no co
   await vm.initRepo(v.id, bare);
   assert.equal((await vm.sync(v.id, 'test')).ok, true);
   const pushed = git(bare, ['rev-list', '--count', 'main']);
-  // Make a real UU entry: conflicting branch merged, then the MERGE_HEAD marker removed (as an autostash pop leaves it).
   const g = (args) => git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t'].concat(args));
   g(['checkout', '-q', '-b', 'other']);
   fs.writeFileSync(path.join(dir, 'Inbox.md'), 'other side\n'); g(['commit', '-qam', 'other']);
   g(['checkout', '-q', 'main']);
   fs.writeFileSync(path.join(dir, 'Inbox.md'), 'main side\n'); g(['commit', '-qam', 'main']);
-  try { g(['merge', 'other']); } catch (_) { /* conflict expected */ }
+  try { g(['merge', 'other']); } catch (_) {  }
   fs.rmSync(path.join(dir, '.git', 'MERGE_HEAD'), { force: true });
   assert.match(git(dir, ['status', '--porcelain']), /^UU /m);
   for (let i = 0; i < 2; i++) {

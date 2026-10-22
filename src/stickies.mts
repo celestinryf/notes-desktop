@@ -1,5 +1,3 @@
-/* Desktop stickies: one small frameless window per note that has note.sticky set. Main process only.
-   Position, size, tint and the on-top flag are persisted on the note, so stickies come back at login. */
 import path from 'node:path';
 import { BrowserWindow, screen, Menu, shell, clipboard } from 'electron';
 import * as windowInput from './window-input.mts';
@@ -18,11 +16,11 @@ class StickyManager {
   constructor(store: Store, opts?: { themeFor?: () => 'light' | 'dark', showInactive?: boolean, onChange?: (noteId: string) => void }) {
     opts = opts || {};
     this.store = store;
-    this.windows = new Map(); // noteId -> BrowserWindow
-    this.timers = new Map();  // noteId -> bounds persist timer
+    this.windows = new Map();
+    this.timers = new Map();
     this.themeFor = opts.themeFor || (() => 'light');
     this.showInactive = !!opts.showInactive;
-    this.onChange = opts.onChange || (() => {}); // (noteId) -> void, after a sticky opens/closes/forgets
+    this.onChange = opts.onChange || (() => {});
     this.quitting = false;
   }
 
@@ -35,11 +33,10 @@ class StickyManager {
     return Array.from(this.windows.keys()).filter((id) => this.isOpen(id));
   }
 
-  // Shows the sticky for a note, creating the window if needed. Marks the note sticky if it was not.
   open(id: string, opts?: { focus?: boolean }) {
     opts = opts || {};
     const note = this.store.get(id);
-    if (!note || note.trashedAt || note.lock) return null; // a locked note never sits on the desktop
+    if (!note || note.trashedAt || note.lock) return null;
     if (!note.sticky) this.store.setSticky(id, { x: null, y: null });
     const sticky = this.store.get(id)?.sticky;
     if (!sticky) return null;
@@ -70,10 +67,8 @@ class StickyManager {
       },
     });
     this.windows.set(id, w);
-    // Same guards as the main window: nothing navigates or opens windows from the privileged page.
     w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); });
-    // Same zoom keys and right-click menu as the main window (zoom is per sticky and not remembered).
     windowInput.attachZoom(w.webContents);
     windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard });
     w.loadFile(path.join(import.meta.dirname, 'renderer', 'sticky.html'), { query: { id } });
@@ -86,7 +81,7 @@ class StickyManager {
       this.timers.set(id, setTimeout(() => {
         if (w.isDestroyed()) return;
         const b = w.getBounds();
-        try { this.store.setSticky(id, { x: b.x, y: b.y, w: b.width, h: b.height }); } catch (_) { /* saving paused; not worth a dialog */ }
+        try { this.store.setSticky(id, { x: b.x, y: b.y, w: b.width, h: b.height }); } catch (_) {  }
       }, 400));
     };
     w.on('move', persist);
@@ -101,10 +96,9 @@ class StickyManager {
     return w;
   }
 
-  // Closes the window. With forget, the note stops being a sticky (it stays a note).
   close(id: string, opts?: { forget?: boolean }) {
     opts = opts || {};
-    if (opts.forget) { try { this.store.setSticky(id, null); } catch (_) { /* paused */ } }
+    if (opts.forget) { try { this.store.setSticky(id, null); } catch (_) {  } }
     const w = this.windows.get(id);
     if (w && !w.isDestroyed()) w.close(); else this.onChange(id);
   }
@@ -123,12 +117,10 @@ class StickyManager {
     return note && note.sticky;
   }
 
-  // Opens every note that was a sticky when the app last ran.
   restoreAll() {
     for (const n of this.store.stickies()) { try { this.open(n.id, { focus: false }); } catch (err) { console.error('[stickies] restore failed', err); } }
   }
 
-  // Gives every sticky the chance to write a pending edit; flushFn(window) resolves when it has.
   flushAll(flushFn: (w: BrowserWindow) => Promise<unknown>) {
     const open = Array.from(this.windows.values()).filter((w) => !w.isDestroyed());
     return Promise.all(open.map((w) => flushFn(w).catch(() => {})));
@@ -136,11 +128,10 @@ class StickyManager {
 
   closeAll() {
     this.quitting = true;
-    for (const w of this.windows.values()) { if (!w.isDestroyed()) { try { w.destroy(); } catch (_) { /* ignore */ } } }
+    for (const w of this.windows.values()) { if (!w.isDestroyed()) { try { w.destroy(); } catch (_) {  } } }
     this.windows.clear();
   }
 
-  // Tells every sticky (except the sender) that a note changed, so it can reload if it shows that note.
   broadcast(channel: string, payload?: unknown, exceptContents?: Electron.WebContents) {
     for (const w of this.windows.values()) {
       if (w.isDestroyed()) continue;
@@ -154,7 +145,6 @@ class StickyManager {
     if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 
-  // A saved position is used only when it is still on a screen; otherwise cascade from the top-right corner.
   _bounds(sticky: Sticky) {
     const width = sticky.w, height = sticky.h;
     const { x, y } = sticky;
