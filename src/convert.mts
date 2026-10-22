@@ -13,12 +13,14 @@ import { OOXML_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
 import * as markitdown from './markitdown.mts';
 import { createRequire } from 'node:module';
 import type MarkdownIt from 'markdown-it';
-import type { ParagraphChild } from 'docx';
+import type { Token } from 'markdown-it';
+import type { ParagraphChild, IParagraphOptions, IRunOptions, Paragraph, Table } from 'docx';
+import { isFileNote } from './store.mts';
 
 const requireWhenNeeded = createRequire(import.meta.url);
 
 
-const FORMATS = {
+const FORMATS: Record<string, string> = {
   md: 'Markdown (.md)',
   txt: 'Plain text (.txt)',
   html: 'Web page (.html)',
@@ -33,7 +35,7 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const PDF_TIMEOUT_MS = 2 * 60 * 1000;
 
 // What the file is, for conversion: md | txt | code | html | docx | pdf | office, or null when it cannot be converted.
-function sourceOf(note) {
+function sourceOf(note: Note | null) {
   if (!note || !note.filePath) return null;
   if (note.fileKind === 'pdf') return 'pdf';
   // Word's zip formats convert here; an .odt, .rtf or .doc is converted by WordCraft's own Save As instead.
@@ -54,7 +56,7 @@ const DOCX_KEEPS = 'Keeps headings, lists, bold and italic, links, tables and pi
 // What each direction loses, said before the person picks it. '' means nothing of note is lost.
 const PDF_TEXT_ONLY = 'Text only: the PDF\'s layout, pictures and fonts are left out. A scanned PDF has no text to convert.';
 const OFFICE_TEXT = 'The text, headings, lists and tables as MarkItDown reads them; layout, pictures, charts, formulas and formatting are left out.';
-const LOSS = {
+const LOSS: Record<string, Record<string, string>> = {
   md: { txt: 'Formatting marks are removed; a link keeps its address in brackets.', docx: 'Keeps headings, lists, bold and italic, links, code, quotes, tables and pictures on this PC; pictures from the web are left out.', pdf: 'Pictures from the web are left out.' },
   txt: {},
   code: { md: 'The text goes in a code block.', html: 'Shown as monospaced text.', docx: 'Shown as monospaced text.', pdf: 'Shown as monospaced text.', txt: 'The same text, saved as .txt.' },
@@ -65,7 +67,7 @@ const LOSS = {
 };
 
 // The formats this note can be converted to, with what each one loses.
-function options(note) {
+function options(note: Note | null) {
   const src = sourceOf(note);
   if (!src) return [];
   return Object.keys(FORMATS).filter((to) => to !== src).map((to) => ({ to, label: FORMATS[to], note: LOSS[src][to] || '' }));
@@ -74,16 +76,16 @@ function options(note) {
 // ---- Markdown in --------------------------------------------------------------------------------
 
 // Escapes one line of plain text so Markdown shows it exactly as written.
-function escapeMarkdownLine(line) {
+function escapeMarkdownLine(line: string) {
   return line
     .replace(/[\\`*_[\]<>|~&]/g, '\\$&')
     .replace(/^(\s*)([#>+=-])/, '$1\\$2') // headings, quotes, list items, setext underlines
     .replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3') // "1." would start a numbered list
-    .replace(/^[ \t]+/, (m) => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length)); // leading space would make a code block
+    .replace(/^[ \t]+/, (m: string) => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length)); // leading space would make a code block
 }
 
 // Plain text as Markdown that reads the same: blank lines separate paragraphs, single line breaks are kept.
-function textToMarkdown(text) {
+function textToMarkdown(text: string) {
   return String(text).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:\n[ \t]*)*\n/)
     .map((p) => p.replace(/^\n+|\n+$/g, ''))
     .filter((p) => p.trim())
@@ -91,7 +93,7 @@ function textToMarkdown(text) {
     .join('\n\n') + '\n';
 }
 
-function fence(text, lang) {
+function fence(text: string, lang: string) {
   const longest = Math.max(2, ...(String(text).match(/`+/g) || []).map((m) => m.length));
   const f = '`'.repeat(longest + 1);
   return f + (lang || '') + '\n' + String(text).replace(/\n$/, '') + '\n' + f + '\n';
@@ -99,7 +101,7 @@ function fence(text, lang) {
 
 type Turndown = { turndown: (html: string) => string, use: (plugin: unknown) => void, remove: (tags: string[]) => void };
 let turndownService: Turndown | null = null;
-function htmlToMarkdown(html) {
+function htmlToMarkdown(html: string) {
   if (!turndownService) {
     const TurndownService: new (options: object) => Turndown = requireWhenNeeded('turndown');
     turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-', emDelimiter: '*' });
@@ -111,7 +113,9 @@ function htmlToMarkdown(html) {
 
 // Links in a Word document can point anywhere; only web and mail links are kept as links.
 const SAFE_HREF = /^(https?:|mailto:)/i;
-function mammothOptions(convertImage) {
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type ImageConverter = Parameters<typeof import('mammoth').images.imgElement>[0];
+function mammothOptions(convertImage?: ImageConverter | null) {
   const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
   const opts: NonNullable<Parameters<typeof mammoth.convertToHtml>[1]> = {
     transformDocument: (doc) => {
@@ -127,7 +131,7 @@ function mammothOptions(convertImage) {
 // Markdown tables need a header row and one line per cell. Word tables often have neither (mammoth marks a header
 // only when Word does, and puts each cell's text in paragraphs), so the first row becomes the header and a cell's
 // paragraphs become line breaks. A table holding another table is left as it is (turndown keeps it as HTML).
-function tablesForMarkdown(html) {
+function tablesForMarkdown(html: string) {
   return String(html).replace(/<table>[\s\S]*?<\/table>/g, (table) => {
     if (table.indexOf('<table', 1) >= 0) return table; // the lazy match stopped at a nested table's end
     let t = table.replace(/<\/p>\s*<p>/g, '<br>').replace(/<\/?p>/g, '');
@@ -139,14 +143,14 @@ function tablesForMarkdown(html) {
   });
 }
 
-async function docxToHtml(filePath, convertImage?) {
+async function docxToHtml(filePath: string, convertImage?: ImageConverter | null) {
   const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
   const res = await mammoth.convertToHtml({ buffer: await readDocumentBuffer(filePath) }, mammothOptions(convertImage));
   return res.value;
 }
 
 // The text of a PDF as Markdown paragraphs. Says how many pages had no text (scanned), and refuses when none did.
-async function pdfToMarkdown(filePath) {
+async function pdfToMarkdown(filePath: string) {
   if (fs.statSync(filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
   const res = await runWorker<{ pages: string[][] }>('pdf-text-worker.mts', { bytes: fs.readFileSync(filePath) }, PDF_TIMEOUT_MS, 'Reading the PDF took too long.');
   if (!res.ok) throw new Error(res.error);
@@ -158,11 +162,11 @@ async function pdfToMarkdown(filePath) {
 }
 
 // One path segment for a Markdown link: "#", "?" and brackets in a file name must not end or break the link.
-const urlSegment = (s) => encodeURIComponent(s).replace(/[()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+const urlSegment = (s: string) => encodeURIComponent(s).replace(/[()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 
 // The file as Markdown. imagesDir: where a Word document's pictures go ({ parent, folder() }, folder() making the
 // folder on first use and returning its name); without it they are inlined as data: URLs.
-async function toMarkdown(note, imagesDir?) {
+async function toMarkdown(note: FileNote, imagesDir?: { parent: string, folder: () => string }) {
   const src = sourceOf(note);
   const file = note.filePath;
   if (src === 'pdf') return pdfToMarkdown(file);
@@ -203,20 +207,20 @@ function md(): MarkdownIt {
   return markdownIt;
 }
 
-const stripTags = (s) => String(s).replace(/<[^>]*>/g, '');
+const stripTags = (s: string) => String(s).replace(/<[^>]*>/g, '');
 
 // Markdown as HTML, with task items ("- [ ] x") shown as boxes the way the editor shows them. forPrint: pictures on
 // the web are replaced by their description, since the print window never fetches them.
-function renderMarkdown(markdown, forPrint?) {
+function renderMarkdown(markdown: string, forPrint?: boolean) {
   let html = md().render(markdown).replace(/<li>(<p>)?\[( |x|X)\]\s/g, (m, p, x) => '<li>' + (p || '') + (x === ' ' ? '☐ ' : '☑ '));
   if (forPrint) html = html.replace(/<img src="(?!data:|file:)[a-z][a-z0-9+.-]*:[^"]*" alt="([^"]*)"[^>]*>/gi, (m, alt) => (alt ? '<em>[' + alt + ']</em>' : ''));
   return html;
 }
 
-function inlineRuns(tok): Run[] {
+function inlineRuns(tok: Token | null): Run[] {
   const runs: Run[] = [];
-  const st = { b: 0, i: 0, s: 0, href: null };
-  const push = (text, extra?) => runs.push(Object.assign({ text, b: st.b > 0, i: st.i > 0, s: st.s > 0, href: st.href }, extra));
+  const st: { b: number, i: number, s: number, href: string | null } = { b: 0, i: 0, s: 0, href: null };
+  const push = (text: string, extra?: { code: true }) => runs.push(Object.assign({ text, b: st.b > 0, i: st.i > 0, s: st.s > 0, href: st.href }, extra));
   for (const c of (tok && tok.children) || []) {
     if (c.type === 'text') push(c.content);
     else if (c.type === 'softbreak') push(' ');
@@ -239,16 +243,26 @@ function inlineRuns(tok): Run[] {
 
 type Run = { text?: string, b?: boolean, i?: boolean, s?: boolean, code?: boolean, href?: string | null, img?: string | null, alt?: string, br?: boolean };
 type TableRow = { header: boolean, cells: Run[][] };
-type Block = { t: string, level?: number, runs?: Run[], tight?: boolean, ordered?: boolean, start?: number, items?: Block[][], rows?: TableRow[], lang?: string, text?: string, blocks?: Block[] };
-function markdownBlocks(src) {
+type Block = { tight?: boolean } & (
+  | { t: 'h', level: number, runs: Run[] }
+  | { t: 'p', runs: Run[] }
+  | { t: 'list', ordered: boolean, start: number, items: Block[][] }
+  | { t: 'code', lang: string, text: string }
+  | { t: 'quote', blocks: Block[] }
+  | { t: 'table', rows: TableRow[] }
+  | { t: 'hr' });
+type ListBlock = Extract<Block, { t: 'list' }>;
+type QuoteBlock = Extract<Block, { t: 'quote' }>;
+type TableBlock = Extract<Block, { t: 'table' }>;
+function markdownBlocks(src: string) {
   const tokens = md().parse(String(src), {});
   const root: Block[] = [];
-  const stack: ({ blocks: Block[], list?: undefined } | { list: Block, blocks?: undefined })[] = [{ blocks: root }];
+  const stack: ({ blocks: Block[], list?: undefined } | { list: ListBlock, blocks?: undefined })[] = [{ blocks: root }];
   const top = () => stack[stack.length - 1];
   // Blocks go into the open container; a list frame only takes items, so a block there is a markdown-it fault.
   const topBlocks = () => { const f = top(); if (!f.blocks) throw new Error('a block outside a list item'); return f.blocks; };
   const topItems = () => { const f = top(); if (!f.list || !f.list.items) throw new Error('a list item outside a list'); return f.list.items; };
-  let table: Block | null = null;
+  let table: TableBlock | null = null;
   let row: TableRow | null = null;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -258,13 +272,13 @@ function markdownBlocks(src) {
       case 'paragraph_open': topBlocks().push({ t: 'p', runs: inlineRuns(inline), tight: !!t.hidden }); break; // hidden: in a tight list
       case 'bullet_list_open':
       case 'ordered_list_open': {
-        const list = { t: 'list', ordered: t.type === 'ordered_list_open', start: Number(t.attrGet('start')) || 1, items: [] };
+        const list: ListBlock = { t: 'list', ordered: t.type === 'ordered_list_open', start: Number(t.attrGet('start')) || 1, items: [] };
         topBlocks().push(list);
         stack.push({ list });
         break;
       }
-      case 'list_item_open': { const item = []; topItems().push(item); stack.push({ blocks: item }); break; }
-      case 'blockquote_open': { const q = { t: 'quote', blocks: [] }; topBlocks().push(q); stack.push({ blocks: q.blocks }); break; }
+      case 'list_item_open': { const item: Block[] = []; topItems().push(item); stack.push({ blocks: item }); break; }
+      case 'blockquote_open': { const q: QuoteBlock = { t: 'quote', blocks: [] }; topBlocks().push(q); stack.push({ blocks: q.blocks }); break; }
       case 'list_item_close': case 'bullet_list_close': case 'ordered_list_close': case 'blockquote_close': stack.pop(); break;
       case 'fence': case 'code_block': topBlocks().push({ t: 'code', lang: String(t.info || '').trim().split(/\s+/)[0], text: t.content.replace(/\n$/, '') }); break;
       case 'hr': topBlocks().push({ t: 'hr' }); break;
@@ -286,7 +300,7 @@ function markdownBlocks(src) {
 
 // ---- writers ------------------------------------------------------------------------------------
 
-function runsText(runs) {
+function runsText(runs: Run[]) {
   let out = '', linkText = '';
   runs.forEach((r, k) => {
     if (r.br) { out += '\n'; return; }
@@ -303,9 +317,9 @@ function runsText(runs) {
   return out;
 }
 
-const indentLines = (text, pad) => text.split('\n').map((l) => (l ? pad + l : l)).join('\n');
+const indentLines = (text: string, pad: string) => text.split('\n').map((l) => (l ? pad + l : l)).join('\n');
 
-function blocksToText(blocks) {
+function blocksToText(blocks: Block[]) {
   let out = '';
   blocks.forEach((b, k) => {
     const text = blockText(b);
@@ -315,7 +329,7 @@ function blocksToText(blocks) {
   return out;
 }
 
-function blockText(b) {
+function blockText(b: Block): string {
   if (b.t === 'h' || b.t === 'p') return runsText(b.runs);
   if (b.t === 'code') return b.text;
   if (b.t === 'hr') return '* * *';
@@ -331,7 +345,7 @@ function blockText(b) {
 }
 
 // Pixel size of a PNG, JPEG, GIF or BMP, read from its header; null for anything else.
-function imageInfo(buf): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null {
+function imageInfo(buf: Buffer): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null {
   if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { type: 'png', w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
   if (buf.length > 10 && buf.toString('latin1', 0, 4) === 'GIF8') return { type: 'gif', w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
   if (buf.length > 26 && buf.toString('latin1', 0, 2) === 'BM') return { type: 'bmp', w: buf.readInt32LE(18), h: Math.abs(buf.readInt32LE(22)) };
@@ -347,7 +361,7 @@ function imageInfo(buf): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: nu
 }
 
 // Whether file is inside dir (or is dir). Network paths (\\server\share) never are.
-function isInside(file, dir) {
+function isInside(file: string, dir: string) {
   if (/^[\\/]{2}/.test(file)) return false;
   const rel = path.relative(path.resolve(dir), path.resolve(file));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
@@ -355,7 +369,7 @@ function isInside(file, dir) {
 
 // A picture's bytes, from a data: URL or a file in the source's folder. Pictures on the web or a network share are
 // never fetched (a share would send the Windows login to whoever runs it), and nothing outside the folder is read.
-function imageBytes(src, baseDir) {
+function imageBytes(src: string | null | undefined, baseDir: string) {
   const s = String(src || '');
   const data = /^data:image\/[a-z+]+;base64,(.*)$/i.exec(s);
   if (data) return Buffer.from(data[1], 'base64');
@@ -368,18 +382,19 @@ function imageBytes(src, baseDir) {
 
 const MAX_IMAGE_WIDTH = 600; // px, about the text width of an A4 or Letter page
 
-async function blocksToDocx(blocks, opts) {
+async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: string }) {
   const D: typeof import('docx') = requireWhenNeeded('docx');
   const baseDir = opts.baseDir;
   const numbering = new Map(); // start number -> reference (every level of it counts from that number)
   let instance = 0;
-  const numberingRef = (start) => {
+  const numberingRef = (start: number) => {
     if (!numbering.has(start)) numbering.set(start, 'ordered-' + start);
     return numbering.get(start);
   };
+  const headingLevels: Record<string, (typeof D.HeadingLevel)[keyof typeof D.HeadingLevel]> = D.HeadingLevel;
   const codeShading = { type: D.ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' };
 
-  function imageRun(r) {
+  function imageRun(r: Run) {
     const buf = imageBytes(r.img, baseDir);
     const info = buf && imageInfo(buf);
     if (!info || !info.w || !info.h) return new D.TextRun({ text: r.alt ? '[' + r.alt + ']' : '', italics: true });
@@ -387,7 +402,7 @@ async function blocksToDocx(blocks, opts) {
     return new D.ImageRun({ type: info.type, data: buf, transformation: { width: Math.round(info.w * scale), height: Math.round(info.h * scale) }, altText: r.alt ? { name: r.alt, description: r.alt, title: r.alt } : undefined });
   }
 
-  function runObjs(runs, extra?) {
+  function runObjs(runs: Run[], extra?: Mutable<IRunOptions>) {
     const out: ParagraphChild[] = [];
     for (const r of runs) {
       if (r.br) { out.push(new D.TextRun({ text: '', break: 1 })); continue; }
@@ -404,17 +419,18 @@ async function blocksToDocx(blocks, opts) {
   }
 
   // A task item's "[ ] " or "[x] " becomes a box.
-  function taskRuns(runs) {
+  function taskRuns(runs: Run[]) {
     const first = runs[0];
-    const m = first && !first.br && first.img === undefined && /^\[( |x|X)\]\s+/.exec(first.text);
-    if (!m) return runs;
-    return [Object.assign({}, first, { text: (m[1] === ' ' ? '☐ ' : '☑ ') + first.text.slice(m[0].length) })].concat(runs.slice(1));
+    const text = first && !first.br && first.img === undefined ? first.text : undefined;
+    const m = text === undefined ? null : /^\[( |x|X)\]\s+/.exec(text);
+    if (!m || text === undefined) return runs;
+    return [{ ...first, text: (m[1] === ' ' ? '☐ ' : '☑ ') + text.slice(m[0].length) }, ...runs.slice(1)];
   }
 
   // ctx: paragraph properties that apply to everything inside (quote borders, list indents); level: list depth.
-  function walk(list, ctx, level, out) {
+  function walk(list: Block[], ctx: IParagraphOptions, level: number, out: (Paragraph | Table)[]) {
     for (const b of list) {
-      if (b.t === 'h') out.push(new D.Paragraph(Object.assign({ heading: D.HeadingLevel['HEADING_' + Math.min(6, b.level)], children: runObjs(b.runs) }, ctx)));
+      if (b.t === 'h') out.push(new D.Paragraph(Object.assign({ heading: headingLevels['HEADING_' + Math.min(6, b.level)], children: runObjs(b.runs) }, ctx)));
       else if (b.t === 'p') out.push(new D.Paragraph(Object.assign({ children: runObjs(b.runs) }, ctx)));
       else if (b.t === 'hr') out.push(new D.Paragraph({ thematicBreak: true, children: [] }));
       else if (b.t === 'code') {
@@ -463,9 +479,9 @@ async function blocksToDocx(blocks, opts) {
 // ---- HTML pages ---------------------------------------------------------------------------------
 
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
+const escHtml = (s: string) => String(s).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
 // A standalone HTML page for an exported note, book or converted file. extraCss styles the parts (contents, page breaks).
-function htmlDocument(title, bodyHtml, extraCss?) {
+function htmlDocument(title: string, bodyHtml: string, extraCss?: string) {
   return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
     '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
     '<body>' + String(bodyHtml || '') + '</body></html>\n';
@@ -474,14 +490,14 @@ function htmlDocument(title, bodyHtml, extraCss?) {
 const PRINT_CSS = '@media print{body{background:#fff;margin:0;max-width:none;padding:0}pre{white-space:pre-wrap}}';
 
 // Markdown pictures that are not inlined (data: URLs) become their description.
-function inlinePicturesOnly(markdown) {
+function inlinePicturesOnly(markdown: string) {
   return String(markdown).replace(/!\[([^\]]*)\]\((?!data:)(?:<[^>]*>|[^)\s]*)(?:\s+"[^"]*")?\)/g, (m, alt) => (alt ? '*[' + alt + ']*' : ''));
 }
 
 // ---- writing the new file -----------------------------------------------------------------------
 
 // Calls make(name) with "<stem><ext>", then "<stem> (2)<ext>" and so on, until one is not taken (make throws EEXIST).
-function firstFree(stem, ext, make) {
+function firstFree(stem: string, ext: string, make: (name: string) => void) {
   for (let n = 1; n < 1000; n++) {
     const name = stem + (n > 1 ? ' (' + n + ')' : '') + ext;
     try { make(name); return name; } catch (err) { if (err.code !== 'EEXIST') throw err; }
@@ -491,7 +507,7 @@ function firstFree(stem, ext, make) {
 
 // Writes data to a new "<base>.<ext>" in dir and returns its path. Never overwrites ('wx'); a write that fails part
 // way removes what it wrote.
-function writeNew(dir, base, ext, data) {
+function writeNew(dir: string, base: string, ext: string, data: string | Buffer) {
   return path.join(dir, firstFree(base, '.' + ext, (name) => {
     const file = path.join(dir, name);
     const fd = fs.openSync(file, 'wx'); // throws EEXIST (or anything else) before anything is created
@@ -504,13 +520,17 @@ function writeNew(dir, base, ext, data) {
 }
 
 // A new, empty folder "<name>" in dir; returns its name.
-const mkdirNew = (dir, name) => firstFree(name, '', (folder) => fs.mkdirSync(path.join(dir, folder)));
+const mkdirNew = (dir: string, name: string) => firstFree(name, '', (folder) => fs.mkdirSync(path.join(dir, folder)));
 
+type Printers = {
+  html: (doc: string, baseDir: string) => Promise<Buffer>,
+  docx: (bytes: Buffer) => Promise<{ pdf: Buffer, warning: string }>,
+};
 // Converts the file behind note to format `to`. print renders PDFs, which needs a window that main owns:
 // print.html(doc, baseDir) -> Buffer, print.docx(bytes) -> { pdf, warning }. Returns { filePath, warning }.
-async function convertFile(note, to, print) {
+async function convertFile(note: Note | null, to: string, print: Printers) {
   const src = sourceOf(note);
-  if (!src) throw new Error('This file cannot be converted.');
+  if (!src || !isFileNote(note)) throw new Error('This file cannot be converted.');
   if (!FORMATS[to] || to === src) throw new Error('Notes cannot convert this file to that format.');
   if (note.lock) throw new Error('Unlock the note first.');
   const file = note.filePath;
@@ -543,12 +563,13 @@ async function convertFile(note, to, print) {
   }
 
   const { markdown, warning } = await toMarkdown(note);
-  let data;
+  let data: string | Buffer;
   if (to === 'md') data = markdown;
   else if (to === 'txt') data = blocksToText(markdownBlocks(markdown)) + '\n';
   else if (to === 'html') data = htmlDocument(title, renderMarkdown(markdown), PRINT_CSS);
   else if (to === 'docx') data = await blocksToDocx(markdownBlocks(markdown), { baseDir: dir, title });
   else if (to === 'pdf') data = await print.html(htmlDocument(title, renderMarkdown(markdown, true), PRINT_CSS), dir);
+  else throw new Error('Notes cannot convert this file to that format.');
   return { filePath: writeNew(dir, base, to, data), warning };
 }
 

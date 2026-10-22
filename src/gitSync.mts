@@ -18,7 +18,7 @@ function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
   });
 }
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class GitSync {
   dataDir: string;
@@ -49,7 +49,7 @@ class GitSync {
     return Object.assign({}, this.state);
   }
 
-  _set(patch) {
+  _set(patch: Partial<GitState>) {
     Object.assign(this.state, patch);
     this.onChange(this.status());
   }
@@ -61,7 +61,7 @@ class GitSync {
     return r.ok;
   }
 
-  async configure(settings) {
+  async configure(settings: Settings) {
     this.state.enabled = !!settings.gitEnabled;
     const wantedRemote = String(settings.gitRemote || '').trim();
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
@@ -84,7 +84,7 @@ class GitSync {
     return true;
   }
 
-  async syncRemote(url) {
+  async syncRemote(url: string) {
     if (!this.state.initialized) return;
     const current = await run(['remote', 'get-url', 'origin'], this.dir);
     const have = current.ok ? current.stdout.trim() : '';
@@ -139,7 +139,7 @@ class GitSync {
     if (this.busy) await this.busy;
   }
 
-  async commit(message?) {
+  async commit(message?: string) {
     if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
     // Chain on whatever is running so two callers can never run git at the same time in this repo.
     const prev = this.busy;
@@ -173,7 +173,7 @@ class GitSync {
     return { ok: true };
   }
 
-  async history(limit) {
+  async history(limit?: number) {
     if (!this.state.initialized) return [];
     const r = await run(['log', '--format=%H%x1f%ct%x1f%s', '-n', String(limit || 50)], this.dir);
     if (!r.ok) return [];
@@ -183,7 +183,7 @@ class GitSync {
     });
   }
 
-  async showNotesAt(hash) {
+  async showNotesAt(hash: string) {
     const r = await run(['show', hash + ':notes.json'], this.dir);
     return r.ok ? r.stdout : null;
   }

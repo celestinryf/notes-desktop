@@ -21,7 +21,7 @@ const requireWhenNeeded = createRequire(import.meta.url);
 
 // Returns 'text' | 'pdf' | 'docx' (any Word document WordCraft opens) | 'sheet' (a spreadsheet, for GridCraft) |
 // 'image' | 'binary'. Text is decided by extension, then by sniffing for NUL bytes.
-function kindOf(filePath) {
+function kindOf(filePath: string): FileKind {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
   if (WORD_EXT.has(ext)) return 'docx';
@@ -43,7 +43,7 @@ function kindOf(filePath) {
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
 // Strict UTF-8: a file that is not valid UTF-8 (Latin-1, UTF-16, binary) must never be rewritten as UTF-8 garbage.
-function readText(filePath) {
+function readText(filePath: string) {
   const stat = fs.statSync(filePath);
   if (stat.size > MAX_TEXT_BYTES) throw Object.assign(new Error('File is larger than 4 MB'), { code: 'ETOOBIG' });
   const bytes = fs.readFileSync(filePath);
@@ -52,7 +52,7 @@ function readText(filePath) {
   return { body: text.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size, bom: bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf };
 }
 
-function hasBom(filePath) {
+function hasBom(filePath: string) {
   try {
     const fd = fs.openSync(filePath, 'r');
     const b = Buffer.alloc(3);
@@ -64,7 +64,7 @@ function hasBom(filePath) {
 
 // Writes in place (truncate + write), never via rename, so hard links such as CLAUDE.md <-> AGENTS.md stay joined.
 // Keeps the file's line-ending style and its byte-order mark if it had one.
-function writeTextInPlace(filePath, body) {
+function writeTextInPlace(filePath: string, body: string) {
   const eol = detectEol(filePath);
   const bom = hasBom(filePath);
   const text = eol === '\r\n' ? String(body).replace(/\r?\n/g, '\r\n') : String(body);
@@ -72,7 +72,7 @@ function writeTextInPlace(filePath, body) {
   return fs.statSync(filePath).mtimeMs;
 }
 
-function detectEol(filePath) {
+function detectEol(filePath: string) {
   try {
     const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(4096);
@@ -89,14 +89,14 @@ const MAX_DOCX_BYTES = 50 * 1024 * 1024;
 const MAX_ZIP_UNPACKED = 100 * 1024 * 1024; // what the viewer parses on the page's own thread
 const MAX_ZIP_ENTRIES = 20000;
 const inflateRaw = (buf: Buffer, opts: zlib.ZlibOptions): Promise<Buffer> => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
-const zipError = (msg) => Object.assign(new Error(msg), { code: 'EZIP' });
+const zipError = (msg: string) => Object.assign(new Error(msg), { code: 'EZIP' });
 const TOO_BIG_UNPACKED = 'This document unpacks to more than 100 MB, so Notes will not open it.';
 
 // A Word document is a zip. A crafted one can unpack to gigabytes from a few kilobytes and hang the app, and its
 // directory can lie about sizes, so every entry is really inflated here (on the thread pool, capped) before any
 // library is allowed to open it. want: names of parts to hand back, inflated ({ name: Buffer }).
-async function assertSafeZip(buf, want?) {
-  const parts = {};
+async function assertSafeZip(buf: Buffer, want?: string[]) {
+  const parts: Record<string, Buffer> = {};
   let eocd = -1;
   for (let i = buf.length - 22, min = Math.max(0, buf.length - 22 - 65535); i >= min; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -132,11 +132,11 @@ async function assertSafeZip(buf, want?) {
   return parts;
 }
 
-const isZipDocument = (filePath) => ZIP_DOC_EXT.has(extOf(filePath));
+const isZipDocument = (filePath: string) => ZIP_DOC_EXT.has(extOf(filePath));
 
 // The bytes of a Word document or spreadsheet, checked for size and (for the zip formats) for zip bombs.
 // Everything that opens one goes through here.
-async function readDocumentBuffer(filePath) {
+async function readDocumentBuffer(filePath: string) {
   if (fs.statSync(filePath).size > MAX_DOCX_BYTES) throw Object.assign(new Error('This document is larger than 50 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
   const buf = fs.readFileSync(filePath);
   if (isZipDocument(filePath)) await assertSafeZip(buf);
@@ -147,7 +147,7 @@ async function readDocumentBuffer(filePath) {
 // itself is shown from its own bytes (files:docxBytes), never from this text.
 // Word's zip formats are read by mammoth, ODT and RTF by the small readers below; the old binary .doc gives no text
 // (WordCraft still opens it in full).
-async function readDocxText(filePath) {
+async function readDocxText(filePath: string) {
   const stat = fs.statSync(filePath);
   const ext = extOf(filePath);
   let body = '';
@@ -168,7 +168,7 @@ async function readDocxText(filePath) {
 // reads the format; otherwise the body is '' and the file still opens. When MarkItDown fails on a file it could read
 // (a timeout, a crash), body is undefined: the caller keeps whatever text it had rather than erase it.
 const MAX_OFFICE_TEXT = 1024 * 1024; // what a note keeps of a big workbook's text; a text file caps at 4 MB
-async function readOfficeText(filePath) {
+async function readOfficeText(filePath: string) {
   const stat = fs.statSync(filePath);
   const out: { body: string | undefined, mtime: number, size: number } = { body: '', mtime: stat.mtimeMs, size: stat.size };
   if (!markitdown.available() || !markitdown.reads(extOf(filePath))) return out;
@@ -186,28 +186,28 @@ async function readOfficeText(filePath) {
 const TEXTED_KINDS = new Set(['text', 'docx', 'sheet']);
 // The body a file note of this kind keeps, with the file's time: { body, mtime }. Other kinds (a PDF, an image, a
 // binary) keep none.
-async function readNoteText(kind, filePath) {
+async function readNoteText(kind: FileKind | null, filePath: string) {
   if (kind === 'text') return readText(filePath);
   if (kind === 'docx') return readDocxText(filePath);
   if (kind === 'sheet') return readOfficeText(filePath);
   return { body: '', mtime: mtimeOf(filePath) };
 }
 
-const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-const decodeXml = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_, e) => {
+const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_: string, e: string) => {
   if (e[0] !== '#') return XML_ENTITIES[e.toLowerCase()];
   const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
   return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
 });
 
 // The text of an ODT's content.xml: paragraphs and headings on their own lines, its tab, space and break elements.
-function odtText(xml) {
+function odtText(xml: string) {
   const bodyAt = xml.indexOf('<office:body');
   const body = bodyAt >= 0 ? xml.slice(bodyAt) : xml;
   return decodeXml(body
     .replace(/<text:line-break\s*\/>/g, '\n')
     .replace(/<text:tab\s*\/>/g, '\t')
-    .replace(/<text:s(?:\s+text:c="(\d+)")?\s*\/>/g, (_, n) => ' '.repeat(Math.min(Number(n) || 1, 1000)))
+    .replace(/<text:s(?:\s+text:c="(\d+)")?\s*\/>/g, (_: string, n: string) => ' '.repeat(Math.min(Number(n) || 1, 1000)))
     .replace(/<\/text:(p|h)>/g, '\n')
     .replace(/<[^>]*>/g, ''))
     .replace(/\n{3,}/g, '\n\n').trim();
@@ -217,15 +217,15 @@ function odtText(xml) {
 const RTF_SKIP = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'themedata', 'colorschememapping',
   'latentstyles', 'datastore', 'xmlnstbl', 'listtable', 'listoverridetable', 'rsidtbl', 'generator', 'fldinst',
   'header', 'headerl', 'headerr', 'headerf', 'footer', 'footerl', 'footerr', 'footerf', 'filetbl', 'revtbl']);
-const RTF_CHARS = { emdash: '\u2014', endash: '\u2013', lquote: '\u2018', rquote: '\u2019', ldblquote: '\u201c', rdblquote: '\u201d', bullet: '\u2022' };
+const RTF_CHARS: Record<string, string> = { emdash: '\u2014', endash: '\u2013', lquote: '\u2018', rquote: '\u2019', ldblquote: '\u201c', rdblquote: '\u201d', bullet: '\u2022' };
 const CP1252 = new TextDecoder('windows-1252');
 
 // The text of an RTF document, for the note's search text and list snippet (the document itself is shown by WordCraft).
-function rtfText(buf) {
+function rtfText(buf: Buffer) {
   const s = buf.toString('latin1');
   let out = '', skip = false, uc = 1, pending = 0;
   const stack: (boolean)[] = [];
-  const put = (text) => { if (skip) return; if (pending > 0) { pending--; return; } out += text; };
+  const put = (text: string) => { if (skip) return; if (pending > 0) { pending--; return; } out += text; };
   for (let i = 0; i < s.length;) {
     const c = s[i];
     if (c === '{') { stack.push(skip); i++; continue; }
@@ -255,24 +255,24 @@ function rtfText(buf) {
 
 // An image file's bytes and media type, for the image viewer.
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
-function readImage(filePath) {
+function readImage(filePath: string) {
   const stat = fs.statSync(filePath);
   if (stat.size > MAX_IMAGE_BYTES) throw Object.assign(new Error('This image is larger than 64 MB; use "Open with…" for it.'), { code: 'ETOOBIG' });
   return { bytes: fs.readFileSync(filePath), mime: IMAGE_MIME[extOf(filePath)] || 'application/octet-stream', mtime: stat.mtimeMs };
 }
 
-function mtimeOf(filePath) {
+function mtimeOf(filePath: string) {
   try { return fs.statSync(filePath).mtimeMs; } catch (_) { return null; }
 }
 
 // Case-insensitive, separator-normalised identity for paths on Windows.
-function pathKey(p) {
+function pathKey(p: string) {
   return path.resolve(String(p)).replace(/\//g, '\\').toLowerCase();
 }
 
 // The files that steer coding agents on this machine: global and per-project instruction files, plus the
 // user's Claude Code commands, output styles, and memory notes. Scans one level of project folders under home.
-function discoverAgentFiles(opts?) {
+function discoverAgentFiles(opts?: { home?: string, extraRoots?: string[] }) {
   opts = opts || {};
   const home = opts.home || os.homedir();
   const out: { filePath: string, label: string }[] = [];
@@ -331,7 +331,7 @@ function discoverAgentFiles(opts?) {
   return out;
 }
 
-function safeList(dir) {
+function safeList(dir: string) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 

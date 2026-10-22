@@ -10,7 +10,7 @@ const ZOOM_STEP = 0.5;
 
 // Decides what a key does to zoom. input is Electron's before-input-event object. Returns 'in', 'out',
 // 'reset' or null. Ctrl+= and Ctrl+Plus (with or without Shift) and the numpad keys all count.
-function zoomAction(input) {
+function zoomAction(input: Electron.Input) {
   if (!input || input.type !== 'keyDown') return null;
   if (!(input.control || input.meta) || input.alt) return null;
   const key = String(input.key || '');
@@ -21,7 +21,7 @@ function zoomAction(input) {
   return null;
 }
 
-function nextZoom(level, action) {
+function nextZoom(level: number, action: string) {
   const cur = Number.isFinite(level) ? level : 0;
   if (action === 'reset') return 0;
   const next = action === 'in' ? cur + ZOOM_STEP : cur - ZOOM_STEP;
@@ -29,9 +29,9 @@ function nextZoom(level, action) {
 }
 
 // Wires the keys on one window. onChange(level) lets the caller remember the level.
-function attachZoom(webContents, opts?) {
+function attachZoom(webContents: Electron.WebContents, opts?: { initial?: number, onChange?: (level: number) => void }) {
   opts = opts || {};
-  if (Number.isFinite(opts.initial)) webContents.once('did-finish-load', () => { try { webContents.setZoomLevel(opts.initial); } catch (_) { /* window gone */ } });
+  if (Number.isFinite(opts.initial)) webContents.once('did-finish-load', () => { try { if (typeof opts.initial === 'number') webContents.setZoomLevel(opts.initial); } catch (_) { /* window gone */ } });
   webContents.on('before-input-event', (event, input) => {
     const action = zoomAction(input);
     if (!action) return;
@@ -45,8 +45,8 @@ function attachZoom(webContents, opts?) {
 // Builds the right-click menu for one context-menu event. Pure: no Electron objects, so it is testable.
 // params: Electron's context-menu params. Returns an array of menu item descriptions; items with an
 // `action` are wired by attachContextMenu, items with a `role` are Electron's standard edit roles.
-type MenuItemSpec = { label?: string, action?: string, arg?: string, enabled?: boolean, type?: 'separator', role?: string, accelerator?: string, click?: () => void };
-function contextMenuTemplate(params) {
+type MenuItemSpec = { label?: string, action?: string, arg?: string, enabled?: boolean, type?: 'separator', role?: Electron.MenuItemConstructorOptions['role'], accelerator?: string, click?: () => void };
+function contextMenuTemplate(params: Electron.ContextMenuParams) {
   const p = params || {};
   const flags = p.editFlags || {};
   const items: MenuItemSpec[] = [];
@@ -95,7 +95,7 @@ function contextMenuTemplate(params) {
 }
 
 // Wires the menu on one window. deps: { Menu, shell, clipboard, onZoom(level) }.
-function attachContextMenu(webContents, getWindow, deps) {
+function attachContextMenu(webContents: Electron.WebContents, getWindow: () => Electron.BrowserWindow | null | undefined, deps: { Menu: typeof Electron.Menu, shell: Electron.Shell, clipboard: Electron.Clipboard, onZoom?: (level: number) => void }) {
   const { Menu, shell, clipboard } = deps;
   webContents.on('context-menu', (_event, params) => {
     const template = contextMenuTemplate(params).map((item) => {

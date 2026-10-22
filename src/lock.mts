@@ -1,6 +1,7 @@
 /* Note locking: the body is encrypted with AES-256-GCM under a key derived from a password with scrypt.
    The record on disk keeps only the ciphertext; plaintext lives in memory for the session once unlocked. */
 import crypto from 'node:crypto';
+import { isObjectLike } from './shared/helpers.mts';
 
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
@@ -36,11 +37,11 @@ function unlock(blob: NoteLock | null, password: string): { body: string, key: B
   try { return { body: decrypt(blob, key), key }; } catch (_) { return null; }
 }
 
-function sanitizeLock(raw): NoteLock | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const ok = ['salt', 'iv', 'tag', 'ct'].every((k) => typeof raw[k] === 'string' && raw[k].length > 0);
-  if (!ok) return null;
-  return { v: 1, kdf: 'scrypt', N: Number.isFinite(raw.N) ? raw.N : SCRYPT.N, salt: raw.salt, iv: raw.iv, tag: raw.tag, ct: raw.ct };
+function sanitizeLock(raw: unknown): NoteLock | null {
+  if (!isObjectLike(raw)) return null;
+  const { salt, iv, tag, ct, N } = raw;
+  if (typeof salt !== 'string' || !salt || typeof iv !== 'string' || !iv || typeof tag !== 'string' || !tag || typeof ct !== 'string' || !ct) return null;
+  return { v: 1, kdf: 'scrypt', N: typeof N === 'number' && Number.isFinite(N) ? N : SCRYPT.N, salt, iv, tag, ct };
 }
 
 export { lock, unlock, encrypt, decrypt, deriveKey, sanitizeLock };

@@ -223,7 +223,7 @@ export const NotesDocxEditor = (function () {
         editable++;
       }
       // Paragraphs the page does not show as the file holds them are not edited, nor any change spanning them.
-      X.limitTo(scan, (i) => baselines.has(i));
+      X.limitTo(shownScan(), (i) => baselines.has(i));
       const readOnly = shownScan().paragraphs.length - editable;
       if (!editable) return { editable, readOnly };
       // Everything in the body that is not, and does not hold, an editable paragraph is fixed.

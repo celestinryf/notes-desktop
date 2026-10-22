@@ -6,12 +6,12 @@ import path from 'node:path';
 
 const NAMES = process.platform === 'win32' ? ['claude.exe', 'claude.cmd', 'claude'] : ['claude'];
 
-function exists(p) {
+function exists(p: string) {
   try { return fs.statSync(p).isFile(); } catch (_) { return false; }
 }
 
 // Reads an npm .cmd/.sh shim and returns the file it ultimately runs, or null.
-function shimTarget(shimPath) {
+function shimTarget(shimPath: string) {
   let text;
   try { text = fs.readFileSync(shimPath, 'utf8'); } catch (_) { return null; }
   const dir = path.dirname(shimPath);
@@ -29,7 +29,7 @@ function shimTarget(shimPath) {
 }
 
 // Turns a candidate path into a launch spec: { file, isScript } or null when it cannot be run directly.
-function specFor(p) {
+function specFor(p: string | null) {
   if (!p || !exists(p)) return null;
   if (/\.(js|cjs|mjs)$/i.test(p)) return { file: p, isScript: true };
   if (/\.exe$/i.test(p) || process.platform !== 'win32' && !/\.(cmd|bat)$/i.test(p)) {
@@ -43,7 +43,7 @@ function specFor(p) {
 
 // The first of names found on the search path, as a launch spec { file, isScript }, or null. opts.override names
 // one file instead (a .js stand-in, an .exe, or a shim); opts.pathDirs the directories to search (default: PATH).
-function resolveExecutable(names, opts?) {
+function resolveExecutable(names: string[], opts?: { override?: string, pathDirs?: string[] }) {
   opts = opts || {};
   if (opts.override) return specFor(path.resolve(opts.override));
   const dirs = (opts.pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
@@ -58,7 +58,7 @@ function resolveExecutable(names, opts?) {
 
 // opts.override: NOTES_APP_CLAUDE_BIN. opts.pathDirs: directories to search (defaults to PATH plus the native
 // installer's ~/.local/bin). Returns { file, isScript } or null.
-function resolveClaude(opts) {
+function resolveClaude(opts?: { override?: string | null, pathDirs?: string[], home?: string }) {
   opts = opts || {};
   if (opts.override) return resolveExecutable(NAMES, { override: opts.override });
   const dirs = (opts.pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
@@ -68,7 +68,7 @@ function resolveClaude(opts) {
 }
 
 // Finds a plain Node binary for running a .js target; null means use the host with ELECTRON_RUN_AS_NODE.
-function resolveNode(pathDirs?) {
+function resolveNode(pathDirs?: string[]) {
   const dirs = (pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
   const name = process.platform === 'win32' ? 'node.exe' : 'node';
   for (const d of dirs) { const p = path.join(d, name); if (exists(p)) return p; }
@@ -76,7 +76,7 @@ function resolveNode(pathDirs?) {
 }
 
 // Builds the spawn call: [file, args, extraEnv] for child_process.spawn with shell: false.
-function launchSpec(spec, args, opts?) {
+function launchSpec(spec: { file: string, isScript: boolean }, args: string[], opts?: { node?: string | null, pathDirs?: string[] }) {
   opts = opts || {};
   if (!spec.isScript) return { file: spec.file, args: args.slice(), env: {} };
   const node = opts.node === undefined ? resolveNode(opts.pathDirs) : opts.node;
@@ -90,7 +90,7 @@ function launchSpec(spec, args, opts?) {
 // token and stays.
 const API_BILLING_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
 
-function subscriptionEnv(env) {
+function subscriptionEnv(env: NodeJS.ProcessEnv) {
   const out = Object.assign({}, env);
   for (const k of Object.keys(out)) if (API_BILLING_VARS.includes(k.toUpperCase())) delete out[k];
   return out;
@@ -98,7 +98,7 @@ function subscriptionEnv(env) {
 
 // Reads the JSON printed by `claude auth status` and decides whether runs will use the Claude subscription.
 // Returns { ok: true, plan } or { ok: false, reason }.
-function checkSubscriptionAuth(text) {
+function checkSubscriptionAuth(text: unknown) {
   let s;
   try { s = JSON.parse(String(text || '').trim()); } catch (_) { return { ok: false, reason: 'Claude Code did not report how it is signed in. Update it (claude update) and try again.' }; }
   if (!s || typeof s !== 'object') return { ok: false, reason: 'Claude Code did not report how it is signed in.' };

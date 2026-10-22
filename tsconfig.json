@@ -10,7 +10,7 @@
     "checkJs": false,
     "noEmit": true,
     "strict": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "skipLibCheck": true,
     "types": [
       "node"

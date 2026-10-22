@@ -4,23 +4,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as H from './shared/helpers.mts';
 import { createHash } from 'node:crypto';
+import type { Store } from './store.mts';
 
 const MANIFEST = '.notes-manifest.json';
 // Office files among the notes (Word documents, spreadsheets, presentations) go along as read-only Markdown copies of
 // their text, so the bot can read them. The files themselves are what count: an edit to a copy is ignored on import.
 const DOCUMENTS_DIR = '_documents';
-const isOfficeNote = (n) => !!H.CRAFT_OF[n.fileKind];
+const isOfficeNote = (n: Note) => !!(n.fileKind && H.CRAFT_OF[n.fileKind]);
 
 // The manifest lives inside the folder the agent edits, so nothing in it is trusted as a path: an entry
 // may only name a file inside the workspace. Returns the absolute path, or null.
-function insideWorkspace(dir, rel) {
+function insideWorkspace(dir: string, rel: unknown) {
   if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return null;
   const root = path.resolve(dir);
   const abs = path.resolve(root, rel);
   return abs.startsWith(root + path.sep) ? abs : null;
 }
 
-function uniqueIn(used, base, ext) {
+function uniqueIn(used: Set<string>, base: string, ext: string) {
   let name = base + ext;
   let i = 2;
   while (used.has(name.toLowerCase())) { name = base + ' ' + i + ext; i++; }
@@ -29,7 +30,7 @@ function uniqueIn(used, base, ext) {
 }
 
 // Relative directory for a folder id, mirroring the folder tree (plain folders only).
-function folderRelPath(store, folderId) {
+function folderRelPath(store: Store, folderId: string) {
   const parts: string[] = [];
   let cur = folderId ? store.getFolder(folderId) : null;
   let guard = 0;
@@ -43,15 +44,15 @@ type ManifestFile = { id: string, rel: string, hash: string, folderId: string | 
 type Manifest = { exportedAt: number, files: ManifestFile[] };
 type ImportResult = { updated: number, created: number, missing: number, conflicts: number, details: string[], updatedIds?: string[] };
 
-function exportNotes(store, dir): Manifest {
+function exportNotes(store: Store, dir: string): Manifest {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const used = new Map(); // relDir -> Set(names)
   const files: ManifestFile[] = [];
   // Oldest first, so a title clash gives the suffix to the newer note and names stay stable between runs.
-  const byAge = (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+  const byAge = (a: Note, b: Note) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
   const live = store.notes.filter((n) => !n.trashedAt && !n.lock);
-  const write = (n, relDir: string, content: string, extra?: Pick<ManifestFile, 'readOnly' | 'filePath'>) => {
+  const write = (n: Note, relDir: string, content: string, extra?: Pick<ManifestFile, 'readOnly' | 'filePath'>) => {
     const dirKey = relDir.toLowerCase(); // Windows folders Work and work are one folder
     if (!used.has(dirKey)) used.set(dirKey, new Set());
     const name = uniqueIn(used.get(dirKey), H.safeFilename(H.deriveTitle(n)), '.md');
@@ -62,7 +63,7 @@ function exportNotes(store, dir): Manifest {
     files.push(Object.assign({ id: n.id, rel, hash: hashOf(content), folderId: n.folderId || null, updatedAt: n.updatedAt }, extra));
   };
   for (const n of live.filter((n) => !n.filePath).sort(byAge)) write(n, n.folderId ? folderRelPath(store, n.folderId) : '', n.body);
-  for (const n of live.filter((n) => n.filePath && isOfficeNote(n) && n.body).sort(byAge)) {
+  for (const n of live.filter((n): n is FileNote => !!n.filePath && isOfficeNote(n) && !!n.body).sort(byAge)) {
     write(n, DOCUMENTS_DIR, '<!-- The text of ' + n.filePath + ', as Notes reads it. Read-only: edits here are ignored; edit the file itself. -->\n\n' + n.body, { readOnly: true, filePath: n.filePath });
   }
   const manifest = { exportedAt: Date.now(), files };
@@ -70,16 +71,16 @@ function exportNotes(store, dir): Manifest {
   return manifest;
 }
 
-function hashOf(text) {
+function hashOf(text: string) {
   return createHash('sha1').update(String(text)).digest('hex');
 }
 
 // Reads the workspace back: changed files update their notes, new .md files become notes in the matching
 // folder, deleted files are reported but the notes are kept (deleting is a decision for a person).
-function importNotes(store, dir): ImportResult {
+function importNotes(store: Store, dir: string): ImportResult {
   const manifestPath = path.join(dir, MANIFEST);
   if (!fs.existsSync(manifestPath)) return { updated: 0, created: 0, missing: 0, conflicts: 0, details: [] };
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const manifest: Manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const known = new Map(manifest.files.map((f) => [f.rel.toLowerCase(), f]));
   let updated = 0, created = 0, missing = 0, conflicts = 0;
   const details: string[] = [];
@@ -115,7 +116,7 @@ function importNotes(store, dir): ImportResult {
       f.hash = h; // the workspace now reflects this content; a later import must not re-apply it
     }
   }
-  const walk = (d, relDir) => {
+  const walk = (d: string, relDir: string) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       if (e.name === MANIFEST || e.name.startsWith('.')) continue;
       const rel = relDir ? path.join(relDir, e.name) : e.name;
@@ -138,9 +139,9 @@ function importNotes(store, dir): ImportResult {
 }
 
 // Finds (or creates) the plain folder chain matching a relative directory produced by folderRelPath.
-function folderIdForRel(store, relDir) {
+function folderIdForRel(store: Store, relDir: string) {
   if (!relDir) return null;
-  let parentId = null;
+  let parentId: string | null = null;
   for (const seg of relDir.split(/[\\/]+/).filter(Boolean)) {
     const existing = store.folders.find((f) => (f.parentId || null) === parentId && !f.vaultId && H.safeFilename(f.name) === seg);
     parentId = existing ? existing.id : store.createFolder({ name: seg, parentId }).id;
@@ -152,7 +153,7 @@ function folderIdForRel(store, relDir) {
 // then writes a fresh export. Returns { imported, manifest }.
 // If the import fails, nothing is exported: exporting starts by deleting the folder, which would throw
 // away whatever the import could not read.
-function refreshWorkspace(store, dir) {
+function refreshWorkspace(store: Store, dir: string) {
   let imported: ImportResult;
   try { imported = importNotes(store, dir); } catch (err) { return { imported: { error: err.message }, manifest: null }; }
   const manifest = exportNotes(store, dir);
@@ -160,10 +161,10 @@ function refreshWorkspace(store, dir) {
 }
 
 // Removes a note's exported file and manifest entry, so a locked or deleted note leaves no clear copy behind.
-function forgetNote(dir, noteId) {
+function forgetNote(dir: string, noteId: string) {
   const manifestPath = path.join(dir, MANIFEST);
   if (!fs.existsSync(manifestPath)) return false;
-  let manifest;
+  let manifest: Manifest;
   try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_) { return false; }
   const entry = (manifest.files || []).find((f) => f.id === noteId);
   if (!entry) return false;

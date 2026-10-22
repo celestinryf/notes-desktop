@@ -3,7 +3,12 @@
 
 const UNTITLED = 'Untitled';
 
-function firstLine(text) {
+type TitleSource = Partial<Pick<Note, 'title' | 'body'>> | null | undefined;
+type FileSource = Partial<Pick<Note, 'filePath' | 'fileKind'>> | null | undefined;
+type Sortable = Pick<Note, 'title' | 'body' | 'pinned' | 'createdAt' | 'updatedAt'>;
+type PaneName = 'sidebarWidth' | 'listWidth';
+
+function firstLine(text?: string | null) {
   const lines = String(text || '').split(/\r?\n/);
   for (const line of lines) {
     const t = line.replace(/^#+\s*/, '').trim();
@@ -13,7 +18,7 @@ function firstLine(text) {
 }
 
 // Cuts by code point, so an emoji at the boundary is dropped whole rather than split into a lone surrogate.
-function truncate(text, max) {
+function truncate(text: string | null | undefined, max: number) {
   const s = String(text || '');
   if (s.length <= max) return s;
   const points = Array.from(s);
@@ -21,7 +26,7 @@ function truncate(text, max) {
   return points.slice(0, Math.max(0, max - 1)).join('').trimEnd() + '…';
 }
 
-function deriveTitle(note) {
+function deriveTitle(note: TitleSource) {
   if (!note) return UNTITLED;
   const explicit = String(note.title || '').trim();
   if (explicit) return explicit;
@@ -29,7 +34,7 @@ function deriveTitle(note) {
   return fromBody ? truncate(fromBody, 60) : UNTITLED;
 }
 
-function snippet(note, max) {
+function snippet(note: TitleSource, max?: number) {
   max = max || 100;
   // The opening of the note is all a snippet shows: never strip a whole long note for it.
   const body = String((note && note.body) || '').slice(0, Math.max(600, max * 8));
@@ -40,14 +45,14 @@ function snippet(note, max) {
   const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
   // A run of list items reads as a list ("Oat milk, Lemons, Rice"), not as one run-on phrase.
   const kept = lines.slice(start);
-  const isItem = (l) => /^([-*+]|\d+[.)])\s/.test(l);
+  const isItem = (l: string) => /^([-*+]|\d+[.)])\s/.test(l);
   const listed = kept.map((l, i) => (isItem(l) && isItem(kept[i + 1] || '') && !/[.,;:!?]$/.test(l) ? l + ',' : l));
   // The same Markdown stripping as read-aloud, so "## Goals" + "Ship it" reads "Goals. Ship it", not "Goals Ship it".
   const text = plainTextFromMarkdown(listed.join('\n')).replace(/\bcode block omitted\.\s*/g, '').replace(/\s+/g, ' ').trim();
   return truncate(text, max);
 }
 
-function relativeTime(ts, now?) {
+function relativeTime(ts: number, now?: number) {
   now = now == null ? Date.now() : now;
   const diff = Math.max(0, now - ts);
   const s = Math.floor(diff / 1000);
@@ -64,7 +69,7 @@ function relativeTime(ts, now?) {
   return date.toLocaleDateString(undefined, opts);
 }
 
-function parseTags(input) {
+function parseTags(input: unknown) {
   if (Array.isArray(input)) input = input.join(',');
   const seen = new Set<string>();
   const out: string[] = [];
@@ -79,7 +84,7 @@ function parseTags(input) {
 
 const TASK_RE = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/;
 
-function toggleTaskAt(body, index) {
+function toggleTaskAt(body: string | null | undefined, index: number) {
   const lines = String(body || '').split('\n');
   let seen = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -95,30 +100,30 @@ function toggleTaskAt(body, index) {
   return String(body || '');
 }
 
-function countWords(text) {
+function countWords(text?: string | null) {
   const t = String(text || '').trim();
   if (!t) return 0;
   return t.split(/\s+/).length;
 }
 
-function tokenize(query) {
+function tokenize(query?: string) {
   return String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
 }
 
-function matchesQuery(note, query) {
+function matchesQuery(note: Note, query?: string) {
   const tokens = tokenize(query);
   if (!tokens.length) return true;
   const hay = (String(note.title || '') + '\n' + String(note.body || '') + '\n' + (note.tags || []).join(' ')).toLowerCase();
   return tokens.every((t) => hay.indexOf(t) !== -1);
 }
 
-const SORTS = {
+const SORTS: Record<SortKey, (a: Sortable, b: Sortable) => number> = {
   updated: (a, b) => b.updatedAt - a.updatedAt,
   created: (a, b) => b.createdAt - a.createdAt,
   title: (a, b) => deriveTitle(a).localeCompare(deriveTitle(b), undefined, { sensitivity: 'base' }),
 };
 
-function sortNotes(notes, sort) {
+function sortNotes<T extends Sortable>(notes: T[], sort: SortKey) {
   const cmp = SORTS[sort] || SORTS.updated;
   return notes.slice().sort((a, b) => {
     if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
@@ -132,11 +137,11 @@ const SINGLE_KEY_RE = /^[a-z0-9`~!@#$%^&*()\-_=+[\]{};:'",.<>/?\\|]$/i;
 const FKEY_RE = /^f([1-9]|1[0-9]|2[0-4])$/i;
 const NUMPAD_RE = /^num[0-9]$/i;
 
-function isBindableKey(key) {
+function isBindableKey(key: string) {
   return SINGLE_KEY_RE.test(key) || FKEY_RE.test(key) || NUMPAD_RE.test(key) || NAMED_KEYS.has(key.toLowerCase());
 }
 
-function parseAccelerator(str) {
+function parseAccelerator(str: string): { ok: true, value: string } | { ok: false, reason: string } {
   const parts = String(str || '').split('+').map((p) => p.trim()).filter(Boolean);
   if (parts.length < 2) return { ok: false, reason: 'A hotkey needs at least one modifier and a key, like Ctrl+Alt+N.' };
   const key = parts[parts.length - 1];
@@ -155,20 +160,20 @@ function parseAccelerator(str) {
   return { ok: true, value: normMods.join('+') + '+' + normKey };
 }
 
-function displayAccelerator(str) {
+function displayAccelerator(str?: string) {
   return String(str || '')
     .replace(/CommandOrControl|CmdOrCtrl/gi, 'Ctrl')
     .replace(/Control/gi, 'Ctrl')
     .replace(/\+/g, ' + ');
 }
 
-function noteToMarkdown(note) {
+function noteToMarkdown(note: Pick<Note, 'title' | 'body' | 'tags'>) {
   const title = deriveTitle(note);
   const tags = (note.tags || []).length ? '\n\nTags: ' + note.tags.map((t) => '#' + t).join(' ') : '';
   return '# ' + title + '\n\n' + String(note.body || '').replace(/\s+$/, '') + tags + '\n';
 }
 
-function markdownToNote(filename, content) {
+function markdownToNote(filename: string, content: string) {
   const text = String(content || '').replace(/\r\n/g, '\n');
   let title = String(filename || '').replace(/\.(md|markdown|txt)$/i, '').trim();
   let body = text;
@@ -186,13 +191,13 @@ function markdownToNote(filename, content) {
 }
 
 // Draggable pane widths, in CSS px. The editor always keeps at least EDITOR_MIN.
-const PANE_LIMITS = {
+const PANE_LIMITS: Record<PaneName, { min: number, max: number, def: number }> = {
   sidebarWidth: { min: 160, max: 420, def: 232 },
   listWidth: { min: 220, max: 560, def: 300 },
 };
 const EDITOR_MIN = 320;
 
-function clampPane(name, value) {
+function clampPane(name: PaneName, value: number) {
   const lim = PANE_LIMITS[name];
   const v = Number(value);
   if (!lim) return value;
@@ -202,12 +207,12 @@ function clampPane(name, value) {
 
 // Plain prose from Markdown for reading aloud: drops markup, keeps the words and sentence breaks.
 // "today 18:30", "tomorrow 09:00", "yesterday 09:00", "Tue, Oct 20 09:00", "Jan 2, 2027 09:00".
-function formatWhen(ts, now?) {
+function formatWhen(ts: number, now?: number) {
   now = now == null ? Date.now() : now;
   const d = new Date(ts), n = new Date(now);
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const dayOf = (x) => x.toDateString();
-  const shift = (days) => { const c = new Date(n); c.setDate(n.getDate() + days); return dayOf(c); };
+  const dayOf = (x: Date) => x.toDateString();
+  const shift = (days: number) => { const c = new Date(n); c.setDate(n.getDate() + days); return dayOf(c); };
   if (dayOf(d) === dayOf(n)) return 'today ' + time;
   if (dayOf(d) === shift(1)) return 'tomorrow ' + time;
   if (dayOf(d) === shift(-1)) return 'yesterday ' + time;
@@ -217,7 +222,7 @@ function formatWhen(ts, now?) {
 
 // A mailto: URL for a note. Mail clients reject very long URLs, so the body is cut with a notice.
 // limit caps the ENCODED URL (Windows shell handlers reject roughly 2 KB), never splitting a surrogate pair.
-function mailtoFor(note, limit?) {
+function mailtoFor(note: Pick<Note, 'title' | 'body'>, limit?: number) {
   limit = limit || 1900;
   // Subjects are bounded too, so the head can never eat the whole budget.
   const subject = truncate(deriveTitle(note) || 'Note', 120);
@@ -237,7 +242,7 @@ function mailtoFor(note, limit?) {
   return { url: head + encodeURIComponent(points.slice(0, lo).join('') + notice), truncated: true };
 }
 
-function plainTextFromMarkdown(md) {
+function plainTextFromMarkdown(md: string) {
   let s = String(md || '').replace(/\r\n/g, '\n');
   s = s.replace(/```[\s\S]*?```/g, ' code block omitted. ');
   s = s.replace(/`([^`\n]+)`/g, '$1');
@@ -258,7 +263,7 @@ function plainTextFromMarkdown(md) {
 }
 
 // Splits prose into utterance-sized chunks; Chromium can go silent on very long single utterances.
-function speechChunks(text, max?) {
+function speechChunks(text: string | null | undefined, max?: number) {
   max = max || 220;
   const out: string[] = [];
   for (const para of String(text || '').split(/\n+/)) {
@@ -282,7 +287,7 @@ function speechChunks(text, max?) {
 }
 
 // Ids of the notes a body links to with note://<id> links, in order, without repeats.
-function noteLinkIds(body) {
+function noteLinkIds(body: string) {
   const out: string[] = [];
   const re = /note:\/\/([0-9a-f][0-9a-f-]{7,})/gi;
   let m;
@@ -290,7 +295,7 @@ function noteLinkIds(body) {
   return out;
 }
 
-function safeFilename(name) {
+function safeFilename(name: string) {
   // Cut by code point: a UTF-16 slice through an emoji would leave a lone surrogate, which the file system
   // turns into U+FFFD, so the stored name and the name on disk would never match again.
   let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('').replace(/[. ]+$/, '');
@@ -299,24 +304,24 @@ function safeFilename(name) {
 }
 
 // An opened file the app shows but does not edit as text: PDF, Word, anything binary.
-function isViewerOnlyFile(note) {
+function isViewerOnlyFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind !== 'text');
 }
 
 // A file's extension in lower case, or its whole name when it has none (Makefile, Dockerfile).
-function extOf(filePath) {
+function extOf(filePath: string | null | undefined) {
   const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
   if (!base.includes('.')) return base;
   return base.slice(base.lastIndexOf('.') + 1);
 }
 
 // An opened text file that is not Markdown (.txt, code, config) is edited as the plain text it is, never rendered.
-function isPlainTextFile(note) {
+function isPlainTextFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
 }
 
 // An opened file whose text is not Markdown: plain text, Word, PDF, a sheet, a picture.
-function isNonMarkdownFile(note) {
+function isNonMarkdownFile(note: FileSource) {
   return isPlainTextFile(note) || isViewerOnlyFile(note);
 }
 
@@ -327,7 +332,7 @@ const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']); // Word's zip forma
 const WORD_TO_DOCX_EXT = new Set(['doc', 'dot', 'rtf', 'odt']);
 // Images (fileKind 'image'), shown by the image viewer.
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
 // Spreadsheets (fileKind 'sheet') open in GridCraft, the user's fork of ArtCraft's Rust spreadsheet, as Word
 // documents open in WordCraft. An .xlsx is saved where it is; the others GridCraft saves as an .xlsx beside them (as
 // WordCraft does with .odt), and the note moves to it. (.csv and .tsv stay text files: Notes shows them as a table
@@ -336,25 +341,25 @@ const SHEET_EXT = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods']);
 // (.xlsm too: a macro workbook saved as .xlsx beside the original keeps the original's macros where they are.)
 const SHEET_TO_XLSX_EXT = new Set(['xlsm', 'xls', 'xlsb', 'ods']);
 // The Craft app that shows each kind of file.
-const CRAFT_OF = { docx: 'wordcraft', sheet: 'gridcraft' };
+const CRAFT_OF: Partial<Record<FileKind, 'wordcraft' | 'gridcraft'>> = { docx: 'wordcraft', sheet: 'gridcraft' };
 // Documents that are zips (the Office and OpenDocument formats, e-books, zips themselves): the zip guard runs on them
 // before anything unpacks them, and a save under such a name must be a zip.
 const ZIP_DOC_EXT = new Set([...OOXML_EXT, 'odt', 'xlsx', 'xlsm', 'xlsb', 'ods', 'epub', 'zip']);
 
 // A comma- or tab-separated file: shown as a table, edited as text (Ctrl+E).
-function isTableFile(note) {
-  return isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
+function isTableFile(note: FileSource) {
+  return !!note && isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
 }
 
 // A Word file the simple editor can show (Word's zip formats); the rest need WordCraft.
-function isOoxmlWordFile(note) {
+function isOoxmlWordFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind === 'docx' && OOXML_EXT.has(extOf(note.filePath)));
 }
 
 // The text a reader sees in an ATX heading, for use as a title. Unlike plainTextFromMarkdown (made for speech)
 // it keeps list-like prefixes ("1. Setup"), underscores inside words (my_file.py) and backslash-escaped
 // characters, and drops only the formatting.
-function headingTitle(md) {
+function headingTitle(md: string) {
   const escaped: string[] = [];
   let s = String(md || '').replace(/\\([!-/:-@[-`{-~])/g, (_, c) => { escaped.push(c); return '\u0000' + (escaped.length - 1) + '\u0001'; });
   s = s.replace(/`([^`]+)`/g, '$1');
@@ -374,7 +379,7 @@ function headingTitle(md) {
 // - The pages start at the highest heading level used. If that level appears once, as the note's first line,
 //   it is the book's title and the pages start at the next level down.
 // - Text before the first page heading becomes an "Introduction" page; deeper headings stay inside their page.
-function splitAtHeadings(markdown, fallbackName) {
+function splitAtHeadings(markdown: string, fallbackName: string) {
   const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n');
   const heads: { i: number, level: number, text: string }[] = [];
   let fence: { ch: string, len: number } | null = null;
@@ -407,7 +412,7 @@ function splitAtHeadings(markdown, fallbackName) {
   if (!usable.length) return { name: name || 'Book', level: 0, pages: [] };
   const level = Math.min(...usable.map((h) => h.level));
   const cuts = usable.filter((h) => h.level === level);
-  const trimBlank = (arr) => { let a = 0, b = arr.length; while (a < b && !arr[a].trim()) a++; while (b > a && !arr[b - 1].trim()) b--; return arr.slice(a, b).join('\n'); };
+  const trimBlank = (arr: string[]) => { let a = 0, b = arr.length; while (a < b && !arr[a].trim()) a++; while (b > a && !arr[b - 1].trim()) b--; return arr.slice(a, b).join('\n'); };
   const pages: { title: string, body: string }[] = [];
   const intro = trimBlank(lines.slice(0, cuts[0].i).filter((_, i) => i !== titleLine));
   if (intro) pages.push({ title: 'Introduction', body: intro });
@@ -420,7 +425,7 @@ function splitAtHeadings(markdown, fallbackName) {
 
 // The file:/// URL of the folder an opened file is in (ending in "/", every segment encoded), which its relative
 // pictures are read from. null for a note with no file, or a file on a network share (never loaded, see the editor).
-function imageBaseFor(note) {
+function imageBaseFor(note: FileSource) {
   const p = note && note.filePath ? String(note.filePath).replace(/\\/g, '/') : '';
   if (!p || p.startsWith('//')) return null;
   const parts = p.split('/');
@@ -429,7 +434,7 @@ function imageBaseFor(note) {
 }
 
 // A timestamp that is safe in a file name and sorts by time: 2026-10-16T21-04-05-123Z.
-function fileStamp(date?) {
+function fileStamp(date?: number) {
   return new Date(date === undefined ? Date.now() : date).toISOString().replace(/[:.]/g, '-');
 }
 
@@ -437,12 +442,12 @@ function fileStamp(date?) {
 // An exact prefix beats everything, then the query whole at a word start ("trash" in "Move to trash"), then the
 // query spread over the label, where each character must continue the previous match or start a word: "nn" and
 // "new n" find "New note", "sv" finds "Split view", but "plan" does not find "Open a file as a note".
-function fuzzyScore(query, text) {
+function fuzzyScore(query: string | null | undefined, text: string | null | undefined) {
   const q = String(query || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const t = String(text || '').toLowerCase();
   if (!q) return 1;
   if (t.startsWith(q)) return 1000 - t.length;
-  const wordStart = (i) => i === 0 || /[\s\-_/.(#:"'“]/.test(t[i - 1]);
+  const wordStart = (i: number) => i === 0 || /[\s\-_/.(#:"'“]/.test(t[i - 1]);
   for (let at = t.indexOf(q); at > 0; at = t.indexOf(q, at + 1)) {
     if (wordStart(at)) return 700 - at - t.length / 10;
   }
@@ -461,7 +466,11 @@ function fuzzyScore(query, text) {
   return Math.max(1, score - t.length / 20);
 }
 
+const isObjectLike = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
+const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
+
 export {
+  isObjectLike, isRecord,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

@@ -1,6 +1,7 @@
 /* Pulls the text out of a PDF, in a worker thread so a long PDF never stalls the app. Posts back one list of
    paragraphs per page; a page with no text (a scanned image) comes back empty. */
 import { parentPort, workerData } from 'node:worker_threads';
+import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api.js';
 const port = parentPort;
 if (!port) throw new Error('this script runs in a worker thread only');
 
@@ -11,11 +12,11 @@ const LIST_START = /^([•◦▪▫‣●○■□☐☑–—*-]|\d{1,3}[.)]|[a
 type Line = { text: string, y: number, h: number };
 const newParagraph = (prev: Line, ln: Line, text: string) => Math.abs(prev.y - ln.y) > 1.6 * Math.max(ln.h, prev.h)
   || Math.abs(ln.h - prev.h) > 0.15 * Math.max(ln.h, prev.h) || LIST_START.test(text);
-function pageParagraphs(items) {
+function pageParagraphs(items: (TextItem | TextMarkedContent)[]) {
   const lines: Line[] = [];
   let cur: Line | null = null;
   for (const it of items) {
-    if (typeof it.str !== 'string') continue; // marked-content markers
+    if (!('str' in it) || typeof it.str !== 'string') continue; // marked-content markers
     if (!cur) cur = { text: '', y: it.transform[5], h: it.height || Math.abs(it.transform[3]) || 10 };
     cur.text += it.str;
     if (it.hasEOL) { lines.push(cur); cur = null; }

@@ -13,19 +13,19 @@ import path from 'node:path';
 
 // NOTES_APP_<NAME>_DIR names a build folder; NOTES_APP_NO_<NAME>=1 (or NOTES_APP_NO_CRAFTS=1 for all of them) means
 // none, which the tests use to drive Notes' own editors whatever is built on this computer.
-const APPS = {
+const APPS: Record<string, { label: string, env: string }> = {
   wordcraft: { label: 'WordCraft', env: 'WORDCRAFT' },
   gridcraft: { label: 'GridCraft', env: 'GRIDCRAFT' },
 };
 const KEYS = Object.keys(APPS);
-const MIME = {
+const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.txt': 'text/plain; charset=utf-8',
 };
 
 // Where an app's build is: its NOTES_APP_<NAME>_DIR, else the fork's own output folder in the usual clone; null for none.
-function buildDir(key) {
+function buildDir(key: string) {
   const app = APPS[key];
   if (!app || process.env.NOTES_APP_NO_CRAFTS === '1' || process.env['NOTES_APP_NO_' + app.env] === '1') return null;
   const candidates = [process.env['NOTES_APP_' + app.env + '_DIR'], path.join(os.homedir(), key, 'dist', 'web')].flatMap((d) => (d ? [d] : []));
@@ -33,12 +33,12 @@ function buildDir(key) {
 }
 
 // Must run before the app is ready.
-function registerSchemes(protocol) {
+function registerSchemes(protocol: Electron.Protocol) {
   protocol.registerSchemesAsPrivileged(KEYS.map((scheme) => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true } })));
 }
 
 // The file a <app>://app/<path> request names, inside the build folder; null for anything outside it.
-function resolve(dir, url) {
+function resolve(dir: string, url: string) {
   let rel;
   try { rel = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, '') || 'index.html'; } catch (_) { return null; }
   const file = path.resolve(dir, rel);
@@ -48,7 +48,7 @@ function resolve(dir, url) {
 }
 
 // Serves every app's build. Returns which are there: { wordcraft, gridcraft }.
-function serve(protocol) {
+function serve(protocol: Electron.Protocol) {
   const ready: Record<string, boolean> = {};
   for (const key of KEYS) {
     const dir = buildDir(key);

@@ -10,10 +10,15 @@
 const BUILT_IN = 'notes';
 const CUSTOM = 'custom';
 
+type Mode = Exclude<Theme, 'system'>;
+type Rgb = number[];
+type Scheme = { name: string, builtIn: true } | { name: string, builtIn?: false, light: ColorSeed, dark: ColorSeed };
+type SeedInput = Partial<Record<keyof ColorSeed, unknown>> | null | undefined;
+
 // Premade schemes: { id: { name, light: seed, dark: seed } }, a seed being { background, text, accent }.
 // The seeds are only a start: derive() makes every token from them and keeps the text readable. The order here
 // is the order of the swatches in Settings. Names and seeds were chosen by the agent on 2026-10-20; change freely.
-const SCHEMES = {
+const SCHEMES: Record<string, Scheme> = {
   notes: { name: 'Notes', builtIn: true },
   paper: { name: 'Paper', light: { background: '#fafafa', text: '#1f1f1f', accent: '#3c6fd1' }, dark: { background: '#1c1c1e', text: '#ebebeb', accent: '#7aa2f7' } },
   slate: { name: 'Slate', light: { background: '#f3f5f8', text: '#1d2430', accent: '#2f6fd6' }, dark: { background: '#1b2028', text: '#e3e8ef', accent: '#8ab4f8' } },
@@ -24,7 +29,7 @@ const SCHEMES = {
 };
 // The built-in scheme's own seeds (styles.css --paper, --fg and --accent), for its swatch and as the custom
 // pickers' starting colours.
-const BUILT_IN_SEEDS = { light: { background: '#fffaf3', text: '#2a1a12', accent: '#f47b3e' }, dark: { background: '#211710', text: '#f6eadb', accent: '#f47b3e' } };
+const BUILT_IN_SEEDS: Record<Mode, ColorSeed> = { light: { background: '#fffaf3', text: '#2a1a12', accent: '#f47b3e' }, dark: { background: '#211710', text: '#f6eadb', accent: '#f47b3e' } };
 
 // The colour tokens a scheme sets (styles.css defines them all for the built-in scheme). Brand names that the
 // stylesheet uses directly (carets, checkboxes, the live dot) are included so they follow the scheme too.
@@ -37,34 +42,35 @@ const TOKENS = [
   'danger', 'ok', 'document-bg',
   'syn-keyword', 'syn-string', 'syn-atom', 'syn-comment', 'syn-punct',
   'cream', 'peach', 'tangerine', 'ember', 'leaf', 'ink',
-];
+] as const;
+type TokenName = (typeof TOKENS)[number];
 
 // The built-in scheme's window colours (styles.css --paper and --fg), for the window before the page paints.
-const BUILT_IN_WINDOW = { light: { background: '#fffaf3', foreground: '#2a1a12' }, dark: { background: '#211710', foreground: '#f6eadb' } };
+const BUILT_IN_WINDOW: Record<Mode, { background: string, foreground: string }> = { light: { background: '#fffaf3', foreground: '#2a1a12' }, dark: { background: '#211710', foreground: '#f6eadb' } };
 
 // ---- colour arithmetic (sRGB, #rrggbb) ----------------------------------------------------------------
 
 const HEX = /^#[0-9a-f]{6}$/i;
-const isHex = (v) => typeof v === 'string' && HEX.test(v);
-const parse = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-const toHex = (rgb) => '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+const isHex = (v: unknown): v is string => typeof v === 'string' && HEX.test(v);
+const parse = (hex: string): Rgb => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const toHex = (rgb: Rgb) => '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
 // a with t (0..1) of b mixed in
-const mix = (a, b, t) => { const x = parse(a), y = parse(b); return toHex(x.map((v, i) => v + (y[i] - v) * t)); };
-const rgba = (hex, alpha) => 'rgba(' + parse(hex).join(', ') + ', ' + alpha + ')';
+const mix = (a: string, b: string, t: number) => { const x = parse(a), y = parse(b); return toHex(x.map((v, i) => v + (y[i] - v) * t)); };
+const rgba = (hex: string, alpha: number) => 'rgba(' + parse(hex).join(', ') + ', ' + alpha + ')';
 // what a colour at alpha looks like over a background
-const over = (hex, alpha, bg) => mix(bg, hex, alpha);
-function luminance(hex) {
+const over = (hex: string, alpha: number, bg: string) => mix(bg, hex, alpha);
+function luminance(hex: string) {
   const [r, g, b] = parse(hex).map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
-function contrast(a, b) {
+function contrast(a: string, b: string) {
   const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
 }
-const worstContrast = (color, surfaces) => Math.min(...surfaces.map((s) => contrast(color, s)));
+const worstContrast = (color: string, surfaces: string[]) => Math.min(...surfaces.map((s) => contrast(color, s)));
 // Moves a colour toward black or white, a step at a time, until it reads at `min` on every surface; the end colour
 // if nothing short of it does.
-function legible(color, surfaces, min, towardDark) {
+function legible(color: string, surfaces: string[], min: number, towardDark: boolean) {
   const end = towardDark ? '#000000' : '#ffffff';
   for (let t = 0; t <= 1.0001; t += 0.04) {
     const c = mix(color, end, Math.min(1, t));
@@ -78,7 +84,7 @@ function legible(color, surfaces, min, towardDark) {
 // A background text can be read on: one in the middle (too light for white text, too dark for black) is moved
 // toward the end it is nearer, only as far as it takes black or white to read on it at 8:1, so the surfaces made
 // from it a step either side still leave room for 4.5:1.
-function readableBackground(bg) {
+function readableBackground(bg: string) {
   const light = luminance(bg) > 0.179;
   const end = light ? '#ffffff' : '#000000', ink = light ? '#000000' : '#ffffff';
   for (let t = 0; t <= 1.0001; t += 0.02) { const c = mix(bg, end, Math.min(1, t)); if (contrast(c, ink) >= 8) return c; }
@@ -87,7 +93,7 @@ function readableBackground(bg) {
 
 // The whole token set from a seed. Which way things go (darker or lighter) follows the background itself, not the
 // mode it is picked for, so a dark background chosen for "light" still gets readable text.
-function derive(seed) {
+function derive(seed: ColorSeed): Record<TokenName, string> {
   const bg = readableBackground(seed.background), light = luminance(bg) > 0.179; // above it, dark text reads better
   const towardDark = light;
   const paper = bg;
@@ -139,25 +145,25 @@ function derive(seed) {
 
 // ---- settings -----------------------------------------------------------------------------------------
 
-const cleanSeed = (s) => (s && typeof s === 'object' && isHex(s.background) && isHex(s.text) && isHex(s.accent)
+const cleanSeed = (s: SeedInput) => (s && typeof s === 'object' && isHex(s.background) && isHex(s.text) && isHex(s.accent)
   ? { background: s.background.toLowerCase(), text: s.text.toLowerCase(), accent: s.accent.toLowerCase() } : null);
 
 // customColors: { light?: seed, dark?: seed }, or null when neither mode has a whole seed.
-function cleanCustom(input) {
+function cleanCustom(input: { light?: SeedInput, dark?: SeedInput } | null | undefined) {
   if (!input || typeof input !== 'object') return null;
-  const out: Record<string, { background: string, text: string, accent: string }> = {};
-  for (const mode of ['light', 'dark']) { const s = cleanSeed(input[mode]); if (s) out[mode] = s; }
+  const out: CustomColors = {};
+  for (const mode of ['light', 'dark'] as const) { const s = cleanSeed(input[mode]); if (s) out[mode] = s; }
   return Object.keys(out).length ? out : null;
 }
 
 // The scheme setting, made valid: a known scheme, or "custom" while there are custom colours.
-function cleanSchemeId(id, customColors) {
+function cleanSchemeId(id: string, customColors: CustomColors | null | undefined) {
   if (id === CUSTOM) return customColors ? CUSTOM : BUILT_IN;
   return Object.prototype.hasOwnProperty.call(SCHEMES, id) ? id : BUILT_IN;
 }
 
 // The seed in use for a mode, or null for the built-in scheme (and for a mode a scheme has no colours for).
-function seedFor(settings, mode) {
+function seedFor(settings: Settings, mode: Mode) {
   const id = settings && settings.colorScheme;
   if (id === CUSTOM) return (settings.customColors && settings.customColors[mode]) || null;
   const scheme = SCHEMES[id];
@@ -165,20 +171,20 @@ function seedFor(settings, mode) {
 }
 
 // The tokens to set on the page for these settings in this mode, or null: the stylesheet's own colours.
-function resolve(settings, mode) {
+function resolve(settings: Settings, mode: Mode) {
   const seed = seedFor(settings, mode);
   return seed ? derive(seed) : null;
 }
 
 // The window's colours before the page paints (and for the caption buttons), in this mode.
-function windowColors(settings, mode) {
+function windowColors(settings: Settings, mode: Mode) {
   const tokens = resolve(settings, mode);
   return tokens ? { background: tokens.paper, foreground: tokens.fg } : BUILT_IN_WINDOW[mode === 'dark' ? 'dark' : 'light'];
 }
 
 // The seeds a scheme starts from in a mode: the built-in scheme's own colours, a premade scheme's seed, or the
 // custom colours (falling back to the built-in ones while none are picked for that mode).
-function seedsOf(id, customColors, mode) {
+function seedsOf(id: string, customColors: CustomColors | null | undefined, mode: string) {
   const m = mode === 'dark' ? 'dark' : 'light';
   if (id === CUSTOM) return (customColors && customColors[m]) || BUILT_IN_SEEDS[m];
   const scheme = SCHEMES[id];
@@ -187,7 +193,7 @@ function seedsOf(id, customColors, mode) {
 
 // What a scheme looks like in a mode, for its swatch in Settings: { paper, text, accent }, the derived colours
 // (so the sample matches the page), or the built-in scheme's own.
-function swatch(id, customColors, mode) {
+function swatch(id: string, customColors: CustomColors | null | undefined, mode: string) {
   const seed = seedsOf(id, customColors, mode);
   if (id === BUILT_IN || (id !== CUSTOM && !(SCHEMES[id] && !SCHEMES[id].builtIn))) return { paper: seed.background, text: seed.text, accent: seed.accent };
   const t = derive(seed);

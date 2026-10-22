@@ -19,8 +19,11 @@ import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, rea
 import * as workspace from './workspace.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+
+interface HiddenPageOptions { isolated?: boolean; javascript?: boolean; allowFiles?: string[]; readDir?: string; timeoutMs?: number }
 
 const APP_ROOT = path.resolve(import.meta.dirname, '..');
 const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appData'), 'notes-app');
@@ -97,7 +100,7 @@ function main() {
   const iconImage = () => nativeImage.createFromBitmap(drawIconBitmap(32), { width: 32, height: 32 });
 
   let rendererShown = false; // first paint done; survives later runtime writes
-  function writeRuntime(extra?) {
+  function writeRuntime(extra?: { ready?: boolean; visible?: boolean; exiting?: boolean }) {
     if (extra && extra.ready) rendererShown = true;
     const data = Object.assign({
       ready: rendererShown,
@@ -123,7 +126,7 @@ function main() {
     return Themes.windowColors(store.settings, effectiveTheme());
   }
 
-  function safeBounds(saved) {
+  function safeBounds(saved: WindowRect | null) {
     const def = { width: 1100, height: 720 };
     if (!saved) return def;
     try {
@@ -136,7 +139,7 @@ function main() {
   }
 
   function createWindow() {
-    const w = new BrowserWindow(Object.assign({
+    const w = new BrowserWindow({
       minWidth: 760,
       minHeight: 480,
       show: false,
@@ -157,7 +160,8 @@ function main() {
         // The split view's right side is this page again in an iframe, and needs the preload there too.
         nodeIntegrationInSubFrames: true,
       },
-    }, safeBounds(store.settings.window)));
+      ...safeBounds(store.settings.window),
+    });
     win = w;
 
     w.loadFile(path.join(import.meta.dirname, 'renderer', 'index.html'));
@@ -206,7 +210,7 @@ function main() {
     // Ctrl+= / Ctrl+- / Ctrl+0 and the right-click menu (Electron supplies neither properly on its own).
     // Debounced: holding Ctrl+= repeats ~30 times a second, and each save writes notes.json.
     let zoomSaveTimer: NodeJS.Timeout | undefined;
-    const rememberZoom = (level) => {
+    const rememberZoom = (level: number) => {
       clearTimeout(zoomSaveTimer);
       zoomSaveTimer = setTimeout(() => { if (store.settings.zoomLevel === level) return; try { store.setSettings({ zoomLevel: level }); } catch (_) { /* saving paused */ } }, 400);
     };
@@ -286,7 +290,7 @@ function main() {
     else showWindow();
   }
 
-  function registerHotkey(preferred) {
+  function registerHotkey(preferred: string) {
     globalShortcut.unregisterAll();
     const candidates = [preferred].concat(HOTKEY_FALLBACKS.filter((k) => k !== preferred));
     for (const acc of candidates) {
@@ -385,31 +389,30 @@ function main() {
 
   // ---- IPC ----------------------------------------------------------------
 
-  const pub = (n) => store.publicNote(n);
   const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
-  handle('notes:list', (_e, opts) => store.list(opts).map(pub));
+  handle('notes:list', (_e, opts) => store.list(opts).map((n) => store.publicNote(n)));
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
-  handle('notes:get', (_e, id) => pub(store.get(id)));
+  handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
   handle('notes:create', (_e, data) => {
     data = Object.assign({}, data || {});
     // The page may only name content and placement; file links, vault membership and locks are the store's.
-    for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) delete data[k];
+    for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) Reflect.deleteProperty(data, k);
     const folder = data.folderId ? store.getFolder(data.folderId) : null;
     const note = folder && folder.vaultId ? store.createVaultNote(folder.id, data) : store.create(data);
     if (note.vaultId) vaults.noteChanged(note.vaultId);
-    return pub(note);
+    return store.publicNote(note);
   });
   handle('notes:update', (e, id, patch) => {
     const note = store.update(id, patch);
     if (note && note.vaultId) vaults.noteChanged(note.vaultId);
     if (note) notifyNoteChanged(note.id, e.sender);
-    return pub(note);
+    return store.publicNote(note);
   });
 
   // ---- locking ---------------------------------------------------------------
   handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); forgetWorkspaceCopy(id); live.stop(id); stickies.close(id, { forget: true }); return n; });
   handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
-  handle('lock:relock', (_e, id) => { store.relock(id); return pub(store.get(id)); });
+  handle('lock:relock', (_e, id) => { store.relock(id); return store.publicNote(store.get(id)); });
   handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
   // Hiding the window locks everything again (after the renderer has written what it was typing).
   function relockOnHide() {
@@ -423,7 +426,7 @@ function main() {
   // and each sticky showing that note does the same.
   // Something other than the main window changed notes (vault, bot, live, recovery, sticky edit): every
   // window that shows notes reloads what it has, when it is clean.
-  function fanReloaded(payload) {
+  function fanReloaded(payload: { reason: string; id?: string }) {
     if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', payload);
     stickies.broadcast('notes:reloaded', payload);
   }
@@ -433,7 +436,7 @@ function main() {
   let trayRefreshTimer: NodeJS.Timeout | undefined;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
 
-  function notifyNoteChanged(id, sender) {
+  function notifyNoteChanged(id: string, sender: Electron.WebContents) {
     const changed = store.get(id);
     if (changed && changed.sticky) refreshTraySoon();
     if (win && !win.isDestroyed() && (!sender || win.webContents.id !== sender.id)) win.webContents.send('notes:reloaded', { reason: 'sticky', id });
@@ -450,8 +453,12 @@ function main() {
   });
   handle('live:stop', (_e, id) => live.stop(id));
   handle('live:status', (_e, id) => live.statusOf(id));
-  handle('notes:togglePin', (_e, id) => pub(store.togglePin(id)));
-  handle('notes:duplicate', (_e, id) => pub(store.duplicate(id)));
+  handle('notes:togglePin', (_e, id) => store.publicNote(store.togglePin(id)));
+  handle('notes:duplicate', (_e, id) => {
+    const copy = store.duplicate(id);
+    if (!copy) throw new Error('Note not found');
+    return store.publicNote(copy);
+  });
   handle('notes:splitIntoBook', (_e, id, opts) => {
     const r = store.splitIntoBook(id, opts);
     if (r.originalTrashed) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
@@ -462,15 +469,15 @@ function main() {
     for (const id of r.removedIds) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
     return r;
   });
-  handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return pub(n); });
-  handle('notes:restore', (_e, id) => pub(store.restore(id)));
+  handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return store.publicNote(n); });
+  handle('notes:restore', (_e, id) => store.publicNote(store.restore(id)));
   handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
-  function forgetWorkspaceCopy(id) { try { workspace.forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
+  function forgetWorkspaceCopy(id: string) { try { workspace.forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) { /* best effort */ } }
   handle('notes:emptyTrash', () => store.emptyTrash());
 
   // ---- desktop stickies ------------------------------------------------------
 
-  const stickyView = (n) => ({ id: n.id, title: H.deriveTitle(n), sticky: n.sticky, open: stickies.isOpen(n.id) });
+  const stickyView = (n: Note) => ({ id: n.id, title: H.deriveTitle(n), sticky: n.sticky, open: stickies.isOpen(n.id) });
   function newSticky() {
     let note;
     try {
@@ -483,7 +490,7 @@ function main() {
       return null;
     }
     fanReloaded({ reason: 'sticky' });
-    return pub(note);
+    return store.publicNote(note);
   }
   handle('stickies:list', () => store.stickies().map(stickyView));
   handle('stickies:open', (_e, id) => !!stickies.open(id));
@@ -501,7 +508,7 @@ function main() {
   // ---- file-backed notes ---------------------------------------------------
 
   const APP_ERROR_CODES = new Set(['EZIP', 'ETOOBIG', 'EENCODING']);
-  async function linkPaths(paths, opts?) {
+  async function linkPaths(paths: string[], opts?: Parameters<typeof store.linkFile>[1]) {
     const linked: (Awaited<ReturnType<typeof store.linkFile>>)[] = [];
     const failed: string[] = [];
     for (const p of paths) {
@@ -531,7 +538,7 @@ function main() {
   // Only documents and media are handed to their default app; anything else is shown in Explorer instead,
   // so a file that could run code is never launched from inside Notes. (An allowlist, not a denylist.)
   const OPENABLE_EXT = /\.(pdf|txt|md|markdown|mdx|csv|tsv|json|xml|yaml|yml|toml|ini|log|rtf|doc|docx|odt|xls|xlsx|ods|ppt|pptx|odp|key|pages|numbers|png|jpe?g|gif|webp|bmp|tiff?|heic|avif|mp3|wav|m4a|aac|ogg|opus|flac|webm|mp4|m4v|mov|mkv|avi|zip|7z|rar|gz|tar|epub|ics|vcf|tex|bib|srt|vtt)$/i;
-  function openSafely(fullPath) {
+  function openSafely(fullPath: string) {
     const name = path.basename(fullPath).replace(/[. ]+$/, '');
     if (OPENABLE_EXT.test(name) && !EXEC_EXT.test(name)) return shell.openPath(fullPath);
     shell.showItemInFolder(fullPath);
@@ -545,7 +552,8 @@ function main() {
   // The opened file behind note id, which must be of the given kind (pdf, docx, sheet, image).
   function fileNoteOfKind(id: string, kind: FileKind): FileNote {
     const n = store.get(id);
-    if (!isFileNote(n) || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' }[kind] || 'Not a Word document.');
+    const wrongKindMessages: Partial<Record<FileKind, string>> = { pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' };
+    if (!isFileNote(n) || n.fileKind !== kind) throw new Error(wrongKindMessages[kind] || 'Not a Word document.');
     return n;
   }
 
@@ -562,9 +570,9 @@ function main() {
   const FILE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'files');
   const KEEP_FILE_VERSIONS = 10;
   const sessionOriginals = new Map(); // pathKey -> name of that first copy
-  const backupDirFor = (file) => path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
+  const backupDirFor = (file: string) => path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
   // Returns { first, name }: whether this was the session's first copy of the file, and the copy's file name.
-  function backUpBeforeWrite(file) {
+  function backUpBeforeWrite(file: string) {
     const key = pathKey(file);
     const dir = backupDirFor(file);
     fs.mkdirSync(dir, { recursive: true });
@@ -578,7 +586,7 @@ function main() {
     return { first, name };
   }
   // In place (so links to the file stay joined), and flushed to disk before it counts as saved.
-  function writeInPlace(file, buf) {
+  function writeInPlace(file: string, buf: Buffer) {
     const fd = fs.openSync(file, 'w');
     try {
       for (let done = 0; done < buf.length;) done += fs.writeSync(fd, buf, done, buf.length - done, done);
@@ -586,7 +594,7 @@ function main() {
     } finally { fs.closeSync(fd); }
   }
   // Backs the file up, writes buf over it in place, and records the app's own write. Returns { mtime, backup }.
-  function replaceFile(id, file, buf) {
+  function replaceFile(id: string, file: string, buf: Buffer) {
     const backup = backUpBeforeWrite(file);
     writeInPlace(file, buf);
     return { mtime: store.markFileWritten(id), backup };
@@ -597,7 +605,7 @@ function main() {
   const conflictCopies = new Map();
   // Writes edited bytes for the opened file of note id: in place after a backup while the file is as it was opened
   // ({ mtime, backup: whether this was the session's first backup }), else into the copy ({ savedAs, newCopy }).
-  function saveEdits(id, file, buf, expectedMtime) {
+  function saveEdits(id: string, file: string, buf: Buffer, expectedMtime: number) {
     if (stillAsOpened(file, expectedMtime)) {
       conflictCopies.delete(id);
       const { mtime, backup } = replaceFile(id, file, buf);
@@ -634,19 +642,19 @@ function main() {
   handle('signature:forget', () => { fs.rmSync(SIGNATURE_FILE, { force: true }); return { ok: true }; });
 
   // PDF bytes from the renderer: a byte array of at most MAX_PDF_BYTES that starts like a PDF, as a Buffer.
-  function pdfBuffer(bytes) {
+  function pdfBuffer(bytes: unknown) {
     if (!ArrayBuffer.isView(bytes) || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the PDF is missing or larger than 100 MB, so nothing was written.');
     const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (buf.length < 8 || buf.toString('latin1', 0, 5) !== '%PDF-') throw new Error('the PDF came back damaged, so nothing was written.');
     return buf;
   }
-  const stillAsOpened = (file, expectedMtime) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
+  const stillAsOpened = (file: string, expectedMtime: number) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
   const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Reload it, then try again.';
 
   // Rewrites the opened PDF of note id: build(bytes of the file now) gives the new bytes. Refused when the file
   // changed on disk since it was opened (or while building); written in place after a backup. Returns
   // { ok, mtime, backup } with the backup's name, for Undo, or { ok: false, error }.
-  async function rewritePdf(id, expectedMtime, build) {
+  async function rewritePdf(id: string, expectedMtime: number, build: (current: Buffer) => unknown) {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
     try {
@@ -659,7 +667,7 @@ function main() {
     }
   }
   // A pdf-lib change (pdf-edit-worker.mts) to bytes; resolves to the new bytes, or throws with the reason.
-  async function pdfLibTask(bytes, task, extra, what) {
+  async function pdfLibTask(bytes: Uint8Array, task: string, extra: object, what: string) {
     const res = await runWorker<{ bytes?: Uint8Array }>('pdf-edit-worker.mts', Object.assign({ bytes, task }, extra), 2 * 60 * 1000, what + ' took too long.');
     if (!res.ok) throw new Error(res.error);
     return res.bytes;
@@ -713,7 +721,7 @@ function main() {
   // the renderer knows that version by (a few are kept, for recent notes).
   const docxBases = new Map();
   const KEEP_DOCX_BASES = 4;
-  function rememberDocx(id, buf, mtime) {
+  function rememberDocx(id: string, buf: Buffer, mtime?: number | null) {
     docxBases.delete(id);
     docxBases.set(id, { buf, mtime });
     while (docxBases.size > KEEP_DOCX_BASES) docxBases.delete(docxBases.keys().next().value);
@@ -743,18 +751,18 @@ function main() {
   // Whether bytes are what their extension says, for the formats this can be told of: the Office and OpenDocument
   // formats are zips, RTF starts {\rtf. (WordCraft writes no .doc and GridCraft no .xls: such a save never goes
   // over one.)
-  const checkable = (ext) => H.ZIP_DOC_EXT.has(ext) || ext === 'rtf';
-  const looksLike = (ext, buf) => {
+  const checkable = (ext: string) => H.ZIP_DOC_EXT.has(ext) || ext === 'rtf';
+  const looksLike = (ext: string, buf: Buffer) => {
     if (H.ZIP_DOC_EXT.has(ext)) return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b;
     if (ext === 'rtf') return buf.slice(0, 5).toString('latin1') === '{\\rtf';
     return false;
   };
-  const assertLooksLike = (ext, buf) => { if (checkable(ext) && !looksLike(ext, buf)) throw new Error('that is not a .' + ext + ' file, so nothing was written.'); };
+  const assertLooksLike = (ext: string, buf: Buffer) => { if (checkable(ext) && !looksLike(ext, buf)) throw new Error('that is not a .' + ext + ' file, so nothing was written.'); };
   // A save that may not go over the note's file (a format the app does not write) goes into one copy beside it,
   // "<name> (from <app>).<ext>", written again on each save in this run: a stable place, so the document counts as
   // saved and the folder does not fill with numbered copies.
   const sideCopies = new Map(); // note id -> the copy's path
-  function sideCopy(id, dir, stem, ext, app, buf) {
+  function sideCopy(id: string, dir: string, stem: string, ext: string, app: string, buf: Buffer) {
     const prev = sideCopies.get(id);
     if (prev && fs.existsSync(prev)) { fs.writeFileSync(prev, buf); return prev; }
     const file = convert.writeNew(dir, stem + ' (from ' + app + ')', ext, buf);
@@ -845,7 +853,7 @@ function main() {
 
   // ---- vaults --------------------------------------------------------------
 
-  const vaultView = (v) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
+  const vaultView = (v: Vault) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
   handle('vaults:list', () => store.vaults.map(vaultView));
   handle('vaults:pickFolder', async () => {
     const { canceled, filePaths } = await openDialog({ title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
@@ -890,7 +898,7 @@ function main() {
   // ---- bot: Claude Code over the notes -------------------------------------
 
   const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
-  let botChild = null;
+  let botChild: ChildProcess | null = null;
   let botStarting = false; // a run is past its checks but its process is not spawned yet
 
   function findClaude() {
@@ -900,7 +908,7 @@ function main() {
   // Where the agent should work for the note in front of the user: the vault folder for vault notes, the
   // file's folder for other file notes, otherwise the exported workspace of plain notes. The workspace is
   // imported before it is rewritten, so edits made there in a terminal session are never thrown away.
-  function botCwdFor(noteId) {
+  function botCwdFor(noteId?: string | null) {
     const note = noteId ? store.get(noteId) : null;
     if (note && note.vaultId && note.filePath) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
     if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
@@ -926,8 +934,8 @@ function main() {
 
   // Asks Claude Code how it is signed in and refuses to start an agent that would bill API credits.
   // A confirmed subscription is remembered for a minute, so quick repeat runs do not pay for the check.
-  let authOkUntil = 0, authPlan = null;
-  async function ensureSubscription(spec) {
+  let authOkUntil = 0, authPlan: string | null = null;
+  async function ensureSubscription(spec: Parameters<typeof claudeBin.launchSpec>[0]) {
     if (Date.now() < authOkUntil) return { ok: true, plan: authPlan };
     const launch = claudeBin.launchSpec(spec, ['auth', 'status']);
     const text = await new Promise((resolve) => {
@@ -938,11 +946,11 @@ function main() {
     return r;
   }
 
-  function botSend(type, data) {
+  function botSend(type: string, data?: object) {
     if (win && !win.isDestroyed()) win.webContents.send('bot:event', Object.assign({ type }, data || {}));
   }
 
-  function killTree(child) {
+  function killTree(child: ChildProcess | null) {
     if (!child || child.exitCode !== null) return;
     if (process.platform === 'win32') {
       // kill() alone would leave grandchildren (and their edits) running.
@@ -985,7 +993,7 @@ function main() {
     }
     botChild = child;
     let ended = false;
-    const end = (data) => { if (ended) return; ended = true; if (botChild === child) botChild = null; botSend('end', data); };
+    const end = (data: object) => { if (ended) return; ended = true; if (botChild === child) botChild = null; botSend('end', data); };
     // Streaming decoders: a multibyte character split across two chunks must not show as a replacement sign.
     const outDec = new StringDecoder('utf8'), errDec = new StringDecoder('utf8');
     child.stdout.on('data', (d) => { const t = outDec.write(d); if (t) botSend('out', { text: t }); });
@@ -997,7 +1005,7 @@ function main() {
       if (target.kind === 'workspace') {
         try { imported = workspace.importNotes(store, WORKSPACE_DIR); for (const nid of imported.updatedIds || []) live.noteChanged(nid); } catch (err) { imported = { error: err.message }; }
       } else if (target.kind === 'vault') {
-        const note = store.get(opts.noteId);
+        const note = opts.noteId ? store.get(opts.noteId) : null;
         if (note && note.vaultId) { store.scanVault(note.vaultId).then((r) => { if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); }).catch(() => {}); vaults.noteChanged(note.vaultId); }
       }
       lastContentHash = contentHash();
@@ -1022,7 +1030,7 @@ function main() {
       // Prefer Windows Terminal; fall back to a PowerShell window. Both run the interactive Claude Code TUI.
       // Paths never go through PowerShell's parser or wt's `;` splitting: they sit inside single-quoted
       // here-strings in a script file (only a line that is exactly '@ ends one, and paths have no newlines).
-      const here = (s) => "@'\n" + String(s).replace(/\r?\n/g, '') + "\n'@";
+      const here = (s: string) => "@'\n" + String(s).replace(/\r?\n/g, '') + "\n'@";
       const lines = ['$ErrorActionPreference = \'Continue\'', 'Set-Location -LiteralPath ' + here(target.cwd)];
       // A Windows Terminal that is already open gives new tabs its own environment, not ours, so the script
       // clears the API-billing variables itself: the session runs on the Claude subscription.
@@ -1124,7 +1132,7 @@ function main() {
   handle('app:info', () => info());
   handle('app:hide', () => hideWindow());
   handle('app:titleBar', (e, colors) => {
-    const ok = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+    const ok = (c: string) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
     if (!win || win.isDestroyed() || e.sender !== win.webContents || !colors || !ok(colors.color) || !ok(colors.symbol)) return false;
     try { win.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbol, height: TITLE_BAR_H }); return true; } catch (_) { return false; }
   });
@@ -1235,7 +1243,7 @@ function main() {
   // nothing but local files and data: URLs (no beacons, no remote pictures), and cannot navigate or open windows.
   // opts.readDir: the one folder an isolated page may load files from (the original file's), besides the page itself
   // and opts.allowFiles; it gives up after opts.timeoutMs.
-  async function withHiddenPage(doc, opts, fn) {
+  async function withHiddenPage<T>(doc: string, opts: HiddenPageOptions, fn: (w: BrowserWindow) => Promise<T>) {
     const tmp = path.join(app.getPath('temp'), 'notes-page-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.html');
     let w: BrowserWindow | null = null, contentsId: number | null = null;
     let timer: NodeJS.Timeout | undefined;
@@ -1274,25 +1282,25 @@ function main() {
     }
     return convertSession;
   }
-  function isolatedRequestAllowed(d) {
+  function isolatedRequestAllowed(d: Electron.OnBeforeRequestListenerDetails) {
     if (/^data:/i.test(d.url)) return true;
     const access = isolatedAccess.get(d.webContentsId);
     if (!access || !/^file:\/\/\//i.test(d.url)) return false;
     let file;
     try { file = fileURLToPath(d.url); } catch (_) { return false; }
-    const same = (a) => path.resolve(a).toLowerCase() === path.resolve(file).toLowerCase();
+    const same = (a: string) => path.resolve(a).toLowerCase() === path.resolve(file).toLowerCase();
     if (same(access.page) || access.files.some(same)) return true;
     // From the folder only what a page shows as part of itself; never a frame or an embedded document.
     return ['image', 'stylesheet', 'font', 'media'].includes(d.resourceType) && !!access.dir && convert.isInside(file, access.dir);
   }
   const RENDER_TIMEOUT_MS = 2 * 60 * 1000;
-  const PDF_OPTIONS = { printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } };
+  const PDF_OPTIONS: Electron.PrintToPDFOptions = { printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } };
   // Relative links and pictures in a converted page resolve against the original file's folder.
   // The CSP repeats the request filter inside the page (defence in depth: it also stops DNS prefetch and preconnect).
   const ISOLATED_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src file: data:; style-src \'unsafe-inline\' file:; font-src file: data:; media-src file: data:">';
-  function withBase(doc, baseDir) {
+  function withBase(doc: string, baseDir: string) {
     const head = ISOLATED_CSP + '<meta http-equiv="x-dns-prefetch-control" content="off"><base href="' + convert.escHtml(pathToFileURL(baseDir + path.sep).href) + '">';
-    if (/<head(\s[^>]*)?>/i.test(doc)) return doc.replace(/<head(\s[^>]*)?>/i, (m) => m + head);
+    if (/<head(\s[^>]*)?>/i.test(doc)) return doc.replace(/<head(\s[^>]*)?>/i, (m: string) => m + head);
     // No <head>: put one after the doctype (or <html>), so the page keeps standards mode.
     const lead = /^\s*(<!doctype[^>]*>)?\s*(<html(\s[^>]*)?>)?/i.exec(doc);
     const at = lead ? lead[0].length : 0;
@@ -1308,7 +1316,7 @@ function main() {
   // Runs in the hidden page. When Word recorded where its pages break, each rendered section is one page and is
   // printed as one, headers and footers included. Otherwise the text flows across pages with the document's
   // margins, and headers and footers (which would show only once) are left out.
-  function docxPrintScript(b64) {
+  function docxPrintScript(b64: string) {
     return '(async () => {'
       + 'const s = atob(' + JSON.stringify(b64) + '); const bytes = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);'
       + 'await DocxView.renderAsync(bytes, document.body, document.head, { inWrapper: false, ignoreLastRenderedPageBreak: false, useBase64URL: true, renderAltChunks: false });'
@@ -1323,8 +1331,8 @@ function main() {
       + 'document.head.append(css); return { flowed: !fits }; })()';
   }
   const printers = {
-    html: (doc, baseDir) => withHiddenPage(withBase(doc, baseDir), { isolated: true, readDir: baseDir, timeoutMs: RENDER_TIMEOUT_MS }, (w) => w.webContents.printToPDF(PDF_OPTIONS)),
-    docx: (bytes) => withHiddenPage(DOCX_PRINT_PAGE, { isolated: true, javascript: true, allowFiles: [DOCX_BUNDLE_PATH], timeoutMs: RENDER_TIMEOUT_MS }, async (w) => {
+    html: (doc: string, baseDir: string) => withHiddenPage(withBase(doc, baseDir), { isolated: true, readDir: baseDir, timeoutMs: RENDER_TIMEOUT_MS }, (w) => w.webContents.printToPDF(PDF_OPTIONS)),
+    docx: (bytes: Buffer) => withHiddenPage(DOCX_PRINT_PAGE, { isolated: true, javascript: true, allowFiles: [DOCX_BUNDLE_PATH], timeoutMs: RENDER_TIMEOUT_MS }, async (w) => {
       const r = await w.webContents.executeJavaScript(docxPrintScript(bytes.toString('base64')));
       const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
       return { pdf, warning: r && r.flowed ? 'This document does not record where its pages break, so its headers and footers were left out.' : '' };
@@ -1334,7 +1342,7 @@ function main() {
   // An opened file as Markdown, for the book reader and book export (Word pictures inlined, PDF text only).
   handle('files:asMarkdown', async (_e, id) => {
     const n = store.get(id);
-    if (!convert.sourceOf(n)) return { ok: false, error: 'this kind of file has no text to show' };
+    if (!isFileNote(n) || !convert.sourceOf(n)) return { ok: false, error: 'this kind of file has no text to show' };
     // The book reader and its exports load pictures, so a page made from a file keeps only its inlined ones; a picture
     // on the web or a network share becomes its description.
     try { return { ok: true, markdown: convert.inlinePicturesOnly((await convert.toMarkdown(n)).markdown) }; } catch (err) { return { ok: false, error: err.message }; }
@@ -1401,7 +1409,7 @@ function main() {
     for (const c of commits) {
       const text = await git.showNotesAt(c.hash);
       if (!text) continue;
-      let snap;
+      let snap: { notes?: Note[] };
       try { snap = JSON.parse(text); } catch (_) { continue; }
       const n = (snap.notes || []).find((x) => x.id === id);
       if (!n || typeof n.body !== 'string' || n.lock) continue;
@@ -1414,7 +1422,7 @@ function main() {
 
   // ---- attachments: files the app keeps next to the notes -----------------------
   const ATTACH_DIR = path.join(DATA_DIR, 'attachments');
-  const safeAttachmentName = (name) => {
+  const safeAttachmentName = (name: string) => {
     const s = String(name || '');
     const base = path.basename(s);
     // A plain file name: no separators, no drive or stream colon, not all dots, no trailing dot or space
@@ -1422,7 +1430,7 @@ function main() {
     if (!base || base !== s || /^\.+$/.test(base) || /[:\u0000-\u001f]/.test(base) || /[. ]$/.test(base)) return null;
     return base;
   };
-  function addAttachment(srcPath) {
+  function addAttachment(srcPath: string) {
     fs.mkdirSync(ATTACH_DIR, { recursive: true });
     const ext = path.extname(srcPath);
     const stem = H.safeFilename(path.basename(srcPath, ext)) || 'file';
@@ -1490,11 +1498,11 @@ function main() {
   app.on('second-instance', () => showWindow());
   let quitPrepared = false;
   // Asks one window to write any pending edit and waits for its own flush-done (not another window's).
-  function flushWindow(w, ms) {
+  function flushWindow(w: BrowserWindow | null, ms: number) {
     return new Promise((resolve) => {
       if (!w || w.isDestroyed()) return resolve(undefined);
       const id = w.webContents.id;
-      const done = (e) => { if (e.sender.id === id) finish(); };
+      const done = (e: Electron.IpcMainEvent) => { if (e.sender.id === id) finish(); };
       const timer = setTimeout(finish, ms);
       function finish() { clearTimeout(timer); ipcMain.removeListener('app:flush-done', done); resolve(undefined); }
       ipcMain.on('app:flush-done', done);
@@ -1509,7 +1517,7 @@ function main() {
     // Let the renderer flush an in-flight edit, then finish any pending git commit, then quit for real.
     e.preventDefault();
     // The main window may be writing a PDF's edits, which takes longer than a note.
-    const rendererFlushed = Promise.all([flushWindow(win, 5000), stickies.flushAll((w) => flushWindow(w, 800))]);
+    const rendererFlushed = Promise.all([flushWindow(win, 5000), stickies.flushAll((w: BrowserWindow) => flushWindow(w, 800))]);
     // After the renderer's write has landed, commit it; cap the git step so an unreachable remote
     // cannot keep the tray icon alive for a minute after Quit.
     rendererFlushed
@@ -1530,7 +1538,7 @@ function main() {
   });
 
   app.whenReady().then(() => {
-    const step = (name, fn) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
+    const step = (name: string, fn: () => void) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
     step('crafts', () => { craftsReady = crafts.serve(protocol); });
     step('theme', applyTheme);
     step('window', createWindow);

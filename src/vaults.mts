@@ -56,12 +56,12 @@ class VaultManager {
     return s;
   }
 
-  _set(id, patch) {
+  _set(id: string, patch: Partial<VaultStatus>) {
     Object.assign(this._status(id), patch);
     this.onChange(id, this.statusOf(id));
   }
 
-  statusOf(id) {
+  statusOf(id: string) {
     return Object.assign({}, this._status(id));
   }
 
@@ -77,7 +77,7 @@ class VaultManager {
     for (const v of this.store.vaults) await this.open(v.id, { pull: true });
   }
 
-  async open(id, opts) {
+  async open(id: string, opts?: { pull?: boolean }) {
     opts = opts || {};
     const v = this.store.getVault(id);
     if (!v) return;
@@ -88,10 +88,10 @@ class VaultManager {
     if (opts.pull && v.remote && v.autoSync) this.sync(id, 'startup').catch(() => {});
   }
 
-  close(id) {
+  close(id: string) {
     const w = this.watchers.get(id);
     if (w) { try { w.close(); } catch (_) { /* ignore */ } this.watchers.delete(id); }
-    const t = this.timers.get(id) || {};
+    const t: Record<string, NodeJS.Timeout | undefined> = this.timers.get(id) || {};
     for (const k of Object.keys(t)) clearTimeout(t[k]);
     this.timers.delete(id);
     this.status.delete(id);
@@ -103,7 +103,7 @@ class VaultManager {
 
   // ---- watching ------------------------------------------------------------
 
-  watch(id) {
+  watch(id: string) {
     const v = this.store.getVault(id);
     if (!v || this.watchers.has(id)) return;
     try {
@@ -120,7 +120,7 @@ class VaultManager {
     }
   }
 
-  scheduleRescan(id) {
+  scheduleRescan(id: string) {
     const t = this._timers(id);
     clearTimeout(t.rescan);
     t.rescan = setTimeout(async () => {
@@ -134,18 +134,18 @@ class VaultManager {
   }
 
   // Called by the app after it writes a vault file itself.
-  noteChanged(id) {
+  noteChanged(id: string) {
     const v = this.store.getVault(id);
     if (v && v.autoSync) this.scheduleCommit(id);
   }
 
-  scheduleCommit(id) {
+  scheduleCommit(id: string) {
     const t = this._timers(id);
     clearTimeout(t.commit);
     t.commit = setTimeout(() => { this.sync(id, 'change').catch(() => {}); }, this.debounceMs);
   }
 
-  schedulePull(id) {
+  schedulePull(id: string) {
     const v = this.store.getVault(id);
     const t = this._timers(id);
     clearTimeout(t.pull);
@@ -155,7 +155,7 @@ class VaultManager {
 
   // ---- git -----------------------------------------------------------------
 
-  async refreshRepoStatus(id) {
+  async refreshRepoStatus(id: string) {
     const v = this.store.getVault(id);
     if (!v) return null;
     const inside = await git(['rev-parse', '--is-inside-work-tree'], v.path, 10000);
@@ -176,7 +176,7 @@ class VaultManager {
     return this.statusOf(id);
   }
 
-  async initRepo(id, remote): Promise<VaultResult> {
+  async initRepo(id: string, remote?: string): Promise<VaultResult> {
     if (typeof remote === 'string') remote = remote.trim();
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
@@ -287,7 +287,7 @@ class VaultManager {
     }
   }
 
-  static async clone(url, destDir) {
+  static async clone(url: string, destDir: string) {
     if (/^\s*-/.test(String(url))) return { ok: false, error: 'That does not look like a repository URL.' };
     fs.mkdirSync(path.dirname(destDir), { recursive: true });
     const r = await git(['clone', '-q', '--', url, destDir], path.dirname(destDir), 300000);
