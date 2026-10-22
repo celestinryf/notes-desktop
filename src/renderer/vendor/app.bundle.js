@@ -183,6 +183,7 @@
     mailtoFor: () => mailtoFor,
     markdownToNote: () => markdownToNote,
     matchesQuery: () => matchesQuery,
+    msSince: () => msSince,
     noteLinkIds: () => noteLinkIds,
     noteToMarkdown: () => noteToMarkdown,
     parseAccelerator: () => parseAccelerator,
@@ -194,8 +195,10 @@
     sortNotes: () => sortNotes,
     speechChunks: () => speechChunks,
     splitAtHeadings: () => splitAtHeadings,
+    tenths: () => tenths,
     toggleTaskAt: () => toggleTaskAt,
     tokenize: () => tokenize,
+    traceClock: () => traceClock,
     truncate: () => truncate
   });
   var UNTITLED = "Untitled";
@@ -597,6 +600,9 @@
   }
   var isObjectLike = (v) => !!v && typeof v === "object";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
+  var tenths = (n) => Math.round(n * 10) / 10;
+  var traceClock = () => tenths(performance.timeOrigin + performance.now());
+  var msSince = (start) => tenths(performance.now() - start);
 
   // src/shared/themes.mts
   var themes_exports = {};
@@ -5215,7 +5221,13 @@
   // src/renderer/craft-frame.ts
   var NotesCraftFrame = /* @__PURE__ */ (function() {
     const isRecord2 = (value) => typeof value === "object" && value !== null;
-    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }) {
+    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, trace }) {
+      const mark = trace || (() => {
+      });
+      const numbers = (m, keys) => Object.fromEntries(keys.flatMap((k) => {
+        const v = m[k];
+        return typeof v === "number" ? [[k, tenths(v)]] : [];
+      }));
       let ready = false;
       let loaded = false;
       let gaveUp = false;
@@ -5237,6 +5249,7 @@
         if (m.type === "ready") {
           clearTimeout(readyTimer);
           ready = true;
+          mark("ready");
           if (theme) post({ type: "theme", value: theme });
           if (typeof darkPage === "boolean") post({ type: "page", dark: darkPage });
           if (queued) {
@@ -5248,18 +5261,23 @@
         }
         if (!current || m.doc !== current.doc) return;
         if (m.type === "opened") {
+          mark("opened", Object.assign({ ok: !!m.ok }, numbers(m, ["ms"])));
           if (m.ok) {
             if (onOpened) onOpened();
           } else if (onOpenFailed) onOpenFailed(String(m.error || "the app could not open it"));
+        } else if (m.type === "drawn") {
+          mark("drawn", numbers(m, ["ms", "frames", "frameMs", "renderMs", "layoutMs"]));
         } else if (m.type === "dirty") {
           dirty = !!m.dirty;
           if (onDirty) onDirty(dirty || unsaved);
         } else if (m.type === "save" && m.bytes instanceof Uint8Array && typeof m.name === "string") {
+          mark("save-message", { bytes: m.bytes.byteLength });
           const editedBefore = dirty || unsaved;
           const { name, bytes } = m;
           const doc = current.doc;
           const context = current.context;
           saving = saving.then(() => onSave(name, bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
+            mark("save-done", { ok: res.ok, own: res.own });
             if (!current || current.doc !== doc) return;
             if (res.own) {
               unsaved = !res.ok;
@@ -5277,6 +5295,7 @@
       function load() {
         if (loaded) return;
         loaded = true;
+        mark("frame-load");
         frame.src = url;
         readyTimer = setTimeout(() => {
           if (ready) return;
@@ -5295,9 +5314,11 @@
         waiters = [];
         current = { doc: token(), name, context };
         if (!ready) {
+          mark("post", { queued: true, bytes: bytes.byteLength });
           queued = { name, bytes, context };
           return;
         }
+        mark("post", { queued: false, bytes: bytes.byteLength });
         const copy = new Uint8Array(bytes);
         post({ type: "open", doc: current.doc, name, bytes: copy }, [copy.buffer]);
       }
@@ -5314,6 +5335,7 @@
             resolve2(ok);
           }
           waiters.push(finish);
+          mark("save-request");
           post({ type: "command", doc, id: "file.save" });
         });
       }
@@ -5330,6 +5352,12 @@
     return { create };
   })();
 
+  // src/renderer/craft-trace.ts
+  function craftTrace(event, fields) {
+    if (!state.info || !state.info.craftTrace) return;
+    window.notesApi.app.trace(event, Object.assign({ t: traceClock() }, fields));
+  }
+
   // src/renderer/craft-notes.ts
   var baseName = (path) => {
     const parts = path.split(/[\\/]/);
@@ -5344,6 +5372,7 @@
       const ui = CRAFT_UI[key];
       const frame = () => ui.frame();
       let fc = null, note = null, shownKey = null, seq = 0, down = false;
+      const trace = (event, fields) => craftTrace(event, Object.assign({ app: key }, fields));
       const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
       function controller() {
         if (!fc) {
@@ -5365,6 +5394,7 @@
             },
             theme: "dark",
             darkPage: true,
+            trace,
             onUnavailable: () => {
               down = true;
               clear();
@@ -5379,6 +5409,7 @@
       async function show(n) {
         const k = n.id + ":" + n.fileMtime;
         frame().classList.remove("hidden");
+        trace("show", { id: n.id, kept: shownKey === k, frame: !!fc });
         if (shownKey === k) return;
         shownKey = k;
         const s = ++seq;
@@ -5387,7 +5418,9 @@
         frame().classList.add("is-opening");
         showBanner("Opening in " + ui.label + "\u2026");
         try {
+          const asked = performance.now();
           const bytes = await ui.bytes(n.id);
+          trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: msSince(asked) });
           if (s !== seq || !state.current || state.current.id !== n.id) return;
           if (!n.filePath) throw new Error("the note has no file");
           const name = baseName(n.filePath);
@@ -5400,6 +5433,7 @@
         }
       }
       function clear() {
+        if (shownKey !== null || note !== null) trace("clear", { id: note ? note.id : null });
         seq++;
         shownKey = null;
         note = null;
@@ -5444,7 +5478,14 @@
         }, 0);
       }
       const dirty = () => !!(fc && note && fc.isDirty());
-      const flush = async () => fc && dirty() ? fc.requestSave(15e3) : true;
+      async function flush() {
+        if (!fc || !dirty()) return true;
+        const started = performance.now();
+        trace("flush", { id: note ? note.id : null });
+        const ok = await fc.requestSave(15e3);
+        trace("flush-done", { ok, ms: msSince(started) });
+        return ok;
+      }
       const forget = () => {
         shownKey = null;
       };
@@ -8107,7 +8148,10 @@
         focusAfterOpen(opts.focus);
         return;
       }
+      const started = performance.now();
+      const from = state.current;
       if (!await leaveNote()) return;
+      const left = performance.now();
       if (state.inflight.has(id)) await state.inflight.get(id);
       const note = await api.notes.get(id);
       if (!note) {
@@ -8195,6 +8239,12 @@
       } else setSaved("Saved");
       placeInTab(note.id, opts.newTab);
       focusAfterOpen(opts.focus);
+      traceSwitch(from, note, started, left);
+    }
+    function traceSwitch(from, to, started, left) {
+      const kindOf = (n) => n && n.fileKind || "note";
+      if (![from, to].some((n) => n && n.fileKind && CRAFT_OF[n.fileKind])) return;
+      craftTrace("switch", { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: tenths(left - started), ms: msSince(started) });
     }
     function markActiveRow(id) {
       el.noteList.querySelectorAll(".note-row").forEach((r) => setRowActive(r, !!id && r.dataset.id === id));

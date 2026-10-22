@@ -33,6 +33,7 @@ import { createWordNote } from './word-note.ts';
 import { createImages } from './images.ts';
 import { createConvertMenu } from './convert-menu.ts';
 import { createEditorText } from './editor-text.ts';
+import { craftTrace } from './craft-trace.ts';
 
 type OpenFocus = 'title' | 'body';
 type OpenOpts = { newTab?: boolean; focus?: OpenFocus | null };
@@ -1684,7 +1685,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     opts = opts || {};
     if (peerHas(id)) { toPeer({ type: 'open', id, focus: opts.focus || 'body' }); return; }
     if (state.currentId === id && state.current) { focusAfterOpen(opts.focus); return; }
+    const started = performance.now();
+    const from = state.current;
     if (!(await leaveNote())) return;
+    const left = performance.now();
     if (state.inflight.has(id)) await state.inflight.get(id);
     const note = await api.notes.get(id);
     if (!note) {
@@ -1763,6 +1767,13 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else setSaved('Saved');
     placeInTab(note.id, opts.newTab);
     focusAfterOpen(opts.focus);
+    traceSwitch(from, note, started, left);
+  }
+
+  function traceSwitch(from: PublicNote | null, to: PublicNote, started: number, left: number) {
+    const kindOf = (n: PublicNote | null) => (n && n.fileKind) || 'note';
+    if (![from, to].some((n) => n && n.fileKind && H.CRAFT_OF[n.fileKind])) return;
+    craftTrace('switch', { from: from ? from.id : null, fromKind: kindOf(from), to: to.id, toKind: kindOf(to), leaveMs: H.tenths(left - started), ms: H.msSince(started) });
   }
 
   function markActiveRow(id: string | null) {

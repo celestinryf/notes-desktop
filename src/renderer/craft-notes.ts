@@ -4,6 +4,7 @@ import { NotesCraftFrame } from './craft-frame.ts';
 import * as H from '../shared/helpers.mts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
+import { craftTrace } from './craft-trace.ts';
 
 type CraftKey = 'wordcraft' | 'gridcraft';
 type CraftDoc = { id: string, fileMtime: number | null, name: string };
@@ -34,6 +35,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const ui = CRAFT_UI[key];
     const frame = () => ui.frame();
     let fc: CraftFrame | null = null, note: CraftDoc | null = null, shownKey: string | null = null, seq = 0, down = false;
+    const trace = (event: string, fields?: TraceFields) => craftTrace(event, Object.assign({ app: key }, fields));
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
       if (!fc) {
@@ -50,6 +52,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           },
           theme: 'dark',
           darkPage: true,
+          trace,
           onUnavailable: () => {
             down = true;
             clear();
@@ -64,6 +67,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     async function show(n: PublicNote) {
       const k = n.id + ':' + n.fileMtime;
       frame().classList.remove('hidden');
+      trace('show', { id: n.id, kept: shownKey === k, frame: !!fc });
       if (shownKey === k) return;
       shownKey = k;
       const s = ++seq;
@@ -72,7 +76,9 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       frame().classList.add('is-opening');
       showBanner('Opening in ' + ui.label + '…');
       try {
+        const asked = performance.now();
         const bytes = await ui.bytes(n.id);
+        trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: H.msSince(asked) });
         if (s !== seq || !state.current || state.current.id !== n.id) return;
         if (!n.filePath) throw new Error('the note has no file');
         const name = baseName(n.filePath);
@@ -85,6 +91,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       }
     }
     function clear() {
+      if (shownKey !== null || note !== null) trace('clear', { id: note ? note.id : null });
       seq++;
       shownKey = null;
       note = null;
@@ -126,7 +133,14 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       }, 0);
     }
     const dirty = () => !!(fc && note && fc.isDirty());
-    const flush = async () => (fc && dirty() ? fc.requestSave(15000) : true);
+    async function flush() {
+      if (!fc || !dirty()) return true;
+      const started = performance.now();
+      trace('flush', { id: note ? note.id : null });
+      const ok = await fc.requestSave(15000);
+      trace('flush-done', { ok, ms: H.msSince(started) });
+      return ok;
+    }
     const forget = () => { shownKey = null; };
     return { usable, show, clear, dirty, flush, forget };
   }

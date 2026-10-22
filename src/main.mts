@@ -12,6 +12,7 @@ import * as H from './shared/helpers.mts';
 import * as convert from './convert.mts';
 import { runWorker } from './run-worker.mts';
 import * as crafts from './craft-host.mts';
+import { createCraftTrace } from './craft-trace.mts';
 import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
@@ -46,6 +47,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function main() {
+  const trace = createCraftTrace(DATA_DIR, process.env.NOTES_APP_CRAFT_TRACE === '1');
+  trace.write('app-start', { uptimeMs: Math.round(process.uptime() * 1000), hidden: START_HIDDEN, version: app.getVersion() });
   const store = new Store(DATA_DIR).load();
   const git = new GitSync(DATA_DIR, {
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
@@ -162,6 +165,8 @@ function main() {
       w.hide();
       writeRuntime();
     });
+    w.on('show', () => trace.write('window-show'));
+    w.on('hide', () => trace.write('window-hide'));
 
     const persistBounds = () => {
       clearTimeout(boundsTimer);
@@ -361,10 +366,12 @@ function main() {
       saveBlocked: !!store.saveBlocked,
       drySpeech: process.env.NOTES_APP_DRY_SPEECH === '1',
       recoveredNotes: store.recoveredFromBackup ? store.notes.length : null,
+      craftTrace: trace.enabled,
     };
   }
 
   const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
+  ipcMain.on('app:trace', (_e, event: unknown, fields: unknown) => trace.fromPage(event, fields));
   handle('notes:list', (_e, opts) => store.list(opts).map((n) => store.publicNote(n)));
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
@@ -656,13 +663,20 @@ function main() {
     while (docxBases.size > KEEP_DOCX_BASES) docxBases.delete(docxBases.keys().next().value);
   }
   handle('files:docxBytes', async (_e, id) => {
+    const started = performance.now();
     const file = fileNoteOfKind(id, 'docx').filePath;
     const mtime = mtimeOf(file);
     const buf = await readDocumentBuffer(file);
     rememberDocx(id, buf, mtime);
+    trace.write('read-bytes', { id, kind: 'docx', bytes: buf.length, ms: H.msSince(started) });
     return buf;
   });
-  handle('files:documentBytes', (_e, id) => readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath));
+  handle('files:documentBytes', async (_e, id) => {
+    const started = performance.now();
+    const buf = await readDocumentBuffer(fileNoteOfKind(id, 'sheet').filePath);
+    trace.write('read-bytes', { id, kind: 'sheet', bytes: buf.length, ms: H.msSince(started) });
+    return buf;
+  });
   const CRAFT_SAVES = {
     docx: { app: 'WordCraft', own: new Set([...H.OOXML_EXT, 'odt', 'rtf']), to: 'docx', from: H.WORD_TO_DOCX_EXT, exports: ['pdf', 'docx', 'odt', 'rtf', 'txt', 'md', 'html', 'png'] },
     sheet: { app: 'GridCraft', own: new Set(['xlsx']), to: 'xlsx', from: H.SHEET_TO_XLSX_EXT, exports: ['pdf', 'csv', 'tsv', 'json', 'html'] },
@@ -696,9 +710,14 @@ function main() {
     if (given.toLowerCase() === path.basename(n.filePath).toLowerCase()) {
       assertLooksLike(own, buf);
       if (!rules.own.has(own)) return { exported: sideCopy(id, dir, stem, own, rules.app, buf), own: true };
+      const started = performance.now();
       const saved = saveEdits(id, n.filePath, buf, expectedMtime);
       if (n.fileKind === 'docx') rememberDocx(id, buf, saved.savedAs ? expectedMtime : saved.mtime);
-      if (!saved.savedAs) store.fillFileText(id);
+      trace.write('save-write', { id, kind: n.fileKind, bytes: buf.length, ms: H.msSince(started), savedAs: !!saved.savedAs });
+      if (!saved.savedAs) {
+        const reread = performance.now();
+        store.fillFileText(id).then(() => trace.write('text-reread', { id, kind: n.fileKind, ms: H.msSince(reread) }));
+      }
       return saved;
     }
     if (rules.to && rules.from.has(own) && given.toLowerCase() === (stem + '.' + rules.to).toLowerCase()) {
@@ -1372,7 +1391,7 @@ function main() {
 
   app.whenReady().then(() => {
     const step = (name: string, fn: () => void) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
-    step('crafts', () => { craftsReady = crafts.serve(protocol); });
+    step('crafts', () => { craftsReady = crafts.serve(protocol, trace.write); });
     step('theme', applyTheme);
     step('window', createWindow);
     if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });
