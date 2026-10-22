@@ -4,6 +4,15 @@
   "description": "Tray-resident notes app launched by a global hotkey",
   "main": "src/main.mts",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/celestinryf/notes-desktop.git"
+  },
+  "homepage": "https://github.com/celestinryf/notes-desktop",
+  "bugs": {
+    "url": "https://github.com/celestinryf/notes-desktop/issues"
+  },
   "scripts": {
     "start": "electron .",
     "test": "node --test --test-force-exit --test-timeout=60000 \"test/unit/**/*.test.js\"",
@@ -20,9 +29,9 @@
     "icons": "node scripts/make-icons.js",
     "build:code": "esbuild src/code/index.ts --bundle --format=iife --global-name=NotesCode --target=chrome120 --minify --outfile=src/renderer/vendor/code.bundle.js",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
-    "build:app": "node scripts/build-renderer.js"
+    "build:app": "node scripts/build-renderer.js",
+    "notices": "node scripts/make-notices.js"
   },
-  "license": "MIT",
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^22.20.5",
