@@ -14,6 +14,8 @@ export const NotesCraftFrame = (function () {
     let readyTimer: ReturnType<typeof setTimeout> | undefined;
     let queued: { name: string, bytes: Uint8Array, context: Context } | null = null;
     let current: { doc: string, name: string, context: Context } | null = null;
+    let parked: { doc: string, name: string, context: Context } | null = null;
+    let confirmed = false;
     let dirty = false;
     let unsaved = false;
     let waiters: ((ok: boolean) => void)[] = [];
@@ -40,6 +42,7 @@ export const NotesCraftFrame = (function () {
       if (!current || m.doc !== current.doc) return;
       if (m.type === 'opened') {
         mark('opened', Object.assign({ ok: !!m.ok }, numbers(m, ['ms'])));
+        confirmed = !!m.ok;
         if (m.ok) { if (onOpened) onOpened(); }
         else if (onOpenFailed) onOpenFailed(String(m.error || 'the app could not open it'));
       } else if (m.type === 'drawn') {
@@ -91,6 +94,8 @@ export const NotesCraftFrame = (function () {
       unsaved = false;
       waiters.forEach((w) => w(false));
       waiters = [];
+      parked = null;
+      confirmed = false;
       current = { doc: token(), name, context };
       if (!ready) { mark('post', { queued: true, bytes: bytes.byteLength }); queued = { name, bytes, context }; return; }
       mark('post', { queued: false, bytes: bytes.byteLength });
@@ -110,16 +115,36 @@ export const NotesCraftFrame = (function () {
       });
     }
 
+    function park() {
+      if (!current || !ready || !confirmed || dirty || unsaved) { close(); return false; }
+      parked = current;
+      current = null;
+      queued = null;
+      return true;
+    }
+
+    function resume(context: Context) {
+      if (!parked || gaveUp || !ready) return false;
+      current = { doc: parked.doc, name: parked.name, context };
+      parked = null;
+      confirmed = true;
+      dirty = false;
+      unsaved = false;
+      return true;
+    }
+
     function close() {
       waiters.forEach((w) => w(false));
       waiters = [];
       current = null;
+      parked = null;
+      confirmed = false;
       dirty = false;
       unsaved = false;
       queued = null;
     }
 
-    return { open, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
+    return { open, park, resume, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
   }
 
   return { create };
