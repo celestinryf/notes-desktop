@@ -19,7 +19,7 @@ A notes app for Windows that opens from anywhere with **Ctrl+Alt+N**. It keeps y
 
 ## Install and run
 
-You need Windows, [Node.js](https://nodejs.org) 24 with npm, and [git](https://git-scm.com). Notes uses git for each note's version history and for vault sync.
+You need Windows, [Node.js](https://nodejs.org) 24 with npm (the version Notes is developed with), and [git](https://git-scm.com). Notes uses git for each note's version history and for vault sync.
 
 ```
 git clone https://github.com/celestinryf/notes-desktop.git
@@ -54,14 +54,14 @@ npm start
 - **Related notes:** under each note, the notes it links to, the notes that link to it, and notes that share its tags.
 
 **Each note**
-- **Earlier versions (Ctrl+Shift+H):** every saved change is kept in a local git history. Preview an old version and restore it.
+- **Earlier versions (Ctrl+Shift+H):** Notes' own notes are saved to a local git history a few seconds after each change (on by default, in Settings › History). Preview an old version and restore it. Locked notes are left out.
 - **Lock (Ctrl+L):** encrypts the note's text on disk with a password (scrypt and AES-256-GCM). The title stays visible. A forgotten password cannot be recovered.
 - **Reminders (Ctrl+Shift+M):** a Windows notification when it is due.
 - **Stick to the desktop (Ctrl+Shift+T):** the note becomes a small window on the desktop, with a colour, and edits flow both ways.
 - **Attach files (Ctrl+Shift+O)** and **record a voice memo (Ctrl+Shift+G):** files are copied into Notes' own folder and linked from the note.
 - **Read aloud (Ctrl+Shift+R)** with the system's voices, and **dictate (Ctrl+Shift+D)** through Windows speech recognition.
 - **Share (Ctrl+Shift+S):** copy as Markdown, rich text or plain text, copy a link to the note, email it, or save it as PDF, HTML or Markdown.
-- **Live share:** edit one note together with people on your local network. No account or outside service is involved, and the link carries a random token.
+- **Live share:** edit one note together with people on your local network, with no account or outside service. It is plain HTTP, and the random token in the link is its only protection: anyone on the network who has the link can edit the note until you stop sharing.
 - **Print (Ctrl+Shift+P)**, duplicate, and export as Markdown.
 
 **Appearance**
@@ -79,17 +79,18 @@ Open a file with Ctrl+O, **Open file…** at the bottom left, or by dropping it 
 |---|---|
 | Markdown (`.md`) | The rendered editor, saved back as Markdown |
 | Plain text (`.txt`) | A plain text box |
-| LaTeX, code and config (`.tex`, `.py`, `.js`, `.json` and 56 more types) | A code editor with highlighting and line numbers |
+| LaTeX, code and config (`.tex`, `.py`, `.js`, `.json` and dozens more) | A code editor with highlighting and line numbers |
 | `.csv`, `.tsv` | A table; Ctrl+E edits the text |
 | Images (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`, `.ico`, `.avif`) | A viewer, fitted to the pane or at actual size |
 | PDF | A viewer where you can highlight, add text, draw, sign, comment, fill forms and reorder pages. The original is backed up before each save |
 | Word (`.docx`) | A simple editor for text, bold, italic and underline, with the document's layout |
 | Spreadsheets (`.xlsx`, `.xls`, `.ods` and others) | Through GridCraft (below); otherwise "Open with…" opens them in their own app |
 
-- **Convert to…** saves a copy in another format (Markdown, text, HTML, Word or PDF) next to the original, and never overwrites a file.
+- **Convert to…** saves a copy in another format (Markdown, text, HTML, Word or PDF) next to the original, and never overwrites a file. Copies made from a PDF or a spreadsheet keep only the text.
+- Any other text file up to 4 MB opens as text.
 - **Open with…** opens the file in its usual app.
 - **WordCraft and GridCraft (optional):** Notes can host two web apps built from Rust: [WordCraft](https://github.com/celestinryf/wordcraft), a full word processor for the Word family, and [GridCraft](https://github.com/celestinryf/gridcraft), a spreadsheet. Notes looks for their web builds in `%USERPROFILE%\wordcraft\dist\web` and `%USERPROFILE%\gridcraft\dist\web`, or in the folders named by `NOTES_APP_WORDCRAFT_DIR` and `NOTES_APP_GRIDCRAFT_DIR`.
-- **MarkItDown (optional):** with Microsoft's [MarkItDown](https://github.com/microsoft/markitdown) installed (`pip install "markitdown[all]"`), search also finds the text inside spreadsheets.
+- **MarkItDown (optional):** with Microsoft's [MarkItDown](https://github.com/microsoft/markitdown) installed (`pip install "markitdown[all]"`), search also finds the text inside `.xlsx` and `.xls` files.
 
 ![The command palette](docs/screenshots/command-palette.png)
 
@@ -100,7 +101,7 @@ A vault is a folder of Markdown and text files that Notes shows as notes, in the
 - A new note becomes a file named after its title. Renaming a note renames the file, moving it moves the file, and trash moves it to the vault's `.trash` folder.
 - Changes made outside Notes, by another editor or by `git pull`, appear on their own.
 
-For a vault that is a git repository with a remote, Notes syncs the way obsidian-git does. It commits 8 seconds after the last change, pulls with rebase, and pushes. It also syncs every few minutes (5 by default) and when Notes quits. Notes never resolves a conflict for you: the sync stops, your commit stays, and the vault's status says what happened. The folder keeps working in Obsidian or any other editor.
+For a vault that is a git repository with a remote, Notes syncs the way obsidian-git does. It commits 8 seconds after the last change, pulls with rebase, and pushes. It also syncs every few minutes (5 by default), and when Notes quits if a change is still waiting. Notes never resolves a conflict for you: the sync stops, your commit stays, and the vault's status says what happened. The folder keeps working in Obsidian or any other editor.
 
 Notes' own notes (the ones not in a vault) have their history in a local git repository. Settings › History can push it to a remote you choose, as a backup.
 
@@ -108,10 +109,10 @@ Notes' own notes (the ones not in a vault) have their history in a local git rep
 
 Ctrl+Shift+A opens a panel that runs [Claude Code](https://github.com/anthropics/claude-code) on your notes and shows its output as it works.
 - **Where it runs:** for a vault note, Claude Code works in the vault folder; for a file, in the file's folder. For Notes' own notes it works in a folder of Markdown copies, and its edits are read back into the notes.
-- **What it may do:** "Allow edits" controls whether it may change files. "Open terminal" starts an interactive Claude Code session in the same folder.
+- **What it may do:** with "Allow edits" off, a panel run can only read. "Open terminal" starts an ordinary interactive Claude Code session in the same folder, which that switch does not limit.
 - **What it needs:** the `claude` command on your PATH, signed in with a Claude account. Notes refuses to run it when it is set up to bill API credits.
 
-Settings › Agent files › **Add my agent files** links your Claude Code files (`CLAUDE.md`, `AGENTS.md`, commands, output styles, memory) into an "Agent files" folder, where editing a note edits the real file.
+Settings › Agent files › **Add my agent files** links your coding agents' files (such as `CLAUDE.md`, `AGENTS.md`, and Claude Code's commands, output styles and memory) into an "Agent files" folder, where editing a note edits the real file.
 
 ## Keyboard shortcuts
 
@@ -163,7 +164,7 @@ Everything else is in `%APPDATA%\notes-app\` (the tray's "Open data folder" open
 
 | Path | What it holds |
 |---|---|
-| `notes.json` | Notes' own notes, folders and settings. Written to a temporary file, then swapped in, so a crash cannot leave half a file |
+| `notes.json` | Notes' own notes, folders and settings. Written to a temporary file first, then renamed into place |
 | `backups\` | A copy of `notes.json` at most every 10 minutes; the newest 10 are kept |
 | `history\` | The git repository behind Earlier versions |
 | `attachments\` | Attached files and voice memos |
