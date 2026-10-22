@@ -12,9 +12,7 @@ const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
 import { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
 import * as markitdown from './markitdown.mts';
-import { createRequire } from 'node:module';
-
-const requireWhenNeeded = createRequire(import.meta.url);
+import { runWorker } from './run-worker.mts';
 
 
 function kindOf(filePath: string): FileKind {
@@ -96,6 +94,7 @@ function detectEol(filePath: string) {
 }
 
 const MAX_DOCX_BYTES = 50 * 1024 * 1024;
+const DOCX_TEXT_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_ZIP_UNPACKED = 100 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 20000;
 const inflateRaw = (buf: Buffer, opts: zlib.ZlibOptions): Promise<Buffer> => new Promise((resolve, reject) => zlib.inflateRaw(buf, opts, (err, out) => (err ? reject(err) : resolve(out))));
@@ -153,8 +152,9 @@ async function readDocxText(filePath: string) {
   const ext = extOf(filePath);
   let body = '';
   if (OOXML_EXT.has(ext)) {
-    const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
-    body = String((await mammoth.extractRawText({ buffer: await readDocumentBuffer(filePath) })).value || '');
+    const res = await runWorker<{ body: string }>('docx-text-worker.mts', { bytes: await readDocumentBuffer(filePath) }, DOCX_TEXT_TIMEOUT_MS, 'Reading the text of the Word document took too long.');
+    if (!res.ok) throw new Error(res.error);
+    body = res.body;
   } else if (ext === 'odt') {
     const parts = await assertSafeZip(await readDocumentBuffer(filePath), ['content.xml']);
     body = parts['content.xml'] ? odtText(parts['content.xml'].toString('utf8')) : '';
