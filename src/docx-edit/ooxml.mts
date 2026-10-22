@@ -18,7 +18,7 @@ type XmlElement = { name: string, attrs: string, start: number, openEnd: number,
 type XmlNode = XmlElement | OtherToken;
 type PageBreak = { start: number, end: number, rPr: string };
 type Run = { kind: 'run', rPr: string, xml: string, text: string, pageBreaks: PageBreak[], pictures: string[] };
-type Marker = { kind: 'marker', xml: string, text?: undefined };
+type Marker = { kind: 'marker', xml: string, text?: undefined, pictures?: undefined };
 type Item = Run | Marker;
 type ParagraphModel = { pPr: string | null, pPrNoSect: string | null, hasSect: boolean, markRPr: string, items: Item[], pageBreaks: PageBreak[], contentStart: number };
 type ScannedParagraph = { start: number, openEnd: number, end?: number, placeOk: boolean, parentStart: number, selfClosing: boolean };
@@ -27,6 +27,8 @@ type EditableParagraph = ParagraphPlace & ParagraphModel & { editable: true, rea
 type FixedParagraph = ParagraphPlace & { editable: false, reason: string };
 type Paragraph = EditableParagraph | FixedParagraph;
 type Scan = { prefix: string, paragraphs: Paragraph[] };
+type ScanOrNone = { prefix: string | null, paragraphs: Paragraph[] };
+type Patch = { start: number, end: number, old: string, xml: string };
 type Fmt = { b?: boolean, i?: boolean, u?: boolean };
 type Baseline = { chars: Fmt[], pictures?: (string | null)[], empty: Fmt };
 type Piece = { source: number, chars: { ch: string, fmt: Fmt, picture?: string | null }[] };
@@ -41,7 +43,7 @@ const FMT_KEYS: ('b' | 'i' | 'u')[] = ['b', 'i', 'u'];
 const TOKEN = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<!DOCTYPE[\s\S]*?>|<(\/?)([A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|[^<]+/y;
 
 // The tokens of xml from `from` to `to`: { type: open|close|empty|text|comment|pi|cdata|doctype, name, attrs, start, end }.
-function* tokenize(xml, from = 0, to = xml.length): Generator<Token> {
+function* tokenize(xml: string, from = 0, to = xml.length): Generator<Token> {
   TOKEN.lastIndex = from;
   while (TOKEN.lastIndex < to) {
     const start = TOKEN.lastIndex;
@@ -61,7 +63,7 @@ function* tokenize(xml, from = 0, to = xml.length): Generator<Token> {
 
 // The element tree of xml from `from` to `to` (which must be balanced): nodes { name, attrs, start, end, openEnd,
 // closeStart, children } for elements, { type, start, end } for anything else.
-function parseNodes(xml, from, to): XmlNode[] {
+function parseNodes(xml: string, from: number, to: number): XmlNode[] {
   const root: XmlElement = { name: '', attrs: '', start: 0, openEnd: 0, closeStart: 0, end: 0, children: [] };
   const stack = [root];
   for (const t of tokenize(xml, from, to)) {
@@ -84,15 +86,15 @@ function parseNodes(xml, from, to): XmlNode[] {
 }
 
 // Throws unless xml (a whole part, or a run of elements) is balanced and readable.
-function assertWellFormed(xml) {
+function assertWellFormed(xml: string) {
   parseNodes(xml, 0, xml.length);
 }
 
 const ENTITY = /&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/g;
-const NAMED = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
+const NAMED: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
 // Text is handled in UTF-16 code units everywhere (here, in the diff and on the page), so a character outside the
 // Basic Multilingual Plane (an emoji) counts as two, the same on every side.
-function decodeText(s) {
+function decodeText(s: string) {
   return s.replace(ENTITY, (e) => {
     if (NAMED[e]) return NAMED[e];
     const code = e[2] === 'x' ? parseInt(e.slice(3, -1), 16) : parseInt(e.slice(2, -1), 10);
@@ -102,18 +104,18 @@ function decodeText(s) {
 // Characters XML cannot hold are dropped, and so is a carriage return (a reader would turn it into a line feed);
 // & and < (and > for safety) are escaped.
 const NOT_XML = /[\u0000-\u0008\u000B\u000C\u000D\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-function escapeText(s) {
+function escapeText(s: string) {
   return s.replace(NOT_XML, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function attr(attrs, qname) {
+function attr(attrs: string, qname: string) {
   const m = new RegExp('\\s' + qname.replace(/[.:]/g, '\\$&') + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')').exec(attrs);
   return m ? decodeText(m[1] !== undefined ? m[1] : m[2]) : null;
 }
-const isOn = (v) => v === null || !/^(0|false|off)$/i.test(v);
+const isOn = (v: string | null) => v === null || !/^(0|false|off)$/i.test(v);
 
 // The prefix the main WordprocessingML namespace has on the root element ('w' in practice), or null.
-function mainPrefix(xml) {
+function mainPrefix(xml: string) {
   for (const t of tokenize(xml)) {
     if (t.type !== 'open' && t.type !== 'empty') continue;
     const m = /\sxmlns:([\w.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
@@ -127,7 +129,7 @@ function mainPrefix(xml) {
 // ---- Which paragraphs can be edited ----------------------------------------------------------------------
 
 // Why a paragraph holding this element is read-only, by the element's local name.
-const REASONS = {
+const REASONS: Record<string, string> = {
   ins: 'tracked changes', del: 'tracked changes', moveFrom: 'tracked changes', moveTo: 'tracked changes',
   pPrChange: 'tracked changes', rPrChange: 'tracked changes', hyperlink: 'a link', fldSimple: 'a field',
   fldChar: 'a field', instrText: 'a field', drawing: 'a picture', pict: 'a picture', object: 'an object',
@@ -136,8 +138,8 @@ const REASONS = {
   commentReference: 'a comment', annotationRef: 'a comment', sym: 'a symbol', vanish: 'hidden text',
   specVanish: 'hidden text', ruby: 'ruby text', ptab: 'a positioned tab',
 };
-const local = (name) => name.slice(name.indexOf(':') + 1);
-const reasonFor = (name) => REASONS[local(name)] || 'content Notes cannot edit safely';
+const local = (name: string) => name.slice(name.indexOf(':') + 1);
+const reasonFor = (name: string) => REASONS[local(name)] || 'content Notes cannot edit safely';
 // Containers a paragraph may sit in and still be edited: the body, and table cells.
 const PLACES = new Set(['document', 'body', 'tbl', 'tr', 'tc']);
 
@@ -145,7 +147,7 @@ class ReadOnly extends Error {}
 const readOnly: (why: string) => never = (why) => { throw new ReadOnly(why); };
 
 // The run properties, checked: hidden text or tracked formatting make the paragraph read-only.
-function checkRPr(node, W) {
+function checkRPr(node: XmlElement, W: string | null) {
   for (const c of node.children) {
     if (!c.name) continue;
     const n = local(c.name);
@@ -156,7 +158,7 @@ function checkRPr(node, W) {
 // What a plain break element (no attribute but its type) stands for in the text: '\n' for a line break, '\f' for a
 // page break, or null for any other (a column break, or one with other attributes).
 const PAGE_BREAK = '\f';
-function breakChar(attrs, W) {
+function breakChar(attrs: string, W: string | null) {
   const m = new RegExp('^\\s*(?:' + W + ':type\\s*=\\s*"(textWrapping|page)"\\s*)?$').exec(attrs);
   return m ? (m[1] === 'page' ? PAGE_BREAK : '\n') : null;
 }
@@ -167,13 +169,13 @@ const PICTURE = '\uFFFC';
 // A no-break space, as the browser writes some typed spaces.
 const NBSP = '\u00A0';
 // Whether text shown on the page is the file's text: the same, but for spaces the browser shows as no-break spaces.
-function sameShownText(fileText, shownText) {
+function sameShownText(fileText: string, shownText: string) {
   if (fileText.length !== shownText.length) return false;
   for (let k = 0; k < fileText.length; k++) if (fileText[k] !== shownText[k] && !(fileText[k] === ' ' && shownText[k] === NBSP)) return false;
   return true;
 }
 const PICTURE_URI = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
-function isPicture(drawingXml) {
+function isPicture(drawingXml: string) {
   return drawingXml.includes('uri="' + PICTURE_URI + '"') && !/<[\w.-]+:(?:txbxContent|p|tbl)[\s/>]/.test(drawingXml)
     && (drawingXml.match(/<[\w.-]+:graphicData\b/g) || []).length === 1;
 }
@@ -182,7 +184,7 @@ function isPicture(drawingXml) {
 // page breaks as '\f' and pictures as '\uFFFC' (characters a document cannot hold as text). pageBreaks:
 // [{ start, end, rPr }], where each page break element is in xml, for the display copy. pictures: the XML of each
 // picture's <w:drawing>, in order.
-function readRun(xml, node: XmlElement, W): Run {
+function readRun(xml: string, node: XmlElement, W: string | null): Run {
   let rPr = '', text = '';
   const pageBreaks: PageBreak[] = [];
   const pictures: string[] = [];
@@ -217,7 +219,7 @@ function readRun(xml, node: XmlElement, W): Run {
 }
 
 // The editable model of the paragraph node, or throws ReadOnly.
-function readParagraph(xml, node: XmlElement, W): ParagraphModel {
+function readParagraph(xml: string, node: XmlElement, W: string | null): ParagraphModel {
   const p: ParagraphModel = { pPr: null, pPrNoSect: null, hasSect: false, markRPr: '', items: [], pageBreaks: [], contentStart: node.openEnd };
   for (const c of node.children) {
     if (!c.name) {
@@ -259,7 +261,7 @@ function readParagraph(xml, node: XmlElement, W): ParagraphModel {
    items: runs and markers (see readRun); text: the runs' text joined. chain: paragraphs with the same chain number
    are siblings next to each other with no section break, so text may move between them (joining or splitting).
    Returns { prefix, paragraphs } (prefix null when the part is not WordprocessingML). */
-function scanDocument(xml) {
+function scanDocument(xml: string) {
   const W = mainPrefix(xml);
   if (!W) return { prefix: null, paragraphs: [] };
   const P = W + ':p';
@@ -318,7 +320,7 @@ function scanDocument(xml) {
 }
 
 // Document-wide reasons not to edit: settings.xml (tracked changes on, or editing restricted), or null when none.
-function settingsBlock(settingsXml) {
+function settingsBlock(settingsXml: string) {
   if (!settingsXml) return null;
   for (const t of tokenize(settingsXml)) {
     if (t.type !== 'open' && t.type !== 'empty') continue;
@@ -336,10 +338,10 @@ function settingsBlock(settingsXml) {
 const RPR_ORDER = ['rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'outline', 'shadow', 'emboss',
   'imprint', 'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing', 'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u',
   'effect', 'bdr', 'shd', 'fitText', 'vertAlign', 'rtl', 'cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath'];
-const rprRank = (name, W) => (name.startsWith(W + ':') && RPR_ORDER.includes(local(name)) ? RPR_ORDER.indexOf(local(name)) : RPR_ORDER.length);
+const rprRank = (name: string, W: string) => (name.startsWith(W + ':') && RPR_ORDER.includes(local(name)) ? RPR_ORDER.indexOf(local(name)) : RPR_ORDER.length);
 
 // rPr (XML, or '') with bold, italic or underline set on or off as in `set` ({ b, i, u }: true/false/undefined).
-function withFormatting(rPr, set, W) {
+function withFormatting(rPr: string, set: Fmt, W: string) {
   const want: (string[])[] = [];
   if (set.b !== undefined) want.push(['b', set.b ? '<' + W + ':b/>' : '<' + W + ':b ' + W + ':val="0"/>']);
   if (set.i !== undefined) want.push(['i', set.i ? '<' + W + ':i/>' : '<' + W + ':i ' + W + ':val="0"/>']);
@@ -367,7 +369,7 @@ function withFormatting(rPr, set, W) {
 
 // The XML of a run with this text, tabs, line breaks, page breaks and pictures as their own elements. pictures: the
 // <w:drawing> XML for each picture character, in order.
-function runXml(rPr, text, W, pictures: (string | null)[] = []) {
+function runXml(rPr: string, text: string, W: string, pictures: (string | null)[] = []) {
   let out = '<' + W + ':r>' + rPr;
   let pic = 0;
   for (const part of text.split(/([\t\n\f\uFFFC])/)) {
@@ -384,11 +386,11 @@ function runXml(rPr, text, W, pictures: (string | null)[] = []) {
 }
 
 // The ids that must stay unique to one paragraph, dropped from the copies a split makes (Word assigns new ones).
-const stripIds = (openTag) => openTag.replace(/\s+[\w.-]+:(?:paraId|textId)\s*=\s*(?:"[^"]*"|'[^']*')/g, '');
+const stripIds = (openTag: string) => openTag.replace(/\s+[\w.-]+:(?:paraId|textId)\s*=\s*(?:"[^"]*"|'[^']*')/g, '');
 
 /* Myers' diff of two token lists: for each token of b, the index of the token of a it keeps, or -1 when inserted.
    eq(x, y) compares tokens. Beyond `limit` differences it gives up and keeps only the common start and end. */
-function matchTokens(a, b, eq, limit = 2000) {
+function matchTokens(a: OldToken[], b: NewToken[], eq: (x: OldToken, y: NewToken) => boolean, limit = 2000) {
   const out = new Array(b.length).fill(-1);
   let s = 0;
   while (s < a.length && s < b.length && eq(a[s], b[s])) { out[s] = s; s++; }
@@ -414,7 +416,7 @@ function matchTokens(a, b, eq, limit = 2000) {
   if (found < 0) return out; // too different: the middle counts as replaced
   let x = n, y = m;
   for (let d = found; d > 0; d--) {
-    const band = trace[d], at = (k) => band[k + d + 1];
+    const band = trace[d], at = (k: number) => band[k + d + 1];
     const k = x - y;
     const prevK = k === -d || (k !== d && at(k - 1) < at(k + 1)) ? k + 1 : k - 1;
     const px = at(prevK), py = px - prevK;
@@ -425,7 +427,7 @@ function matchTokens(a, b, eq, limit = 2000) {
   return out;
 }
 
-const fmtKey = (f) => (f.b ? 'b' : '') + (f.i ? 'i' : '') + (f.u ? 'u' : '');
+const fmtKey = (f: Fmt) => (f.b ? 'b' : '') + (f.i ? 'i' : '') + (f.u ? 'u' : '');
 
 /* The XML that replaces paragraphs first..last (indices into scan.paragraphs, one chain) given what is now shown:
    pieces: [{ source: paragraph index, chars: [{ ch, fmt: { b, i, u }, picture }] }] in order, each becoming one
@@ -433,7 +435,7 @@ const fmtKey = (f) => (f.b ? 'b' : '') + (f.i ? 'i' : '') + (f.u ? 'u' : '');
    baselines: paragraph index -> { chars: [fmt per char of its text], pictures: [name per char, for pictures],
    empty: fmt } as first shown. A picture is kept only where it has the same name; it is never added.
    A paragraph that came through unchanged is copied as it was; so is each untouched run of a changed one. */
-function rewriteParagraphs(xml, scan: Scan, first, last, pieces: Piece[], baselines: Map<number, Baseline>) {
+function rewriteParagraphs(xml: string, scan: Scan, first: number, last: number, pieces: Piece[], baselines: Map<number, Baseline>) {
   const W = scan.prefix;
   const paras: EditableParagraph[] = [];
   for (const p of scan.paragraphs.slice(first, last + 1)) {
@@ -556,7 +558,7 @@ function rewriteParagraphs(xml, scan: Scan, first, last, pieces: Piece[], baseli
     const pPr = src.hasSect && nth !== count.get(pc.source) ? src.pPrNoSect : src.pPr;
     let body = '';
     let k = 0;
-    const flushMarkers = (q) => { for (const m of markersBefore.get(q) || []) body += m.xml; };
+    const flushMarkers = (q: number) => { for (const m of markersBefore.get(q) || []) body += m.xml; };
     while (k < chars.length) {
       flushMarkers(startJ + k);
       // A stretch with the same source run and the same changes, not crossing a marker.
@@ -588,20 +590,20 @@ function rewriteParagraphs(xml, scan: Scan, first, last, pieces: Piece[], baseli
    docx-preview moves the whole run holding a break to the next page, text before the break included. */
 const MARK = '_notesP';
 const BREAK_MARK = '_notesB';
-const bookmark = (W, id, name) => '<' + W + ':bookmarkStart ' + W + ':id="' + id + '" ' + W + ':name="' + name + '"/>';
+const bookmark = (W: string, id: number, name: string) => '<' + W + ':bookmarkStart ' + W + ':id="' + id + '" ' + W + ':name="' + name + '"/>';
 // Whether the paragraph's first page break is the last thing docx-preview sees in it (it skips spelling marks).
-function breakIsLast(xml, p, W) {
-  const e = (name) => W.replace(/\./g, '\\.') + ':' + name;
+function breakIsLast(xml: string, p: EditableParagraph, W: string) {
+  const e = (name: string) => W.replace(/\./g, '\\.') + ':' + name;
   return new RegExp('^\\s*</' + e('r') + '>(?:\\s*<' + e('proofErr') + '\\b[^>]*/>)*\\s*</' + e('p') + '>$').test(xml.slice(p.pageBreaks[0].end, p.end));
 }
-function markForDisplay(xml, scan) {
+function markForDisplay(xml: string, scan: Scan) {
   const W = scan.prefix;
   let out = xml;
   for (const p of [...scan.paragraphs].reverse()) {
     if (!p.editable) continue;
     if (p.pageBreaks.length && !breakIsLast(xml, p, W)) {
       const { start, end, rPr } = p.pageBreaks[0];
-      const cut = (between) => '</' + W + ':r>' + between + '<' + W + ':r>' + rPr;
+      const cut = (between: string) => '</' + W + ':r>' + between + '<' + W + ':r>' + rPr;
       out = out.slice(0, start) + cut('') + out.slice(start, end) + cut(bookmark(W, 910000000 + p.index, BREAK_MARK + p.index)) + out.slice(end);
     }
     const mark = bookmark(W, 900000000 + p.index, MARK + p.index);
@@ -613,7 +615,7 @@ function markForDisplay(xml, scan) {
 }
 
 // Throws unless each patch replaces whole editable paragraphs of one chain (first..last) with paragraphs only.
-function checkPatches(xml, scan, patches) {
+function checkPatches(xml: string, scan: ScanOrNone, patches: Patch[]) {
   if (!Array.isArray(patches) || !patches.length) throw new Error('there was no change to save');
   const W = scan.prefix;
   const byStart = new Map(scan.paragraphs.map((p) => [p.start, p]));
@@ -621,9 +623,11 @@ function checkPatches(xml, scan, patches) {
     const first = p && byStart.get(p.start);
     const last = first && scan.paragraphs.find((q) => q.end === p.end && q.index >= first.index);
     if (!first || !last) throw new Error('a change does not cover whole paragraphs');
+    const replaced: EditableParagraph[] = [];
     for (let i = first.index; i <= last.index; i++) {
       const q = scan.paragraphs[i];
       if (!q.editable || q.chain !== first.chain) throw new Error('a change covers a paragraph that cannot be edited');
+      replaced.push(q);
     }
     if (typeof p.xml !== 'string') throw new Error('a change is missing its text');
     const nodes = parseNodes(p.xml, 0, p.xml.length);
@@ -633,9 +637,8 @@ function checkPatches(xml, scan, patches) {
     // paragraphs' pictures, byte for byte, and each of those is used at most once.
     const props: Set<string | null> = new Set([null]);
     const pictures = new Map();
-    const picturesOf = (model) => model.items.flatMap((it) => it.pictures || []);
-    for (let i = first.index; i <= last.index; i++) {
-      const q = scan.paragraphs[i];
+    const picturesOf = (model: { items: Item[] }) => model.items.flatMap((it) => it.pictures || []);
+    for (const q of replaced) {
       props.add(q.pPr);
       props.add(q.pPrNoSect);
       for (const x of picturesOf(q)) pictures.set(x, (pictures.get(x) || 0) + 1);
@@ -658,7 +661,7 @@ function checkPatches(xml, scan, patches) {
 
 // Keeps editing within what the page could show: paragraphs where usable(index) is false become read-only, and
 // chains are cut around them, so a save never spans a paragraph that is not on the page as the file has it.
-function limitTo(scan, usable) {
+function limitTo<S extends { paragraphs: { chain: number, editable: boolean, reason: string }[] }>(scan: S, usable: (index: number) => boolean) {
   const was = scan.paragraphs.map((p) => p.chain);
   let chain = 0;
   scan.paragraphs.forEach((p, i) => {
@@ -671,7 +674,7 @@ function limitTo(scan, usable) {
 }
 
 // Applies patches [{ start, end, old, xml }] (ranges of the part, old being exactly what is there) to xml.
-function applyPatches(xml, patches) {
+function applyPatches(xml: string, patches: Patch[]) {
   const sorted = [...patches].sort((a, b) => b.start - a.start);
   let out = xml;
   let limit = xml.length;

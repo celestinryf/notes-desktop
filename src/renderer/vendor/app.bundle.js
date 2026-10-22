@@ -168,8 +168,10 @@
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
     isNonMarkdownFile: () => isNonMarkdownFile,
+    isObjectLike: () => isObjectLike,
     isOoxmlWordFile: () => isOoxmlWordFile,
     isPlainTextFile: () => isPlainTextFile,
+    isRecord: () => isRecord,
     isTableFile: () => isTableFile,
     isViewerOnlyFile: () => isViewerOnlyFile,
     mailtoFor: () => mailtoFor,
@@ -474,7 +476,7 @@
   var CRAFT_OF = { docx: "wordcraft", sheet: "gridcraft" };
   var ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
   function isTableFile(note) {
-    return isPlainTextFile(note) && ["csv", "tsv"].includes(extOf(note.filePath));
+    return !!note && isPlainTextFile(note) && ["csv", "tsv"].includes(extOf(note.filePath));
   }
   function isOoxmlWordFile(note) {
     return !!(note && note.filePath && note.fileKind === "docx" && OOXML_EXT.has(extOf(note.filePath)));
@@ -587,6 +589,8 @@
     }
     return Math.max(1, score - t.length / 20);
   }
+  var isObjectLike = (v) => !!v && typeof v === "object";
+  var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
 
   // src/shared/themes.mts
   var themes_exports = {};
@@ -5621,7 +5625,7 @@
           baselines.set(para.index, baselineOf(shown2.chars, fmtOf(p)));
           editable++;
         }
-        X.limitTo(scan, (i) => baselines.has(i));
+        X.limitTo(shownScan(), (i) => baselines.has(i));
         const readOnly = shownScan().paragraphs.length - editable;
         if (!editable) return { editable, readOnly };
         const holders = /* @__PURE__ */ new Set();

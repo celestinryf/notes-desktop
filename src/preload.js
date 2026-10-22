@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 /** @template {keyof MainEvents} K @param {K} channel @returns {Listener<K>} */
 const on = (channel) => (handler) => {
+  /** @param {unknown} _event @param {unknown[]} args */
   const wrapped = (_event, ...args) => handler(.../** @type {MainEvents[K]} */ (args));
   ipcRenderer.on(channel, wrapped);
   return () => ipcRenderer.removeListener(channel, wrapped);

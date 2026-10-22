@@ -5,7 +5,7 @@ const INK = [0x12, 0x1a, 0x2a];        // BGR of #2a1a12
 const TANGERINE = [0x3e, 0x7b, 0xf4];  // BGR of #f47b3e
 const CREAM = [0xe4, 0xf1, 0xfb];      // BGR of #fbf1e4
 
-function drawIconBitmap(size) {
+function drawIconBitmap(size: number) {
   const buf = Buffer.alloc(size * size * 4);
   const border = Math.max(1, Math.round(size / 16));
   const radius = Math.round(size / 6);
@@ -15,7 +15,7 @@ function drawIconBitmap(size) {
   const padX = Math.round(size * 0.25);
   const lines = [0, 1, 2].map((i) => lineStart + i * lineGap);
 
-  const insideRounded = (x, y, inset) => {
+  const insideRounded = (x: number, y: number, inset: number) => {
     const lo = inset, hi = size - 1 - inset, r = Math.max(0, radius - inset);
     if (x < lo || x > hi || y < lo || y > hi) return false;
     const cx = x < lo + r ? lo + r : x > hi - r ? hi - r : x;

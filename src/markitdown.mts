@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { resolveExecutable, launchSpec } from './claude-bin.mts';
 
 // What MarkItDown reads that nothing else in Notes does (Word, PDF, HTML and text have their own readers): the
@@ -21,7 +21,7 @@ const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 const TIMEOUT_MS = 2 * 60 * 1000;
 const NAMES = process.platform === 'win32' ? ['markitdown.exe', 'markitdown'] : ['markitdown'];
 
-let found; // looked up once per run; null when it is not installed
+let found: ReturnType<typeof resolveExecutable> | undefined; // looked up once per run; null when it is not installed
 function executable() {
   if (found === undefined) {
     const override = process.env.NOTES_APP_MARKITDOWN_BIN;
@@ -30,10 +30,10 @@ function executable() {
   return found;
 }
 const available = () => !!executable();
-const reads = (ext) => EXT.has(ext);
+const reads = (ext: string) => EXT.has(ext);
 
 // The file's text as Markdown: { markdown, warning }. Throws when MarkItDown is missing, fails or takes too long.
-async function toMarkdown(filePath) {
+async function toMarkdown(filePath: string) {
   const exe = executable();
   if (!exe) throw new Error('MarkItDown is not installed (pip install "markitdown[all]").');
   if (fs.statSync(filePath).size > MAX_INPUT_BYTES) throw new Error('This file is larger than 100 MB.');
@@ -53,7 +53,7 @@ async function toMarkdown(filePath) {
 
 // Runs MarkItDown to completion. Resolves on exit code 0; rejects with its last stderr line, or after the timeout,
 // once the process (and on Windows the Python it starts) is gone.
-function run(exe, args) {
+function run(exe: NonNullable<typeof found>, args: string[]) {
   const spec = launchSpec(exe, args);
   return (new Promise((resolve, reject) => {
     let child;
@@ -77,10 +77,10 @@ function run(exe, args) {
   }) as Promise<void>);
 }
 // The markitdown.exe on Windows is a launcher that runs Python as a child; killing it alone leaves Python running.
-function killTree(child) {
+function killTree(child: ChildProcess) {
   if (process.platform === 'win32') execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => child.kill());
   else child.kill();
 }
-const lastLine = (s) => s.trim().split(/\r?\n/).pop().slice(0, 300);
+const lastLine = (s: string) => (s.trim().split(/\r?\n/).pop() || '').slice(0, 300);
 
 export { EXT, available, reads, toMarkdown };

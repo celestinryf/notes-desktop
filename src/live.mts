@@ -42,7 +42,7 @@ function readJson(req: http.IncomingMessage, limit: number): Promise<Record<stri
   });
 }
 
-function sameToken(a, b) {
+function sameToken(a: string, b: string) {
   const x = Buffer.from(String(a || '')), y = Buffer.from(String(b || ''));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
@@ -72,11 +72,11 @@ class LiveShare {
     return { role: s.role, url: s.url, peers: s.role === 'host' ? s.clients.size : (s.connected ? 1 : 0), connected: s.role === 'host' ? true : !!s.connected, version: s.version, error: s.error || null, localOnly: s.role === 'host' && s.local, pending: s.role === 'guest' && s.dirty };
   }
 
-  _emit(noteId) { this.onStatus(noteId, this.statusOf(noteId)); }
+  _emit(noteId: string) { this.onStatus(noteId, this.statusOf(noteId)); }
 
   // ---- host ------------------------------------------------------------------
 
-  host(noteId, opts?) {
+  host(noteId: string, opts?: { token?: string, port?: number, hostname?: string, advertise?: string, movedFrom?: number }) {
     opts = opts || {};
     const note = this.store.get(noteId);
     if (!note || note.trashedAt) throw new Error('Note not found');
@@ -109,7 +109,7 @@ class LiveShare {
         this.sessions.set(noteId, session);
         session.error = opts.movedFrom ? 'Port ' + opts.movedFrom + ' was busy; the link changed, share it again.' : null;
         session.local = (opts.advertise || lanAddress()) === '127.0.0.1';
-        this.store.setLive(noteId, { role: 'host', url: session.url, token, port: session.port });
+        this.store.setLive(noteId, { role: 'host', url: session.url, token, port: session.port ?? undefined });
         this._emit(noteId);
         resolve(this.statusOf(noteId));
       });
@@ -119,20 +119,20 @@ class LiveShare {
     return p;
   }
 
-  _state(noteId, session) {
+  _state(noteId: string, session: HostSession) {
     const n = this.store.get(noteId);
     return { id: noteId, title: n ? n.title : '', body: n ? n.body : '', version: session.version, updatedAt: n ? n.updatedAt : 0 };
   }
 
-  async _handle(session, noteId, req, res) {
+  async _handle(session: HostSession, noteId: string, req: http.IncomingMessage, res: http.ServerResponse) {
     // Anything the handler cannot cope with (a malformed path such as "//" makes new URL throw) must still
     // get a response: an async handler's rejection would otherwise be unhandled and the socket left open.
     try { await this._route(session, noteId, req, res); }
     catch (_) { try { if (!res.headersSent) res.statusCode = 400; res.end('bad request'); } catch (_e) { /* socket gone */ } }
   }
 
-  async _route(session, noteId, req, res) {
-    const url = new URL(req.url, 'http://x');
+  async _route(session: HostSession, noteId: string, req: http.IncomingMessage, res: http.ServerResponse) {
+    const url = new URL(req.url || '/', 'http://x');
     const parts = url.pathname.split('/').filter(Boolean); // ['live', token, ('events')?]
     res.setHeader('Cache-Control', 'no-store');
     if (parts[0] !== 'live' || !sameToken(parts[1], session.token)) { res.statusCode = 404; res.end('not found'); return; }
@@ -172,7 +172,7 @@ class LiveShare {
     res.statusCode = 405; res.end('method not allowed');
   }
 
-  _broadcast(session, noteId, exceptClientId) {
+  _broadcast(session: HostSession, noteId: string, exceptClientId?: unknown) {
     const payload = 'event: state\ndata: ' + JSON.stringify(Object.assign(this._state(noteId, session), { from: exceptClientId || 'host' })) + '\n\n';
     for (const res of session.clients) { try { res.write(payload); } catch (_) { session.clients.delete(res); } }
   }
@@ -180,7 +180,7 @@ class LiveShare {
   // ---- guest -----------------------------------------------------------------
 
   // Joins a share: fetches the note, creates a local copy flagged live, then follows the event stream.
-  async join(url, opts) {
+  async join(url: string, opts?: { noteId?: string, resume?: boolean, folderId?: string | null, pending?: boolean }) {
     opts = opts || {};
     if (opts.noteId && this.sessions.has(opts.noteId)) return { noteId: opts.noteId, status: this.statusOf(opts.noteId) }; // already following
     const parsed = new URL(String(url).trim());
@@ -189,13 +189,15 @@ class LiveShare {
     if (opts.resume) {
       // After a restart: keep the local copy as it is; the first state from the host (or our own pending
       // push, when edits were made offline) brings the two sides together.
-      note = this.store.get(opts.noteId);
+      note = opts.noteId ? this.store.get(opts.noteId) : null;
       if (!note) throw new Error('Note not found');
     } else {
       const initial = await this._fetch(parsed.toString(), 'GET');
-      note = opts.noteId ? this.store.get(opts.noteId) : this.store.create({ title: initial.title, body: initial.body, folderId: opts.folderId || null });
+      const title = typeof initial.title === 'string' ? initial.title : undefined;
+      const body = typeof initial.body === 'string' ? initial.body : undefined;
+      note = opts.noteId ? this.store.get(opts.noteId) : this.store.create({ title, body, folderId: opts.folderId || null });
       if (!note) throw new Error('Note not found');
-      if (opts.noteId) this.store.update(note.id, { title: initial.title, body: initial.body });
+      if (opts.noteId) this.store.update(note.id, { title, body });
       version = Number(initial.version) || 0;
     }
     const session: GuestSession = { role: 'guest', url: parsed.toString(), version, connected: false, req: null, retry: 0, pushTimer: undefined, pushing: false, dirty: !!opts.pending, pendingFlag: !!opts.pending, stopped: false, lastByteAt: 0 };
@@ -226,7 +228,7 @@ class LiveShare {
     });
   }
 
-  _listen(noteId, session) {
+  _listen(noteId: string, session: GuestSession) {
     if (session.stopped) return;
     const u = new URL(session.url);
     const req = http.get({ hostname: u.hostname, port: u.port, path: u.pathname + '/events', headers: { Accept: 'text/event-stream' } }, (res) => {
@@ -251,7 +253,7 @@ class LiveShare {
           if (eventLine && eventLine.slice(7).trim() === 'end') { this._ended(noteId, session); return; }
           const dataLine = lines.find((x) => x.startsWith('data: '));
           if (!dataLine) continue;
-          try { this._onState(noteId, session, JSON.parse(dataLine.slice(6))); } catch (_) { /* ignore a bad frame */ }
+          try { this._onState(noteId, session, jsonObject(dataLine.slice(6))); } catch (_) { /* ignore a bad frame */ }
         }
       });
       res.on('end', () => { clearInterval(session.idleTimer); this._scheduleReconnect(noteId, session, 'Connection closed'); });
@@ -262,13 +264,13 @@ class LiveShare {
   }
 
   // The host said the share is over (or it no longer exists): the local note stays, as an ordinary note.
-  _ended(noteId, session) {
+  _ended(noteId: string, session: GuestSession) {
     if (session.stopped) return;
     this.stop(noteId);
     this.onStatus(noteId, { role: 'guest', url: session.url, peers: 0, connected: false, version: session.version, error: null, ended: true });
   }
 
-  _scheduleReconnect(noteId, session, why) {
+  _scheduleReconnect(noteId: string, session: GuestSession, why: string) {
     if (session.stopped) return;
     if (session.timer) return; // a destroyed request reports on both req and res; one reconnect is enough
     clearInterval(session.idleTimer);
@@ -279,8 +281,10 @@ class LiveShare {
     if (session.timer.unref) session.timer.unref();
   }
 
-  _onState(noteId, session, state) {
-    if (!state || typeof state.version !== 'number') return;
+  _onState(noteId: string, session: GuestSession, state: Record<string, unknown>) {
+    if (typeof state.version !== 'number') return;
+    const title = typeof state.title === 'string' ? state.title : undefined;
+    const body = typeof state.body === 'string' ? state.body : undefined;
     // The first state after (re)connecting is authoritative whatever its number: a restarted host counts
     // from one again. Later frames must not go backwards.
     const first = session.fresh;
@@ -293,15 +297,15 @@ class LiveShare {
     if (session.dirty || session.pushing) { if (session.dirty && !session.pushTimer) this.noteChanged(noteId); return; }
     const note = this.store.get(noteId);
     if (!note) return;
-    if (note.title === state.title && note.body === state.body) return;
-    try { this.store.update(noteId, { title: state.title, body: state.body }); } catch (_) { return; }
-    this.onRemote(noteId, { title: state.title, body: state.body, from: state.from || 'host' });
+    if (note.title === title && note.body === body) return;
+    try { this.store.update(noteId, { title, body }); } catch (_) { return; }
+    this.onRemote(noteId, { title, body, from: typeof state.from === 'string' && state.from ? state.from : 'host' });
   }
 
   // ---- edits from this side ---------------------------------------------------
 
   // Called after a local edit of a note went into the store (through the app's normal save path).
-  noteChanged(noteId) {
+  noteChanged(noteId: string) {
     const session = this.sessions.get(noteId);
     if (!session) return;
     if (session.role === 'host') { session.version++; this._broadcast(session, noteId, 'host'); return; }
@@ -310,7 +314,7 @@ class LiveShare {
     session.pushTimer = setTimeout(() => { session.pushTimer = undefined; this._push(noteId, session); }, this.pushDelayMs);
   }
 
-  async _push(noteId, session) {
+  async _push(noteId: string, session: GuestSession) {
     if (session.pushing || !session.dirty || session.stopped) return;
     session.pushing = true; session.dirty = false;
     const note = this.store.get(noteId);
@@ -334,7 +338,7 @@ class LiveShare {
   }
 
   // Waits for a guest's pending push (used before quit).
-  async flush(noteId) {
+  async flush(noteId: string) {
     const s = this.sessions.get(noteId);
     if (!s || s.role !== 'guest') return;
     clearTimeout(s.pushTimer); s.pushTimer = undefined;
@@ -344,7 +348,7 @@ class LiveShare {
   // ---- stop ------------------------------------------------------------------
 
   // Ends the share for this note. The note itself stays, as an ordinary note, on every side.
-  stop(noteId) {
+  stop(noteId: string) {
     const s = this.sessions.get(noteId);
     if (!s) {
       // A flag with no session (a resume that failed): clearing it is exactly what Stop is for.

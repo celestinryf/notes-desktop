@@ -26,7 +26,7 @@ class StickyManager {
     this.quitting = false;
   }
 
-  isOpen(id) {
+  isOpen(id: string) {
     const w = this.windows.get(id);
     return !!(w && !w.isDestroyed());
   }
@@ -36,7 +36,7 @@ class StickyManager {
   }
 
   // Shows the sticky for a note, creating the window if needed. Marks the note sticky if it was not.
-  open(id, opts?) {
+  open(id: string, opts?: { focus?: boolean }) {
     opts = opts || {};
     const note = this.store.get(id);
     if (!note || note.trashedAt || note.lock) return null; // a locked note never sits on the desktop
@@ -102,20 +102,20 @@ class StickyManager {
   }
 
   // Closes the window. With forget, the note stops being a sticky (it stays a note).
-  close(id, opts?) {
+  close(id: string, opts?: { forget?: boolean }) {
     opts = opts || {};
     if (opts.forget) { try { this.store.setSticky(id, null); } catch (_) { /* paused */ } }
     const w = this.windows.get(id);
     if (w && !w.isDestroyed()) w.close(); else this.onChange(id);
   }
 
-  setColor(id, color) {
+  setColor(id: string, color: string) {
     const note = this.store.setSticky(id, { color });
     this._send(id, 'sticky:changed', note && note.sticky);
     return note && note.sticky;
   }
 
-  setOnTop(id, onTop) {
+  setOnTop(id: string, onTop: boolean) {
     const note = this.store.setSticky(id, { onTop: !!onTop });
     const w = this.windows.get(id);
     if (w && !w.isDestroyed()) w.setAlwaysOnTop(!!onTop);
@@ -129,7 +129,7 @@ class StickyManager {
   }
 
   // Gives every sticky the chance to write a pending edit; flushFn(window) resolves when it has.
-  flushAll(flushFn) {
+  flushAll(flushFn: (w: BrowserWindow) => Promise<unknown>) {
     const open = Array.from(this.windows.values()).filter((w) => !w.isDestroyed());
     return Promise.all(open.map((w) => flushFn(w).catch(() => {})));
   }
@@ -141,7 +141,7 @@ class StickyManager {
   }
 
   // Tells every sticky (except the sender) that a note changed, so it can reload if it shows that note.
-  broadcast(channel, payload?, exceptContents?) {
+  broadcast(channel: string, payload?: unknown, exceptContents?: Electron.WebContents) {
     for (const w of this.windows.values()) {
       if (w.isDestroyed()) continue;
       if (exceptContents && w.webContents.id === exceptContents.id) continue;
@@ -149,16 +149,17 @@ class StickyManager {
     }
   }
 
-  _send(id, channel, payload) {
+  _send(id: string, channel: string, payload: Sticky | null) {
     const w = this.windows.get(id);
     if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 
   // A saved position is used only when it is still on a screen; otherwise cascade from the top-right corner.
-  _bounds(sticky) {
+  _bounds(sticky: Sticky) {
     const width = sticky.w, height = sticky.h;
-    if (Number.isFinite(sticky.x) && Number.isFinite(sticky.y)) {
-      const rect = { x: sticky.x, y: sticky.y, width, height };
+    const { x, y } = sticky;
+    if (x !== null && y !== null && Number.isFinite(x) && Number.isFinite(y)) {
+      const rect = { x, y, width, height };
       const onScreen = screen.getAllDisplays().some((d) => {
         const a = d.workArea;
         return rect.x + 40 < a.x + a.width && rect.x + rect.width - 40 > a.x && rect.y + 20 < a.y + a.height && rect.y + rect.height - 20 > a.y;

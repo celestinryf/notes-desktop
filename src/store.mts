@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as H from './shared/helpers.mts';
+import { isObjectLike, isRecord } from './shared/helpers.mts';
 import * as Themes from './shared/themes.mts';
 import * as F from './files.mts';
 import * as L from './lock.mts';
@@ -44,7 +45,19 @@ const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
 
 const EDITOR_WIDTH = { min: 480, max: 1600 };
 
-function clampEditorWidth(v) {
+type NoteInput = Partial<Omit<Note, 'tags'>> & { tags?: string[] | string };
+type NoteUpdate = NoteInput & { force?: boolean };
+type LinkOptions = { title?: string; tags?: string[] | string; folderId?: string | null };
+type FileText = Awaited<ReturnType<typeof F.readNoteText>>;
+
+const FILE_KINDS: readonly string[] = ['text', 'pdf', 'docx', 'sheet', 'image', 'binary'];
+
+const isPublicView = (n: Note | PublicNote): n is PublicNote => !('lock' in n && n.lock !== undefined) && 'locked' in n && typeof n.locked === 'boolean';
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isFileKind = (v: unknown): v is FileKind => typeof v === 'string' && FILE_KINDS.includes(v);
+const isPresent = <T,>(v: T | null): v is T => v !== null;
+
+function clampEditorWidth(v: number) {
   const n = Number(v);
   if (!Number.isFinite(n)) return DEFAULT_SETTINGS.editorWidth;
   if (n <= 0) return 0;
@@ -53,12 +66,12 @@ function clampEditorWidth(v) {
 
 const FOLDER_NAME_MAX = 80;
 
-function stem(fileName) {
+function stem(fileName: string) {
   const ext = path.extname(fileName);
   return ext ? fileName.slice(0, -ext.length) : fileName;
 }
 
-function cleanFolderName(name) {
+function cleanFolderName(name: unknown) {
   const s = String(name == null ? '' : name).replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
   return (s || 'Untitled folder').slice(0, FOLDER_NAME_MAX);
 }
@@ -66,29 +79,29 @@ function cleanFolderName(name) {
 // The longest reading order a book keeps, and so the most pages a split may make.
 const MAX_BOOK_PAGES = 5000;
 
-function sanitizeFolder(raw, now): Folder | null {
-  if (!raw || typeof raw !== 'object') return null;
+function sanitizeFolder(raw: unknown, now: number): Folder | null {
+  if (!isObjectLike(raw)) return null;
   return folderFrom(raw, now);
 }
 
-function folderFrom(raw: Record<string, any>, now): Folder {
+function folderFrom(raw: Record<string, unknown>, now: number): Folder {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name),
     parentId: typeof raw.parentId === 'string' && raw.parentId ? raw.parentId : null,
-    createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
+    createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
     // Vault folders mirror a directory on disk.
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
     // A book is a folder whose notes are pages, read in this order (ids not listed follow, oldest first).
     book: !!raw.book,
-    pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x) => typeof x === 'string' && x).slice(0, MAX_BOOK_PAGES) : [],
+    pageOrder: Array.isArray(raw.pageOrder) ? raw.pageOrder.filter((x: unknown) => typeof x === 'string' && x).slice(0, MAX_BOOK_PAGES) : [],
   };
 }
 
 // A vault is a folder on disk (optionally a git repository) whose text files are notes.
-function sanitizeVault(raw, now) {
-  if (!raw || typeof raw !== 'object' || typeof raw.path !== 'string' || !raw.path) return null;
+function sanitizeVault(raw: unknown, now: number): Vault | null {
+  if (!isObjectLike(raw) || typeof raw.path !== 'string' || !raw.path) return null;
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name || path.basename(raw.path)),
@@ -96,7 +109,7 @@ function sanitizeVault(raw, now) {
     remote: typeof raw.remote === 'string' ? raw.remote.trim().slice(0, 500) : '',
     autoSync: raw.autoSync !== false,
     syncMinutes: Number.isFinite(Number(raw.syncMinutes)) ? Math.min(240, Math.max(1, Math.round(Number(raw.syncMinutes)))) : 5,
-    createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
+    createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
   };
 }
 
@@ -105,12 +118,12 @@ const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', 
 
 // Directories the scan skips must not be creatable or renamable from the app: their notes would vanish
 // from view while staying on disk.
-function assertVaultDirName(name) {
+function assertVaultDirName(name: string) {
   const safe = H.safeFilename(name);
   if (/^\./.test(safe) || VAULT_SKIP_DIRS.has(safe.toLowerCase())) throw Object.assign(new Error('A vault folder cannot be named "' + safe + '": the app does not scan folders with that name.'), { code: 'ENAME' });
 }
 
-function uniqueName(dir, base, ext) {
+function uniqueName(dir: string, base: string, ext: string) {
   let candidate = base + ext;
   let i = 2;
   while (fs.existsSync(path.join(dir, candidate))) { candidate = base + ' ' + i + ext; i++; }
@@ -119,11 +132,11 @@ function uniqueName(dir, base, ext) {
 
 // Atomic replace with retries. On Windows a reader (git, antivirus, a sync client) holding the target
 // open makes rename fail with EPERM/EBUSY for a moment; wait briefly and try again before falling back to a copy.
-function sleepSync(ms) {
+function sleepSync(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function replaceFile(tmp, target) {
+function replaceFile(tmp: string, target: string) {
   // Short total wait (~300 ms): a reader's lock lasts milliseconds, and this blocks the main process.
   let lastErr = null;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -141,7 +154,7 @@ function replaceFile(tmp, target) {
   }
 }
 
-function clampFontSize(n) {
+function clampFontSize(n: number) {
   const v = Number(n);
   if (!Number.isFinite(v)) return DEFAULT_SETTINGS.fontSize;
   return Math.min(28, Math.max(12, Math.round(v)));
@@ -151,12 +164,12 @@ const TABS_MAX = 50;
 
 // The editor's tabs: { split, ratio (left side's share), active ('left' | 'right'), left, right }, each side
 // { ids: note ids in tab order, current: the id shown }. Unknown ids are dropped when a tab is opened.
-function sanitizePanes(raw): Panes {
-  const p = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  const side = (v): PaneSide => {
-    const o = v && typeof v === 'object' ? v : {};
-    const ids = Array.isArray(o.ids) ? Array.from(new Set<string>(o.ids.filter((x) => typeof x === 'string' && x && x.length <= 100))).slice(0, TABS_MAX) : [];
-    return { ids, current: ids.includes(o.current) ? o.current : null };
+function sanitizePanes(raw: unknown): Panes {
+  const p: Record<string, unknown> = isRecord(raw) ? raw : {};
+  const side = (v: unknown): PaneSide => {
+    const o: Record<string, unknown> = isObjectLike(v) ? v : {};
+    const ids = Array.isArray(o.ids) ? Array.from(new Set<string>(o.ids.filter((x: unknown) => typeof x === 'string' && x && x.length <= 100))).slice(0, TABS_MAX) : [];
+    return { ids, current: typeof o.current === 'string' && ids.includes(o.current) ? o.current : null };
   };
   const left = side(p.left);
   const right = side(p.right);
@@ -172,8 +185,8 @@ function sanitizePanes(raw): Panes {
   };
 }
 
-function sanitizeSettings(input) {
-  const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+function sanitizeSettings(input: unknown) {
+  const src: Record<string, unknown> = isRecord(input) ? input : {};
   const s: Settings = Object.assign({}, DEFAULT_SETTINGS, src);
   const acc = H.parseAccelerator(s.hotkey);
   s.hotkey = acc.ok && acc.value ? acc.value : DEFAULT_SETTINGS.hotkey;
@@ -214,7 +227,7 @@ function sanitizeSettings(input) {
   s.sort = ['updated', 'created', 'title'].includes(s.sort) ? s.sort : 'updated';
   if (s.window && typeof s.window === 'object') {
     const w = s.window;
-    const ok = ['width', 'height'].every((k) => Number.isFinite(w[k]) && w[k] > 100) && ['x', 'y'].every((k) => Number.isFinite(w[k]));
+    const ok = (['width', 'height'] as const).every((k) => Number.isFinite(w[k]) && w[k] > 100) && (['x', 'y'] as const).every((k) => Number.isFinite(w[k]));
     s.window = ok ? { x: Math.round(w.x), y: Math.round(w.y), width: Math.round(w.width), height: Math.round(w.height) } : null;
   } else s.window = null;
   return s;
@@ -223,30 +236,30 @@ function sanitizeSettings(input) {
 const STICKY_COLORS = ['peach', 'cream', 'leaf', 'sky', 'rose', 'ink'];
 
 // A note shown as a desktop sticky: where it sits, how big, which tint, whether it floats above other windows.
-function sanitizeSticky(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const num = (v, d) => (Number.isFinite(v) ? Math.round(v) : d);
+function sanitizeSticky(raw: unknown): Sticky | null {
+  if (!isObjectLike(raw)) return null;
+  const num = <D,>(v: unknown, d: D): number | D => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : d);
   return {
     x: num(raw.x, null), y: num(raw.y, null),
     w: Math.max(180, Math.min(1600, num(raw.w, 280))), h: Math.max(140, Math.min(1600, num(raw.h, 260))),
-    color: STICKY_COLORS.includes(raw.color) ? raw.color : 'peach',
+    color: typeof raw.color === 'string' && STICKY_COLORS.includes(raw.color) ? raw.color : 'peach',
     onTop: raw.onTop !== false,
   };
 }
 
 // A live-share session recorded on a note so it can be resumed after a restart.
-function sanitizeLive(raw): Live | null {
-  if (!raw || typeof raw !== 'object' || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
-  return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
+function sanitizeLive(raw: unknown): Live | null {
+  if (!isObjectLike(raw) || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
+  return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: isFiniteNumber(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
 }
 
-function sanitizeNote(raw, now): Note | null {
-  if (!raw || typeof raw !== 'object') return null;
+function sanitizeNote(raw: unknown, now: number): Note | null {
+  if (!isObjectLike(raw)) return null;
   return noteFrom(raw, now);
 }
 
-function noteFrom(raw: Record<string, any>, now): Note {
-  const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
+function noteFrom(raw: Record<string, unknown>, now: number): Note {
+  const createdAt = isFiniteNumber(raw.createdAt) ? raw.createdAt : now;
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     title: typeof raw.title === 'string' ? raw.title : '',
@@ -255,20 +268,20 @@ function noteFrom(raw: Record<string, any>, now): Note {
     folderId: typeof raw.folderId === 'string' && raw.folderId ? raw.folderId : null,
     // File-backed notes: body mirrors the file; text files are written back in place, other kinds are read-only.
     filePath: typeof raw.filePath === 'string' && raw.filePath ? raw.filePath : null,
-    fileKind: ['text', 'pdf', 'docx', 'sheet', 'image', 'binary'].includes(raw.fileKind) ? raw.fileKind : null,
-    fileMtime: Number.isFinite(raw.fileMtime) ? raw.fileMtime : null,
+    fileKind: isFileKind(raw.fileKind) ? raw.fileKind : null,
+    fileMtime: isFiniteNumber(raw.fileMtime) ? raw.fileMtime : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     trashedFrom: typeof raw.trashedFrom === 'string' && raw.trashedFrom ? raw.trashedFrom : undefined,
     sticky: sanitizeSticky(raw.sticky),
     live: sanitizeLive(raw.live),
     // A locked note stores only ciphertext; its body field is always empty on disk.
     lock: L.sanitizeLock(raw.lock),
-    remindAt: Number.isFinite(raw.remindAt) ? Math.round(raw.remindAt) : null,
-    remindedAt: Number.isFinite(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
+    remindAt: isFiniteNumber(raw.remindAt) ? Math.round(raw.remindAt) : null,
+    remindedAt: isFiniteNumber(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
     pinned: !!raw.pinned,
     createdAt,
-    updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
-    trashedAt: Number.isFinite(raw.trashedAt) ? raw.trashedAt : null,
+    updatedAt: isFiniteNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
+    trashedAt: isFiniteNumber(raw.trashedAt) ? raw.trashedAt : null,
   };
 }
 
@@ -312,7 +325,7 @@ class Store {
 
   load() {
     fs.mkdirSync(this.dir, { recursive: true });
-    let raw: ReturnType<typeof JSON.parse> | ReturnType<typeof this._loadNewestBackup> | null = null;
+    let raw: unknown = null;
     this.saveBlocked = false;
     this.recoveredFromBackup = false;
     this.backupSuspended = false;
@@ -347,17 +360,18 @@ class Store {
       }
     }
     const now = this.now();
-    const notes = Array.isArray(raw && raw.notes) ? raw.notes : [];
-    const folders = Array.isArray(raw && raw.folders) ? raw.folders : [];
-    const vaults = Array.isArray(raw && raw.vaults) ? raw.vaults : [];
-    this.notes = notes.map((n) => sanitizeNote(n, now)).filter(Boolean);
-    this.folders = folders.map((f) => sanitizeFolder(f, now)).filter(Boolean);
-    this.vaults = vaults.map((v) => sanitizeVault(v, now)).filter(Boolean);
+    const doc: Record<string, unknown> = isObjectLike(raw) ? raw : {};
+    const notes: unknown[] = Array.isArray(doc.notes) ? doc.notes : [];
+    const folders: unknown[] = Array.isArray(doc.folders) ? doc.folders : [];
+    const vaults: unknown[] = Array.isArray(doc.vaults) ? doc.vaults : [];
+    this.notes = notes.map((n) => sanitizeNote(n, now)).filter(isPresent);
+    this.folders = folders.map((f) => sanitizeFolder(f, now)).filter(isPresent);
+    this.vaults = vaults.map((v) => sanitizeVault(v, now)).filter(isPresent);
     const vaultIds = new Set(this.vaults.map((v) => v.id));
     for (const f of this.folders) if (f.vaultId && !vaultIds.has(f.vaultId)) { f.vaultId = null; f.dirPath = null; }
     for (const n of this.notes) if (n.vaultId && !vaultIds.has(n.vaultId)) n.vaultId = null;
     this._repairFolderGraph();
-    this.settings = sanitizeSettings(raw && raw.settings);
+    this.settings = sanitizeSettings(doc.settings);
     const ids = new Set(this.folders.map((f) => f.id));
     this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
     this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
@@ -388,7 +402,7 @@ class Store {
     for (const n of this.notes) if (n.folderId && !byId.has(n.folderId)) n.folderId = null;
   }
 
-  _loadNewestBackup() {
+  _loadNewestBackup(): unknown {
     try {
       const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort().reverse();
       for (const f of files) {
@@ -431,7 +445,7 @@ class Store {
 
   // ---- notes -------------------------------------------------------------
 
-  list(opts) {
+  list(opts?: ListOpts) {
     opts = opts || {};
     const trashed = !!opts.trashed;
     let out = this.notes.filter((n) => !!n.trashedAt === trashed);
@@ -458,11 +472,11 @@ class Store {
     return H.sortNotes(out, opts.sort || this.settings.sort);
   }
 
-  get(id) {
+  get(id: string) {
     return this.notes.find((n) => n.id === id) || null;
   }
 
-  create(data) {
+  create(data?: NoteInput) {
     data = data || {};
     const now = this.now();
     const note = noteFrom(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
@@ -478,14 +492,14 @@ class Store {
     return note;
   }
 
-  update(id, patch) {
+  update(id: string, patch?: NoteUpdate) {
     const note = this.get(id);
     if (!note) return null;
     patch = patch || {};
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
     let fileWritten = false; // the body landed in the file
-    let plainBefore;          // the cached plaintext to restore if the save fails
+    let plainBefore: string | undefined; // the cached plaintext to restore if the save fails
     if (note.lock && typeof patch.body === 'string') {
       // A locked view can only ever send an empty body (that is all it has): ignore it, so title and tag
       // edits still save. Any other body while locked is a mistake.
@@ -522,14 +536,14 @@ class Store {
     }
     if (typeof patch.title === 'string' && patch.title !== note.title) {
       // In a vault the title is the file name: rename the file first, then record what it became.
-      if (note.vaultId && note.filePath && note.fileKind === 'text') {
+      if (note.vaultId && isFileNote(note) && note.fileKind === 'text') {
         try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
-        catch (err) { if (fileWritten) { note.body = patch.body; } throw err; } // the body did land; keep memory honest
+        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; } throw err; } // the body did land; keep memory honest
       } else note.title = patch.title;
       changed = true;
     }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
-    if (patch.folderId !== undefined && note.vaultId && note.filePath) {
+    if (patch.folderId !== undefined && note.vaultId && isFileNote(note)) {
       const fid = patch.folderId || null;
       if (fid !== (note.folderId || null)) {
         if (!fid) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
@@ -557,7 +571,7 @@ class Store {
     }
     if (typeof patch.pinned === 'boolean' && patch.pinned !== note.pinned) { note.pinned = patch.pinned; changed = true; }
     if (patch.remindAt !== undefined) {
-      const at = Number.isFinite(patch.remindAt) ? Math.round(patch.remindAt) : null;
+      const at = isFiniteNumber(patch.remindAt) ? Math.round(patch.remindAt) : null;
       if (at !== note.remindAt) { note.remindAt = at; note.remindedAt = null; changed = true; } // a new time rings again
     }
     if (patch.folderId !== undefined) {
@@ -586,18 +600,17 @@ class Store {
   // ---- locking ----------------------------------------------------------------
 
   // What leaves the store: never the ciphertext; the body only while unlocked this session.
-  publicNote(n) {
+  publicNote(n: Note | PublicNote): PublicNote;
+  publicNote(n: Note | PublicNote | null): PublicNote | null;
+  publicNote(n: Note | PublicNote | null): PublicNote | null {
     if (!n) return n;
-    if (n.lock === undefined && typeof n.locked === 'boolean') return n; // already a public view: idempotent
-    const out = Object.assign({}, n);
-    delete out.lock;
-    out.locked = !!n.lock;
-    out.unlocked = !!n.lock && this.plain.has(n.id);
-    if (n.lock) out.body = out.unlocked ? this.plain.get(n.id) : '';
-    return out;
+    if (isPublicView(n)) return n; // already a public view: idempotent
+    const { lock, ...rest } = n;
+    const unlocked = !!lock && this.plain.has(n.id);
+    return Object.assign(rest, { locked: !!lock, unlocked }, lock ? { body: unlocked ? this.plain.get(n.id) ?? '' : '' } : {});
   }
 
-  lockNote(id, password) {
+  lockNote(id: string, password: string) {
     const note = this.get(id);
     if (!note) return null;
     if (note.filePath || note.vaultId) throw Object.assign(new Error('A file-backed note cannot be locked: the file itself would stay readable.'), { code: 'EFILE' });
@@ -611,7 +624,7 @@ class Store {
     return this.publicNote(note);
   }
 
-  unlockNote(id, password) {
+  unlockNote(id: string, password: string) {
     const note = this.get(id);
     if (!note) return null;
     if (!note.lock) return this.publicNote(note);
@@ -622,7 +635,7 @@ class Store {
     return this.publicNote(note);
   }
 
-  relock(id) {
+  relock(id: string) {
     const was = this.plain.has(id);
     this.plain.delete(id);
     this.keys.delete(id);
@@ -637,7 +650,7 @@ class Store {
     return ids;
   }
 
-  removeLock(id, password) {
+  removeLock(id: string, password: string) {
     const note = this.get(id);
     if (!note || !note.lock) return this.publicNote(note);
     const r = L.unlock(note.lock, password);
@@ -648,14 +661,14 @@ class Store {
   }
 
   // Called by the reminder scheduler when a reminder has been announced.
-  markReminded(id, at) {
+  markReminded(id: string, at: number) {
     const note = this.get(id);
     if (!note) return null;
     return this._commit(() => { note.remindedAt = at; return note; });
   }
 
   // Desktop stickies. Only this path changes the field; update() ignores it.
-  setSticky(id, sticky) {
+  setSticky(id: string, sticky: Partial<Sticky> | null) {
     const note = this.get(id);
     if (!note) return null;
     const next = sticky ? sanitizeSticky(Object.assign({}, note.sticky || {}, sticky)) : null;
@@ -665,7 +678,7 @@ class Store {
 
   // ---- books -------------------------------------------------------------------
 
-  _orderPages(folder, notes) {
+  _orderPages(folder: Folder, notes: Note[]) {
     const rank = new Map<string, number>((folder.pageOrder || []).map((id, i) => [id, i]));
     return notes.slice().sort((a, b) => {
       const ra = rank.get(a.id) ?? Infinity, rb = rank.get(b.id) ?? Infinity;
@@ -675,13 +688,13 @@ class Store {
   }
 
   // Live pages of a book, in reading order.
-  bookPages(folderId) {
+  bookPages(folderId: string) {
     const f = this.getFolder(folderId);
     if (!f) return [];
     return this._orderPages(f, this.notes.filter((n) => !n.trashedAt && n.folderId === folderId));
   }
 
-  setBook(folderId, on) {
+  setBook(folderId: string, on: boolean) {
     const f = this.getFolder(folderId);
     if (!f) return null;
     if (!!f.book === !!on) return f;
@@ -694,7 +707,7 @@ class Store {
   }
 
   // ids: the new reading order. Unknown ids are dropped; pages missing from the list keep their relative order after it.
-  reorderPages(folderId, ids) {
+  reorderPages(folderId: string, ids: string[]) {
     const f = this.getFolder(folderId);
     if (!f || !f.book) return null;
     const pages = this.bookPages(folderId).map((n) => n.id);
@@ -717,11 +730,11 @@ class Store {
 
   // What a note links to, what links to it, and notes that share its tags. Locked bodies are only read
   // while unlocked this session (their stored body is empty); titles are always visible.
-  related(id, limit?) {
+  related(id: string, limit?: number) {
     const note = this.get(id);
     if (!note) return null;
-    const bodyOf = (n) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
-    const view = (n) => ({ id: n.id, title: H.deriveTitle(this.publicNote(n)) || 'Untitled', trashed: !!n.trashedAt, locked: !!n.lock });
+    const bodyOf = (n: Note) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
+    const view = (n: Note) => ({ id: n.id, title: H.deriveTitle(this.publicNote(n)) || 'Untitled', trashed: !!n.trashedAt, locked: !!n.lock });
     const outgoing = H.noteLinkIds(bodyOf(note)).filter((x) => x !== id).map((x) => {
       const t = this.get(x);
       return t ? view(t) : { id: x, title: 'Deleted note', missing: true };
@@ -739,7 +752,7 @@ class Store {
     return { outgoing, incoming, byTags };
   }
 
-  setLive(id, live) {
+  setLive(id: string, live: Live | null) {
     const note = this.get(id);
     if (!note) return null;
     const next = sanitizeLive(live);
@@ -751,13 +764,13 @@ class Store {
     return this.notes.filter((n) => n.sticky && !n.trashedAt);
   }
 
-  togglePin(id) {
+  togglePin(id: string) {
     const note = this.get(id);
     if (!note) return null;
     return this.update(id, { pinned: !note.pinned });
   }
 
-  duplicate(id) {
+  duplicate(id: string) {
     const note = this.get(id);
     if (!note) return null;
     if (note.lock) {
@@ -779,7 +792,7 @@ class Store {
   // Turns a note into a book: a new folder (next to the note) whose pages are the note's sections, cut at its
   // headings (H.splitAtHeadings). One write. opts: { name, keepOriginal }. The original goes to the trash unless
   // kept. Returns { folder, pageIds, originalTrashed }.
-  splitIntoBook(id, opts) {
+  splitIntoBook(id: string, opts?: { name?: string; keepOriginal?: boolean }) {
     opts = opts || {};
     const note = this.get(id);
     if (!note || note.trashedAt) throw new Error('Note not found');
@@ -807,7 +820,7 @@ class Store {
   // note if it was trashed. All or nothing: it refuses, changing nothing, when a page was edited since (undo would
   // lose the edit) or the trashed original is gone (undo would lose everything). Only pages still in that book
   // are touched; pages moved out meanwhile are left alone. Returns { restored, removedIds }.
-  undoSplit(folderId, pageIds, originalId) {
+  undoSplit(folderId: string, pageIds: string[], originalId: string | null) {
     const folder = typeof folderId === 'string' ? this.getFolder(folderId) : null;
     if (!folder || !folder.book || folder.vaultId) throw new Error('That book is gone, so there is nothing to undo.');
     const ids = new Set(Array.isArray(pageIds) ? pageIds.filter((x) => typeof x === 'string') : []);
@@ -824,7 +837,7 @@ class Store {
     });
   }
 
-  ensureFolder(name, parentId) {
+  ensureFolder(name: string, parentId: null) {
     const found = this.folders.find((f) => (f.parentId || null) === (parentId || null) && f.name.toLowerCase() === String(name).toLowerCase());
     return found || this.createFolder({ name, parentId: parentId || null });
   }
@@ -859,26 +872,26 @@ class Store {
 
   // ---- vaults: folders on disk mirrored as notes ---------------------------
 
-  getVault(id) {
+  getVault(id: string) {
     return this.vaults.find((v) => v.id === id) || null;
   }
 
-  vaultRootFolder(vaultId) {
+  vaultRootFolder(vaultId: string) {
     return this.folders.find((f) => f.vaultId === vaultId && f.parentId === null) || null;
   }
 
-  folderDir(folderId) {
+  folderDir(folderId: string) {
     const f = this.getFolder(folderId);
     return f && f.vaultId ? f.dirPath : null;
   }
 
-  addVault(data) {
+  addVault(data: { path: string; name?: string; remote?: string }) {
     const vault = sanitizeVault(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: this.now() }), this.now());
     if (!vault) throw new Error('A vault needs a folder path.');
     if (!fs.existsSync(vault.path) || !fs.statSync(vault.path).isDirectory()) throw Object.assign(new Error('Folder not found: ' + vault.path), { code: 'ENOENT' });
     const dup = this.vaults.find((v) => F.pathKey(v.path) === F.pathKey(vault.path));
     if (dup) return dup;
-    const inside = (a, b) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
+    const inside = (a: string, b: string) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
     const overlap = this.vaults.find((v) => inside(vault.path, v.path) || inside(v.path, vault.path));
     if (overlap) throw Object.assign(new Error('That folder overlaps the vault "' + overlap.name + '"; one vault cannot sit inside another.'), { code: 'EOVERLAP' });
     return this._commit(() => {
@@ -888,7 +901,7 @@ class Store {
     });
   }
 
-  updateVault(id, patch) {
+  updateVault(id: string, patch?: Partial<Vault>) {
     const v = this.getVault(id);
     if (!v) return null;
     return this._commit(() => {
@@ -901,7 +914,7 @@ class Store {
   }
 
   // Removes the vault from the app. Files on disk are never touched.
-  removeVault(id) {
+  removeVault(id: string) {
     const v = this.getVault(id);
     if (!v) return false;
     return this._commit(() => {
@@ -916,7 +929,7 @@ class Store {
 
   // Makes the folder tree and notes match the directory. Returns counts. Idempotent and safe to call often.
   // opts.allowRemovals=false keeps mirrors of files that are momentarily absent (e.g. during a git rebase).
-  async scanVault(id, opts?) {
+  async scanVault(id: string, opts?: { allowRemovals?: boolean }) {
     opts = opts || {};
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
@@ -926,9 +939,9 @@ class Store {
     try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
     const root = this.vaultRootFolder(id) || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path, book: false, pageOrder: [] }; this.folders.push(f); return f; });
     const seenFolders = new Set([root.id]);
-    const seenNotes = new Set();
+    const seenNotes = new Set<string>();
     let added = 0, updated = 0, removed = 0;
-    const walk = async (dir, folderId) => {
+    const walk = async (dir: string, folderId: string) => {
       let entries: fs.Dirent[] = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
       for (const e of entries) {
@@ -991,7 +1004,7 @@ class Store {
   }
 
   // A new note inside a vault folder is a new file; the title is the file name.
-  createVaultNote(folderId, data) {
+  createVaultNote(folderId: string, data?: NoteInput) {
     const folder = this.getFolder(folderId);
     if (!folder || !folder.vaultId || !folder.dirPath) throw new Error('Not a vault folder');
     data = data || {};
@@ -1008,7 +1021,7 @@ class Store {
   }
 
   // Renaming a vault note renames its file; a clash gets a numeric suffix. Returns the new title.
-  _renameVaultFile(note, title) {
+  _renameVaultFile(note: FileNote, title: string) {
     const dir = path.dirname(note.filePath);
     const ext = path.extname(note.filePath) || '.md';
     const base = H.safeFilename(String(title || '').trim() || 'Untitled');
@@ -1021,7 +1034,7 @@ class Store {
     return stem(name);
   }
 
-  _vaultTrashDir(vaultId) {
+  _vaultTrashDir(vaultId: string) {
     const v = this.getVault(vaultId);
     if (!v) throw new Error('Vault not found');
     const dir = path.join(v.path, '.trash');
@@ -1030,7 +1043,7 @@ class Store {
   }
 
   // Moves a vault file into another vault folder's directory (same vault only). Returns the new path.
-  _moveVaultFile(note, targetFolderId) {
+  _moveVaultFile(note: FileNote, targetFolderId: string) {
     const target = this.getFolder(targetFolderId);
     if (!target || target.vaultId !== note.vaultId || !target.dirPath) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
     fs.mkdirSync(target.dirPath, { recursive: true });
@@ -1042,7 +1055,7 @@ class Store {
   }
 
   // Vault notes: trash moves the file into <vault>/.trash, restore moves it back, delete forever removes it.
-  trash(id) {
+  trash(id: string) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
     this.relock(id); // a trashed locked note needs its password again
@@ -1066,7 +1079,7 @@ class Store {
     }
   }
 
-  restore(id) {
+  restore(id: string) {
     const note = this.get(id);
     if (!note || !note.trashedAt) return note;
     // Back to where it came from; if that is unknown (older data) or gone, the vault root is the fallback.
@@ -1106,7 +1119,7 @@ class Store {
     return !!(note.vaultId && note.trashedAt && note.filePath && /[\\/]\.trash[\\/]/.test(note.filePath) && fs.existsSync(note.filePath));
   }
 
-  destroy(id) {
+  destroy(id: string) {
     const idx = this.notes.findIndex((n) => n.id === id);
     if (idx === -1) return false;
     this.relock(id);
@@ -1124,7 +1137,7 @@ class Store {
   }
 
   tags() {
-    const counts = new Map();
+    const counts = new Map<string, number>();
     for (const n of this.notes) {
       if (n.trashedAt) continue;
       for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
@@ -1144,14 +1157,14 @@ class Store {
 
   // ---- file-backed notes -------------------------------------------------
 
-  findByPath(filePath) {
+  findByPath(filePath: string) {
     const key = F.pathKey(filePath);
     return this.notes.find((n) => n.filePath && F.pathKey(n.filePath) === key) || null;
   }
 
   // Links a file as a note. Text files load their contents; Word files are converted (read-only); PDFs and
   // other binaries are shown through the system viewer. Linking the same file twice returns the same note.
-  async linkFile(filePath, opts) {
+  async linkFile(filePath: string, opts?: LinkOptions) {
     opts = opts || {};
     const abs = path.resolve(filePath);
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw Object.assign(new Error('File not found: ' + abs), { code: 'ENOENT' });
@@ -1184,20 +1197,21 @@ class Store {
 
   // Reads a file note's text in the background and keeps it, if the file is still the one the note knew. Then
   // onFileText(id) (set by main) tells the windows. Nothing is kept when the read gives no text.
-  async fillFileText(id) {
+  async fillFileText(id: string) {
     const before = this.get(id);
     if (!before || !before.filePath) return;
     let read;
     try { read = await F.readNoteText(before.fileKind, before.filePath); } catch (_) { return; }
     const note = this.get(id);
-    if (!note || note.filePath !== before.filePath || note.fileMtime !== before.fileMtime || typeof read.body !== 'string' || read.body === note.body) return;
-    this._commit(() => { note.body = read.body; });
+    const body = read.body;
+    if (!note || note.filePath !== before.filePath || note.fileMtime !== before.fileMtime || typeof body !== 'string' || body === note.body) return;
+    this._commit(() => { note.body = body; });
     if (this.onFileText) this.onFileText(id);
   }
 
   // A file the app itself just wrote (a PDF saved with its edits): its new time is recorded so the next refresh
   // does not take the app's own write for an outside change. Returns that time.
-  markFileWritten(id) {
+  markFileWritten(id: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
     const mtime = F.mtimeOf(note.filePath);
@@ -1206,7 +1220,7 @@ class Store {
   }
 
   // Re-reads a file-backed note when the file changed on disk. Returns { changed, missing }.
-  async refreshFileNote(id) {
+  async refreshFileNote(id: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return { changed: false, missing: false };
     if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
@@ -1232,7 +1246,7 @@ class Store {
   // A Word document WordCraft saved as a .docx beside the original (an .odt, .rtf or .doc): the note now stands for the
   // .docx, so later saves go there. Its title follows when it was the old file's name, and its text (the list snippet,
   // search) is the new file's: the poll will not read it again, since the time it knows is the new file's. Returns the note.
-  relinkFileNote(id, newPath, body) {
+  relinkFileNote(id: string, newPath: string, body?: string) {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
     const oldName = path.basename(note.filePath);
@@ -1252,20 +1266,20 @@ class Store {
 
   // ---- folders -----------------------------------------------------------
 
-  getFolder(id) {
+  getFolder(id: string) {
     return this.folders.find((f) => f.id === id) || null;
   }
 
-  descendantIds(id) {
-    const out = new Set();
-    const walk = (pid) => {
+  descendantIds(id: string) {
+    const out = new Set<string>();
+    const walk = (pid: string) => {
       for (const f of this.folders) if (f.parentId === pid && !out.has(f.id)) { out.add(f.id); walk(f.id); }
     };
     walk(id);
     return out;
   }
 
-  folderPath(id) {
+  folderPath(id: string) {
     const path: { id: string, name: string }[] = [];
     let cur = this.getFolder(id);
     let guard = 0;
@@ -1276,13 +1290,14 @@ class Store {
   // Nested tree; count is the number of live notes directly in the folder (what the folder view lists).
   // Every live note, lightly: what the folder trees draw (no bodies). Grouped by folder, in the list's sort
   // order, books in page order.
-  noteOutline(sort) {
-    const by = new Map();
+  noteOutline(sort?: SortKey) {
+    const by = new Map<string, Note[]>();
     for (const n of this.notes) {
       if (n.trashedAt) continue;
       const k = n.folderId || '';
-      if (!by.has(k)) by.set(k, []);
-      by.get(k).push(n);
+      let list = by.get(k);
+      if (!list) { list = []; by.set(k, list); }
+      list.push(n);
     }
     const out: Record<string, OutlineRow[]> = {};
     for (const [k, list] of by) {
@@ -1299,18 +1314,19 @@ class Store {
   }
 
   folderTree() {
-    const direct = new Map();
+    const direct = new Map<string, number>();
     for (const n of this.notes) {
       if (n.trashedAt || !n.folderId) continue;
       direct.set(n.folderId, (direct.get(n.folderId) || 0) + 1);
     }
-    const byParent = new Map();
+    const byParent = new Map<string | null, Folder[]>();
     for (const f of this.folders) {
       const key = f.parentId || null;
-      if (!byParent.has(key)) byParent.set(key, []);
-      byParent.get(key).push(f);
+      let siblings = byParent.get(key);
+      if (!siblings) { siblings = []; byParent.set(key, siblings); }
+      siblings.push(f);
     }
-    const build = (pid, depth) => (byParent.get(pid) || [])
+    const build = (pid: string | null, depth: number): FolderNode[] => (byParent.get(pid) || [])
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt)
       .map((f) => {
@@ -1322,7 +1338,7 @@ class Store {
     return build(null, 0);
   }
 
-  createFolder(data) {
+  createFolder(data?: { name?: string; parentId?: string | null }) {
     data = data || {};
     const parentId = data.parentId && this.getFolder(data.parentId) ? data.parentId : null;
     const folder = folderFrom({ name: data.name, parentId }, this.now());
@@ -1347,7 +1363,7 @@ class Store {
     return folder;
   }
 
-  renameFolder(id, name) {
+  renameFolder(id: string, name: string) {
     const f = this.getFolder(id);
     if (!f) return null;
     let next = cleanFolderName(name);
@@ -1371,10 +1387,10 @@ class Store {
     return f;
   }
 
-  _retargetVaultPaths(oldDir, newDir) {
+  _retargetVaultPaths(oldDir: string, newDir: string) {
     const oldKey = F.pathKey(oldDir);
-    const under = (p) => p && (F.pathKey(p) === oldKey || F.pathKey(p).startsWith(oldKey + '\\'));
-    const swap = (p) => newDir + path.resolve(p).slice(path.resolve(oldDir).length);
+    const under = (p: string | null | undefined): p is string => !!p && (F.pathKey(p) === oldKey || F.pathKey(p).startsWith(oldKey + '\\'));
+    const swap = (p: string) => newDir + path.resolve(p).slice(path.resolve(oldDir).length);
     for (const n of this.notes) {
       if (under(n.filePath)) n.filePath = swap(n.filePath);
       if (under(n.trashedFrom)) n.trashedFrom = swap(n.trashedFrom);
@@ -1382,7 +1398,7 @@ class Store {
     for (const d of this.folders) if (d.dirPath && under(d.dirPath) && F.pathKey(d.dirPath) !== oldKey) d.dirPath = swap(d.dirPath);
   }
 
-  moveFolder(id, parentId) {
+  moveFolder(id: string, parentId: string | null) {
     const f = this.getFolder(id);
     if (!f) return { error: 'Folder not found.' };
     parentId = parentId || null;
@@ -1409,7 +1425,7 @@ class Store {
   }
 
   // Deleting a folder lifts its notes and subfolders into its parent; nothing is lost.
-  deleteFolder(id) {
+  deleteFolder(id: string) {
     const f = this.getFolder(id);
     if (!f) return null;
     const parent = f.parentId || null;
@@ -1447,7 +1463,7 @@ class Store {
     return Object.assign({}, this.settings);
   }
 
-  setSettings(patch) {
+  setSettings(patch?: SettingsPatch) {
     const previous = this.settings;
     this.settings = sanitizeSettings(Object.assign({}, this.settings, patch || {}));
     try { this.save(); } catch (err) { this.settings = previous; throw err; }
@@ -1456,7 +1472,7 @@ class Store {
 
   // ---- import / export ---------------------------------------------------
 
-  exportNote(id) {
+  exportNote(id: string) {
     const note = this.get(id);
     if (!note) return null;
     if (note.lock && !this.plain.has(id)) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
@@ -1469,7 +1485,7 @@ class Store {
     return JSON.stringify({ exportedAt: this.now(), folders: this.folders, notes }, null, 2);
   }
 
-  importMarkdown(filename, content) {
+  importMarkdown(filename: string, content: string) {
     const parsed = H.markdownToNote(filename, content);
     return this.create(parsed);
   }
