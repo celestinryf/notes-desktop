@@ -69,6 +69,7 @@ interface Note {
   trashedAt: number | null;
 }
 interface PublicNote extends Omit<Note, 'lock'> { locked: boolean; unlocked: boolean }
+type FileNote = Note & { filePath: string };
 
 interface Folder {
   id: string;
@@ -141,7 +142,7 @@ interface DocxPatch { start: number; end: number; old: string; xml: string }
 // How main saved an edited file: in place (with the mtime, and whether the first backup of the session was taken),
 // or into a copy beside it because the file changed on disk since it was opened.
 type SavedFile = { mtime: number | null; backup: boolean; savedAs?: undefined } | { savedAs: string; newCopy: boolean; mtime?: undefined };
-type CraftSave = SavedFile | { exported: string; own?: boolean } | { relinked: string; mtime: number };
+type CraftSave = SavedFile | { exported: string; own?: boolean } | { relinked: string; mtime: number | null };
 interface ConvertOption { to: string; label: string; note: string }
 type ConvertResult = { ok: true; filePath: string; warning: string } | { ok: false; error: string };
 type MarkdownResult = { ok: true; markdown: string } | { ok: false; error: string };
@@ -162,7 +163,7 @@ interface IpcContract {
   'notes:update': (id: string, patch: NotePatch) => PublicNote | null;
   'notes:togglePin': (id: string) => PublicNote | null;
   'notes:duplicate': (id: string) => PublicNote;
-  'notes:splitIntoBook': (id: string, opts?: { level?: number; name?: string }) => { folderId: string; pageIds: string[]; originalTrashed: boolean };
+  'notes:splitIntoBook': (id: string, opts?: { name?: string; keepOriginal?: boolean }) => { folder: Folder; pageIds: string[]; originalTrashed: boolean };
   'notes:undoSplit': (folderId: string, pageIds: string[], originalId: string | null) => { restored: boolean; removedIds: string[] };
   'notes:trash': (id: string) => PublicNote | null;
   'notes:restore': (id: string) => PublicNote | null;

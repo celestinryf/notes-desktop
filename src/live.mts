@@ -6,6 +6,16 @@ import http from 'node:http';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
+import type { Store } from './store.mts';
+
+type HostSession = { role: 'host', token: string, clients: Set<http.ServerResponse>, version: number, server: http.Server | null, url: string, port: number | null, error: string | null, local: boolean };
+type GuestSession = {
+  role: 'guest', url: string, version: number, connected: boolean, req: http.ClientRequest | null, retry: number, pushTimer: NodeJS.Timeout | undefined,
+  pushing: boolean, dirty: boolean, pendingFlag: boolean, stopped: boolean, lastByteAt: number, error?: string | null, fresh?: boolean,
+  idleTimer?: NodeJS.Timeout, timer?: NodeJS.Timeout,
+};
+type LiveSession = HostSession | GuestSession;
+type RemoteChange = { title?: string, body?: string, from: string };
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -38,14 +48,14 @@ function sameToken(a, b) {
 }
 
 class LiveShare {
-  store: any;
-  onRemote: any;
-  onStatus: any;
-  pushDelayMs: any;
-  sessions: Map<any, any>;
-  hosting: Map<any, any>;
+  store: Store;
+  onRemote: (noteId: string, change: RemoteChange) => void;
+  onStatus: (noteId: string, status: LiveStatus | null) => void;
+  pushDelayMs: number;
+  sessions: Map<string, LiveSession>;
+  hosting: Map<string, Promise<LiveStatus | null>>;
   clientId: string;
-  constructor(store, opts) {
+  constructor(store: Store, opts?: { onRemote?: (noteId: string, change: RemoteChange) => void, onStatus?: (noteId: string, status: LiveStatus | null) => void, pushDelayMs?: number }) {
     opts = opts || {};
     this.store = store;
     this.onRemote = opts.onRemote || (() => {});   // (noteId, { title, body, from }) after a remote edit landed in the store
@@ -56,10 +66,10 @@ class LiveShare {
     this.clientId = crypto.randomBytes(8).toString('hex');
   }
 
-  statusOf(noteId) {
+  statusOf(noteId: string): LiveStatus | null {
     const s = this.sessions.get(noteId);
     if (!s) return null;
-    return { role: s.role, url: s.url, peers: s.role === 'host' ? s.clients.size : (s.connected ? 1 : 0), connected: s.role === 'host' ? true : !!s.connected, version: s.version, error: s.error || null, localOnly: !!s.local, pending: !!s.dirty };
+    return { role: s.role, url: s.url, peers: s.role === 'host' ? s.clients.size : (s.connected ? 1 : 0), connected: s.role === 'host' ? true : !!s.connected, version: s.version, error: s.error || null, localOnly: s.role === 'host' && s.local, pending: s.role === 'guest' && s.dirty };
   }
 
   _emit(noteId) { this.onStatus(noteId, this.statusOf(noteId)); }
@@ -73,12 +83,13 @@ class LiveShare {
     if (note.lock) throw new Error('A locked note cannot be shared live.');
     if (note.filePath) throw new Error('A file-backed note cannot be shared live; copy it into a plain note first.');
     if (this.sessions.has(noteId)) return Promise.resolve(this.statusOf(noteId));
-    if (this.hosting.has(noteId)) return this.hosting.get(noteId); // a second click while the first listen() is pending
+    const pending = this.hosting.get(noteId);
+    if (pending) return pending; // a second click while the first listen() is pending
     const token = opts.token || crypto.randomBytes(16).toString('hex');
-    const session: { role: 'host', token: string, clients: Set<import('http').ServerResponse>, version: number, server: import('http').Server | null, url: string | null, port: number | null, error: string | null, local: boolean } = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null, error: null, local: false };
+    const session: HostSession = { role: 'host', token, clients: new Set(), version: 1, server: null, url: '', port: null, error: null, local: false };
     const server = http.createServer((req, res) => this._handle(session, noteId, req, res));
     server.on('clientError', (_err, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch (_) { /* ignore */ } });
-    const p = new Promise((resolve, reject) => {
+    const p = new Promise<LiveStatus | null>((resolve, reject) => {
       server.once('error', (err) => {
         // The remembered port is taken (after a restart): take any free port; the link changes and the
         // status says so, which is better than a share that silently never comes back.
@@ -187,7 +198,7 @@ class LiveShare {
       if (opts.noteId) this.store.update(note.id, { title: initial.title, body: initial.body });
       version = Number(initial.version) || 0;
     }
-    const session = { role: 'guest', url: parsed.toString(), version, connected: false, req: null, retry: 0, pushTimer: null, pushing: false, dirty: !!opts.pending, pendingFlag: !!opts.pending, stopped: false, lastByteAt: 0 };
+    const session: GuestSession = { role: 'guest', url: parsed.toString(), version, connected: false, req: null, retry: 0, pushTimer: undefined, pushing: false, dirty: !!opts.pending, pendingFlag: !!opts.pending, stopped: false, lastByteAt: 0 };
     this.sessions.set(note.id, session);
     this.store.setLive(note.id, { role: 'guest', url: session.url, pending: !!opts.pending });
     this._listen(note.id, session);
@@ -264,7 +275,7 @@ class LiveShare {
     session.connected = false; session.error = why;
     this._emit(noteId);
     const delay = Math.min(10000, 1000 * Math.pow(2, Math.min(session.retry++, 4)));
-    session.timer = setTimeout(() => { session.timer = null; this._listen(noteId, session); }, delay);
+    session.timer = setTimeout(() => { session.timer = undefined; this._listen(noteId, session); }, delay);
     if (session.timer.unref) session.timer.unref();
   }
 
@@ -296,13 +307,14 @@ class LiveShare {
     if (session.role === 'host') { session.version++; this._broadcast(session, noteId, 'host'); return; }
     session.dirty = true;
     clearTimeout(session.pushTimer);
-    session.pushTimer = setTimeout(() => { session.pushTimer = null; this._push(noteId, session); }, this.pushDelayMs);
+    session.pushTimer = setTimeout(() => { session.pushTimer = undefined; this._push(noteId, session); }, this.pushDelayMs);
   }
 
   async _push(noteId, session) {
     if (session.pushing || !session.dirty || session.stopped) return;
     session.pushing = true; session.dirty = false;
     const note = this.store.get(noteId);
+    if (!note) { session.pushing = false; return; }
     try {
       const r = await this._fetch(session.url, 'POST', { title: note.title, body: note.body, clientId: this.clientId, base: session.version });
       session.version = Math.max(session.version, Number(r.version) || 0);
@@ -313,7 +325,7 @@ class LiveShare {
       session.dirty = true; session.error = 'push: ' + err.message;
       // Remember on the note that an edit is waiting, so a restart pushes it instead of taking the host's text.
       if (!session.pendingFlag) { session.pendingFlag = true; try { this.store.setLive(noteId, { role: 'guest', url: session.url, pending: true }); } catch (_) { /* paused */ } }
-      session.pushTimer = setTimeout(() => { session.pushTimer = null; this._push(noteId, session); }, 2000);
+      session.pushTimer = setTimeout(() => { session.pushTimer = undefined; this._push(noteId, session); }, 2000);
     } finally {
       session.pushing = false;
       this._emit(noteId);
@@ -325,7 +337,7 @@ class LiveShare {
   async flush(noteId) {
     const s = this.sessions.get(noteId);
     if (!s || s.role !== 'guest') return;
-    clearTimeout(s.pushTimer); s.pushTimer = null;
+    clearTimeout(s.pushTimer); s.pushTimer = undefined;
     if (s.dirty) await this._push(noteId, s);
   }
 
@@ -344,7 +356,7 @@ class LiveShare {
     if (s.role === 'host') {
       for (const res of s.clients) { try { res.write('event: end\ndata: {}\n\n'); res.end(); } catch (_) { /* ignore */ } }
       s.clients.clear();
-      try { s.server.close(); s.server.closeAllConnections(); } catch (_) { /* ignore */ }
+      try { s.server?.close(); s.server?.closeAllConnections(); } catch (_) { /* ignore */ }
     } else {
       s.stopped = true;
       clearTimeout(s.timer); clearTimeout(s.pushTimer); clearInterval(s.idleTimer);
