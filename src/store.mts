@@ -1194,7 +1194,7 @@ class Store {
       out[k] = ordered.map((n) => {
         const p = this.publicNote(n);
         return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
-          fileKind: n.fileKind || null, filePath: n.filePath || null, remindAt: p.remindAt || null, live: p.live || null, updatedAt: n.updatedAt };
+          fileKind: n.fileKind || null, filePath: n.filePath || null, remindAt: p.remindAt || null, live: p.live || null, createdAt: n.createdAt, updatedAt: n.updatedAt };
       });
     }
     return out;

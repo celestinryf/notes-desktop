@@ -6400,6 +6400,8 @@
     }
     const NARROW_W = 1e3;
     const PEEK_EDGE_PX = 24;
+    const AWAY_KEY = "p:";
+    let treeActiveKey = null;
     let sidebarPeek = null;
     let peekTimer;
     const isNarrow = () => window.innerWidth < NARROW_W;
@@ -6756,13 +6758,14 @@
       const overdue = n.remindAt <= Date.now();
       return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(formatWhen(n.remindAt)) + "</span>";
     }
-    function rowInner(n, q) {
+    function rowInner(n, q, where = whereMark(n)) {
       const title = n.body === void 0 ? n.title : deriveTitle(n);
       const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
-      const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "") + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
+      const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "";
+      const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
       const inTitle = !q || tokenize(q).some((t) => title.toLowerCase().includes(t));
       const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
-      return '<span class="row-name">' + highlight(title, q) + "</span>" + why + marks + fileMark + reminderMark(n) + whereMark(n);
+      return '<span class="row-name">' + highlight(title, q) + "</span>" + why + where + marks + fileMark + reminderMark(n) + pin;
     }
     function matchExcerpt(n, q) {
       const body = String(n.body || "").replace(/\s+/g, " ");
@@ -6776,9 +6779,20 @@
       return text;
     }
     function whereMark(n) {
-      if (!n.folderId || treeModeActive() || state.view === "folder" && !state.query) return "";
-      const f = flattenTree(state.tree).find((x) => x.id === n.folderId);
-      return f ? '<span class="row-meta where">' + I(f.book ? "book-open" : "folder") + escapeHtml(f.name) + "</span>" : "";
+      if (treeModeActive() || state.view === "folder" && !state.query) return "";
+      return folderMark(n);
+    }
+    function folderMark(n) {
+      if (!n.folderId) return "";
+      const byId = new Map(flattenTree(state.tree).map((x) => [x.id, x]));
+      const f = byId.get(n.folderId);
+      if (!f) return "";
+      const names = [];
+      for (let x = f; x && names.length < 200; x = x.parentId ? byId.get(x.parentId) : void 0) names.unshift(x.name);
+      return '<span class="row-meta where" title="' + escapeHtml(names.join(" / ")) + '">' + I(f.book ? "book-open" : "folder") + escapeHtml(f.name) + "</span>";
+    }
+    function treeNoteInner(n, awayFromFolder) {
+      return '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(n, "", awayFromFolder ? folderMark(n) : "");
     }
     function refreshRow(note) {
       if (tabs.ids.includes(note.id)) {
@@ -6794,9 +6808,8 @@
             e.pinned = !!note.pinned;
           }
         }
-        const row = el.noteTree.querySelector('.tree-note[data-id="' + note.id + '"]');
-        if (row) {
-          row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(note, "");
+        for (const row of el.noteTree.querySelectorAll('.tree-note[data-id="' + note.id + '"]')) {
+          row.innerHTML = treeNoteInner(note, row.dataset.key === AWAY_KEY + note.id);
           row.title = title;
         }
       }
@@ -7093,20 +7106,27 @@
         else next.delete(id);
         updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
       };
-      const noteRow = (n, depth, into) => {
+      const noteRow = (n, depth, into, awayFromFolder = false) => {
         const row = document.createElement("div");
-        const active2 = n.id === state.currentId;
-        row.className = "tree-row tree-note note-row" + (active2 ? " is-active" : "");
+        row.className = "tree-row tree-note note-row";
         row.dataset.id = n.id;
-        row.dataset.key = "n:" + n.id;
+        row.dataset.key = (awayFromFolder ? AWAY_KEY : "n:") + n.id;
+        row.dataset.depth = String(depth);
         row.style.setProperty("--depth", String(depth));
         row.setAttribute("role", "treeitem");
         row.setAttribute("aria-level", String(depth + 1));
-        row.setAttribute("aria-selected", String(active2));
+        row.setAttribute("aria-selected", "false");
         row.tabIndex = -1;
-        row.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(n, "");
+        row.innerHTML = treeNoteInner(n, awayFromFolder);
         row.title = n.title;
-        row.addEventListener("click", (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
+        row.addEventListener("click", (e) => {
+          const newTab = e.ctrlKey || e.metaKey;
+          if (!newTab && treeActiveKey !== row.dataset.key) {
+            treeActiveKey = row.dataset.key || null;
+            if (n.id === state.currentId) renderNoteTree();
+          }
+          openNote(n.id, { newTab });
+        });
         row.addEventListener("auxclick", (e) => {
           if (e.button === 1) {
             e.preventDefault();
@@ -7127,28 +7147,30 @@
           toPeer({ type: "drag", id: null });
         });
         into.append(row);
-        if (active2 && heads.length > 1) {
-          const group = treeGroup(depth, true);
-          group.classList.add("tree-outline");
-          heads.forEach((h, i) => {
-            const hr = document.createElement("div");
-            hr.className = "tree-row tree-heading";
-            hr.dataset.key = "h:" + n.id + ":" + i;
-            hr.style.setProperty("--depth", String(depth + 1 + (h.level - minLevel)));
-            hr.setAttribute("role", "treeitem");
-            hr.setAttribute("aria-level", String(depth + 2 + (h.level - minLevel)));
-            hr.tabIndex = -1;
-            hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>';
-            const hName = document.createElement("span");
-            hName.className = "row-name";
-            hName.textContent = h.text;
-            hr.append(hName);
-            hr.title = h.text;
-            hr.addEventListener("click", () => jumpToHeading(i));
-            group.append(hr);
-          });
-          into.append(group);
-        }
+      };
+      const outlineUnder = (row) => {
+        if (heads.length < 2) return;
+        const depth = Number(row.dataset.depth);
+        const group = treeGroup(depth, true);
+        group.classList.add("tree-outline");
+        heads.forEach((h, i) => {
+          const hr = document.createElement("div");
+          hr.className = "tree-row tree-heading";
+          hr.dataset.key = "h:" + row.dataset.id + ":" + i;
+          hr.style.setProperty("--depth", String(depth + 1 + (h.level - minLevel)));
+          hr.setAttribute("role", "treeitem");
+          hr.setAttribute("aria-level", String(depth + 2 + (h.level - minLevel)));
+          hr.tabIndex = -1;
+          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>';
+          const hName = document.createElement("span");
+          hName.className = "row-name";
+          hName.textContent = h.text;
+          hr.append(hName);
+          hr.title = h.text;
+          hr.addEventListener("click", () => jumpToHeading(i));
+          group.append(hr);
+        });
+        row.after(group);
       };
       const folderRow = (node, depth, into) => {
         const notes = out[node.id] || [];
@@ -7186,18 +7208,30 @@
         into.append(row);
         if (isOpen) {
           const group = treeGroup(depth, here.has(node.id));
-          node.children.forEach((c) => folderRow(c, depth + 1, group));
-          notes.forEach((n) => noteRow(n, depth + 1, group));
+          folderContents(node, depth + 1, group);
           into.append(group);
         }
       };
+      const pinnedFirst = (notes, book2) => book2 ? { pins: [], rest: notes } : { pins: notes.filter((n) => n.pinned), rest: notes.filter((n) => !n.pinned) };
+      const fillLevel = (folderId, pins, folders, rest, depth, into) => {
+        pins.forEach((n) => noteRow(n, depth, into, n.folderId !== folderId));
+        folders.forEach((c) => folderRow(c, depth, into));
+        rest.forEach((n) => noteRow(n, depth, into));
+      };
+      const folderContents = (node, depth, into) => {
+        const { pins, rest } = pinnedFirst(out[node.id] || [], node.book);
+        fillLevel(node.id, pins, node.children, rest, depth, into);
+      };
       const frag = document.createDocumentFragment();
-      if (scopeNode) {
-        scopeNode.children.forEach((c) => folderRow(c, 0, frag));
-        (out[scopeNode.id] || []).forEach((n) => noteRow(n, 0, frag));
-      } else {
-        state.tree.forEach((c) => folderRow(c, 0, frag));
-        (out[""] || []).forEach((n) => noteRow(n, 0, frag));
+      if (scopeNode) folderContents(scopeNode, 0, frag);
+      else {
+        const everyPin = sortNotes(Object.values(out).flat().filter((n) => n.pinned), settingsNow().sort);
+        fillLevel(null, everyPin, state.tree, (out[""] || []).filter((n) => !n.pinned), 0, frag);
+      }
+      const chosen = activeTreeRow(frag, state.currentId);
+      if (chosen) {
+        setRowActive(chosen, true);
+        outlineUnder(chosen);
       }
       root.append(frag);
       restoreTreeFocus(root, refocus);
@@ -7218,7 +7252,13 @@
       setExpanded(parents[parents.length - 1], true);
     }
     function revealInTree(note) {
-      if (GUEST || !treeModeActive() || !note || !note.folderId) return;
+      if (GUEST || !treeModeActive() || !note) return;
+      if (!note.folderId || state.view === "all" && note.pinned) {
+        renderNoteTree();
+        const active = el.noteTree.querySelector(".tree-note.is-active");
+        if (active) active.scrollIntoView({ block: "nearest" });
+        return;
+      }
       const path = pathTo(note.folderId);
       const have = new Set(settingsNow().treeExpanded || []);
       const missing = path.filter((id) => !have.has(id));
@@ -8157,13 +8197,18 @@
       focusAfterOpen(opts.focus);
     }
     function markActiveRow(id) {
-      for (const root of [el.noteList, el.noteTree]) {
-        root.querySelectorAll(".note-row").forEach((r) => {
-          const on = !!id && r.dataset.id === id;
-          r.classList.toggle("is-active", on);
-          if (r.hasAttribute("aria-selected")) r.setAttribute("aria-selected", String(on));
-        });
-      }
+      el.noteList.querySelectorAll(".note-row").forEach((r) => setRowActive(r, !!id && r.dataset.id === id));
+      const chosen = activeTreeRow(el.noteTree, id);
+      el.noteTree.querySelectorAll(".note-row").forEach((r) => setRowActive(r, r === chosen));
+    }
+    function setRowActive(row, on) {
+      row.classList.toggle("is-active", on);
+      if (row.hasAttribute("aria-selected")) row.setAttribute("aria-selected", String(on));
+    }
+    function activeTreeRow(root, id) {
+      if (!id) return null;
+      const rows = Array.from(root.querySelectorAll('.tree-note[data-id="' + id + '"]'));
+      return rows.find((r) => r.dataset.key === treeActiveKey) || rows[0] || null;
     }
     function focusAfterOpen(where) {
       if (where === "title") el.titleInput.focus();

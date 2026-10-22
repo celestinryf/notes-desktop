@@ -96,7 +96,7 @@ interface ListOpts {
 }
 interface OutlineRow {
   id: string; title: string; folderId: string | null; pinned: boolean; locked: boolean; unlocked: boolean; sticky: boolean;
-  fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; updatedAt: number;
+  fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; createdAt: number; updatedAt: number;
 }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }
 interface TagCount { tag: string; count: number }

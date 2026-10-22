@@ -218,7 +218,10 @@ const SCENES = {
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
-  pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
+  'tree-pinned': { about: 'All notes as a folder tree: every pinned note first (one from a folder carries its name), and an open folder lists its own pinned notes first', pin: ['n-reading', 'n-retro', 'b2'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: openNote('Q4 planning') },
+  'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
+  'tree-pinned-folder': { about: 'A folder (Work) as a tree: its own pinned notes above its subfolders', pin: ['n-retro', 'n-1on1'], settings: { lastFolderId: 'f-work', treeExpanded: ['f-proj'] }, run: openNote('1:1 with Sam') },
+  pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', pin: ['n-reading', 'n-retro', 'b2'], run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
   'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
   'settings-appearance': { about: 'Settings > Appearance: theme, the scheme swatches, the custom colour pickers', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await sleep(400); } },
   'settings-unsaved': { about: 'Settings with an unsaved change (the theme previewed on the page) and the Save changes button live', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await page.click('.scheme-swatch[data-scheme="slate"]'); await sleep(400); } },
@@ -259,6 +262,7 @@ async function shoot(theme, name, opts) {
   const data = seed(Date.now());
   data.settings.theme = theme;
   Object.assign(data.settings, SCENES[name].settings || {});
+  for (const id of SCENES[name].pin || []) data.notes.find((n) => n.id === id).pinned = true;
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
