@@ -1,88 +1,193 @@
 # Notes
 
-A tray-resident notes app for Windows. Press **Ctrl + Alt + N** anywhere to toggle it. It starts hidden at login so the hotkey always works.
+A notes app for Windows that opens from anywhere with **Ctrl+Alt+N**. It keeps your notes, Markdown files, Word documents, PDFs and code files in one place. Everything stays on your computer, and syncing goes through a git repository you own, not a cloud account.
 
-**Status:** in development. Notes runs on Windows, from source. macOS support and installers are planned. Parts of this README predate recent changes, and a full rewrite is planned.
+![Notes in the light theme: the folder tree, a note with a checklist and a table](docs/screenshots/notes-light.png)
 
-## Run
+**Status:** in development. Notes runs on Windows 10 and 11, from source. Installers and a macOS version are planned.
 
-Requires Node.js 24 or later and npm.
+## Contents
+- [Install and run](#install-and-run)
+- [What it does](#what-it-does)
+- [Files it opens](#files-it-opens)
+- [Vaults and git sync](#vaults-and-git-sync)
+- [Claude Code panel](#claude-code-panel)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Where your data lives](#where-your-data-lives)
+- [Development](#development)
+- [Licence](#licence)
+
+## Install and run
+
+You need Windows, [Node.js](https://nodejs.org) 24 with npm (the version Notes is developed with), and [git](https://git-scm.com). Notes uses git for each note's version history and for vault sync.
 
 ```
 git clone https://github.com/celestinryf/notes-desktop.git
 cd notes-desktop
 npm install
-npm run install:shortcuts   # Start Menu + desktop shortcuts, launches the app
+npm start
 ```
 
-The renderer and the editors are prebuilt bundles in `src/renderer/vendor/`. After changing their sources, run `npm run build`.
+`npm run install:shortcuts` adds Notes to the Start Menu and the desktop and starts it.
 
-The app adds its own autostart entry (Settings → "Start Notes when I log in"). Quit from the tray icon.
+- **The hotkey:** Ctrl+Alt+N shows or hides Notes from any app, and Esc hides it. If another app already holds Ctrl+Alt+N, Notes takes Ctrl+Shift+Alt+N, Ctrl+Alt+J or Ctrl+Alt+F12 and says which one in Settings. You can change it in Settings (Ctrl+,).
+- **The tray:** closing the window hides Notes; the tray icon shows it again, starts a new note or sticky note, and quits.
+- **Start at sign-in:** on by default, so the hotkey always works. Turn it off in Settings › General ("Start Notes when I sign in") or in the tray menu ("Start at login").
 
-## Features
+## What it does
 
-- Notes with title, tags, Markdown body, autosave, pin, duplicate, trash with undo, restore, delete forever, empty trash
-- Open files as notes (Ctrl+O, the Open file… button, or drag files onto the window): Markdown, text, LaTeX, JSON, code and any other text file are editable and written back to the file in place (hard links such as CLAUDE.md ↔ AGENTS.md stay joined; CRLF files stay CRLF). PDFs open in a viewer where you can comment, sign and rearrange pages. Word documents show as laid out in the file and can be edited in place, or in WordCraft when its web build is present. "Open with…" opens any file in its native app. Changes made by other programs are picked up while the note is open.
-- Agent files: Settings → "Add my agent files" links your global CLAUDE.md/AGENTS.md, Claude commands, output styles, memory notes, and every project's CLAUDE.md/AGENTS.md into an "Agent files" folder. Editing them in Notes edits the real files.
-- Folders, nested as deep as you like: create with the + next to Folders or Ctrl+Shift+N, right-click or the ⋯ button for new subfolder / rename / delete, double-click to rename, drag notes onto folders and folders onto folders (or onto All notes to move to the top level). Deleting a folder lifts its contents one level up; nothing is lost. The editor toolbar also has a folder picker.
-- Instant search across title, body, and tags with match highlighting; sort by last edited, newest, or title; filter by tag
-- Markdown renders as you type: `## ` becomes a heading, `- ` a list, `- [ ] ` a checklist, `**bold**` bold; tables and images render too. Ctrl+E shows the raw Markdown source and Ctrl+E again returns. Markdown is always what gets stored.
-- Safety net: if a note contains Markdown the rendered view cannot show faithfully (inline HTML, footnotes), it opens as source with a notice, so just looking at it never rewrites it.
-- Ctrl+B / Ctrl+I for bold and italic, Ctrl+K for a link, Tab / Shift+Tab to nest and un-nest list items
-- Vaults (Settings → Vaults): add a folder, or clone a git repository, and its Markdown files become notes under a folder of the same name, subfolders included. New notes become files named after their title, renames rename the file, moves move it, trash uses `<vault>/.trash`. A watcher picks up changes made by other programs or by a `git pull`. For a repository with a remote, changes are committed a few seconds after you stop typing, pulled with rebase, and pushed; on an interval too; and before quit. Conflicts are never resolved for you: the sync stops, your local commit stays, and the status tells you to resolve in the folder. This is the obsidian-git model, so the same vault works in Obsidian or any editor.
-- Desktop stickies (📌 Stick or Ctrl+Shift+T, tray → New sticky note): any note can sit on the desktop as a small frameless window with the same rendered editor, so a `- [ ]` checklist is a to-do sticky. Drag the top bar to move, drag edges to resize, pick a tint, toggle floating above other windows. ✕ removes it from the desktop (the note stays); Esc hides it until tray → Stickies shows it again. Position, size and tint are remembered and stickies come back at login. Edits in a sticky show up in the main window and vice versa.
-- Bot (🤖 or Ctrl+Shift+A): a panel that runs Claude Code (`claude -p`) over your notes and streams its output. For a vault note it works in the vault folder; for other file notes, in that file's folder; for plain notes, in a workspace folder that mirrors them as Markdown and is read back afterwards (edits update notes, new files become notes, deletions are reported but kept). "Allow edits" controls whether the agent may write files. "Open terminal" starts an interactive Claude Code session in that same folder. Requires the Claude Code CLI on your PATH.
-- Live share (Share ▾ → Live share this note…): edit one note together over your local network, no account or service. The host's app serves that single note at a link with a random token; whoever joins gets their own copy that stays in step both ways while the share lasts (last writer wins per note; if two people type at the same moment the later save stands). Stop from the Share menu or the Live bar; the note stays on every side. Shares resume after a restart. Locked and file-backed notes cannot be shared live.
-- Lock a note (🔒 Lock or Ctrl+L): the text is encrypted on disk with a password (scrypt + AES-256-GCM); the title stays visible and searchable, the body does not. It stays readable until you hide the app or choose Lock now. There is no recovery for a forgotten password. File-backed notes cannot be locked.
-- Reminders (⏰ Remind or Ctrl+Shift+M): quick picks or a date and time. A Windows notification appears when it is due (click it to open the note), the app shows a toast, the card badge turns red, and the Reminders view lists what is coming up, soonest first.
-- Share (Share ▾ or Ctrl+Shift+S): copy as Markdown, rich text or plain text; email it; save as PDF, HTML or Markdown; show the file in Explorer for file-backed notes.
-- Replace in the open note (Ctrl+H, or ⇄ in the find bar): one match at a time or all at once, in either view.
-- Earlier versions (🕘 History or Ctrl+Shift+H): every saved change of a note, from the local git history; preview and restore any of them.
-- Attachments (📎 Attach or Ctrl+Shift+O) and voice memos (🎙 Record or Ctrl+Shift+G): files are copied into the app's attachments folder and linked from the note; Ctrl+click a link to open it. Programs and scripts are never launched.
-- Books (prototype; folder menu → Turn into a book): a folder whose notes are pages in a set order. Opening a page shows a strip of page tabs like Google Docs' document tabs: click to jump, ‹ › or Ctrl+PageUp/PageDown to turn pages, + Page to add one at the end, drag a tab to reorder. The note list shows the pages numbered in reading order.
-- Related notes: under each note, the notes it links to, the notes that link to it, and notes that share its tags; click one to open it.
-- Links between notes: in the link dialog (Ctrl+K) pick a note, or Share ▾ → Copy link to this note and paste it elsewhere. Ctrl+click follows it.
-- Find in the open note (Ctrl+Shift+F; Enter/Shift+Enter or F3 step through, Esc closes). Ctrl+F searches all notes.
-- Print the open note (🖨 Print or Ctrl+Shift+P): just the note, no chrome.
-- Read aloud (🔊 Read or Ctrl+Shift+R) speaks the selection or the whole note with a system voice; voice and speed in Settings. Dictate (🎤 or Ctrl+Shift+D) opens Windows speech recognition (Win+H) into the editor; speech is handled by Windows, not this app.
-- Writing column can sit left, center, or right of the editor pane at a chosen width, or use the full width (Settings)
-- Git history: every change is committed to a git repo inside the data folder (only `notes.json` is tracked). Add an optional remote in Settings and each commit is pushed. Commit now / Push now buttons in Settings.
-- Light (cream) and dark (ink) themes, follows the system by default; adjustable editor font size; always-on-top option
-- Drag the edge of the sidebar or the note list to resize them; widths persist, double-click an edge to reset
-- Export a note as `.md`, export everything as JSON, import `.md`/`.txt` files
-- Data lives in `%APPDATA%\notes-app\notes.json`, written atomically, with rolling backups in `backups\`
+**Writing**
+- Markdown renders as you type: `## ` makes a heading, `- [ ] ` a checklist, `**bold**` bold. Tables, images and code blocks render too. Ctrl+E shows the Markdown source, and Markdown is what gets saved.
+- Type `/` for a menu of blocks (headings, lists, checklist, quote, code, table, divider, today's date, a link to a note). Type `[[` to link to another note, or to create one and link it.
+- If a note holds Markdown the rendered view cannot show faithfully, it opens as source with a notice, so just opening a note never rewrites it.
+- Spelling suggestions are in the right-click menu.
 
-## Shortcuts
+**Finding and organising**
+- **Command palette (Ctrl+P):** one box finds any note by title or text and runs every command, each listed with its shortcut. Type `>` to see commands only.
+- **Search (Ctrl+F)** filters the list by title, text and tags, with matches highlighted.
+- **Folders** nest as deep as you like. Drag notes and folders to move them. The note list shows folders with their notes inside, or one flat list (the switch is beside the sort menu).
+- **Tags**, a **Pinned** view, a **Reminders** view and a **Trash** with Undo, restore, delete forever and empty trash.
+- **Pinned notes stay on top.** In All notes, every pinned note comes first, wherever it lives. In a folder, that folder's pinned notes come first.
+- **Sort** by last edited, newest or title.
+- **Tabs and split view:** Ctrl+click opens a note in a new tab, and Split view puts a second side next to the first.
+- **Books:** turn a folder into a book whose notes are pages in a set order, with page tabs, a reading view of the whole book, and export to one Markdown, HTML or PDF file. "Split into a book…" turns a long note into a book, one page per heading.
+- **Related notes:** under each note, the notes it links to, the notes that link to it, and notes that share its tags.
+
+**Each note**
+- **Earlier versions (Ctrl+Shift+H):** Notes' own notes are saved to a local git history a few seconds after each change (on by default, in Settings › History). Preview an old version and restore it. Locked notes are left out.
+- **Lock (Ctrl+L):** encrypts the note's text on disk with a password (scrypt and AES-256-GCM). The title stays visible. A forgotten password cannot be recovered.
+- **Reminders (Ctrl+Shift+M):** a Windows notification when it is due.
+- **Stick to the desktop (Ctrl+Shift+T):** the note becomes a small window on the desktop, with a colour, and edits flow both ways.
+- **Attach files (Ctrl+Shift+O)** and **record a voice memo (Ctrl+Shift+G):** files are copied into Notes' own folder and linked from the note.
+- **Read aloud (Ctrl+Shift+R)** with the system's voices, and **dictate (Ctrl+Shift+D)** through Windows speech recognition.
+- **Share (Ctrl+Shift+S):** copy as Markdown, rich text or plain text, copy a link to the note, email it, or save it as PDF, HTML or Markdown.
+- **Live share:** edit one note together with people on your local network, with no account or outside service. It is plain HTTP, and the random token in the link is its only protection: anyone on the network who has the link can edit the note until you stop sharing.
+- **Print (Ctrl+Shift+P)**, duplicate, and export as Markdown.
+
+**Appearance**
+- Light and dark themes, following Windows by default (Ctrl+Shift+L switches). Colour schemes: Notes, Paper, Slate, Forest, Ocean, Rose, Sepia, or your own background, text and accent colours.
+- Text size, a full-width or narrower writing column, always on top, and resizable panes.
+- Hide the sidebar (Ctrl+\\) or the note list (Ctrl+Shift+\\). A hidden sidebar slides in when the pointer reaches the left edge.
+
+![Notes in the dark theme](docs/screenshots/notes-dark.png)
+
+## Files it opens
+
+Open a file with Ctrl+O, **Open file…** at the bottom left, or by dropping it on the window. It becomes a note that edits the file itself, in its own format. Changes made by other programs show up while the note is open.
+
+| Files | How they open |
+|---|---|
+| Markdown (`.md`) | The rendered editor, saved back as Markdown |
+| Plain text (`.txt`) | A plain text box |
+| LaTeX, code and config (`.tex`, `.py`, `.js`, `.json` and dozens more) | A code editor with highlighting and line numbers |
+| `.csv`, `.tsv` | A table; Ctrl+E edits the text |
+| Images (`.png`, `.jpg`, `.gif`, `.webp`, `.bmp`, `.ico`, `.avif`) | A viewer, fitted to the pane or at actual size |
+| PDF | A viewer where you can highlight, add text, draw, sign, comment, fill forms and reorder pages. The original is backed up before each save |
+| Word (`.docx`) | A simple editor for text, bold, italic and underline, with the document's layout |
+| Spreadsheets (`.xlsx`, `.xls`, `.ods` and others) | Through GridCraft (below); otherwise "Open with…" opens them in their own app |
+
+- **Convert to…** saves a copy in another format (Markdown, text, HTML, Word or PDF) next to the original, and never overwrites a file. Copies made from a PDF or a spreadsheet keep only the text.
+- Any other text file up to 4 MB opens as text.
+- **Open with…** opens the file in its usual app.
+- **WordCraft and GridCraft (optional):** Notes can host two web apps built from Rust: [WordCraft](https://github.com/celestinryf/wordcraft), a full word processor for the Word family, and [GridCraft](https://github.com/celestinryf/gridcraft), a spreadsheet. Notes looks for their web builds in `%USERPROFILE%\wordcraft\dist\web` and `%USERPROFILE%\gridcraft\dist\web`, or in the folders named by `NOTES_APP_WORDCRAFT_DIR` and `NOTES_APP_GRIDCRAFT_DIR`.
+- **MarkItDown (optional):** with Microsoft's [MarkItDown](https://github.com/microsoft/markitdown) installed (`pip install "markitdown[all]"`), search also finds the text inside `.xlsx` and `.xls` files.
+
+![The command palette](docs/screenshots/command-palette.png)
+
+## Vaults and git sync
+
+A vault is a folder of Markdown and text files that Notes shows as notes, in the same way as Obsidian. Add one in Settings › Vaults, either an existing folder or a git repository to clone.
+- Subfolders become folders.
+- A new note becomes a file named after its title. Renaming a note renames the file, moving it moves the file, and trash moves it to the vault's `.trash` folder.
+- Changes made outside Notes, by another editor or by `git pull`, appear on their own.
+
+For a vault that is a git repository with a remote, Notes syncs the way obsidian-git does. It commits 8 seconds after the last change, pulls with rebase, and pushes. It also syncs every few minutes (5 by default), and when Notes quits if a change is still waiting. Notes never resolves a conflict for you: the sync stops, your commit stays, and the vault's status says what happened. The folder keeps working in Obsidian or any other editor.
+
+Notes' own notes (the ones not in a vault) have their history in a local git repository. Settings › History can push it to a remote you choose, as a backup.
+
+## Claude Code panel
+
+Ctrl+Shift+A opens a panel that runs [Claude Code](https://github.com/anthropics/claude-code) on your notes and shows its output as it works.
+- **Where it runs:** for a vault note, Claude Code works in the vault folder; for a file, in the file's folder. For Notes' own notes it works in a folder of Markdown copies, and its edits are read back into the notes.
+- **What it may do:** with "Allow edits" off, a panel run can only read. "Open terminal" starts an ordinary interactive Claude Code session in the same folder, which that switch does not limit.
+- **What it needs:** the `claude` command on your PATH, signed in with a Claude account. Notes refuses to run it when it is set up to bill API credits.
+
+Settings › Agent files › **Add my agent files** links your coding agents' files (such as `CLAUDE.md`, `AGENTS.md`, and Claude Code's commands, output styles and memory) into an "Agent files" folder, where editing a note edits the real file.
+
+## Keyboard shortcuts
 
 | Keys | Action |
-| --- | --- |
-| Ctrl+Alt+N | Show / hide from anywhere (changeable in Settings) |
-| Esc | Hide window |
+|---|---|
+| Ctrl+Alt+N | Show or hide Notes from anywhere (changeable in Settings) |
+| Esc | Hide Notes (closes a menu or dialog first) |
+| Ctrl+P | Command palette: any note or command |
 | Ctrl+N | New note |
-| Ctrl+O | Open files as notes |
-| Ctrl+Shift+N | New folder (inside the current folder) |
-| Ctrl+F | Search |
-| Ctrl+E | Toggle Markdown source / rendered |
-| Ctrl+P | Command palette: find any note or command |
-| Ctrl+D | Pin / unpin |
-| Ctrl+Shift+Del | Move to trash (Ctrl+Del also works outside a text field) |
+| Ctrl+O | Open a file as a note |
+| Ctrl+Shift+N | New folder |
+| Ctrl+F | Search all notes |
+| Ctrl+Shift+F | Find in this note (Enter, Shift+Enter or F3 to step) |
+| Ctrl+H | Find and replace |
+| Ctrl+E | Markdown source or rendered view |
+| Ctrl+D | Pin or unpin |
 | Ctrl+S | Save now |
+| Ctrl+B, Ctrl+I, Ctrl+K | Bold, italic, link |
+| Ctrl+Shift+S | Share menu |
+| Ctrl+Shift+H | Earlier versions |
+| Ctrl+Shift+M | Remind me |
+| Ctrl+L | Lock |
+| Ctrl+Shift+O | Attach files |
+| Ctrl+Shift+G | Record a voice memo |
+| Ctrl+Shift+R | Read aloud |
+| Ctrl+Shift+D | Dictate |
+| Ctrl+Shift+T | Stick to the desktop |
+| Ctrl+Shift+P | Print |
+| Ctrl+Shift+A | Claude Code panel |
+| Ctrl+Shift+Del | Move to trash (Ctrl+Del also works outside a text field) |
+| Alt+↑, Alt+↓ | Previous or next note |
+| Ctrl+T, Ctrl+W | New tab, close tab |
+| Ctrl+Tab, Ctrl+Shift+Tab | Next or previous tab |
+| Ctrl+PageDown, Ctrl+PageUp | Next or previous page of a book |
+| Ctrl+\\, Ctrl+Shift+\\ | Hide or show the sidebar, the note list |
+| Ctrl+Shift+L | Light or dark |
+| Ctrl+=, Ctrl+-, Ctrl+0 | Zoom in, out, reset |
 | Ctrl+, | Settings |
-| Ctrl+\ | Toggle sidebar |
-| Ctrl+Shift+L | Toggle light / dark |
-| Alt+↑ / Alt+↓ | Previous / next note |
 
-## Tests
+## Where your data lives
+
+Notes has no account and sends nothing anywhere on its own. It uses the network only when you ask it to:
+- pushing to and pulling from git remotes you set up;
+- a live share on your local network;
+- images in a note that point to a web address;
+- the Claude Code panel, which runs your own `claude` command.
+
+Everything else is in `%APPDATA%\notes-app\` (the tray's "Open data folder" opens it):
+
+| Path | What it holds |
+|---|---|
+| `notes.json` | Notes' own notes, folders and settings. Written to a temporary file first, then renamed into place |
+| `backups\` | A copy of `notes.json` at most every 10 minutes; the newest 10 are kept |
+| `history\` | The git repository behind Earlier versions |
+| `attachments\` | Attached files and voice memos |
+| `workspace\` | The Markdown copies the Claude Code panel works in |
+
+Files you open and vault files stay where they are; Notes only remembers where they are. Settings › Your data exports every note as JSON and imports Markdown files.
+
+## Development
 
 ```
-npm test          # unit tests for the store and helpers
-npm run test:ui   # Playwright drives every feature in the real app (search, sort, pin, tags, duplicate,
-                  # trash/undo/restore/delete/empty, preview checklists, settings, export/import, hotkey change)
-npm run test:e2e  # launches the app, presses the real OS hotkey via SendKeys, types a note, checks disk
-npm run test:all  # all three
+npm run typecheck   # tsc over the main process and the renderer
+npm test            # unit tests
+npm run test:ui     # drives the real app with Playwright, in a separate data folder
+npm run test:e2e    # presses the real hotkey with SendKeys: hands off the keyboard while it runs
+npm run test:all    # all four
+npm run shots       # screenshots of the app's screens, with sample notes
 ```
 
-The UI and e2e tests use isolated data folders and test-only hotkeys so they never touch your notes or your running instance. Export and import dialogs are stubbed inside the main process during the UI test so the real file writes still happen.
+- **The main process** is TypeScript (`src/*.mts`), which Electron runs directly by stripping the types, with no build step.
+- **The page** is TypeScript too (`src/renderer/`), bundled with esbuild into `src/renderer/vendor/`. Run `npm run build:app` after changing it; a unit test fails while the bundle is stale. `npm run build` rebuilds every bundle, including the editors.
+- **Notices:** `npm run notices` regenerates `THIRD_PARTY_NOTICES.txt` after a dependency change.
+
+Issues and pull requests are welcome; run `npm run test:all` before opening one. Please report security problems privately, through the repository's Security tab.
 
 ## Licence
 
