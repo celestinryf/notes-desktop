@@ -2,7 +2,7 @@ const UNTITLED = 'Untitled';
 
 type TitleSource = Partial<Pick<Note, 'title' | 'body'>> | null | undefined;
 type FileSource = Partial<Pick<Note, 'filePath' | 'fileKind'>> | null | undefined;
-type Sortable = Pick<Note, 'title' | 'body' | 'pinned' | 'createdAt' | 'updatedAt'>;
+type Sortable = Partial<Pick<Note, 'title' | 'body'>> & Pick<Note, 'pinned' | 'createdAt' | 'updatedAt'>;
 type PaneName = 'sidebarWidth' | 'listWidth';
 
 function firstLine(text?: string | null) {
