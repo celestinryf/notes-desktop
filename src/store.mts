@@ -52,7 +52,7 @@ type VaultWalk = {
   seenNotes: Set<string>;
   seenFolders: Set<string>;
   newFolders: Folder[];
-  folderMoves: { folder: Folder; parentId: string; name: string }[];
+  folderMoves: { folder: Folder; dir: string; parentId: string; name: string }[];
   refreshes: { note: FileNote; full: string; from: number | null; body: string; mtime: number | null; kind: FileKind | null; changed: boolean }[];
   placements: { note: Note; full: string; folderId: string }[];
   newFiles: { full: string; folderId: string; body: string; mtime: number }[];
@@ -902,7 +902,7 @@ class Store {
             folderByDir.set(F.pathKey(full), sub);
             walk.newFolders.push(sub);
           } else if (sub.parentId !== folderId || sub.name !== e.name) {
-            walk.folderMoves.push({ folder: sub, parentId: folderId, name: e.name });
+            walk.folderMoves.push({ folder: sub, dir: full, parentId: folderId, name: e.name });
           }
           walk.seenFolders.add(sub.id);
           await visit(full, sub.id);
@@ -915,9 +915,10 @@ class Store {
           }
           walk.seenNotes.add(known.id);
           if (isFileNote(known) && fs.existsSync(known.filePath)) {
+            const from = known.fileMtime;
             let change;
             try { change = await this._fileChange(known); } catch (_) { continue; }
-            if (change) walk.refreshes.push(Object.assign({ note: known, full, from: known.fileMtime }, change));
+            if (change) walk.refreshes.push(Object.assign({ note: known, full, from }, change));
           }
           if (known.folderId !== folderId || known.vaultId !== id || known.trashedAt) walk.placements.push({ note: known, full, folderId });
         }
@@ -929,7 +930,11 @@ class Store {
 
   _vaultFoldersByDir(id: string) {
     const byDir = new Map<string, Folder>();
-    for (const f of this.folders) if (f.vaultId === id && f.dirPath) byDir.set(F.pathKey(f.dirPath), f);
+    for (const f of this.folders) {
+      if (f.vaultId !== id || !f.dirPath) continue;
+      const key = F.pathKey(f.dirPath);
+      if (!byDir.has(key)) byDir.set(key, f);
+    }
     return byDir;
   }
 
@@ -947,35 +952,46 @@ class Store {
       const same = orphansByBody.get(n.body);
       if (same) same.push(n); else orphansByBody.set(n.body, [n]);
     }
+    const root = this.vaultRootFolder(id);
+    if (!root) return { added, updated, removed, notes: walk.seenNotes.size, folders: walk.seenFolders.size };
     this._commit(() => {
-      const inStore = new Set(this.notes);
+      const live = new Map(this.notes.map((n) => [n.id, n]));
+      const liveFolders = new Map(this.folders.map((f) => [f.id, f]));
       const byPath = this._notesByPath();
       const byDir = this._vaultFoldersByDir(id);
       const renamed = new Map<string, string>();
-      const folderOf = (folderId: string) => renamed.get(folderId) || folderId;
-      const stillAt = (n: Note, full: string) => inStore.has(n) && !!n.filePath && F.pathKey(n.filePath) === F.pathKey(full);
+      const folderOf = (folderId: string) => { const to = renamed.get(folderId) || folderId; return liveFolders.has(to) ? to : root.id; };
+      const liveAt = (n: Note, full: string) => { const now = live.get(n.id); return now && now.filePath && F.pathKey(now.filePath) === F.pathKey(full) ? now : null; };
       for (const f of walk.newFolders) {
         const existing = f.dirPath ? byDir.get(F.pathKey(f.dirPath)) : undefined;
         if (existing) { renamed.set(f.id, existing.id); walk.seenFolders.add(existing.id); continue; }
         f.parentId = f.parentId ? folderOf(f.parentId) : null;
         this.folders.push(f);
+        liveFolders.set(f.id, f);
       }
-      for (const m of walk.folderMoves) { m.folder.parentId = folderOf(m.parentId); m.folder.name = m.name; }
+      for (const m of walk.folderMoves) {
+        const now = liveFolders.get(m.folder.id);
+        if (!now || !now.dirPath || F.pathKey(now.dirPath) !== F.pathKey(m.dir)) continue;
+        now.parentId = folderOf(m.parentId); now.name = m.name;
+      }
       for (const r of walk.refreshes) {
-        if (!stillAt(r.note, r.full) || r.note.fileMtime !== r.from) continue;
-        r.note.body = r.body; r.note.fileMtime = r.mtime; r.note.fileKind = r.kind;
+        const note = liveAt(r.note, r.full);
+        if (!note || note.fileMtime !== r.from) continue;
+        note.body = r.body; note.fileMtime = r.mtime; note.fileKind = r.kind;
         if (r.changed) updated++;
       }
       for (const p of walk.placements) {
-        if (!stillAt(p.note, p.full)) continue;
-        p.note.folderId = folderOf(p.folderId); p.note.vaultId = id; p.note.trashedAt = null;
+        const note = liveAt(p.note, p.full);
+        if (!note) continue;
+        note.folderId = folderOf(p.folderId); note.vaultId = id; note.trashedAt = null;
       }
       const fresh: Note[] = [];
       for (const file of walk.newFiles) {
-        if (byPath.has(F.pathKey(file.full))) continue;
+        if (byPath.has(F.pathKey(file.full)) || !fs.existsSync(file.full)) continue;
         const name = stem(path.basename(file.full));
-        const orphan = (orphansByBody.get(file.body) || []).shift();
-        if (orphan && inStore.has(orphan) && !orphan.trashedAt) {
+        const candidate = (orphansByBody.get(file.body) || []).shift();
+        const orphan = candidate ? live.get(candidate.id) : undefined;
+        if (orphan && !orphan.trashedAt && fileMissing(orphan)) {
           orphan.filePath = file.full; orphan.title = name; orphan.folderId = folderOf(file.folderId); orphan.fileMtime = F.mtimeOf(file.full);
           walk.seenNotes.add(orphan.id);
           updated++;
