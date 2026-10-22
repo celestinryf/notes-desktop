@@ -1,7 +1,7 @@
 // What the renderer pages find on window: the preload bridge, and the vendor bundles that esbuild exposes as
 // globals (their types come from their own sources). The bundles are optional because a page checks for them.
-type RichEditor = ReturnType<typeof import('../editor/index.js').create>;
-type CodeEditor = ReturnType<typeof import('../code/index.js').create>;
+type RichEditor = ReturnType<typeof import('../editor/index.ts').create>;
+type CodeEditor = ReturnType<typeof import('../code/index.ts').create>;
 
 // Chromium's window-controls overlay (Electron titleBarOverlay); absent where the OS draws the title bar.
 interface WindowControlsOverlay extends EventTarget {
@@ -13,11 +13,11 @@ interface Navigator { windowControlsOverlay?: WindowControlsOverlay }
 
 interface Window {
   notesApi: NotesApi;
-  NotesEditor?: typeof import('../editor/index.js');
-  NotesCode?: typeof import('../code/index.js');
+  NotesEditor?: typeof import('../editor/index.ts');
+  NotesCode?: typeof import('../code/index.ts');
   // index.html loads these two before the page bundle, so they are always there.
-  DocxView: typeof import('../docx-view/index.js');
-  PdfView: typeof import('../pdf-view/index.js');
+  DocxView: typeof import('../docx-view/index.ts');
+  PdfView: typeof import('../pdf-view/index.ts');
   NotesIcons?: { svg(name: string, size?: number): string; hydrate(root?: ParentNode | null): void; names: string[] };
 }
 

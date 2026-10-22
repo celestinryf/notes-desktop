@@ -14,10 +14,10 @@
     "src/types.d.ts",
     "src/renderer/globals.d.ts",
     "src/renderer/*.js",
-    "src/editor/index.js",
-    "src/code/index.js",
-    "src/docx-view/index.js",
-    "src/pdf-view/index.js",
+    "src/editor/index.ts",
+    "src/code/index.ts",
+    "src/docx-view/index.ts",
+    "src/pdf-view/index.ts",
     "src/renderer/*.ts",
     "src/shared/*.mts"
   ]

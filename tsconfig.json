@@ -26,7 +26,6 @@
     "src/preload.js",
     "src/*.mts",
     "src/shared/*.mts",
-    "src/docx-edit/*.mts",
-    "src/renderer/globals.d.ts"
+    "src/docx-edit/*.mts"
   ]
 }
