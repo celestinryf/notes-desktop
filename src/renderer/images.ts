@@ -2,11 +2,13 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { ipcErrorText } from './text.ts';
 
-export function createImages({ api, showBanner }) {
+type ImagesDeps = { api: NotesApi, showBanner: (text: string) => void };
+
+export function createImages({ api, showBanner }: ImagesDeps) {
   // An image file, fitted to the pane; a click (or Enter) shows it at its actual size, and again fits it. The picture
   // comes from the main process as bytes and is shown from a blob: URL, so the page never reads files itself.
   let imageUrl: string | null = null, imageSeq = 0;
-  async function showImage(note) {
+  async function showImage(note: PublicNote) {
     const seq = ++imageSeq;
     el.imageView.removeAttribute('src'); // the last picture never shows under this note's name
     el.imageViewer.classList.remove('hidden', 'is-actual');

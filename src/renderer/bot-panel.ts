@@ -2,10 +2,17 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { toast } from './toast.ts';
 
-export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) {
+interface BotPanelDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  refresh: (opts: { keepEditor: boolean }) => Promise<unknown>;
+  applyFreshFileBody: (fresh: PublicNote) => void;
+}
+
+export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }: BotPanelDeps) {
   const bot = { open: false, running: false };
 
-  function toggleBot(force?) {
+  function toggleBot(force?: boolean) {
     bot.open = typeof force === 'boolean' ? force : !bot.open;
     el.botPanel.classList.toggle('hidden', !bot.open);
     el.botBtn.classList.toggle('is-on', bot.open);
@@ -21,7 +28,7 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) 
     el.botScope.title = text;
   }
 
-  function botAppend(text, cls?: string) {
+  function botAppend(text: string, cls?: string) {
     const span = document.createElement('span');
     if (cls) span.className = cls;
     span.textContent = text;
@@ -37,7 +44,7 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) 
     if (!prompt) {
       // Empty prompt: pull in whatever a terminal session changed in the workspace.
       const r = await api.bot.importWorkspace();
-      botAppend(r.error ? ('Import failed: ' + r.error + '\n') : ('Pulled in workspace edits. ' + importSummary(r) + '\n' + (r.details || []).map((d) => '  ' + d).join('\n') + (r.details && r.details.length ? '\n' : '')), r.error ? 'bot-err' : 'bot-meta');
+      botAppend(!('updated' in r) || r.error ? ('Import failed: ' + r.error + '\n') : ('Pulled in workspace edits. ' + importSummary(r) + '\n' + (r.details || []).map((d) => '  ' + d).join('\n') + (r.details && r.details.length ? '\n' : '')), r.error ? 'bot-err' : 'bot-meta');
       await refresh({ keepEditor: true });
       el.botPrompt.focus();
       return;
@@ -46,7 +53,7 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) 
     if (!res.ok) { botAppend(res.error + '\n', 'bot-err'); return; }
   }
 
-  function onBotEvent(ev) {
+  function onBotEvent(ev: BotEvent) {
     if (ev.type === 'start') {
       bot.running = true;
       el.botPanel.classList.add('is-running');
@@ -78,7 +85,7 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) 
     }
   }
 
-  function importSummary(imp) {
+  function importSummary(imp: WorkspaceImport) {
     return 'Notes updated: ' + imp.updated + ', created: ' + imp.created + (imp.conflicts ? ', conflicts: ' + imp.conflicts : '') + (imp.missing ? ', files removed by the agent (notes kept): ' + imp.missing : '') + '.';
   }
 

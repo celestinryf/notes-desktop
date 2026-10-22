@@ -2,19 +2,27 @@ import { el, I } from './dom.ts';
 import { state } from './state.ts';
 import { escapeHtml } from './text.ts';
 
-export function createRelated({ api, followLink }) {
+interface RelatedDeps {
+  api: NotesApi;
+  followLink: (href: string) => Promise<unknown>;
+}
+
+type RelatedRow = RelatedItem & { sharedTags?: string[] };
+
+export function createRelated({ api, followLink }: RelatedDeps) {
   let relatedTimer: ReturnType<typeof setTimeout> | undefined;
   function renderRelatedSoon() { clearTimeout(relatedTimer); relatedTimer = setTimeout(() => { if (state.current) renderRelated(state.current); }, 400); }
 
-  async function renderRelated(note) {
+  async function renderRelated(note: PublicNote | null) {
     if (!note || note.trashedAt) { el.relatedPanel.classList.add('hidden'); return; }
     const forNote = note.id;
     let r;
     try { r = await api.notes.related(note.id); } catch (_) { r = null; }
     if (state.currentId !== forNote) return;
     if (!r) { el.relatedPanel.classList.add('hidden'); return; }
-    const fill = (group: HTMLDivElement, items) => {
+    const fill = (group: HTMLDivElement, items: RelatedRow[]) => {
       const ul = group.querySelector('ul');
+      if (!ul) return;
       ul.innerHTML = '';
       for (const it of items) {
         const li = document.createElement('li');

@@ -25,6 +25,10 @@ export const NotesDocxEditor = (function () {
   type PlacedPiece = ShownPiece & { source: number };
   // edits: the count of edits when the save started.
   type SaveInFlight = { plan: { first: number, last: number, pieces: PlacedPiece[] }[], patches: DocxPatch[], edits: number };
+  type Hooks = { onDirty?: (dirty: boolean) => void, say: (text: string) => void, onKey?: (e: KeyboardEvent) => void, onBlur?: () => void };
+  const isElement = (node: Node): node is Element => node.nodeType === Node.ELEMENT_NODE;
+  const isText = (node: Node): node is Text => node.nodeType === Node.TEXT_NODE;
+  const isHtmlElement = (node: Element): node is HTMLElement => node.namespaceURI === 'http://www.w3.org/1999/xhtml';
   const TAB_SHOWN = ' '; // docx-preview shows a tab as an em space
   const BREAK = { ch: X.PAGE_BREAK, fmt: {}, br: false }; // a page break, as a character of a paragraph's text
   const NOT_TEXT = new Set([X.PAGE_BREAK, X.PICTURE]);
@@ -43,7 +47,7 @@ export const NotesDocxEditor = (function () {
 
   // hooks: onDirty(bool), say(text), onKey(KeyboardEvent) for keys the app handles (Ctrl+S, Escape), onBlur() when
   // the document loses focus (the app's own window blur does not fire while focus is inside the frame).
-  function create(hooks) {
+  function create(hooks: Hooks) {
     // xml/scan: document.xml as last saved, and its paragraphs. map: which paragraph a shown element stands for.
     // baselines: paragraph index -> { chars: [fmt], empty: fmt } as shown after the last save. edits: input events
     // since the last save started.
@@ -58,12 +62,12 @@ export const NotesDocxEditor = (function () {
     // On the element showing the rest of a paragraph after its page break (the browser copies it when Enter splits it).
     const REST = 'data-notes-rest';
     const map = {
-      get(p) {
+      get(p: Element): number | undefined {
         const v = p.getAttribute(SRC);
         const m = v && /^(\d+):(\d+)$/.exec(v);
         return m && Number(m[1]) === gen ? Number(m[2]) : undefined;
       },
-      has(p) { return map.get(p) !== undefined; },
+      has(p: Element): boolean { return map.get(p) !== undefined; },
       set(p: HTMLParagraphElement | HTMLElement, index: number) { p.setAttribute(SRC, gen + ':' + index); },
     };
     let saving: SaveInFlight | null = null;
@@ -78,13 +82,14 @@ export const NotesDocxEditor = (function () {
 
     // ---- What is shown -------------------------------------------------------------------------------------
 
-    function fmtOf(el) {
+    function fmtOf(el: Element): Fmt {
       const cached = styleCache.get(el);
       if (cached) return cached;
       const win = el.ownerDocument.defaultView;
+      if (!win) throw new Error('the Word document has no window');
       const cs = win.getComputedStyle(el);
       let u = false;
-      for (let e = el; e && !u; e = e.parentElement) {
+      for (let e: Element | null = el; e && !u; e = e.parentElement) {
         u = /underline/.test(win.getComputedStyle(e).textDecorationLine);
         if (e.tagName === 'P') break;
       }
@@ -98,17 +103,17 @@ export const NotesDocxEditor = (function () {
     function charsOf(p: HTMLParagraphElement) {
       const out: ShownChar[] = [];
       styleCache = new WeakMap();
-      const walk = (node) => {
+      const walk = (node: Element) => {
         for (let n = node.firstChild; n; n = n.nextSibling) {
-          if (n.nodeType === 3) {
-            const fmt = fmtOf(n.parentElement);
+          if (isText(n)) {
+            const fmt = fmtOf(node);
             // By UTF-16 code unit, as the file's text is read (an emoji counts as two, on both sides).
             // A form feed or object character in the text is not a page break or a picture (those are not shown as
             // text): it is not counted.
             for (let k = 0; k < n.data.length; k++) if (!NOT_TEXT.has(n.data[k])) out.push({ ch: n.data[k] === TAB_SHOWN ? '\t' : n.data[k], fmt, br: false });
-          } else if (n.nodeType === 1) {
-            if (n.tagName === 'BR') out.push({ ch: '\n', fmt: fmtOf(n.parentElement), br: true, real: n.hasAttribute(REAL_BR) });
-            else if (n.tagName === 'DIV') out.push({ ch: X.PICTURE, fmt: fmtOf(n.parentElement), br: false, picture: n.getAttribute(PIC) });
+          } else if (isElement(n)) {
+            if (n.tagName === 'BR') out.push({ ch: '\n', fmt: fmtOf(node), br: true, real: n.hasAttribute(REAL_BR) });
+            else if (n.tagName === 'DIV') out.push({ ch: X.PICTURE, fmt: fmtOf(node), br: false, picture: n.getAttribute(PIC) });
             else walk(n);
           }
         }
@@ -120,16 +125,16 @@ export const NotesDocxEditor = (function () {
       for (let k = out.length - 2; k >= 0; k--) if (out[k].br && !out[k].real && out[k + 1].ch === X.PICTURE) out.splice(k, 1);
       return out;
     }
-    const textOf = (chars) => chars.map((c) => c.ch).join('');
+    const textOf = (chars: ShownChar[]) => chars.map((c) => c.ch).join('');
     // What a paragraph is compared with at the next save: per character its formatting and, for a picture, its name.
-    const baselineOf = (chars, empty: Fmt) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
+    const baselineOf = (chars: ShownChar[], empty: Fmt): ShownBaseline => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
 
     // Names the pictures shown in paragraph element p (the <div>s whose nearest <div> or <p> above is p) and makes
     // each one a single block the caret steps over: it can be deleted, not edited inside.
     let pictureSeq = 0;
     function namePictures(p: HTMLParagraphElement) {
       for (const d of p.querySelectorAll('div')) {
-        if (d.parentElement.closest('div, p') !== p || d.hasAttribute(PIC)) continue;
+        if (d.parentElement?.closest('div, p') !== p || d.hasAttribute(PIC)) continue;
         d.setAttribute(PIC, String(++pictureSeq));
         d.contentEditable = 'false';
       }
@@ -163,7 +168,7 @@ export const NotesDocxEditor = (function () {
 
     // Shows bytes (a .docx) in frameDoc, the frame's fresh document, editable where it can be.
     // Resolves { editable, readOnly, block }: counts of paragraphs, and why nothing is editable (or null).
-    async function open(frameDoc, bytes) {
+    async function open(frameDoc: Document, bytes: Uint8Array) {
       const my = ++seq;
       reset();
       const zip = await DV.JSZip.loadAsync(bytes);
@@ -178,7 +183,7 @@ export const NotesDocxEditor = (function () {
           try { nextScan = X.scanDocument(nextXml); } catch (err) { block = err.message; }
           if (nextScan && !nextScan.prefix) block = 'it is not a standard Word document';
         }
-        if (!block && nextScan && nextScan.paragraphs.some((p) => p.editable)) {
+        if (!block && nextScan && nextScan.prefix && nextScan.paragraphs.some((p) => p.editable)) {
           zip.file('word/document.xml', X.markForDisplay(nextXml, nextScan));
           display = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
         }
@@ -198,7 +203,7 @@ export const NotesDocxEditor = (function () {
     // Finds the editable paragraphs on the page, makes them (and only them) editable, and listens.
     function attach() {
       let editable = 0;
-      const pages = [...shownDoc().querySelectorAll('section.docx > article')];
+      const pages = [...shownDoc().querySelectorAll<HTMLElement>('section.docx > article')];
       const take = (id: string) => {
         const mark = shownDoc().getElementById(id);
         const p = mark && mark.closest('p');
@@ -228,7 +233,7 @@ export const NotesDocxEditor = (function () {
       const readOnly = shownScan().paragraphs.length - editable;
       if (!editable) return { editable, readOnly };
       // Everything in the body that is not, and does not hold, an editable paragraph is fixed.
-      const holders = new Set();
+      const holders = new Set<Element>();
       for (const art of shownDoc().querySelectorAll<HTMLElement>('section.docx > article')) {
         for (const p of art.querySelectorAll('p')) if (map.has(p)) for (let e = p.parentElement; e && e !== art; e = e.parentElement) holders.add(e);
         fix(art, holders);
@@ -246,21 +251,21 @@ export const NotesDocxEditor = (function () {
     }
     // A paragraph as shown: { chars, mark } (mark records its page break on the page), or null when it is not shown
     // whole. p: the element it starts in; rest: the one its text after a page break is in, if any.
-    function shownAs(para: EditableParagraph, p: HTMLParagraphElement, rest: HTMLParagraphElement | null, pages: Element[]) {
+    function shownAs(para: EditableParagraph, p: HTMLParagraphElement, rest: HTMLParagraphElement | null, pages: HTMLElement[]) {
       if (!para.pageBreaks.length) return { chars: charsOf(p) };
       if (para.pageBreaks.length > 1) return null; // docx-preview starts a new page at the first one only
-      const page = p.parentElement, k = pages.indexOf(page);
-      if (k < 0 || page.lastElementChild !== p) return null;
+      const page = p.parentElement, k = page ? pages.indexOf(page) : -1;
+      if (!page || k < 0 || page.lastElementChild !== p) return null;
       if (!rest) return { chars: [...charsOf(p), BREAK], mark: () => { page.dataset.notesEnd = ''; } };
       const next = pages[k + 1];
       if (!next || rest.parentElement !== next || next.firstElementChild !== rest || map.has(rest)) return null;
       return { chars: [...charsOf(p), BREAK, ...charsOf(rest)], mark: () => { next.dataset.notesJoin = ''; } };
     }
-    function fix(container, holders) {
+    function fix(container: Element, holders: Set<Element>) {
       for (const el of container.children) {
         if (map.has(el)) continue;
         if (holders.has(el)) fix(el, holders);
-        else el.contentEditable = 'false';
+        else if (isHtmlElement(el)) el.contentEditable = 'false';
       }
     }
 
@@ -281,14 +286,14 @@ export const NotesDocxEditor = (function () {
 
     // ---- Guarding what the person does ----------------------------------------------------------------------
 
-    const paraOf = (node) => {
-      const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const paraOf = (node: Node | null) => {
+      const el = node && (isElement(node) ? node : node.parentElement);
       const p = el && el.closest('p');
       return p && !p.closest('[contenteditable="false"]') && p.closest('article[contenteditable="true"]') ? p : null;
     };
     // A range may change text only inside one chain of paragraphs (see ooxml.mts): never across a table, a picture,
     // a read-only paragraph or a section break.
-    function rangeAllowed(range) {
+    function rangeAllowed(range: AbstractRange) {
       const a = paraOf(range.startContainer), b = paraOf(range.endContainer);
       if (!a || !b) return false;
       if (a === b) return true;
@@ -297,7 +302,7 @@ export const NotesDocxEditor = (function () {
       const i = list.indexOf(a), j = list.indexOf(b);
       if (i < 0 || j < 0) return false;
       const scanned = shownScan();
-      const paragraphOf = (p) => { const index = src.get(p); return index === undefined ? undefined : scanned.paragraphs[index]; };
+      const paragraphOf = (p: HTMLElement) => { const index = src.get(p); return index === undefined ? undefined : scanned.paragraphs[index]; };
       const start = paragraphOf(a);
       if (!start) return false;
       for (let k = Math.min(i, j); k <= Math.max(i, j); k++) {
@@ -321,7 +326,7 @@ export const NotesDocxEditor = (function () {
       return true;
     }
 
-    function onBeforeInput(e) {
+    function onBeforeInput(e: InputEvent) {
       if (!scan) { e.preventDefault(); return; }
       const t = e.inputType;
       if (t === 'historyUndo' || t === 'historyRedo') return;
@@ -330,11 +335,11 @@ export const NotesDocxEditor = (function () {
       const ok = ranges.length ? ranges.every((r) => rangeAllowed(r)) : selectionAllowed();
       if (!ok) { e.preventDefault(); hooks.say('That part of the document cannot be changed here (a table, picture, link or similar is in the way).'); }
     }
-    function onInput(e) {
+    function onInput(e: Event) {
       edits++;
       setDirty(true);
       // The line break just typed is the last one before the caret.
-      if (e.inputType === 'insertLineBreak') {
+      if ('inputType' in e && e.inputType === 'insertLineBreak') {
         const sel = shownDoc().getSelection();
         const p = sel && sel.rangeCount ? paraOf(sel.anchorNode) : null;
         if (p && sel) {
@@ -345,7 +350,7 @@ export const NotesDocxEditor = (function () {
       }
     }
     // Pasted text arrives as plain text: line breaks start new paragraphs, tabs stay tabs.
-    function onPaste(e) {
+    function onPaste(e: ClipboardEvent) {
       e.preventDefault();
       if (!scan) return;
       const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
@@ -357,7 +362,7 @@ export const NotesDocxEditor = (function () {
         if (line) shownDoc().execCommand('insertText', false, line.replace(/\t/g, TAB_SHOWN).replace(/[\f\uFFFC]/g, ''));
       });
     }
-    function onKeydown(e) {
+    function onKeydown(e: KeyboardEvent) {
       if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
         e.preventDefault();
         if (selectionAllowed()) shownDoc().execCommand('insertText', false, TAB_SHOWN);
@@ -367,7 +372,7 @@ export const NotesDocxEditor = (function () {
     }
 
     // Bold, italic, underline, undo, redo from the toolbar.
-    function exec(cmd) {
+    function exec(cmd: string) {
       if (!doc || !scan) return false;
       if (cmd === 'undo' || cmd === 'redo') return doc.execCommand(cmd);
       if (!selectionAllowed()) { hooks.say('Select text in a paragraph you can edit first.'); return false; }

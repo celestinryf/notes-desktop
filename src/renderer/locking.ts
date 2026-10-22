@@ -10,8 +10,20 @@ import { focusBody, autoGrow } from './editor-view.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
-export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
-  function renderLockState(note) {
+interface LockingDeps {
+  api: NotesApi;
+  renderFileRow: (note: PublicNote) => void;
+  flushSave: () => Promise<boolean>;
+  applyEditorMode: (source: boolean) => void;
+  runFind: (forward?: boolean, fresh?: boolean, quiet?: boolean) => unknown;
+  scheduleSave: () => void;
+  renderStickyButton: (note: PublicNote | null) => void;
+  updateStatus: (note: PublicNote) => void;
+  refreshRow: (note: PublicNote) => void;
+}
+
+export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }: LockingDeps) {
+  function renderLockState(note: PublicNote | null) {
     const locked = !!(note && note.locked);
     const open = !!(note && note.unlocked);
     el.lockScreen.classList.toggle('hidden', !(locked && !open));
@@ -86,7 +98,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
   }
 
   // Swaps the open note for its fresh view after a lock change: body, editor, button, card.
-  function applyLockedNote(updated) {
+  function applyLockedNote(updated: PublicNote | null) {
     if (!updated || updated.id !== state.currentId) return;
     state.current = updated;
     // Keystrokes that landed while the lock call ran (scrypt takes a moment) are kept and saved again;
@@ -111,7 +123,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
     if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
   }
 
-  async function lockMenuAction(action) {
+  async function lockMenuAction(action: string) {
     el.lockMenu.classList.add('hidden');
     const note = state.current;
     if (!note || !note.locked) return;

@@ -8,7 +8,15 @@ import { autoGrow } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
 
-export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
+interface HistoryDialogDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  applyEditorMode: (source: boolean) => void;
+  runFind: (forward?: boolean, fresh?: boolean, quiet?: boolean) => unknown;
+  scheduleSave: () => void;
+}
+
+export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }: HistoryDialogDeps) {
   const hist: { versions: HistoryVersion[], index: number, noteId: string | null } = { versions: [], index: -1, noteId: null };
 
   async function openHistory() {
@@ -47,7 +55,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
 
   function showVersion(i: number) {
     hist.index = i;
-    for (const li of el.historyList.children) li.classList.toggle('is-active', Number(li.dataset.index) === i);
+    for (const li of el.historyList.children) if (li instanceof HTMLElement) li.classList.toggle('is-active', Number(li.dataset.index) === i);
     el.historyPreview.textContent = hist.versions[i].body;
     el.historyRestoreBtn.disabled = false;
   }

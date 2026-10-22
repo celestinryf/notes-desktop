@@ -1,17 +1,29 @@
 import { el } from './dom.ts';
 import { state } from './state.ts';
-import { NotesPdfEditor } from './pdf-editor.ts';
+import { NotesPdfEditor, requireChild } from './pdf-editor.ts';
+import type { PdfController } from './pdf-editor.ts';
 import { NotesPdfPages } from './pdf-pages.ts';
+import type { PdfPagesPlan } from './pdf-pages.ts';
 import { NotesPdfComments } from './pdf-comments.ts';
+import type { PdfCommentOp } from './pdf-comments.ts';
 import { NotesSignPad } from './sign-pad.ts';
 import { oneAtATime } from './one-at-a-time.ts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
 
-type PdfController = ReturnType<NonNullable<typeof NotesPdfEditor>['create']>;
 type PdfOnShow = { id: string, fileMtime: number | null };
+type FlushOptions = { commit?: boolean, explicit?: boolean };
+type SavedAsCopy = Extract<SavedFile, { savedAs: string }>;
+type CallFailure = { ok: false, error: string, canceled?: undefined };
+type Rewritten = { mtime: number | null, backup: string };
+type PdfNoteDeps = {
+  api: NotesApi,
+  externalLinkClick: (e: MouseEvent, href: string) => void,
+  showBanner: (text: string) => void,
+  openFiles: (paths?: string[]) => Promise<unknown>,
+};
 
-export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }) {
+export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }: PdfNoteDeps) {
   // pdf.js shows the PDF and holds the edits; saving writes them into the file through main, which backs up the
   // original on the first save of a session. pdfNote is the PDF on show: { id, fileMtime } as it was loaded or saved.
 
@@ -24,7 +36,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
         // Never disabled: a stroke or text box still in progress only counts once it is committed, which Save does.
         onDirty: (d) => { el.pdfSaveBtn.textContent = d ? 'Save' : 'Saved'; },
         onState: (s) => {
-          for (const b of el.pdfEditor.querySelectorAll('[data-pdf-mode]')) b.classList.toggle('is-on', b.dataset.pdfMode === s.mode);
+          for (const b of el.pdfEditor.querySelectorAll<HTMLElement>('[data-pdf-mode]')) b.classList.toggle('is-on', b.dataset.pdfMode === s.mode);
           el.pdfUndoBtn.disabled = !s.canUndo;
           el.pdfRedoBtn.disabled = !s.canRedo;
           el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + '%';
@@ -46,7 +58,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   }
 
   // opts.keepView: the PDF on show, reopened after the app rewrote it (same page and zoom).
-  async function showPdf(note, opts?) {
+  async function showPdf(note: PublicNote, opts?: { keepView?: boolean }) {
     const key = note.id + ':' + note.fileMtime;
     if (pdfShownKey === key) return;
     closePdfPages(); // its plan was for the PDF, or the version of it, shown before
@@ -77,9 +89,9 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   // on Save or Ctrl+S. opts.commit: finish a stroke or text box in progress first (not on a mere window blur, which
   // would end the person's drawing); opts.explicit: say so when done. Saves run one at a time, and each re-checks,
   // so edits made during an earlier save are saved too. Resolves false while edits are still unsaved.
-  const flushPdf = oneAtATime((opts) => flushPdfNow(opts));
+  const flushPdf = oneAtATime((opts: FlushOptions) => flushPdfNow(opts));
 
-  async function flushPdfNow(opts) {
+  async function flushPdfNow(opts: FlushOptions) {
     let explicit = !!opts.explicit;
     for (let i = 0; i < 3; i++) {
       if (!pdf || !pdfNote) return true;
@@ -111,8 +123,10 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   // Says how main saved an edited file (r: { mtime, backup } in place, or { savedAs, newCopy } into a copy beside it,
   // when the file changed on disk since it was opened; later saves go to the same copy until it is reloaded).
   // what: 'PDF' or 'document'. Returns true when the file itself was written.
-  function reportFileSaved(target, r, explicit, what) {
-    if (r.savedAs) {
+  const savedAsCopy = (r: SavedFile): r is SavedAsCopy => !!r.savedAs;
+
+  function reportFileSaved(target: PdfOnShow, r: SavedFile, explicit: boolean, what: string) {
+    if (savedAsCopy(r)) {
       if (r.newCopy || explicit) toast('This ' + what + ' changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
       return false;
     }
@@ -141,54 +155,54 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   }
 
   // An IPC call whose failure is reported as { ok: false, error } like its own refusals.
-  async function callOk(promise) {
+  async function callOk<T extends { ok: boolean }>(promise: Promise<T>): Promise<T | CallFailure> {
     try { return await promise; } catch (err) { return { ok: false, error: ipcErrorText(err) }; }
   }
 
   async function pickPdfForPages() {
     const r = await callOk(api.files.pdfPickPages());
-    if (r.canceled) return null;
+    if ('canceled' in r && r.canceled) return null;
     if (!r.ok) { toast('Could not add pages: ' + r.error); return null; }
     return r;
   }
 
   // The app wrote the PDF itself: record the new time (so the poll does not reload it) on the note on show.
-  function noteFileWritten(target, mtime) {
+  function noteFileWritten(target: PdfOnShow, mtime: number | null) {
     target.fileMtime = mtime;
     if (state.current && state.current.id === target.id) state.current.fileMtime = mtime;
   }
 
   // Shows the PDF again from the file, which the app has just rewritten. keepView: the pages are laid out as before
   // (comments changed, not pages), so the same place is shown again.
-  function reloadPdf(target: PdfOnShow, mtime, keepView: boolean) {
+  function reloadPdf(target: PdfOnShow, mtime: number | null, keepView: boolean) {
     noteFileWritten(target, mtime);
     if (state.current && state.current.id === target.id) showPdf(state.current, { keepView: !!keepView });
   }
 
   // While main rewrites the PDF, the pages and tools take no input: anything done meanwhile would be lost when the
   // rewritten file is shown.
-  async function rewriting(promise) {
+  async function rewriting<T>(promise: Promise<T>) {
     el.pdfEditor.classList.add('rewriting');
     try { return await promise; } finally { el.pdfEditor.classList.remove('rewriting'); }
   }
 
   // Main rewrote the PDF (r: { mtime, backup }): show it again, and offer Undo, back to the backup taken just before.
   // say: { done, undone } texts; keepView as for reloadPdf, for the change and its Undo.
-  function pdfRewritten(target: PdfOnShow, r, say, keepView: boolean) {
+  function pdfRewritten(target: PdfOnShow, r: Rewritten, say: { done: string, undone: string }, keepView: boolean) {
     reloadPdf(target, r.mtime, keepView);
     toast(say.done, { label: 'Undo', run: () => undoPdfChange(target.id, r.backup, r.mtime, say.undone, keepView) });
   }
 
-  async function applyPdfPages(plan) {
+  async function applyPdfPages(plan: PdfPagesPlan) {
     const target = pdfNote;
     const ctl = pdf;
     if (!target || !ctl || pdfPagesFor !== target) { closePdfPages(); toast('That PDF changed while the pages were open, so they were not changed.'); return false; }
     if (!(await flushPdf({ commit: true }))) { toast('Your marks could not be saved, so the pages were not changed.'); return false; }
-    let bytes = null;
+    let bytes: Uint8Array | null = null;
     if (plan.pageInfos) {
       // The pages come from the file as just saved, marks and form entries included: pdf.js would carry over drawn
       // marks from the open document but not typed form values.
-      let saved;
+      let saved: Uint8Array;
       try { saved = new Uint8Array(await api.files.pdfBytes(target.id)); } catch (err) { toast('Could not read the PDF: ' + ipcErrorText(err)); return false; }
       const pageInfos = plan.pageInfos.map((info) => (info.document === null ? Object.assign({}, info, { document: saved }) : info));
       try { bytes = await ctl.extractPages(pageInfos); } catch (err) { toast('Could not rearrange the pages: ' + (err.message || err)); return false; }
@@ -206,7 +220,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   }
 
   // Undo only while the file is exactly what the change wrote (mtime): anything saved since would be lost.
-  async function undoPdfChange(id: string, backup, mtime, undoneText, keepView: boolean) {
+  async function undoPdfChange(id: string, backup: string, mtime: number | null, undoneText: string, keepView: boolean) {
     if (!pdfNote || pdfNote.id !== id) { toast('Open that PDF again to undo.'); return; }
     if (pdfComments && pdfComments.busy()) { toast('Save or cancel the comment you are writing first, then undo.'); return; }
     // Marks not yet saved are saved first: main then refuses the Undo, since the file is no longer what the change wrote.
@@ -226,7 +240,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
 
   function showPdfComments(show: boolean) {
     if (show && (!pdf || !pdfNote || !NotesPdfComments)) return;
-    if (show && !pdfComments) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
+    if (show && !pdfComments && pdf) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
     el.pdfEditor.classList.toggle('commenting', show);
     el.pdfCommentsBtn.classList.toggle('is-on', show);
     if (!pdfComments) return;
@@ -235,7 +249,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   }
 
   // Marks not yet saved go into the file first, since main changes the file as it is on disk.
-  async function changePdfComments(ops) {
+  async function changePdfComments(ops: PdfCommentOp[]) {
     const target = pdfNote;
     if (!target) { toast('The PDF is still opening. Try again in a moment.'); return false; }
     if (!(await flushPdf({ commit: true }))) { toast('Your marks could not be saved, so the comment was not saved.'); return false; }
@@ -259,7 +273,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
     try {
       const pad = signPad || NotesSignPad.create(el.signPad);
       signPad = pad;
-      let saved = null;
+      let saved: IpcResult<'signature:get'> = null;
       try { saved = await api.signature.get(); } catch (_) { saved = null; }
       if (!pdfNote) return;
       signFor = pdfNote.id;
@@ -295,7 +309,8 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
     }
   }
 
-  function onPdfToolbarClick(e) {
+  function onPdfToolbarClick(e: MouseEvent) {
+    if (!(e.target instanceof Element)) return;
     const b = e.target.closest('button');
     if (!b || !pdf || !pdfNote) return;
     if (b.dataset.pdfMode) { if (!pdf.setMode(b.dataset.pdfMode)) toast('This PDF does not allow changes.'); return; }
@@ -318,7 +333,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   function forgetShownPdf() { pdfShownKey = null; }
 
   function bindPdfEvents() {
-    el.pdfEditor.querySelector('.pdf-toolbar').addEventListener('click', onPdfToolbarClick);
+    requireChild(el.pdfEditor, '.pdf-toolbar', HTMLElement).addEventListener('click', onPdfToolbarClick);
     el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });

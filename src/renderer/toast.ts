@@ -5,7 +5,7 @@ let toastMs = 0;
 // Hovering a toast holds it, so a slow reader (or an Undo just out of reach) does not lose it.
 el.toast.addEventListener('mouseenter', () => clearTimeout(toastTimer));
 el.toast.addEventListener('mouseleave', () => { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, Math.min(toastMs, 3000)); });
-export function toast(message, action?) {
+export function toast(message: string, action?: { label: string; run: () => void }) {
   clearTimeout(toastTimer);
   el.toast.innerHTML = '';
   const text = document.createElement('span');

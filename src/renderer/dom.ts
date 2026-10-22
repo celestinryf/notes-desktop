@@ -1,7 +1,7 @@
 import NotesIcons from './icons.js';
 import { pageElement } from './page-element.ts';
 
-export const I = (name) => NotesIcons.svg(name);
+export const I = (name: string) => NotesIcons.svg(name);
 
 // A button's words live in its .lbl span when it has one, so its icon and shortcut hint survive a relabel.
 export function setLabel(btn: HTMLButtonElement, text: string) {
@@ -9,11 +9,12 @@ export function setLabel(btn: HTMLButtonElement, text: string) {
   if (l) l.textContent = text; else btn.textContent = text;
 }
 export function setIcon(btn: HTMLButtonElement | HTMLElement | null, name: string) {
+  if (!btn) return;
   if (btn.dataset.icon === name) return;
   btn.dataset.icon = name;
   NotesIcons.hydrate(btn.parentElement);
 }
-export function setPressed(btn: HTMLButtonElement, on) {
+export function setPressed(btn: HTMLButtonElement, on: boolean) {
   btn.classList.toggle('is-on', !!on);
   btn.setAttribute('aria-pressed', String(!!on));
 }

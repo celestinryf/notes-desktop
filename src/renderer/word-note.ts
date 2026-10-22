@@ -5,10 +5,22 @@ import { oneAtATime } from './one-at-a-time.ts';
 import * as H from '../shared/helpers.mts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
+import type { createCraftNotes } from './craft-notes.ts';
 
 type DocxController = ReturnType<NonNullable<typeof NotesDocxEditor>['create']>;
+type DocxOpened = NonNullable<Awaited<ReturnType<DocxController['open']>>>;
+type DocxOnShow = { id: string, fileMtime: number | null };
+type WordNoteDeps = {
+  api: NotesApi,
+  flushSave: (opts?: { fromBlur?: boolean }) => Promise<boolean>,
+  showBanner: (text: string) => void,
+  reportFileSaved: (target: DocxOnShow, r: SavedFile, explicit: boolean, what: string) => boolean,
+  externalLinkClick: (e: MouseEvent, href: string) => void,
+  crafts: ReturnType<typeof createCraftNotes>['crafts'],
+  useWordCraft: () => boolean,
+};
 
-export function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }) {
+export function createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft }: WordNoteDeps) {
   // A Word document is shown from its own bytes, as laid out in the file, inside a frame of its own: sandboxed
   // (nothing in it runs), with a policy that allows only inline styles and data: images. So the file's styles
   // cannot reach the app, and it loads nothing from the network, so opening it cannot tell anyone you did.
@@ -23,7 +35,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   let docxSeq = 0;
   // docx: the editing controller; docxNote: the document on show and editable, { id, fileMtime } as loaded or saved;
   // docxBanner: what the banner says about it (shown again when the same version is shown again).
-  let docx: DocxController | null = null, docxNote: { id: string, fileMtime: number | null } | null = null, docxBanner = '';
+  let docx: DocxController | null = null, docxNote: DocxOnShow | null = null, docxBanner = '';
   function clearDocx() {
     crafts.wordcraft.clear();
     docxShownKey = null;
@@ -49,8 +61,9 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   }
   // Links in a document never navigate: a #bookmark scrolls to its place, a web link opens in the browser only
   // on Ctrl+click (like links in notes), and a plain click says where it goes.
-  function onDocxLinkClick(e) {
-    const a = e.target && e.target.closest && e.target.closest('a[href]');
+  function onDocxLinkClick(e: MouseEvent) {
+    const frameWindow = el.docxView.contentDocument?.defaultView;
+    const a = frameWindow && e.target instanceof frameWindow.Element ? e.target.closest('a[href]') : null;
     if (!a) return;
     e.preventDefault();
     const href = a.getAttribute('href') || '';
@@ -80,13 +93,13 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     return docx;
   }
 
-  function docxBannerFor(res) {
+  function docxBannerFor(res: DocxOpened) {
     const fixed = res.readOnly ? ' ' + res.readOnly + (res.readOnly === 1 ? ' paragraph has' : ' paragraphs have') + ' links, charts, text boxes, tracked changes or similar, and cannot be edited here; use "Open with…" for those.' : '';
     if (res.editable) return 'Click into the text to edit it. Ctrl+B, Ctrl+I and Ctrl+U (or the buttons) set bold, italic and underline. Save (Ctrl+S) writes your changes into the document, and the original is backed up first.' + fixed;
     return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
   }
 
-  async function showDocx(note) {
+  async function showDocx(note: PublicNote) {
     if (useWordCraft()) { crafts.wordcraft.show(note); return; }
     if (!H.isOoxmlWordFile(note)) {
       el.docxEditor.classList.add('hidden');
@@ -122,7 +135,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   // Writes the document's edits into the file, like flushPdf for PDFs: one save at a time, each re-checking, so
   // typing during a save is saved too. opts.explicit: say so when done. Resolves false while edits are unsaved.
   const docxDirty = () => !!(docx && docxNote && docx.isDirty());
-  const flushDocx = oneAtATime(async (opts) => {
+  const flushDocx = oneAtATime(async (opts: { explicit?: boolean }) => {
     let explicit = !!opts.explicit;
     for (let i = 0; i < 3; i++) {
       if (!docxDirty()) return true;
@@ -134,7 +147,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
 
   async function saveDocxNow(explicit: boolean) {
     const target = docxNote, ed = docx;
-    let c;
+    let c: ReturnType<DocxController['save']>;
     try {
       if (!target || !ed) throw new Error('no Word document is open');
       c = ed.save();
@@ -160,8 +173,8 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     }
   }
 
-  function onDocxToolbarClick(e) {
-    const b = e.target.closest('button');
+  function onDocxToolbarClick(e: MouseEvent) {
+    const b = e.target instanceof Element ? e.target.closest('button') : null;
     if (!b || !docx || !docxNote) return;
     if (b === el.docxSaveBtn) { flushDocx({ explicit: true }); return; }
     if (b.dataset.docxAct) docx.exec(b.dataset.docxAct);
@@ -172,8 +185,9 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   // The next showDocx shows the file again even if it did not change (a reload from disk drops the edits).
   function forgetShownDocx() { docxShownKey = null; }
   function bindDocxEvents() {
-    const docxTools = el.docxEditor.querySelector('.docx-toolbar');
-    docxTools.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); }); // keep the text selection in the document
+    const docxTools = el.docxEditor.querySelector<HTMLElement>('.docx-toolbar');
+    if (!docxTools) return;
+    docxTools.addEventListener('mousedown', (e) => { if (e.target instanceof Element && e.target.closest('button')) e.preventDefault(); }); // keep the text selection in the document
     docxTools.addEventListener('click', onDocxToolbarClick);
   }
 

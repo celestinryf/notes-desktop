@@ -4,7 +4,7 @@ export function toLocalInputValue(ts: number) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
-export function quickPick(kind) {
+export function quickPick(kind: string) {
   const d = new Date();
   d.setSeconds(0, 0);
   if (kind === '1h') { d.setTime(d.getTime() + 3600 * 1000); return d.getTime(); }

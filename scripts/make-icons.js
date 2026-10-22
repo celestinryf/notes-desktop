@@ -38,20 +38,36 @@ fs.writeFileSync(file, `// @ts-check
    NotesIcons.svg(name) returns an <svg> string: 16px, currentColor, 1.75 stroke.
    NotesIcons.hydrate(root) puts the icon named by data-icon="..." at the start of every such element under root. */
 (function () {
+  /** @type {Record<string, string>} */
   const PATHS = ${JSON.stringify(out, null, 2)};
+  /**
+   * @param {string} name
+   * @param {number} [size]
+   */
   function svg(name, size) {
     const body = PATHS[name];
     if (!body) throw new Error('Unknown icon: ' + name);
     const s = size || 16;
     return '<svg class="icon" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + body + '</svg>';
   }
+  /**
+   * @param {Element | null} node
+   * @returns {node is HTMLElement | SVGElement}
+   */
+  function hasDataset(node) {
+    return node instanceof HTMLElement || node instanceof SVGElement;
+  }
+  /** @param {ParentNode | null} [root] */
   function hydrate(root) {
     (root || document).querySelectorAll('[data-icon]').forEach((el) => {
+      if (!hasDataset(el)) return;
       const first = el.firstElementChild;
-      if (first && first.classList.contains('icon') && first.dataset.name === el.dataset.icon) return;
-      if (first && first.classList.contains('icon')) first.remove();
-      el.insertAdjacentHTML('afterbegin', svg(el.dataset.icon));
-      el.firstElementChild.dataset.name = el.dataset.icon;
+      const firstIcon = hasDataset(first) && first.classList.contains('icon') ? first : null;
+      if (firstIcon && firstIcon.dataset.name === el.dataset.icon) return;
+      if (firstIcon) firstIcon.remove();
+      el.insertAdjacentHTML('afterbegin', svg(String(el.dataset.icon)));
+      const inserted = el.firstElementChild;
+      if (hasDataset(inserted)) inserted.dataset.name = el.dataset.icon;
     });
   }
   const api = { svg, hydrate, names: Object.keys(PATHS) };

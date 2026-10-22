@@ -1,11 +1,21 @@
 /* The comments panel beside an open PDF, exposed as window.NotesPdfComments. It lists the PDF's sticky notes, and
    other marks that carry a comment, and adds, retypes and deletes sticky notes. Those are standard PDF "Text"
    annotations, which main writes into the file, so other PDF apps show them as comments too. */
-import type { PdfComment, PdfPoint } from './pdf-editor.ts';
+import { requireChild } from './pdf-editor.ts';
+import type { PdfComment, PdfController, PdfPoint } from './pdf-editor.ts';
+
+export type PdfCommentOp =
+  | { op: 'add', page: number, x: number, y: number, text: string }
+  | { op: 'edit', page: number, ref: number[] | null, text: string }
+  | { op: 'delete', page: number, ref: number[] | null };
+export type PdfCommentsHooks = {
+  change: (ops: PdfCommentOp[]) => Promise<boolean>,
+  say: (text: string) => void,
+};
 
 export const NotesPdfComments = (function () {
   'use strict';
-  const KIND_NAMES = { Text: 'Note', Highlight: 'Highlight', Underline: 'Underline', Squiggly: 'Squiggly underline', StrikeOut: 'Strikethrough',
+  const KIND_NAMES: Record<string, string> = { Text: 'Note', Highlight: 'Highlight', Underline: 'Underline', Squiggly: 'Squiggly underline', StrikeOut: 'Strikethrough',
     Ink: 'Drawing', Stamp: 'Stamp', Square: 'Rectangle', Circle: 'Oval', Line: 'Line', Polygon: 'Shape', PolyLine: 'Lines',
     Caret: 'Insertion', FileAttachment: 'Attachment', Sound: 'Sound' };
   const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -13,14 +23,14 @@ export const NotesPdfComments = (function () {
   // panel: the .pdf-comments element. ctl: the NotesPdfEditor controller. hooks:
   //   change(ops) -> Promise<bool>   writes the change (ops as main's files:pdfComments takes them) and reloads the PDF
   //   say(text)
-  function create(panel, ctl, hooks) {
-    const listEl = panel.querySelector('.pdf-comments-list');
-    const addBtn = panel.querySelector('[data-comments-act="add"]');
-    const hint = panel.querySelector('.pdf-comments-hint');
+  function create(panel: HTMLElement, ctl: PdfController, hooks: PdfCommentsHooks) {
+    const listEl = requireChild(panel, '.pdf-comments-list', HTMLElement);
+    const addBtn = requireChild(panel, '[data-comments-act="add"]', HTMLButtonElement);
+    const hint = requireChild(panel, '.pdf-comments-hint', HTMLElement);
     // list: the comments as last read. editing: the id being retyped, or 'new' for draft (a place { page, x, y }).
     let list: PdfComment[] = [], editing: string | null = null, draft: PdfPoint | null = null, picking = false, working = false, readSeq = 0;
 
-    function el(tag: string, cls: string, text?) {
+    function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
       const e = document.createElement(tag);
       if (cls) e.className = cls;
       if (text !== undefined) e.textContent = text;
@@ -35,7 +45,7 @@ export const NotesPdfComments = (function () {
     }
 
     // A text box for a new or retyped comment, with Save and Cancel. Ctrl+Enter saves; Escape cancels.
-    function editorCard(value, label: string) {
+    function editorCard(value: string, label: string) {
       const card = el('div', 'pdf-comment is-editing');
       card.append(el('div', 'pdf-comment-meta', label));
       const box = el('textarea', 'pdf-comment-input');
@@ -52,7 +62,7 @@ export const NotesPdfComments = (function () {
       return card;
     }
 
-    function commentCard(c, reply: boolean) {
+    function commentCard(c: PdfComment, reply: boolean) {
       if (editing === c.id) return editorCard(c.text, 'Page ' + (c.page + 1));
       const card = el('div', 'pdf-comment' + (reply ? ' is-reply' : ''));
       card.dataset.id = c.id;
@@ -78,11 +88,15 @@ export const NotesPdfComments = (function () {
       addBtn.disabled = working || (!picking && !!editing);
       const cards: HTMLElement[] = [];
       if (editing === 'new' && draft) cards.push(editorCard('', 'New comment · page ' + (draft.page + 1)));
-      const replies = new Map();
-      for (const c of list) if (c.replyTo) { if (!replies.has(c.replyTo)) replies.set(c.replyTo, []); replies.get(c.replyTo).push(c); }
+      const replies = new Map<string, PdfComment[]>();
+      for (const c of list) if (c.replyTo) {
+        let answers = replies.get(c.replyTo);
+        if (!answers) { answers = []; replies.set(c.replyTo, answers); }
+        answers.push(c);
+      }
       const ids = new Set(list.map((c) => c.id));
-      const shown = new Set();
-      const withReplies = (c, reply: boolean) => {
+      const shown = new Set<string>();
+      const withReplies = (c: PdfComment, reply: boolean) => {
         if (shown.has(c.id)) return; // a reply loop in a damaged PDF
         shown.add(c.id);
         cards.push(commentCard(c, reply));
@@ -91,7 +105,7 @@ export const NotesPdfComments = (function () {
       for (const c of list) if (!(c.replyTo && ids.has(c.replyTo))) withReplies(c, false); // replies go under theirs
       if (!cards.length) cards.push(el('p', 'pdf-comments-empty', 'No comments yet. Press Add comment, then click where it goes on the page.'));
       listEl.replaceChildren(...cards);
-      const box = listEl.querySelector('.pdf-comment-input');
+      const box = listEl.querySelector<HTMLTextAreaElement>('.pdf-comment-input');
       if (box) box.focus();
     }
 
@@ -101,7 +115,7 @@ export const NotesPdfComments = (function () {
       editing = null;
       draft = null;
       listEl.replaceChildren(el('p', 'pdf-comments-empty', 'Reading comments…'));
-      let read;
+      let read: PdfComment[] | null;
       try { read = await ctl.comments(); } catch (err) { read = null; if (my === readSeq) hooks.say('Could not read the comments: ' + (err.message || err)); }
       if (my !== readSeq || read === null) return;
       list = read;
@@ -123,7 +137,7 @@ export const NotesPdfComments = (function () {
       render();
     }
 
-    async function run(ops) {
+    async function run(ops: PdfCommentOp[]) {
       working = true;
       panel.classList.add('is-working');
       try { return await hooks.change(ops); } finally {
@@ -134,10 +148,10 @@ export const NotesPdfComments = (function () {
 
     async function save() {
       if (working) return;
-      const box = listEl.querySelector('.pdf-comment-input');
+      const box = listEl.querySelector<HTMLTextAreaElement>('.pdf-comment-input');
       const text = box ? box.value.trim() : '';
       if (!text) { hooks.say('Write the comment first, or press Cancel.'); return; }
-      let op;
+      let op: PdfCommentOp;
       if (editing === 'new') {
         if (!draft) { cancelEdit(); return; }
         op = { op: 'add', page: draft.page, x: draft.x, y: draft.y, text };
@@ -168,9 +182,9 @@ export const NotesPdfComments = (function () {
     }
 
     listEl.addEventListener('click', (e) => {
-      if (working) return;
-      const b = e.target.closest('button[data-c-act]');
-      const card = e.target.closest('.pdf-comment');
+      if (working || !(e.target instanceof Element)) return;
+      const b = e.target.closest<HTMLButtonElement>('button[data-c-act]');
+      const card = e.target.closest<HTMLElement>('.pdf-comment');
       const c = card && card.dataset.id ? list.find((x) => x.id === card.dataset.id) : null;
       if (!b) { if (c) ctl.goTo(c.page, c.rect); return; }
       const act = b.dataset.cAct;

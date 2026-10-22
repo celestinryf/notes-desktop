@@ -6,6 +6,7 @@
    NotesIcons.svg(name) returns an <svg> string: 16px, currentColor, 1.75 stroke.
    NotesIcons.hydrate(root) puts the icon named by data-icon="..." at the start of every such element under root. */
 (function () {
+  /** @type {Record<string, string>} */
   const PATHS = {
   "panel-left": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /><path d=\"M9 3v18\" />",
   "list": "<path d=\"M3 5h.01\" /><path d=\"M3 12h.01\" /><path d=\"M3 19h.01\" /><path d=\"M8 5h13\" /><path d=\"M8 12h13\" /><path d=\"M8 19h13\" />",
@@ -86,19 +87,34 @@
   "square-stack": "<path d=\"M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2\" /><path d=\"M10 16c-1.1 0-2-.9-2-2v-4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2\" /><rect width=\"8\" height=\"8\" x=\"14\" y=\"14\" rx=\"2\" />",
   "palette": "<path d=\"M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z\" /><circle cx=\"13.5\" cy=\"6.5\" r=\".5\" fill=\"currentColor\" /><circle cx=\"17.5\" cy=\"10.5\" r=\".5\" fill=\"currentColor\" /><circle cx=\"6.5\" cy=\"12.5\" r=\".5\" fill=\"currentColor\" /><circle cx=\"8.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\" />"
 };
+  /**
+   * @param {string} name
+   * @param {number} [size]
+   */
   function svg(name, size) {
     const body = PATHS[name];
     if (!body) throw new Error('Unknown icon: ' + name);
     const s = size || 16;
     return '<svg class="icon" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + body + '</svg>';
   }
+  /**
+   * @param {Element | null} node
+   * @returns {node is HTMLElement | SVGElement}
+   */
+  function hasDataset(node) {
+    return node instanceof HTMLElement || node instanceof SVGElement;
+  }
+  /** @param {ParentNode | null} [root] */
   function hydrate(root) {
     (root || document).querySelectorAll('[data-icon]').forEach((el) => {
+      if (!hasDataset(el)) return;
       const first = el.firstElementChild;
-      if (first && first.classList.contains('icon') && first.dataset.name === el.dataset.icon) return;
-      if (first && first.classList.contains('icon')) first.remove();
-      el.insertAdjacentHTML('afterbegin', svg(el.dataset.icon));
-      el.firstElementChild.dataset.name = el.dataset.icon;
+      const firstIcon = hasDataset(first) && first.classList.contains('icon') ? first : null;
+      if (firstIcon && firstIcon.dataset.name === el.dataset.icon) return;
+      if (firstIcon) firstIcon.remove();
+      el.insertAdjacentHTML('afterbegin', svg(String(el.dataset.icon)));
+      const inserted = el.firstElementChild;
+      if (hasDataset(inserted)) inserted.dataset.name = el.dataset.icon;
     });
   }
   const api = { svg, hydrate, names: Object.keys(PATHS) };

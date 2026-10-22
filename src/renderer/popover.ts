@@ -9,6 +9,6 @@ export function placePopover(menu: HTMLDivElement, anchor: HTMLButtonElement | H
   if (y + mh > window.innerHeight - 8) y = ev ? window.innerHeight - mh - 8 : rect.top - mh - 4;
   menu.style.left = Math.max(8, x) + 'px';
   menu.style.top = Math.max(8, y) + 'px';
-  const first = menu.querySelector('button:not(.hidden):not(:disabled)');
+  const first = menu.querySelector<HTMLButtonElement>('button:not(.hidden):not(:disabled)');
   if (first) first.focus();
 }

@@ -20,27 +20,30 @@
    onUnavailable: the frame never said it was ready (a build without hosted mode, or one that fails to load); nothing more
    is shown in it. */
 export const NotesCraftFrame = (function () {
-  function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
-    onSave: (name: string, bytes: Uint8Array, context: any) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+  function create<Context>({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
+    onSave: (name: string, bytes: Uint8Array, context: Context) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
     onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void }) {
     let ready = false;
     let loaded = false;
     let gaveUp = false;    // the frame was not ready in time: it is not used again
     let readyTimer: ReturnType<typeof setTimeout> | undefined;
-    let queued: { name: string, bytes: Uint8Array, context: unknown } | null = null;     // the open waiting for the frame to be ready
-    let current: { doc: string, name: string, context: unknown } | null = null;    // the document on show
+    let queued: { name: string, bytes: Uint8Array, context: Context } | null = null;     // the open waiting for the frame to be ready
+    let current: { doc: string, name: string, context: Context } | null = null;    // the document on show
     let dirty = false;     // the app's own unsaved changes
     let unsaved = false;   // a save the app made that did not reach the file: still unsaved for Notes
     let waiters: ((ok: boolean) => void)[] = [];      // requestSave promises waiting for the next save of the current document
     let saving: Promise<unknown> = Promise.resolve();
 
-    function post(msg, transfer?) {
+    function post(msg: unknown, transfer?: Transferable[]) {
       if (frame.contentWindow) frame.contentWindow.postMessage(msg, origin, transfer || []);
     }
 
     window.addEventListener('message', (e) => {
-      if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !e.data || typeof e.data !== 'object') return;
-      const m = e.data;
+      const data: unknown = e.data;
+      if (!loaded || e.source !== frame.contentWindow || e.origin !== origin || !isRecord(data)) return;
+      const m = data;
       if (gaveUp) return;
       if (m.type === 'ready') {
         clearTimeout(readyTimer);
@@ -62,11 +65,12 @@ export const NotesCraftFrame = (function () {
         // A copy under another name leaves the document's own file as it was: if there were edits, they are still
         // unsaved for Notes (WordCraft calls the document saved after any save).
         const editedBefore = dirty || unsaved;
+        const { name, bytes } = m;
         const doc = current.doc;
         const context = current.context;
         // One save at a time, in the order they were made, each to the document it was made in.
         // A save that throws counts as failed and never stops the ones after it.
-        saving = saving.then(() => onSave(m.name, m.bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
+        saving = saving.then(() => onSave(name, bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
           if (!current || current.doc !== doc) return;
           if (res.own) {
             unsaved = !res.ok;
@@ -96,7 +100,7 @@ export const NotesCraftFrame = (function () {
     const token = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 
     // Shows a document. A copy of the bytes goes in, so the caller's buffer stays usable.
-    function open(name, bytes, context) {
+    function open(name: string, bytes: Uint8Array, context: Context) {
       load();
       if (gaveUp) return;
       dirty = false;
@@ -110,12 +114,12 @@ export const NotesCraftFrame = (function () {
     }
 
     // Asks WordCraft to save; resolves true once the save reached the file, false on failure or after ms.
-    function requestSave(ms?): Promise<boolean> {
+    function requestSave(ms?: number): Promise<boolean> {
       const doc = current && current.doc;
       if (!ready || !doc || !(dirty || unsaved)) return Promise.resolve(true);
       return new Promise((resolve) => {
         const timer = setTimeout(() => { waiters = waiters.filter((w) => w !== finish); resolve(false); }, ms || 15000);
-        function finish(ok) { clearTimeout(timer); resolve(ok); }
+        function finish(ok: boolean) { clearTimeout(timer); resolve(ok); }
         waiters.push(finish);
         post({ type: 'command', doc, id: 'file.save' });
       });

@@ -8,7 +8,9 @@ import { focusBody } from './editor-view.ts';
 
 const { isViewerOnlyFile, isNonMarkdownFile } = H;
 
-export function createSpeech({ api }) {
+interface SpeechDeps { api: NotesApi }
+
+export function createSpeech({ api }: SpeechDeps) {
   const tts: { active: boolean, queue: string[], index: number } = { active: false, queue: [], index: 0 };
 
   function selectedTextForSpeech() {

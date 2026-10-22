@@ -11,23 +11,26 @@ export const NotesCsv = (function () {
   const NUMBER = /^[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?%?$/;
 
   // The delimiter: a tab for .tsv; otherwise whichever of , ; and tab is most common outside quotes on the first line.
-  function detectDelimiter(text, ext) {
+  type Delimiter = ',' | ';' | '\t';
+  const DELIMITERS: Delimiter[] = [',', ';', '\t'];
+  function detectDelimiter(text: string, ext: string): Delimiter {
     if (ext === 'tsv') return '\t';
-    const counts = { ',': 0, ';': 0, '\t': 0 };
+    const counts: Record<Delimiter, number> = { ',': 0, ';': 0, '\t': 0 };
+    const isDelimiter = (c: string): c is Delimiter => c in counts;
     let quoted = false;
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
       if (c === '"') quoted = !quoted;
       else if (!quoted && (c === '\n' || c === '\r')) break;
-      else if (!quoted && c in counts) counts[c]++;
+      else if (!quoted && isDelimiter(c)) counts[c]++;
     }
-    return Object.keys(counts).reduce((best, d) => (counts[d] > counts[best] ? d : best), ',');
+    return DELIMITERS.reduce<Delimiter>((best, d) => (counts[d] > counts[best] ? d : best), ',');
   }
 
   // Rows of fields, the first `limit` kept; total counts them all. Each row knows the text line it starts on (a quoted
   // field can span lines), so the table's numbers are the text view's line numbers.
   type Row = string[] & { line?: number };
-  function parse(text, delim, limit) {
+  function parse(text: string, delim: string, limit: number) {
     const rows: Row[] = [];
     let row: Row = [];
     let field = '', quoted = false, total = 0, line = 1, rowLine = 1;
@@ -53,7 +56,7 @@ export const NotesCsv = (function () {
   }
 
   const note = (text: string) => Object.assign(document.createElement('p'), { className: 'csv-note', textContent: text });
-  const cell = (tag: string, text: string, className: string) => {
+  const cell = (tag: 'th' | 'td', text: string, className: string) => {
     const c = document.createElement(tag);
     c.textContent = text;
     if (className) c.className = className;
@@ -62,7 +65,7 @@ export const NotesCsv = (function () {
   };
 
   // Draws the table and returns its counts: { rows (data rows, all of them), cols }.
-  function render(container, text, ext) {
+  function render(container: HTMLElement, text: string, ext: string) {
     container.replaceChildren();
     const src = String(text || '');
     const { rows, total } = parse(src, detectDelimiter(src, ext), MAX_ROWS + 1);

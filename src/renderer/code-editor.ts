@@ -10,8 +10,10 @@ let code: CodeEditor | null = null;      // the code editor, made when a file fi
 let codeOn = false;   // it is showing the open note's text
 let codeFailed = false; // it could not start: files use the textarea until Notes restarts
 
+type CodeEditorHooks = { runFind: (forward?: boolean) => void, autoGrow: () => void, scrollTextareaToSelection: (at: number) => void };
+
 // What the rest of the app lends the editor: set once by createCodeEditor.
-let hooks: { runFind: (forward?: boolean) => void, autoGrow: () => void, scrollTextareaToSelection: (at: number) => void } = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {} };
+let hooks: CodeEditorHooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {} };
 
 // The code editor while it shows the open note's text, else null.
 const shown = () => (codeOn ? code : null);
@@ -20,9 +22,9 @@ const shown = () => (codeOn ? code : null);
 // changes the text, moves the selection or focuses it goes through here, so the two never disagree.
 export const src = {
   get value() { return el.bodyInput.value; },
-  set value(text) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value); },
+  set value(text: string) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value); },
   // Text that came from outside (the file changed on disk, a live or vault update, a lock): shown, not undoable.
-  reload(text) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value, { history: false }); },
+  reload(text: string) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value, { history: false }); },
   get readOnly() { return el.bodyInput.readOnly; },
   get selectionStart() { const c = shown(); return c ? c.selectionStart : el.bodyInput.selectionStart; },
   get selectionEnd() { const c = shown(); return c ? c.selectionEnd : el.bodyInput.selectionEnd; },
@@ -35,7 +37,7 @@ export const src = {
   dispatchEvent(event: Event) { return el.bodyInput.dispatchEvent(event); },
   get codeOn() { return !!shown(); },
   // Undo or redo in the code editor when the keyboard is in it; false when it is not.
-  undoRedo(cmd) {
+  undoRedo(cmd: 'undo' | 'redo') {
     const c = shown();
     if (!c || !c.contains(document.activeElement)) return false;
     c[cmd === 'redo' ? 'redo' : 'undo']();
@@ -50,17 +52,17 @@ export const src = {
 // Prose files (.txt) are written, not coded: the plain text box in the writing font, as the user asked, with no
 // line numbers or highlighting. LaTeX, code and config get the code editor.
 const PROSE_EXT = new Set(['txt', 'text']);
-const isProseFile = (note) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
+const isProseFile = (note: PublicNote) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
 
 function codeEditor(): CodeEditor {
   if (!code) {
     if (!window.NotesCode) throw new Error('the code editor bundle did not load');
     code = window.NotesCode.create({
       parent: el.codeHost,
-      onChange: (text) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
+      onChange: (text: string) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
       onSelection: renderCodePosition,
       // While the find bar is open, Enter steps between matches, as it does in the textarea.
-      onEnter: (shift) => { if (!find.open) return false; hooks.runFind(!shift); return true; },
+      onEnter: (shift: boolean) => { if (!find.open) return false; hooks.runFind(!shift); return true; },
     });
   }
   return code;
@@ -68,7 +70,7 @@ function codeEditor(): CodeEditor {
 
 // Shows the note's text in the code editor when it is a plain-text file (and the editor is built), else in the
 // textarea. A new note starts a new undo history.
-function showCode(note, readOnly) {
+function showCode(note: PublicNote, readOnly: boolean) {
   codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile(note) && !isProseFile(note);
   if (codeOn) {
     try {
@@ -97,7 +99,7 @@ export function renderCodePosition() {
   el.statusCode.textContent = 'Ln ' + at.line + ', Col ' + at.col;
 }
 
-export function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }) {
+export function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }: CodeEditorHooks) {
   hooks = { runFind, autoGrow, scrollTextareaToSelection };
   return { showCode };
 }

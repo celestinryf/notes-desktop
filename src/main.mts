@@ -605,7 +605,7 @@ function main() {
   const conflictCopies = new Map();
   // Writes edited bytes for the opened file of note id: in place after a backup while the file is as it was opened
   // ({ mtime, backup: whether this was the session's first backup }), else into the copy ({ savedAs, newCopy }).
-  function saveEdits(id: string, file: string, buf: Buffer, expectedMtime: number) {
+  function saveEdits(id: string, file: string, buf: Buffer, expectedMtime: number | null) {
     if (stillAsOpened(file, expectedMtime)) {
       conflictCopies.delete(id);
       const { mtime, backup } = replaceFile(id, file, buf);
@@ -648,13 +648,13 @@ function main() {
     if (buf.length < 8 || buf.toString('latin1', 0, 5) !== '%PDF-') throw new Error('the PDF came back damaged, so nothing was written.');
     return buf;
   }
-  const stillAsOpened = (file: string, expectedMtime: number) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
+  const stillAsOpened = (file: string, expectedMtime: number | null) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
   const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Reload it, then try again.';
 
   // Rewrites the opened PDF of note id: build(bytes of the file now) gives the new bytes. Refused when the file
   // changed on disk since it was opened (or while building); written in place after a backup. Returns
   // { ok, mtime, backup } with the backup's name, for Undo, or { ok: false, error }.
-  async function rewritePdf(id: string, expectedMtime: number, build: (current: Buffer) => unknown) {
+  async function rewritePdf(id: string, expectedMtime: number | null, build: (current: Buffer) => unknown): Promise<Ok<{ mtime: number | null; backup: string }>> {
     const file = fileNoteOfKind(id, 'pdf').filePath;
     if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: CHANGED_ON_DISK };
     try {

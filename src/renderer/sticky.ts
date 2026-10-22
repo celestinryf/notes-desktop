@@ -21,7 +21,7 @@ import { pageElement } from './page-element.ts';
     return state.systemDark ? 'dark' : 'light';
   }
 
-  function applySticky(sticky) {
+  function applySticky(sticky: Sticky | null | undefined) {
     const color = (sticky && sticky.color) || 'peach';
     document.documentElement.dataset.color = color;
     for (const b of el.colors.querySelectorAll('button')) b.classList.toggle('is-on', b.dataset.color === color);

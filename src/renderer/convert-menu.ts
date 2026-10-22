@@ -4,7 +4,13 @@ import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
 import { placePopover } from './popover.ts';
 
-export function createConvertMenu({ api, flushSave, openFiles }) {
+interface ConvertMenuDeps {
+  api: NotesApi;
+  flushSave: () => Promise<boolean>;
+  openFiles: (paths: string[]) => Promise<unknown>;
+}
+
+export function createConvertMenu({ api, flushSave, openFiles }: ConvertMenuDeps) {
   async function openConvertMenu() {
     const note = state.current;
     if (!note || !note.filePath) return;
@@ -21,13 +27,14 @@ export function createConvertMenu({ api, flushSave, openFiles }) {
       return b;
     }));
     placePopover(el.convertMenu, el.fileConvertBtn);
-    el.convertMenu.querySelector('button').focus();
+    const firstItem = el.convertMenu.querySelector('button');
+    if (firstItem) firstItem.focus();
   }
 
   function closeConvertMenu() { el.convertMenu.classList.add('hidden'); }
 
   let converting = false;
-  async function convertCurrent(to) {
+  async function convertCurrent(to: string) {
     closeConvertMenu();
     const note = state.current;
     if (!note || !note.filePath || converting) return;

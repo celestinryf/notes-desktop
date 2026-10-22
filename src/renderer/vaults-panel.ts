@@ -3,8 +3,17 @@ import { state } from './state.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 
-export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded }) {
-  async function syncVault(id) {
+interface VaultsPanelDeps {
+  api: NotesApi;
+  refresh: (opts: { keepEditor: boolean }) => Promise<unknown>;
+  flushSave: () => Promise<boolean>;
+  setView: (view: RendererState['view'], arg?: string | null) => Promise<unknown>;
+  leaveSettings: () => Promise<unknown>;
+  setExpanded: (id: string | null, open: boolean) => Promise<unknown>;
+}
+
+export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded }: VaultsPanelDeps) {
+  async function syncVault(id: string) {
     toast('Syncing vault…');
     const r = await api.vaults.sync(id);
     if (r.ok) toast('Vault synced.');
@@ -14,7 +23,7 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
     renderVaultList();
   }
 
-  async function removeVault(id) {
+  async function removeVault(id: string) {
     if (!window.confirm('Remove this vault from Notes? The folder and its files stay on disk untouched.')) return;
     await flushSave();
     await api.vaults.remove(id);
@@ -105,11 +114,11 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
       remote.className = 'input';
       remote.placeholder = v.status.isRepo ? 'Remote URL (origin)' : 'Add a remote URL to turn this folder into a synced repo';
       remote.value = v.remote || v.status.remote || '';
-      remote.addEventListener('change', async () => { const r = await api.vaults.update(v.id, { remote: remote.value.trim() }); if (r && r.ok === false) toast(r.error); renderVaultList(); });
+      remote.addEventListener('change', async () => { const r = await api.vaults.update(v.id, { remote: remote.value.trim() }); if (r && 'ok' in r && r.ok === false) toast(r.error); renderVaultList(); });
       actions.append(remote);
-      const mk = (label: string, fn, cls?: string) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
+      const mk = (label: string, fn: () => unknown, cls?: string) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
       mk('Sync now', () => syncVault(v.id));
-      mk('Rescan', async () => { const r = await api.vaults.scan(v.id); toast('Rescanned: +' + r.added + ' changed ' + r.updated + ' removed ' + r.removed); await refresh({ keepEditor: true }); });
+      mk('Rescan', async () => { const r = await api.vaults.scan(v.id); if (!r) return; toast('Rescanned: +' + r.added + ' changed ' + r.updated + ' removed ' + r.removed); await refresh({ keepEditor: true }); });
       mk('Open folder', () => api.vaults.openFolder(v.id));
       const auto = document.createElement('label');
       auto.className = 'field-check';
@@ -127,7 +136,7 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
     }
   }
 
-  function describeVaultStatus(v) {
+  function describeVaultStatus(v: { status: VaultStatus }) {
     const s = v.status || {};
     if (!s.isRepo) return 'Plain folder: notes mirror the files, no git. Add a remote URL to start syncing.';
     const parts = ['git on ' + (s.branch || '?')];
