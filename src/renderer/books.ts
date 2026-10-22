@@ -63,7 +63,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   // Moves page dragId so it sits just before page beforeId.
-  async function movePage(dragId, beforeId) {
+  async function movePage(dragId: string | null, beforeId) {
     if (!book.id || !dragId || dragId === beforeId) return;
     const ids = book.pages.map((p) => p.id).filter((x) => x !== dragId);
     const at = ids.indexOf(beforeId);
@@ -160,7 +160,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
   }
 
   // Puts page id right after page afterId in the book's reading order.
-  async function placePageAfter(id, afterId) {
+  async function placePageAfter(id, afterId: string) {
     const pages = await api.notes.list({ folderId: book.id });
     const ids = pages.map((p) => p.id).filter((x) => x !== id);
     const at = ids.indexOf(afterId);
@@ -168,7 +168,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     await api.folders.reorderPages(book.id, ids);
   }
 
-  function openPageMenu(id, anchor, ev) {
+  function openPageMenu(id, anchor: HTMLDivElement, ev: PointerEvent) {
     closeAllBookMenus();
     state.menuPageId = id;
     state.menuBookId = book.id;
@@ -261,7 +261,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     input.value = folder.name;
     input.setAttribute('aria-label', 'Book name');
     let done = false;
-    const finish = async (save) => {
+    const finish = async (save: boolean) => {
       if (done) return; done = true;
       const name = input.value.trim();
       input.replaceWith(el.bookName);
@@ -278,7 +278,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
 
   // Gathers the current book: its name and pages in order, each with Markdown and HTML.
   // Locked pages stay locked: only their title goes in.
-  async function collectBook(bookId) {
+  async function collectBook(bookId: string) {
     await flushSave();
     const folder = flattenTree(state.tree).find((f) => f.id === bookId);
     const pages = await api.notes.list({ folderId: bookId });

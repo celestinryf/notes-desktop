@@ -132,7 +132,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     return !docxDirty();
   });
 
-  async function saveDocxNow(explicit) {
+  async function saveDocxNow(explicit: boolean) {
     const target = docxNote, ed = docx;
     let c;
     try {

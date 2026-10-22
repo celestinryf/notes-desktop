@@ -107,7 +107,7 @@ export function createVaultsPanel({ api, refresh, flushSave, setView, leaveSetti
       remote.value = v.remote || v.status.remote || '';
       remote.addEventListener('change', async () => { const r = await api.vaults.update(v.id, { remote: remote.value.trim() }); if (r && r.ok === false) toast(r.error); renderVaultList(); });
       actions.append(remote);
-      const mk = (label, fn, cls?) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
+      const mk = (label: string, fn, cls?: string) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-small' + (cls ? ' ' + cls : ''); b.textContent = label; b.addEventListener('click', fn); actions.append(b); };
       mk('Sync now', () => syncVault(v.id));
       mk('Rescan', async () => { const r = await api.vaults.scan(v.id); toast('Rescanned: +' + r.added + ' changed ' + r.updated + ' removed ' + r.removed); await refresh({ keepEditor: true }); });
       mk('Open folder', () => api.vaults.openFolder(v.id));

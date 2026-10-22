@@ -26,7 +26,7 @@ export function createAttachments({ api, flushSave, refresh }) {
     return true;
   }
 
-  function insertLinkIntoNote(text, href) {
+  function insertLinkIntoNote(text: string, href) {
     if (!state.current || lockedNow()) return;
     if (refuseInTable()) return;
     if (state.sourceMode || !state.rich) {

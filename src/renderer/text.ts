@@ -7,7 +7,7 @@ export function escapeHtml(s) {
 }
 
 // Match on the raw text and escape each piece afterwards, so entities in notes are never split by a mark.
-export function highlight(text, query) {
+export function highlight(text, query: string) {
   const raw = String(text);
   const tokens = H.tokenize(query);
   if (!tokens.length) return escapeHtml(raw);

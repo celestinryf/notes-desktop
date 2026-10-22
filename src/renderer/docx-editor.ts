@@ -1,3 +1,4 @@
+import type { EditableParagraph } from '../docx-edit/ooxml.mts';
 /* Editing an opened Word document in place, exposed as window.NotesDocxEditor. The document is shown by docx-preview
    inside the sandboxed frame (nothing in it runs); this page makes its paragraphs editable and listens from outside.
 
@@ -63,13 +64,13 @@ export const NotesDocxEditor = (function () {
         return m && Number(m[1]) === gen ? Number(m[2]) : undefined;
       },
       has(p) { return map.get(p) !== undefined; },
-      set(p, index) { p.setAttribute(SRC, gen + ':' + index); },
+      set(p: HTMLParagraphElement | HTMLElement, index: number) { p.setAttribute(SRC, gen + ':' + index); },
     };
     let saving: SaveInFlight | null = null;
     // Computed formatting per element, for one reading of the page only: editing can restyle an element in place.
     let styleCache = new WeakMap<Element, Fmt>();
 
-    function setDirty(v) {
+    function setDirty(v: boolean) {
       if (dirty === v) return;
       dirty = v;
       if (hooks.onDirty) hooks.onDirty(v);
@@ -94,7 +95,7 @@ export const NotesDocxEditor = (function () {
 
     // The characters of a shown paragraph, with bold/italic/underline: [{ ch, fmt }]. A line break the browser keeps
     // only to give an empty line its height (the last thing in the paragraph) does not count.
-    function charsOf(p) {
+    function charsOf(p: HTMLParagraphElement) {
       const out: ShownChar[] = [];
       styleCache = new WeakMap();
       const walk = (node) => {
@@ -121,12 +122,12 @@ export const NotesDocxEditor = (function () {
     }
     const textOf = (chars) => chars.map((c) => c.ch).join('');
     // What a paragraph is compared with at the next save: per character its formatting and, for a picture, its name.
-    const baselineOf = (chars, empty) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
+    const baselineOf = (chars, empty: Fmt) => ({ chars: chars.map((c) => c.fmt), pictures: chars.map((c) => c.picture || null), empty });
 
     // Names the pictures shown in paragraph element p (the <div>s whose nearest <div> or <p> above is p) and makes
     // each one a single block the caret steps over: it can be deleted, not edited inside.
     let pictureSeq = 0;
-    function namePictures(p) {
+    function namePictures(p: HTMLParagraphElement) {
       for (const d of p.querySelectorAll('div')) {
         if (d.parentElement.closest('div, p') !== p || d.hasAttribute(PIC)) continue;
         d.setAttribute(PIC, String(++pictureSeq));
@@ -143,7 +144,7 @@ export const NotesDocxEditor = (function () {
     }
     const shownParagraphs = () => shownByPage().flatMap((pg) => pg.list);
     // Which paragraph of the file each shown one belongs to: its own, or (made by Enter) the one before it.
-    function sources(list) {
+    function sources(list: HTMLParagraphElement[]) {
       const out = new Map<HTMLElement, number>();
       let last: number | undefined;
       for (const p of list) {
@@ -198,7 +199,7 @@ export const NotesDocxEditor = (function () {
     function attach() {
       let editable = 0;
       const pages = [...shownDoc().querySelectorAll('section.docx > article')];
-      const take = (id) => {
+      const take = (id: string) => {
         const mark = shownDoc().getElementById(id);
         const p = mark && mark.closest('p');
         if (mark) mark.remove();
@@ -245,7 +246,7 @@ export const NotesDocxEditor = (function () {
     }
     // A paragraph as shown: { chars, mark } (mark records its page break on the page), or null when it is not shown
     // whole. p: the element it starts in; rest: the one its text after a page break is in, if any.
-    function shownAs(para, p, rest, pages) {
+    function shownAs(para: EditableParagraph, p: HTMLParagraphElement, rest: HTMLParagraphElement | null, pages: Element[]) {
       if (!para.pageBreaks.length) return { chars: charsOf(p) };
       if (para.pageBreaks.length > 1) return null; // docx-preview starts a new page at the first one only
       const page = p.parentElement, k = pages.indexOf(page);
@@ -375,7 +376,7 @@ export const NotesDocxEditor = (function () {
 
     // ---- Saving -------------------------------------------------------------------------------------------
 
-    const sameChars = (chars, base, text) => chars.length === base.chars.length && X.sameShownText(text, textOf(chars))
+    const sameChars = (chars: ShownChar[], base: ShownBaseline, text: string) => chars.length === base.chars.length && X.sameShownText(text, textOf(chars))
       && chars.every((c, k) => !c.fmt.b === !base.chars[k].b && !c.fmt.i === !base.chars[k].i && !c.fmt.u === !base.chars[k].u
         && (c.picture || null) === base.pictures[k]);
 
@@ -393,7 +394,7 @@ export const NotesDocxEditor = (function () {
       const lost = () => new Error('a page break could not be placed');
       // A paragraph already holding a break gets no second one (the page shows only one per paragraph): the break
       // becomes a paragraph of its own, as Ctrl+Enter makes in Word.
-      const endWithBreak = (last) => {
+      const endWithBreak = (last: ShownPiece) => {
         if (last.chars.includes(BREAK)) pieces.push({ els: [], source: last.source, chars: [BREAK] });
         else last.chars.push(BREAK);
       };

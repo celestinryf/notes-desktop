@@ -45,7 +45,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     if (hist.versions.length) showVersion(0);
   }
 
-  function showVersion(i) {
+  function showVersion(i: number) {
     hist.index = i;
     for (const li of el.historyList.children) li.classList.toggle('is-active', Number(li.dataset.index) === i);
     el.historyPreview.textContent = hist.versions[i].body;

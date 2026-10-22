@@ -173,7 +173,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     return false;
   }
 
-  async function chooseInline(i) {
+  async function chooseInline(i: number) {
     const it = inline.items[i];
     const t = inline.trigger;
     const rich = state.rich;
@@ -231,7 +231,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     updateStatus(note);
   }
   // A table or an image takes the rest of the pane, with its own scrolling, rather than a box scrolling in a page.
-  function fillPane(on) {
+  function fillPane(on: boolean) {
     el.editorColumn.classList.toggle('fills-pane', on);
     el.editor.classList.toggle('fills-pane', on);
   }

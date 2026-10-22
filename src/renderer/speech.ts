@@ -38,7 +38,7 @@ export function createSpeech({ api }) {
     return voices.find((v) => v.name === wanted) || null;
   }
 
-  function setReadAloudState(active) {
+  function setReadAloudState(active: boolean) {
     tts.active = active;
     setLabel(el.readAloudBtn, active ? 'Stop reading' : 'Read aloud');
     el.readAloudBtn.classList.toggle('is-on', active);

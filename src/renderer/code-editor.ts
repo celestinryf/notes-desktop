@@ -26,13 +26,13 @@ export const src = {
   get readOnly() { return el.bodyInput.readOnly; },
   get selectionStart() { const c = shown(); return c ? c.selectionStart : el.bodyInput.selectionStart; },
   get selectionEnd() { const c = shown(); return c ? c.selectionEnd : el.bodyInput.selectionEnd; },
-  setSelectionRange(from, to) { const c = shown(); if (c) c.setSelectionRange(from, to); else el.bodyInput.setSelectionRange(from, to); },
+  setSelectionRange(from: number, to: number) { const c = shown(); if (c) c.setSelectionRange(from, to); else el.bodyInput.setSelectionRange(from, to); },
   focus() { const c = shown(); if (c) c.focus(); else el.bodyInput.focus(); },
   hasFocus() { const c = shown(); return c ? c.hasFocus() : document.activeElement === el.bodyInput; },
   // Scrolls a position into view (a find match, a heading).
-  reveal(at) { const c = shown(); if (c) c.reveal(at); else hooks.scrollTextareaToSelection(at); },
+  reveal(at: number) { const c = shown(); if (c) c.reveal(at); else hooks.scrollTextareaToSelection(at); },
   // The input event goes to the textarea, whose listeners save, count and refresh the find bar.
-  dispatchEvent(event) { return el.bodyInput.dispatchEvent(event); },
+  dispatchEvent(event: Event) { return el.bodyInput.dispatchEvent(event); },
   get codeOn() { return !!shown(); },
   // Undo or redo in the code editor when the keyboard is in it; false when it is not.
   undoRedo(cmd) {

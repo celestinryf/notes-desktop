@@ -44,7 +44,7 @@ export const NotesPdfPages = (function () {
       c.style.transform = 'rotate(' + turn + 'deg) scale(' + scale + ')';
     }
 
-    function button(act, k, icon, title) {
+    function button(act: string, k: number, icon: string, title: string) {
       const b = document.createElement('button');
       b.className = 'tool-btn icon-only';
       b.dataset.act = act;
@@ -84,7 +84,7 @@ export const NotesPdfPages = (function () {
       }));
     }
 
-    function act(name, k) {
+    function act(name, k: number) {
       const it = items[k];
       if (!it) return;
       if (name === 'left' && k > 0) [items[k - 1], items[k]] = [items[k], items[k - 1]];

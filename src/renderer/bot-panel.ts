@@ -21,7 +21,7 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }) 
     el.botScope.title = text;
   }
 
-  function botAppend(text, cls?) {
+  function botAppend(text, cls?: string) {
     const span = document.createElement('span');
     if (cls) span.className = cls;
     span.textContent = text;

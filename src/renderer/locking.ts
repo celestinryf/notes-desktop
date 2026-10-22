@@ -39,7 +39,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
     placePopover(el.lockMenu, el.moreMenu.contains(el.lockBtn) ? el.moreBtn : el.lockBtn);
   }
 
-  function openLockDialog(mode) {
+  function openLockDialog(mode: string) {
     el.lockDialog.dataset.mode = mode;
     el.lockDialogTitle.textContent = mode === 'set' ? 'Lock note' : 'Remove lock';
     el.lockDialogHint.textContent = mode === 'set'

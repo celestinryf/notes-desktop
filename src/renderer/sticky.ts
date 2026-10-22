@@ -2,13 +2,13 @@
 /* Sticky window page: one note, rendered editor, autosave. Talks to main through the same notesApi bridge. */
 import * as H from '../shared/helpers.mts';
 import NotesIcons from './icons.js';
+import { pageElement } from './page-element.ts';
 
 (function () {
   const api = window.notesApi;
-  const $ = (s) => document.querySelector(s);
   const el = {
-    title: $('#stickyTitle'), colors: $('#stickyColors'), topBtn: $('#stickyTopBtn'), openBtn: $('#stickyOpenBtn'),
-    closeBtn: $('#stickyCloseBtn'), editor: $('#stickyEditor'), missing: $('#stickyMissing'), status: $('#stickyStatus'),
+    title: pageElement('#stickyTitle', HTMLSpanElement), colors: pageElement('#stickyColors', HTMLDivElement), topBtn: pageElement('#stickyTopBtn', HTMLButtonElement), openBtn: pageElement('#stickyOpenBtn', HTMLButtonElement),
+    closeBtn: pageElement('#stickyCloseBtn', HTMLButtonElement), editor: pageElement('#stickyEditor', HTMLDivElement), missing: pageElement('#stickyMissing', HTMLDivElement), status: pageElement('#stickyStatus', HTMLSpanElement),
   };
   NotesIcons.hydrate(document);
   const id = new URLSearchParams(location.search).get('id') || ''; // main always opens a sticky with its note's id
@@ -30,7 +30,7 @@ import NotesIcons from './icons.js';
     el.topBtn.title = onTop ? 'Floating above other windows (click to let windows cover it)' : 'Behind other windows (click to float on top)';
   }
 
-  function render(note) {
+  function render(note: PublicNote | null) {
     state.note = note;
     if (!note || note.trashedAt) {
       el.editor.classList.add('hidden');
@@ -55,7 +55,7 @@ import NotesIcons from './icons.js';
     }
   }
 
-  function setReadOnly(on, why) {
+  function setReadOnly(on: boolean, why: string) {
     state.readOnly = on;
     if (state.rich) state.rich.setEditable(!on);
     document.documentElement.classList.toggle('is-readonly', on);

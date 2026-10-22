@@ -10,7 +10,7 @@ export function setRowToggle(row: HTMLElement, fn: ((open: boolean) => void) | n
 export function bookMark() { return '<span class="row-mark book-mark" title="Book: its notes are pages">' + NotesIcons.svg('book') + '</span>'; }
 
 // The children of a row at parentDepth; its guide line runs under the parent's chevron.
-export function treeGroup(parentDepth, isHere) {
+export function treeGroup(parentDepth, isHere: boolean) {
   const group = document.createElement('div');
   group.className = 'tree-children' + (isHere ? ' is-here' : '');
   group.setAttribute('role', 'group');
@@ -18,18 +18,18 @@ export function treeGroup(parentDepth, isHere) {
   return group;
 }
 
-export function visibleRows(root) { return Array.from<HTMLElement>(root.querySelectorAll('.tree-row')).filter((r) => r.offsetParent); }
-export function focusRow(root, row) {
+export function visibleRows(root: HTMLElement | HTMLDivElement) { return Array.from<HTMLElement>(root.querySelectorAll('.tree-row')).filter((r) => r.offsetParent); }
+export function focusRow(root: HTMLElement | HTMLDivElement, row) {
   for (const r of Array.from<HTMLElement>(root.querySelectorAll('.tree-row[tabindex="0"]'))) r.tabIndex = -1;
   row.tabIndex = 0;
   row.focus();
 }
 // A rebuild must not lose the keyboard: remember which row had focus, and focus it again afterwards.
-export function treeFocusKey(root) {
+export function treeFocusKey(root: HTMLElement | HTMLDivElement) {
   const a = document.activeElement;
   return a instanceof HTMLElement && root.contains(a) && a.classList.contains('tree-row') ? a.dataset.key : null;
 }
-export function restoreTreeFocus(root, key) {
+export function restoreTreeFocus(root: HTMLElement | HTMLDivElement, key?: string | null) {
   const rows = visibleRows(root);
   const target = (key && rows.find((r) => r.dataset.key === key)) || null;
   if (target) { focusRow(root, target); return; }
@@ -39,14 +39,14 @@ export function restoreTreeFocus(root, key) {
 }
 // Arrow keys as in any tree: up and down move, right opens (then steps in), left closes (then steps out),
 // Home and End jump, Enter or Space activates.
-export function bindTreeKeys(root) {
+export function bindTreeKeys(root: HTMLElement | HTMLDivElement) {
   root.addEventListener('keydown', (e) => {
     if (e.target.closest('input, select, textarea') || e.altKey || e.ctrlKey || e.metaKey) return;
     const row = e.target.closest('.tree-row');
     if (!row || !root.contains(row) || e.target !== row) return;
     const rows = visibleRows(root);
     const i = rows.indexOf(row);
-    const go = (j) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };
+    const go = (j: number) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };
     const expanded = row.getAttribute('aria-expanded');
     const toggle = toggles.get(row);
     if (e.key === 'ArrowDown') go(i + 1);

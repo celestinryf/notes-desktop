@@ -20,13 +20,13 @@ export const NotesPdfComments = (function () {
     // list: the comments as last read. editing: the id being retyped, or 'new' for draft (a place { page, x, y }).
     let list: PdfComment[] = [], editing: string | null = null, draft: PdfPoint | null = null, picking = false, working = false, readSeq = 0;
 
-    function el(tag, cls, text?) {
+    function el(tag: string, cls: string, text?) {
       const e = document.createElement(tag);
       if (cls) e.className = cls;
       if (text !== undefined) e.textContent = text;
       return e;
     }
-    function button(act, text, title?) {
+    function button(act: string, text: string, title?: string) {
       const b = el('button', 'tool-btn', text);
       b.type = 'button';
       b.dataset.cAct = act;
@@ -35,7 +35,7 @@ export const NotesPdfComments = (function () {
     }
 
     // A text box for a new or retyped comment, with Save and Cancel. Ctrl+Enter saves; Escape cancels.
-    function editorCard(value, label) {
+    function editorCard(value, label: string) {
       const card = el('div', 'pdf-comment is-editing');
       card.append(el('div', 'pdf-comment-meta', label));
       const box = el('textarea', 'pdf-comment-input');
@@ -52,7 +52,7 @@ export const NotesPdfComments = (function () {
       return card;
     }
 
-    function commentCard(c, reply) {
+    function commentCard(c, reply: boolean) {
       if (editing === c.id) return editorCard(c.text, 'Page ' + (c.page + 1));
       const card = el('div', 'pdf-comment' + (reply ? ' is-reply' : ''));
       card.dataset.id = c.id;
@@ -82,7 +82,7 @@ export const NotesPdfComments = (function () {
       for (const c of list) if (c.replyTo) { if (!replies.has(c.replyTo)) replies.set(c.replyTo, []); replies.get(c.replyTo).push(c); }
       const ids = new Set(list.map((c) => c.id));
       const shown = new Set();
-      const withReplies = (c, reply) => {
+      const withReplies = (c, reply: boolean) => {
         if (shown.has(c.id)) return; // a reply loop in a damaged PDF
         shown.add(c.id);
         cards.push(commentCard(c, reply));
@@ -152,7 +152,7 @@ export const NotesPdfComments = (function () {
     }
 
     // The replies to c, and to those, as main deletes them with it.
-    function repliesTo(c) {
+    function repliesTo(c: PdfComment) {
       const found = new Set([c.id]);
       for (let grew = true; grew;) {
         grew = false;
@@ -161,7 +161,7 @@ export const NotesPdfComments = (function () {
       return found.size - 1;
     }
 
-    async function remove(c) {
+    async function remove(c: PdfComment) {
       const answers = repliesTo(c);
       if (!window.confirm('Delete this comment' + (answers ? ' and its ' + answers + (answers === 1 ? ' reply' : ' replies') : '') + '?')) return;
       await run([{ op: 'delete', page: c.page, ref: c.ref }]);

@@ -96,7 +96,7 @@ export const NotesSignPad = (function () {
       ctx.fillStyle = INK;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
-      const font = (px) => 'italic 500 ' + px + 'px Fraunces, Georgia, serif';
+      const font = (px: number) => 'italic 500 ' + px + 'px Fraunces, Georgia, serif';
       ctx.font = font(size);
       while (size > 8 && ctx.measureText(text).width > canvas.width * 0.9) ctx.font = font(size *= 0.9);
       const w = ctx.measureText(text).width;

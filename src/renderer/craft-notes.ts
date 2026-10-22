@@ -13,7 +13,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
     gridcraft: { label: 'GridCraft', what: 'spreadsheet', frame: () => el.gridcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'Excel', without: 'spreadsheets cannot be shown for now.' },
   };
-  function craftViewer(key) {
+  function craftViewer(key: string) {
     const ui = CRAFT_UI[key];
     const frame = () => ui.frame();
     let fc: ReturnType<typeof NotesCraftFrame.create> | null = null, note: { id: string, fileMtime: number | null, name: string } | null = null, shownKey: string | null = null, seq = 0, down = false;

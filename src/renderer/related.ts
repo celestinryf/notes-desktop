@@ -13,7 +13,7 @@ export function createRelated({ api, followLink }) {
     try { r = await api.notes.related(note.id); } catch (_) { r = null; }
     if (state.currentId !== forNote) return;
     if (!r) { el.relatedPanel.classList.add('hidden'); return; }
-    const fill = (group, items) => {
+    const fill = (group: HTMLDivElement, items) => {
       const ul = group.querySelector('ul');
       ul.innerHTML = '';
       for (const it of items) {

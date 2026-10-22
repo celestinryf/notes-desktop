@@ -12,11 +12,11 @@ import { escapeHtml } from './text.ts';
 type PaletteItem = { id: string, title: string, group: string, hint?: string, keys?: string, icon?: string, run: (opts: { newTab?: boolean }) => void };
 
 export const NotesPalette = (function () {
-  const I = (name) => (name ? NotesIcons.svg(name) : '');
-  const esc = (s) => escapeHtml(s == null ? '' : s);
+  const I = (name: string) => (name ? NotesIcons.svg(name) : '');
+  const esc = (s: string) => escapeHtml(s == null ? '' : s);
 
   // Bold the characters of the label that the query matched, in order.
-  function marked(text, query) {
+  function marked(text: string, query) {
     const q = String(query || '').toLowerCase().replace(/\s+/g, '');
     if (!q) return esc(text);
     const lower = text.toLowerCase();
@@ -93,13 +93,13 @@ export const NotesPalette = (function () {
       render(query);
     }
 
-    function move(delta) {
+    function move(delta: number) {
       if (!items.length) return;
       active = (active + delta + items.length) % items.length;
       paint();
     }
 
-    function choose(i, opts) {
+    function choose(i: number, opts) {
       const it = items[i];
       if (!it) return;
       close(false);

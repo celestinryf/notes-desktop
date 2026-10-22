@@ -43,7 +43,7 @@ import { createEditorText } from './editor-text.ts';
 
   // ---- theme & settings ----------------------------------------------------
 
-  function effectiveTheme(settings?) {
+  function effectiveTheme(settings?: Settings & Partial<Settings>) {
     const s = settings || state.settings;
     const t = s ? s.theme : 'system';
     if (t === 'light' || t === 'dark') return t;
@@ -51,7 +51,7 @@ import { createEditorText } from './editor-text.ts';
   }
 
   // Shows a theme and colour scheme on the page: the saved settings, or the Settings dialog's unsaved draft.
-  function applyTheme(settings?) {
+  function applyTheme(settings?: Settings & Partial<Settings>) {
     const theme = effectiveTheme(settings);
     document.documentElement.dataset.theme = theme;
     applyColorScheme(theme, settings || state.settings);
@@ -60,7 +60,7 @@ import { createEditorText } from './editor-text.ts';
 
   // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.mts); the
   // built-in one clears them, so the stylesheet's own colours show.
-  function applyColorScheme(mode, settings) {
+  function applyColorScheme(mode: string, settings: Settings | null) {
     const tokens = NotesThemes.resolve(settings, mode);
     const style = document.documentElement.style;
     for (const name of NotesThemes.TOKENS) {
@@ -147,7 +147,7 @@ import { createEditorText } from './editor-text.ts';
     const home = layout === 'docked' ? el.sidebarTop : el.tabBar;
     if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
   }
-  function peekSidebar(how) {
+  function peekSidebar(how: string) {
     if (GUEST || sidebarLayout() !== 'float') return;
     clearTimeout(peekTimer);
     if (sidebarPeek === 'sticky' && how === 'hover') return;
@@ -259,7 +259,7 @@ import { createEditorText } from './editor-text.ts';
     };
   }
 
-  function setupResizer(handle, key) {
+  function setupResizer(handle: HTMLDivElement, key: string) {
     const other = key === 'sidebarWidth' ? 'list' : 'sidebar';
     const mine = key === 'sidebarWidth' ? 'sidebar' : 'list';
     handle.addEventListener('pointerdown', (e) => {
@@ -480,7 +480,7 @@ import { createEditorText } from './editor-text.ts';
   // One renderer for a note row's contents, shared by the list, the folder view and single-row refreshes, so the
   // pin, sticky, lock, live, file and reminder marks never disappear after a save. The row is the title; everything
   // else trails it as a small mark (the user: "just the titles", 2026-10-19). Takes a note or an outline entry.
-  function rowInner(n, q) {
+  function rowInner(n, q: string) {
     const title = n.body === undefined ? n.title : H.deriveTitle(n); // outline entries carry a derived title already
     const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
     const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '')
@@ -494,7 +494,7 @@ import { createEditorText } from './editor-text.ts';
   }
 
   // The text around the first word of the query in the note's body (or its tags), on one line, about 80 characters.
-  function matchExcerpt(n, q) {
+  function matchExcerpt(n, q: string) {
     const body = String(n.body || '').replace(/\s+/g, ' ');
     const low = body.toLowerCase();
     const at = H.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
@@ -619,7 +619,7 @@ import { createEditorText } from './editor-text.ts';
     return out;
   }
 
-  function editKey(edit) {
+  function editKey(edit: FolderEdit | null) {
     return edit ? edit.mode + ':' + (edit.id || edit.parentId || 'root') : '';
   }
 
@@ -642,7 +642,7 @@ import { createEditorText } from './editor-text.ts';
     const here = new Set(state.view === 'folder' ? pathTo(state.folderId) : []);
     const holding = state.current && state.current.folderId ? state.current.folderId : null;
     for (const id of holding ? pathTo(holding) : []) here.add(id);
-    const addRow = (node, into) => {
+    const addRow = (node, into: HTMLDivElement | DocumentFragment) => {
       const kids = node.children.length > 0;
       const isOpen = kids && open.has(node.id);
       const row = document.createElement('div');
@@ -752,7 +752,7 @@ import { createEditorText } from './editor-text.ts';
     return !!state.settings && state.settings.listMode === 'tree' && treeModePossible();
   }
   // Is the note somewhere in what the tree shows? (In a folder view the tree also shows its subfolders' notes.)
-  function inTreeScope(noteId) {
+  function inTreeScope(noteId: string | null) {
     const out = state.outline || {};
     const scope = state.view === 'folder' ? state.folderId : null;
     const ids = scope ? new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
@@ -764,7 +764,7 @@ import { createEditorText } from './editor-text.ts';
   }
 
   // The open note's headings, for its outline in the tree. Skips code fences; the text loses its Markdown marks.
-  function headingsOf(md) {
+  function headingsOf(md: string) {
     const out: ({ level: number; text: string; })[] = [];
     let fence = false;
     for (const line of String(md || '').split(/\r?\n/)) {
@@ -788,7 +788,7 @@ import { createEditorText } from './editor-text.ts';
   }
 
   // Jumps to the i-th heading of the open note, in whichever view is showing.
-  function jumpToHeading(i) {
+  function jumpToHeading(i: number) {
     if (state.sourceMode) {
       const lines = el.bodyInput.value.split('\n');
       let fence = false, count = -1, at = 0;
@@ -817,13 +817,13 @@ import { createEditorText } from './editor-text.ts';
     const here = new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []);
     const heads = currentHeadings();
     const minLevel = heads.length ? Math.min(...heads.map((h) => h.level)) : 1;
-    const setOpen = (id, on) => {
+    const setOpen = (id, on: boolean) => {
       const next = new Set(settingsNow().treeExpanded || []);
       if (on) next.add(id); else next.delete(id);
       updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
     };
 
-    const noteRow = (n, depth, into) => {
+    const noteRow = (n: OutlineRow, depth, into: HTMLDivElement | DocumentFragment) => {
       const row = document.createElement('div');
       const active = n.id === state.currentId;
       row.className = 'tree-row tree-note note-row' + (active ? ' is-active' : '');
@@ -867,7 +867,7 @@ import { createEditorText } from './editor-text.ts';
       }
     };
 
-    const folderRow = (node, depth, into) => {
+    const folderRow = (node, depth, into: HTMLDivElement | DocumentFragment) => {
       const notes = out[node.id] || [];
       const kids = node.children.length + notes.length > 0;
       const isOpen = kids && (open.has(node.id) || here.has(node.id) && state.revealInTree === state.currentId);
@@ -959,7 +959,7 @@ import { createEditorText } from './editor-text.ts';
     input.setAttribute('aria-label', what);
     input.spellcheck = false;
     let done = false;
-    const finish = (save) => {
+    const finish = (save: boolean) => {
       if (done) return;
       done = true;
       if (save) commit(input.value);
@@ -976,7 +976,7 @@ import { createEditorText } from './editor-text.ts';
     return input;
   }
 
-  function startCreateFolder(parentId, asBook?) {
+  function startCreateFolder(parentId: string | null, asBook?: boolean) {
     closeFolderMenu();
     showSidebar(); // the name field lives there
     state.editingFolder = { mode: 'create', parentId: parentId || null, book: !!asBook };
@@ -1026,7 +1026,7 @@ import { createEditorText } from './editor-text.ts';
     }
   }
 
-  async function deleteFolder(id) {
+  async function deleteFolder(id: string) {
     closeFolderMenu();
     const node = flattenTree(state.tree).find((n) => n.id === id);
     if (!node) return;
@@ -1064,8 +1064,8 @@ import { createEditorText } from './editor-text.ts';
     await refresh({ keepEditor: true });
   }
 
-  function wireDropTarget(target, folderId) {
-    const accepts = (e) => e.dataTransfer && (e.dataTransfer.types.includes('text/x-note-id') || e.dataTransfer.types.includes('text/x-folder-id'));
+  function wireDropTarget(target: HTMLDivElement | HTMLButtonElement, folderId) {
+    const accepts = (e: Event) => e.dataTransfer && (e.dataTransfer.types.includes('text/x-note-id') || e.dataTransfer.types.includes('text/x-folder-id'));
     target.addEventListener('dragover', (e) => {
       if (!accepts(e)) return;
       e.preventDefault();
@@ -1109,7 +1109,7 @@ import { createEditorText } from './editor-text.ts';
     setIcon(sel.parentElement, f && f.book ? 'book' : 'folder');
   }
 
-  function openFolderMenu(id, anchor, ev?) {
+  function openFolderMenu(id, anchor: HTMLButtonElement | HTMLDivElement, ev?: PointerEvent) {
     state.menuFolderId = id;
     const menu = el.folderMenu;
     const node = flattenTree(state.tree).find((n) => n.id === id) || {};
@@ -1194,7 +1194,7 @@ import { createEditorText } from './editor-text.ts';
 
   // Events from the main process reach the left side only; it hands them on to the right side.
   const mainEvents = {};
-  function fromMain(name, handler) {
+  function fromMain(name: string, handler) {
     mainEvents[name] = handler;
     api.on[name]((arg) => { handler(arg); if (tabs.split) toPeer({ type: 'event', name, arg }); });
   }
@@ -1219,7 +1219,7 @@ import { createEditorText } from './editor-text.ts';
 
   function openIds() { return tabs.ids.flatMap((id) => (id ? [id] : [])); }
 
-  function tabTitle(id) {
+  function tabTitle(id: string | null) {
     if (!id) return 'New tab';
     if (id === state.currentId && state.current) return H.deriveTitle({ title: el.titleInput.value, body: el.bodyInput.value });
     return tabs.titles.get(id) || '…';
@@ -1270,7 +1270,7 @@ import { createEditorText } from './editor-text.ts';
   }
 
   let titlesLoading = false;
-  async function loadTabTitles(ids) {
+  async function loadTabTitles(ids: string[]) {
     if (titlesLoading) return;
     titlesLoading = true;
     let gone: string[] = [];
@@ -1284,7 +1284,7 @@ import { createEditorText } from './editor-text.ts';
     if (gone.length) tabsChanged(); else renderTabs();
   }
 
-  function removeTabAt(i) {
+  function removeTabAt(i: number) {
     tabs.ids.splice(i, 1);
     if (i < tabs.at || tabs.at >= tabs.ids.length) tabs.at = Math.max(0, tabs.at - 1);
   }
@@ -1340,7 +1340,7 @@ import { createEditorText } from './editor-text.ts';
     return true;
   }
 
-  function showTab(i) {
+  function showTab(i: number) {
     return inTurn(async () => {
       if (i < 0 || i >= tabs.ids.length) return;
       const id = tabs.ids[i];
@@ -1365,7 +1365,7 @@ import { createEditorText } from './editor-text.ts';
     });
   }
 
-  function closeTab(i) {
+  function closeTab(i: number) {
     return inTurn(async () => {
       if (i < 0 || i >= tabs.ids.length) return;
       if (i !== tabs.at) { removeTabAt(i); tabsChanged(); return; }
@@ -1393,7 +1393,7 @@ import { createEditorText } from './editor-text.ts';
     });
   }
 
-  function cycleTab(step) {
+  function cycleTab(step: number) {
     if (tabs.ids.length < 2) return;
     showTab((tabs.at + step + tabs.ids.length) % tabs.ids.length);
   }
@@ -1411,7 +1411,7 @@ import { createEditorText } from './editor-text.ts';
 
   // ---- the split ----
 
-  function setActiveSide(side) {
+  function setActiveSide(side: string) {
     if (GUEST || tabs.active === side) return;
     tabs.active = side;
     el.paneMain.classList.toggle('is-active-side', tabs.split && side === 'left');
@@ -1423,7 +1423,7 @@ import { createEditorText } from './editor-text.ts';
     el.editorPane.style.setProperty('--peer-w', Math.round((1 - tabs.ratio) * 1000) / 10 + '%');
   }
 
-  function openSplit(restoring) {
+  function openSplit(restoring: boolean) {
     if (GUEST || tabs.split) return;
     tabs.split = true;
     tabs.peerReady = false;
@@ -1474,7 +1474,7 @@ import { createEditorText } from './editor-text.ts';
   // Asks the right side to write what it has. leave: also its documents, asking the person if they cannot be.
   let flushSeq = 0;
   const peerWaits = new Map();
-  function askPeer(msg, ms): Promise<{ ok?: boolean } | null> {
+  function askPeer(msg, ms: number): Promise<{ ok?: boolean } | null> {
     const seq = ++flushSeq;
     return new Promise((resolve) => {
       const timer = setTimeout(() => { peerWaits.delete(seq); resolve(null); }, ms);
@@ -2147,7 +2147,7 @@ import { createEditorText } from './editor-text.ts';
     }, 3000);
   }
 
-  function offerConflictChoice(id, patch) {
+  function offerConflictChoice(id: string, patch) {
     if (state.conflictShown === id) return;
     state.conflictShown = id;
     toast('This file changed on disk while you were editing. Reload it (your edit is dropped) or keep yours.', {
@@ -2437,7 +2437,7 @@ import { createEditorText } from './editor-text.ts';
   // Add a folder, Import) are not settings and run at once.
   let draft: SettingsPatch = {};
   const settingKeys = (o) => (Object.keys(o) as (keyof Settings)[]);
-  const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  const same = (a, b: string | number | boolean | string[] | CustomColors | Panes | WindowRect | null) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
   const draftSettings = () => Object.assign({}, state.settings, draft);
   function settingsDirty() { return settingKeys(draft).some((k) => !same(draft[k], settingsNow()[k])); }
   function setDraft(patch) {
@@ -2638,7 +2638,7 @@ import { createEditorText } from './editor-text.ts';
     markSettingsSection();
   }
 
-  function collectMatches(root, tokens, out) {
+  function collectMatches(root: Element, tokens: string[], out) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node; (node = walker.nextNode());) {
       const text = (node.textContent || '').toLowerCase();
@@ -2684,7 +2684,7 @@ import { createEditorText } from './editor-text.ts';
     syncSettingsDirty();
   }
 
-  function acceleratorFromEvent(e) {
+  function acceleratorFromEvent(e: KeyboardEvent) {
     const mods: ("Control" | "Alt" | "Shift" | "Super")[] = [];
     if (e.ctrlKey) mods.push('Control');
     if (e.altKey) mods.push('Alt');
@@ -2707,7 +2707,7 @@ import { createEditorText } from './editor-text.ts';
     return { partial: null, value: mods.concat(key).join('+') };
   }
 
-  function commitHotkey(value) {
+  function commitHotkey(value: string) {
     const parsed = H.parseAccelerator(value);
     if (!parsed.ok) { el.hotkeyError.textContent = parsed.reason; return; }
     el.hotkeyError.textContent = '';
@@ -2726,17 +2726,17 @@ import { createEditorText } from './editor-text.ts';
     palette.open(query);
   }
 
-  const buttonWords = (b) => ((b.querySelector('.lbl') || {}).textContent || b.getAttribute('aria-label') || b.textContent || '').trim();
-  const shortcutIn = (b) => ((b.querySelector('.keys') || {}).textContent || (/\((Ctrl[^)]*|F\d+|Esc)\)/.exec(b.title || '') || [])[1] || '').trim();
+  const buttonWords = (b: Element | HTMLButtonElement) => ((b.querySelector('.lbl') || {}).textContent || b.getAttribute('aria-label') || b.textContent || '').trim();
+  const shortcutIn = (b: Element | HTMLButtonElement) => ((b.querySelector('.keys') || {}).textContent || (/\((Ctrl[^)]*|F\d+|Esc)\)/.exec(b.title || '') || [])[1] || '').trim();
   // Usable: not hidden by the app, not disabled, not removed by the page's own CSS (the right side hides some).
-  const usable = (b) => !!b && !b.disabled && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none';
+  const usable = (b: Element | HTMLButtonElement) => !!b && !b.disabled && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none';
 
   function commandList() {
     const noteOpen = !!state.current && !el.editor.classList.contains('hidden');
-    const fromButton = (b, group, extra?) => Object.assign({ id: b.id, group, title: buttonWords(b), icon: b.dataset.icon, keys: shortcutIn(b), ok: usable(b) && (group !== 'This note' || noteOpen), run: () => b.click() }, extra);
-    const cmd = (id, group, title, icon, keys, run, ok?, keywords?) => ({ id, group, title, icon, keys, run, ok: ok === undefined ? true : ok, keywords });
+    const fromButton = (b: HTMLButtonElement | Element, group: string, extra?) => Object.assign({ id: b.id, group, title: buttonWords(b), icon: b.dataset.icon, keys: shortcutIn(b), ok: usable(b) && (group !== 'This note' || noteOpen), run: () => b.click() }, extra);
+    const cmd = (id: string, group: string, title, icon, keys: string, run, ok?: boolean, keywords?: string) => ({ id, group, title, icon, keys, run, ok: ok === undefined ? true : ok, keywords });
     // On the right side of a split, these run on the left side (which has the sidebar and list), as their keys do.
-    const side = (name, fn) => (GUEST ? () => toPeer({ type: 'command', name }) : fn);
+    const side = (name: string, fn) => (GUEST ? () => toPeer({ type: 'command', name }) : fn);
     if (noteOpen) syncShareMenu();
     const list = [
       cmd('new-note', 'Create', 'New note', 'square-pen', 'Ctrl+N', side('newNote', newNote)),

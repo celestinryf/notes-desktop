@@ -91,7 +91,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
     return !pdfDirty();
   }
 
-  async function savePdfNow(explicit) {
+  async function savePdfNow(explicit: boolean) {
     const target = pdfNote, ctl = pdf;
     try {
       if (!target || !ctl) throw new Error('no PDF is open.');
@@ -160,7 +160,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
 
   // Shows the PDF again from the file, which the app has just rewritten. keepView: the pages are laid out as before
   // (comments changed, not pages), so the same place is shown again.
-  function reloadPdf(target, mtime, keepView) {
+  function reloadPdf(target: PdfOnShow, mtime, keepView: boolean) {
     noteFileWritten(target, mtime);
     if (state.current && state.current.id === target.id) showPdf(state.current, { keepView: !!keepView });
   }
@@ -174,7 +174,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
 
   // Main rewrote the PDF (r: { mtime, backup }): show it again, and offer Undo, back to the backup taken just before.
   // say: { done, undone } texts; keepView as for reloadPdf, for the change and its Undo.
-  function pdfRewritten(target, r, say, keepView) {
+  function pdfRewritten(target: PdfOnShow, r, say, keepView: boolean) {
     reloadPdf(target, r.mtime, keepView);
     toast(say.done, { label: 'Undo', run: () => undoPdfChange(target.id, r.backup, r.mtime, say.undone, keepView) });
   }
@@ -206,7 +206,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   }
 
   // Undo only while the file is exactly what the change wrote (mtime): anything saved since would be lost.
-  async function undoPdfChange(id, backup, mtime, undoneText, keepView) {
+  async function undoPdfChange(id: string, backup, mtime, undoneText, keepView: boolean) {
     if (!pdfNote || pdfNote.id !== id) { toast('Open that PDF again to undo.'); return; }
     if (pdfComments && pdfComments.busy()) { toast('Save or cancel the comment you are writing first, then undo.'); return; }
     // Marks not yet saved are saved first: main then refuses the Undo, since the file is no longer what the change wrote.
@@ -224,7 +224,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
   let pdfComments: { refresh: () => Promise<void>; stop(): void; busy: () => boolean; } | null = null;
   const pdfCommentsShown = () => !!pdfComments && el.pdfEditor.classList.contains('commenting');
 
-  function showPdfComments(show) {
+  function showPdfComments(show: boolean) {
     if (show && (!pdf || !pdfNote || !NotesPdfComments)) return;
     if (show && !pdfComments) pdfComments = NotesPdfComments.create(el.pdfComments, pdf, { change: changePdfComments, say: toast });
     el.pdfEditor.classList.toggle('commenting', show);
@@ -251,7 +251,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles })
 
   // signFor: the PDF note (id) the signature is for. signBusy: opening or placing is under way (double clicks).
   let signPad: ReturnType<typeof NotesSignPad.create> | null = null, signFor: string | null = null, signBusy = false;
-  const signSay = (text) => { el.signStatus.textContent = text; }; // inside the dialog: a toast would sit behind it
+  const signSay = (text: string) => { el.signStatus.textContent = text; }; // inside the dialog: a toast would sit behind it
 
   async function openSignDialog() {
     if (!pdf || !pdfNote || !NotesSignPad || signBusy || el.signDialog.open) return;

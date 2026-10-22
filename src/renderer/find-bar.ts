@@ -133,10 +133,10 @@ export function createFindBar({ api, flushSave, GUEST }) {
   }
 
   // Ranges over the rendered editor's text nodes (matches may span node boundaries).
-  function findRangesIn(root, q) {
+  function findRangesIn(root: HTMLDivElement, q: string) {
     const nodes: ({ node: Node; start: number; })[] = []; let text = '';
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-    const blockOf = (n) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
+    const blockOf = (n: Node) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       if (n instanceof Element) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
@@ -145,7 +145,7 @@ export function createFindBar({ api, flushSave, GUEST }) {
       lastBlock = b;
       nodes.push({ node: n, start: text.length }); text += n.nodeValue;
     }
-    const locate = (pos) => {
+    const locate = (pos: number) => {
       let lo = 0, hi = nodes.length - 1;
       while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (nodes[mid].start <= pos) lo = mid; else hi = mid - 1; }
       if (!nodes.length) return null;

@@ -52,8 +52,8 @@ export const NotesCsv = (function () {
     return { rows, total };
   }
 
-  const note = (text) => Object.assign(document.createElement('p'), { className: 'csv-note', textContent: text });
-  const cell = (tag, text, className) => {
+  const note = (text: string) => Object.assign(document.createElement('p'), { className: 'csv-note', textContent: text });
+  const cell = (tag: string, text: string, className: string) => {
     const c = document.createElement(tag);
     c.textContent = text;
     if (className) c.className = className;
