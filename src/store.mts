@@ -12,6 +12,8 @@ const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 const JOURNAL_MIN_BYTES = 1024 * 1024;
 const JOURNAL_SHARE_OF_BASE = 0.25;
+const STALE_JOURNALS_KEPT = 3;
+const STALE_JOURNAL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const SCAN_YIELD_EVERY = 256;
 const SCAN_READERS = 16;
 const SCAN_TARGETED_MAX = 1000;
@@ -609,8 +611,11 @@ class Store {
     if (read.text === null) return raw;
     const journal = parseJournal(read.text);
     if (!journal.header || !journal.journalId || !isRecord(raw) || raw.journalId !== journal.journalId) {
-      if (journal.records.length) { try { fs.renameSync(this.journalFile, this.journalFile + '.stale-' + this.now()); } catch (_) {  } }
-      return raw;
+      if (!journal.records.length) return raw;
+      try { fs.renameSync(this.journalFile, this.journalFile + '.stale-' + this.now()); } catch (_) {  }
+      if (!this.recoveredFromBackup || !isRecord(raw) || !journal.header || !isFiniteNumber(journal.header.baseMtime) || !isFiniteNumber(raw.savedAt) || journal.header.baseMtime <= raw.savedAt) return raw;
+      this.journalRecords = journal.records.length;
+      return replayJournal(raw, journal.records, true);
     }
     const baseWasEdited = !baseMatches(this.file, journal.header);
     this.journalId = journal.journalId;
@@ -677,6 +682,19 @@ class Store {
     } catch (_) {
       this.journalReady = false;
     }
+    this._removeStaleJournals(STALE_JOURNALS_KEPT);
+  }
+
+  _removeStaleJournals(keep: number) {
+    const prefix = path.basename(this.journalFile) + '.stale-';
+    let names: string[] = [];
+    try { names = fs.readdirSync(this.dir).filter((f) => f.startsWith(prefix)); } catch (_) { return; }
+    const now = this.now();
+    const stale = names.map((name) => { const at = Number(name.slice(prefix.length)); return { name, at: Number.isFinite(at) ? at : 0 }; }).sort((a, b) => b.at - a.at);
+    stale.forEach((s, i) => {
+      if (i < keep && now - s.at <= STALE_JOURNAL_MAX_AGE_MS) return;
+      try { fs.unlinkSync(path.join(this.dir, s.name)); } catch (_) {  }
+    });
   }
 
   _append(records: string, bytes: number) {
@@ -876,6 +894,7 @@ class Store {
     const body = note.body;
     const { blob, key } = L.lock(body, password);
     this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; });
+    this._removeStaleJournals(0);
     this.plain.set(id, body);
     this.keys.set(id, key);
     return this.publicNote(note);
@@ -1423,7 +1442,9 @@ class Store {
     this.relock(id);
     const note = this.notes[idx];
     if (this._inVaultTrash(note)) fs.rmSync(note.filePath);
-    return this._commit(() => { this.notes.splice(idx, 1); return true; });
+    const destroyed = this._commit(() => { this.notes.splice(idx, 1); return true; });
+    this._removeStaleJournals(0);
+    return destroyed;
   }
 
   emptyTrash() {
@@ -1431,7 +1452,9 @@ class Store {
     if (!this.notes.some((n) => n.trashedAt)) return 0;
     for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) {  } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
-    return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
+    const emptied = this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
+    this._removeStaleJournals(0);
+    return emptied;
   }
 
   tags() {

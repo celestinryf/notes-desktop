@@ -390,6 +390,7 @@ function main() {
   function relockOnHide() {
     flushWindow(win, 800).then(() => {
       if (win && !win.isDestroyed() && win.isVisible()) return;
+      flushStore();
       const ids = store.relockAll();
       if (ids.length && win && !win.isDestroyed()) win.webContents.send('lock:relocked', ids);
     });
