@@ -7255,6 +7255,8 @@
       if (GUEST || !treeModeActive() || !note) return;
       if (!note.folderId || state.view === "all" && note.pinned) {
         renderNoteTree();
+        const active = el.noteTree.querySelector(".tree-note.is-active");
+        if (active) active.scrollIntoView({ block: "nearest" });
         return;
       }
       const path = pathTo(note.folderId);

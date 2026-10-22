@@ -923,7 +923,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   function revealInTree(note: PublicNote | null) {
     if (GUEST || !treeModeActive() || !note) return;
-    if (!note.folderId || (state.view === 'all' && note.pinned)) { renderNoteTree(); return; }
+    if (!note.folderId || (state.view === 'all' && note.pinned)) {
+      renderNoteTree();
+      const active = el.noteTree.querySelector('.tree-note.is-active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     const path = pathTo(note.folderId);
     const have = new Set(settingsNow().treeExpanded || []);
     const missing = path.filter((id) => !have.has(id));
