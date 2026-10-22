@@ -46,7 +46,7 @@ async function main() {
     const craftFrame = (id) => page.frames().find((f) => f.url().startsWith(id + '://'));
     const status = () => page.evaluate(() => document.getElementById('statusSaved').textContent.trim());
 
-    await page.click('.note-card:has-text("Probe report.docx")');
+    await page.click('.note-row:has-text("Probe report.docx")');
     await waitFor('wordcraft frame shown', () => frameShown('wordcraftFrame'));
     ok('Word document opened in the frame', true);
     ok('banner cleared after open', (await banner()) === '');
@@ -57,7 +57,7 @@ async function main() {
     ok('reload from disk did not throw', !errors.some((e) => /ReferenceError/.test(e)));
     ok('frame shown again after reload', await frameShown('wordcraftFrame'));
 
-    await page.click('.note-card:has-text("Probe book.xlsm")');
+    await page.click('.note-row:has-text("Probe book.xlsm")');
     await waitFor('gridcraft frame shown', () => frameShown('gridcraftFrame'));
     ok('banner cleared for the workbook', (await banner()) === '');
     const grid = craftFrame('gridcraft');
@@ -73,7 +73,7 @@ async function main() {
     await sleep(1200);
     ok('still one copy after the second save: ' + copies().join(','), copies().length === 1);
     ok('the workbook itself is unchanged', Buffer.compare(originalBytes, fs.readFileSync(xlsmPath)) === 0);
-    await page.click('.note-card:has-text("Plain")');
+    await page.click('.note-row:has-text("Plain")');
     await sleep(800);
     const confirms = await page.evaluate(() => window.__confirms);
     ok('leaving the saved workbook asked nothing', confirms === 0);

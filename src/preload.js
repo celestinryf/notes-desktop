@@ -159,6 +159,7 @@ const notesApi = {
     rendererReady: invoke('app:rendererReady'),
     dictate: invoke('app:dictate'),
     flushDone: () => ipcRenderer.send('app:flush-done'),
+    trace: (event, fields) => ipcRenderer.send('app:trace', event, fields),
     openDataFolder: invoke('app:openDataFolder'),
     openExternal: invoke('app:openExternal'),
     exportNote: invoke('app:exportNote'),

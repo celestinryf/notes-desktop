@@ -2,9 +2,11 @@
 export const NotesCraftFrame = (function () {
   const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-  function create<Context>({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
+  function create<Context>({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, trace }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
     onSave: (name: string, bytes: Uint8Array, context: Context) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
-    onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void }) {
+    onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void, trace?: (event: string, fields?: TraceFields) => void }) {
+    const mark = trace || (() => {});
+    const numbers = (m: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.flatMap((k) => { const v = m[k]; return typeof v === 'number' ? [[k, Math.round(v * 10) / 10]] : []; }));
     let ready = false;
     let loaded = false;
     let gaveUp = false;
@@ -28,6 +30,7 @@ export const NotesCraftFrame = (function () {
       if (m.type === 'ready') {
         clearTimeout(readyTimer);
         ready = true;
+        mark('ready');
         if (theme) post({ type: 'theme', value: theme });
         if (typeof darkPage === 'boolean') post({ type: 'page', dark: darkPage });
         if (queued) { const q = queued; queued = null; open(q.name, q.bytes, q.context); }
@@ -35,17 +38,22 @@ export const NotesCraftFrame = (function () {
       }
       if (!current || m.doc !== current.doc) return;
       if (m.type === 'opened') {
+        mark('opened', Object.assign({ ok: !!m.ok }, numbers(m, ['ms'])));
         if (m.ok) { if (onOpened) onOpened(); }
         else if (onOpenFailed) onOpenFailed(String(m.error || 'the app could not open it'));
+      } else if (m.type === 'drawn') {
+        mark('drawn', numbers(m, ['ms', 'frames', 'frameMs', 'renderMs', 'layoutMs']));
       } else if (m.type === 'dirty') {
         dirty = !!m.dirty;
         if (onDirty) onDirty(dirty || unsaved);
       } else if (m.type === 'save' && m.bytes instanceof Uint8Array && typeof m.name === 'string') {
+        mark('save-message', { bytes: m.bytes.byteLength });
         const editedBefore = dirty || unsaved;
         const { name, bytes } = m;
         const doc = current.doc;
         const context = current.context;
         saving = saving.then(() => onSave(name, bytes, context)).catch(() => ({ ok: false, own: true })).then((res) => {
+          mark('save-done', { ok: res.ok, own: res.own });
           if (!current || current.doc !== doc) return;
           if (res.own) {
             unsaved = !res.ok;
@@ -63,6 +71,7 @@ export const NotesCraftFrame = (function () {
     function load() {
       if (loaded) return;
       loaded = true;
+      mark('frame-load');
       frame.src = url;
       readyTimer = setTimeout(() => {
         if (ready) return;
@@ -82,7 +91,8 @@ export const NotesCraftFrame = (function () {
       waiters.forEach((w) => w(false));
       waiters = [];
       current = { doc: token(), name, context };
-      if (!ready) { queued = { name, bytes, context }; return; }
+      if (!ready) { mark('post', { queued: true, bytes: bytes.byteLength }); queued = { name, bytes, context }; return; }
+      mark('post', { queued: false, bytes: bytes.byteLength });
       const copy = new Uint8Array(bytes);
       post({ type: 'open', doc: current.doc, name, bytes: copy }, [copy.buffer]);
     }
@@ -94,6 +104,7 @@ export const NotesCraftFrame = (function () {
         const timer = setTimeout(() => { waiters = waiters.filter((w) => w !== finish); resolve(false); }, ms || 15000);
         function finish(ok: boolean) { clearTimeout(timer); resolve(ok); }
         waiters.push(finish);
+        mark('save-request');
         post({ type: 'command', doc, id: 'file.save' });
       });
     }

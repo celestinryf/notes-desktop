@@ -106,8 +106,9 @@ interface NotePatch extends NoteCreate { remindedAt?: number | null }
 interface AppInfo {
   version: string; dataDir: string; hotkey: string; hotkeyRegistered: boolean; hotkeyFallback: boolean; hotkeyDisplay: string;
   platform: NodeJS.Platform; crafts: Record<string, boolean>; loadError: string | null; documentsDir: string; saveBlocked: boolean;
-  drySpeech: boolean; recoveredNotes: number | null;
+  drySpeech: boolean; recoveredNotes: number | null; craftTrace: boolean;
 }
+type TraceFields = Record<string, string | number | boolean | null>;
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
 interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean; sharedTags?: string[] }
 interface RelatedNotes { outgoing: RelatedItem[]; incoming: RelatedItem[]; byTags: RelatedItem[] }
@@ -338,7 +339,7 @@ interface NotesApi {
   app: {
     info: Invoker<'app:info'>; hide: Invoker<'app:hide'>; print: Invoker<'app:print'>; copy: Invoker<'app:copy'>; emailNote: Invoker<'app:emailNote'>;
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
-    dictate: Invoker<'app:dictate'>; flushDone: () => void; openDataFolder: Invoker<'app:openDataFolder'>; openExternal: Invoker<'app:openExternal'>;
+    dictate: Invoker<'app:dictate'>; flushDone: () => void; trace: (event: string, fields?: TraceFields) => void; openDataFolder: Invoker<'app:openDataFolder'>; openExternal: Invoker<'app:openExternal'>;
     exportNote: Invoker<'app:exportNote'>; exportAll: Invoker<'app:exportAll'>; importMarkdown: Invoker<'app:importMarkdown'>;
     historyVersions: Invoker<'history:versions'>; titleBar: Invoker<'app:titleBar'>;
   };

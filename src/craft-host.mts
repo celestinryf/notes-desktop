@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { msSince } from './craft-trace.mts';
 
 const APPS: Record<string, { label: string, env: string }> = {
   wordcraft: { label: 'WordCraft', env: 'WORDCRAFT' },
@@ -33,7 +34,7 @@ function resolve(dir: string, url: string) {
   return file;
 }
 
-function serve(protocol: Electron.Protocol) {
+function serve(protocol: Electron.Protocol, trace?: (event: string, fields?: TraceFields) => void) {
   const ready: Record<string, boolean> = {};
   for (const key of KEYS) {
     const dir = buildDir(key);
@@ -43,7 +44,9 @@ function serve(protocol: Electron.Protocol) {
       const file = resolve(dir, req.url);
       if (!file) return new Response('Not found', { status: 404 });
       try {
+        const started = performance.now();
         const buf = await fs.promises.readFile(file);
+        if (trace) trace('serve', { app: key, file: path.basename(file), bytes: buf.length, ms: msSince(started) });
         return new Response(buf, { status: 200, headers: { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-cache' } });
       } catch (_) {
         return new Response('Not found', { status: 404 });
