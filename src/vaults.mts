@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import type { Store } from './store.mts';
+
+type VaultTimers = { rescan?: NodeJS.Timeout, commit?: NodeJS.Timeout, pull?: NodeJS.Timeout };
 
 type GitRun = { ok: true, stdout: string, stderr: string, error: null } | { ok: false, stdout: string, stderr: string, error: string };
 
@@ -18,18 +21,18 @@ function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 
 class VaultManager {
-  store: any;
-  onChange: any;
-  onNotesChanged: any;
-  now: any;
-  debounceMs: any;
-  rescanDebounceMs: any;
-  watchers: Map<any, any>;
-  timers: Map<any, any>;
-  status: Map<any, any>;
-  busy: Map<any, any>;
-  queued: Map<any, any>;
-  constructor(store, opts) {
+  store: Store;
+  onChange: (vaultId: string, status: VaultStatus) => void;
+  onNotesChanged: (vaultId: string, scan: VaultScan) => void;
+  now: () => number;
+  debounceMs: number;
+  rescanDebounceMs: number;
+  watchers: Map<string, fs.FSWatcher>;
+  timers: Map<string, VaultTimers>;
+  status: Map<string, VaultStatus>;
+  busy: Map<string, Promise<VaultResult>>;
+  queued: Map<string, Promise<VaultResult>>;
+  constructor(store: Store, opts?: { onChange?: (vaultId: string, status: VaultStatus) => void, onNotesChanged?: (vaultId: string, scan: VaultScan) => void, now?: () => number, debounceMs?: number, rescanDebounceMs?: number }) {
     opts = opts || {};
     this.store = store;
     this.onChange = opts.onChange || (() => {});      // (vaultId, status) -> void
@@ -44,9 +47,13 @@ class VaultManager {
     this.queued = new Map();       // vaultId -> promise of the follow-up sync
   }
 
-  _status(id) {
-    if (!this.status.has(id)) this.status.set(id, { isRepo: false, branch: '', remote: '', dirty: false, ahead: 0, behind: 0, lastSyncAt: null, lastError: null, syncing: false, conflict: false });
-    return this.status.get(id);
+  _status(id: string): VaultStatus {
+    let s = this.status.get(id);
+    if (!s) {
+      s = { isRepo: false, branch: '', remote: '', dirty: false, ahead: 0, behind: 0, lastSyncAt: null, lastError: null, syncing: false, conflict: false };
+      this.status.set(id, s);
+    }
+    return s;
   }
 
   _set(id, patch) {
@@ -58,9 +65,10 @@ class VaultManager {
     return Object.assign({}, this._status(id));
   }
 
-  _timers(id) {
-    if (!this.timers.has(id)) this.timers.set(id, {});
-    return this.timers.get(id);
+  _timers(id: string): VaultTimers {
+    let t = this.timers.get(id);
+    if (!t) { t = {}; this.timers.set(id, t); }
+    return t;
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -189,7 +197,7 @@ class VaultManager {
       const have = (await git(['remote', 'get-url', 'origin'], v.path)).stdout.trim();
       if (have) await git(['remote', 'remove', 'origin'], v.path);
       this.store.updateVault(id, { remote: '' });
-      const t = this.timers.get(id); if (t && t.pull) { clearTimeout(t.pull); t.pull = null; }
+      const t = this.timers.get(id); if (t && t.pull) { clearTimeout(t.pull); t.pull = undefined; }
     }
     await this.refreshRepoStatus(id);
     return { ok: true };
@@ -197,18 +205,21 @@ class VaultManager {
 
   // Commit local changes, pull with rebase (autostash), push. Never destroys local work: a conflicting
   // rebase is aborted and reported, leaving the local commit in place for the user to resolve.
-  async sync(id, reason) {
+  async sync(id: string, reason: string): Promise<VaultResult> {
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
     // A sync asked for while one is running must not get that run's (possibly stale) result: it runs
     // again afterwards, once, however many callers queued up meanwhile.
-    if (this.busy.has(id)) {
-      if (!this.queued.has(id)) {
-        this.queued.set(id, this.busy.get(id).catch(() => {}).then(() => { this.queued.delete(id); return this.sync(id, reason); }));
+    const running = this.busy.get(id);
+    if (running) {
+      let next = this.queued.get(id);
+      if (!next) {
+        next = running.catch(() => {}).then(() => { this.queued.delete(id); return this.sync(id, reason); });
+        this.queued.set(id, next);
       }
-      return this.queued.get(id);
+      return next;
     }
-    const work = (async () => {
+    const work = (async (): Promise<VaultResult> => {
       this._set(id, { syncing: true });
       try {
         await this.refreshRepoStatus(id);

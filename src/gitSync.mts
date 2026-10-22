@@ -21,17 +21,17 @@ function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class GitSync {
-  dataDir: any;
+  dataDir: string;
   source: string;
   dir: string;
   snapshot: string;
-  debounceMs: any;
-  now: any;
+  debounceMs: number;
+  now: () => number;
   timer: NodeJS.Timeout | null;
   busy: Promise<GitResult> | null;
   state: GitState;
-  onChange: any;
-  constructor(dataDir, opts) {
+  onChange: (state: GitState) => void;
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');

@@ -3,18 +3,19 @@
 import path from 'node:path';
 import { BrowserWindow, screen, Menu, shell, clipboard } from 'electron';
 import * as windowInput from './window-input.mts';
+import type { Store } from './store.mts';
 
 const THEME_BG = { light: '#f6dcc3', dark: '#2a1a12' };
 
 class StickyManager {
-  store: any;
-  windows: Map<any, any>;
-  timers: Map<any, any>;
-  themeFor: any;
+  store: Store;
+  windows: Map<string, BrowserWindow>;
+  timers: Map<string, NodeJS.Timeout>;
+  themeFor: () => 'light' | 'dark';
   showInactive: boolean;
-  onChange: any;
+  onChange: (noteId: string) => void;
   quitting: boolean;
-  constructor(store, opts) {
+  constructor(store: Store, opts?: { themeFor?: () => 'light' | 'dark', showInactive?: boolean, onChange?: (noteId: string) => void }) {
     opts = opts || {};
     this.store = store;
     this.windows = new Map(); // noteId -> BrowserWindow
@@ -40,11 +41,12 @@ class StickyManager {
     const note = this.store.get(id);
     if (!note || note.trashedAt || note.lock) return null; // a locked note never sits on the desktop
     if (!note.sticky) this.store.setSticky(id, { x: null, y: null });
-    const sticky = this.store.get(id).sticky;
-    if (this.isOpen(id)) {
-      const w = this.windows.get(id);
-      if (opts.focus !== false) { w.show(); w.focus(); }
-      return w;
+    const sticky = this.store.get(id)?.sticky;
+    if (!sticky) return null;
+    const open = this.windows.get(id);
+    if (open && !open.isDestroyed()) {
+      if (opts.focus !== false) { open.show(); open.focus(); }
+      return open;
     }
     const bounds = this._bounds(sticky);
     const w = new BrowserWindow({

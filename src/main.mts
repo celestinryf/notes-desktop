@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
-import { Store } from './store.mts';
+import { Store, isFileNote } from './store.mts';
 import { GitSync } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
@@ -543,9 +543,9 @@ function main() {
     return openSafely(n.filePath);
   });
   // The opened file behind note id, which must be of the given kind (pdf, docx, sheet, image).
-  function fileNoteOfKind(id, kind) {
+  function fileNoteOfKind(id: string, kind: FileKind): FileNote {
     const n = store.get(id);
-    if (!n || !n.filePath || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' }[kind] || 'Not a Word document.');
+    if (!isFileNote(n) || n.fileKind !== kind) throw new Error({ pdf: 'Not a PDF.', image: 'Not an image.', sheet: 'Not a spreadsheet.' }[kind] || 'Not a Word document.');
     return n;
   }
 
@@ -763,8 +763,8 @@ function main() {
   }
   handle('files:saveCraft', async (_e, id, bytes, name, expectedMtime) => {
     const n = store.get(id);
-    const rules = n && n.filePath && CRAFT_SAVES[n.fileKind];
-    if (!rules) throw new Error('Not a document a Craft app edits.');
+    if (!isFileNote(n) || (n.fileKind !== 'docx' && n.fileKind !== 'sheet')) throw new Error('Not a document a Craft app edits.');
+    const rules = CRAFT_SAVES[n.fileKind];
     if (!ArrayBuffer.isView(bytes) || !bytes.byteLength || bytes.byteLength > MAX_PDF_BYTES) throw new Error('the document is missing or larger than 100 MB, so nothing was written.');
     const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const own = H.extOf(n.filePath);
@@ -790,6 +790,7 @@ function main() {
       let body;
       if (n.fileKind === 'docx') { try { body = (await readNoteText('docx', file)).body; } catch (_) { body = undefined; } }
       const moved = store.relinkFileNote(id, file, body);
+      if (!moved) throw new Error('Note not found');
       if (n.fileKind !== 'docx') store.fillFileText(id);
       conflictCopies.delete(id); // an "(edited)" copy of the old file is not where the new file's saves go
       sideCopies.delete(id);
@@ -901,7 +902,7 @@ function main() {
   // imported before it is rewritten, so edits made there in a terminal session are never thrown away.
   function botCwdFor(noteId) {
     const note = noteId ? store.get(noteId) : null;
-    if (note && note.vaultId) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
+    if (note && note.vaultId && note.filePath) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
     if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
     const refreshed = workspace.refreshWorkspace(store, WORKSPACE_DIR);
     if (!refreshed.manifest) throw new Error('the earlier workspace could not be read back (' + refreshed.imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
@@ -1514,7 +1515,7 @@ function main() {
     rendererFlushed
       .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()].concat(Array.from(live.sessions.keys()).map((id) => live.flush(id)))), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server.close(); } catch (_) { /* ignore */ } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
+      .finally(() => { reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server?.close(); } catch (_) { /* ignore */ } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => { /* stay alive in the tray */ });

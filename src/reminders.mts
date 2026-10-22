@@ -1,13 +1,15 @@
+import type { Store } from './store.mts';
+
 /* Reminders: a note can carry a remindAt time; when it passes, the note is marked reminded and the
    notifier is called once. Main process only; the clock and the notifier are injectable for tests. */
 
 class ReminderScheduler {
-  store: any;
-  now: any;
-  notify: any;
-  tickMs: any;
+  store: Store;
+  now: () => number;
+  notify: (note: Note) => void;
+  tickMs: number;
   timer: NodeJS.Timeout | null;
-  constructor(store, opts) {
+  constructor(store: Store, opts?: { now?: () => number, notify?: (note: Note) => void, tickMs?: number }) {
     opts = opts || {};
     this.store = store;
     this.now = opts.now || Date.now;
