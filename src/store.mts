@@ -48,6 +48,15 @@ const EDITOR_WIDTH = { min: 480, max: 1600 };
 type NoteInput = Partial<Omit<Note, 'tags'>> & { tags?: string[] | string };
 type NoteUpdate = NoteInput & { force?: boolean };
 type LinkOptions = { title?: string; tags?: string[] | string; folderId?: string | null };
+type VaultWalk = {
+  seenNotes: Set<string>;
+  seenFolders: Set<string>;
+  newFolders: Folder[];
+  folderMoves: { folder: Folder; parentId: string; name: string }[];
+  refreshes: { note: FileNote; full: string; from: number | null; body: string; mtime: number | null; kind: FileKind | null; changed: boolean }[];
+  placements: { note: Note; full: string; folderId: string }[];
+  newFiles: { full: string; folderId: string; body: string; mtime: number }[];
+};
 type FileText = Awaited<ReturnType<typeof F.readNoteText>>;
 
 const FILE_KINDS: readonly string[] = ['text', 'pdf', 'docx', 'sheet', 'image', 'binary'];
@@ -110,6 +119,7 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
 }
 
 const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
+const SCAN_YIELD_EVERY = 250;
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
 
 function assertVaultDirName(name: string) {
@@ -287,6 +297,7 @@ class Store {
   saveBlocked: boolean | undefined;
   recoveredFromBackup: boolean | undefined;
   backupSuspended: boolean | undefined;
+  contentRevision: number;
   constructor(dir: string, opts?: { now?: () => number }) {
     opts = opts || {};
     this.dir = dir;
@@ -302,6 +313,7 @@ class Store {
     this.lastBackupAt = 0;
     this.loadError = null;
     this.onFileText = null;
+    this.contentRevision = 0;
   }
 
   load() {
@@ -390,7 +402,7 @@ class Store {
     return { schemaVersion: SCHEMA_VERSION, savedAt: this.now(), settings: this.settings, vaults: this.vaults, folders: this.folders, notes: this.notes };
   }
 
-  save() {
+  save(opts?: { content?: boolean }) {
     if (this.saveBlocked) {
       throw Object.assign(new Error('Your notes file could not be read when Notes started (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once the file is free.'), { code: 'ESAVEBLOCKED' });
     }
@@ -400,6 +412,7 @@ class Store {
     fs.writeFileSync(tmp, JSON.stringify(this.serialize(), null, 2), 'utf8');
     replaceFile(tmp, this.file);
     this.backupSuspended = false;
+    if (!opts || opts.content !== false) this.contentRevision++;
     return this;
   }
 
@@ -445,11 +458,15 @@ class Store {
     return this.notes.find((n) => n.id === id) || null;
   }
 
-  create(data?: NoteInput) {
-    data = data || {};
+  _newNote(data: NoteInput) {
     const now = this.now();
     const note = noteFrom(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
     if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
+    return note;
+  }
+
+  create(data?: NoteInput) {
+    const note = this._newNote(data || {});
     this.notes.unshift(note);
     try {
       this.save();
@@ -775,7 +792,7 @@ class Store {
     return found || this.createFolder({ name, parentId: parentId || null });
   }
 
-  _commit<T>(mutate: () => T): T {
+  _commit<T>(mutate: () => T, opts?: { content?: boolean }): T {
     const snapshot = {
       notes: this.notes.map((n) => Object.assign({}, n, { tags: n.tags.slice() })),
       folders: this.folders.map((f) => Object.assign({}, f)),
@@ -784,7 +801,7 @@ class Store {
     };
     try {
       const result = mutate();
-      this.save();
+      this.save(opts);
       return result;
     } catch (err) {
       this.notes = snapshot.notes;
@@ -839,7 +856,7 @@ class Store {
       const root = this.vaultRootFolder(id);
       if (root && patch && patch.name) root.name = v.name;
       return v;
-    });
+    }, { content: !!(patch && patch.name) });
   }
 
   removeVault(id: string) {
@@ -860,68 +877,124 @@ class Store {
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
-    let rootEntries: fs.Dirent<string>[] | null = null;
-    try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
+    try { fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
     const root = this.vaultRootFolder(id) || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path, book: false, pageOrder: [] }; this.folders.push(f); return f; });
-    const seenFolders = new Set([root.id]);
-    const seenNotes = new Set<string>();
-    let added = 0, updated = 0, removed = 0;
-    const walk = async (dir: string, folderId: string) => {
+    const walk = await this._walkVault(id, vault.path, root);
+    return this._applyVaultWalk(id, walk, allowRemovals);
+  }
+
+  async _walkVault(id: string, rootPath: string, root: Folder) {
+    const walk: VaultWalk = { seenNotes: new Set(), seenFolders: new Set([root.id]), newFolders: [], folderMoves: [], refreshes: [], placements: [], newFiles: [] };
+    const folderByDir = this._vaultFoldersByDir(id);
+    const noteByPath = this._notesByPath();
+    let sinceYield = 0;
+    const visit = async (dir: string, folderId: string) => {
       let entries: fs.Dirent[] = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
       for (const e of entries) {
+        if (++sinceYield >= SCAN_YIELD_EVERY) { sinceYield = 0; await new Promise((resolve) => setImmediate(resolve)); }
         const full = path.join(dir, e.name);
         if (e.isDirectory()) {
           if (VAULT_SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
-          const sub = this.folders.find((f) => f.vaultId === id && f.dirPath && F.pathKey(f.dirPath) === F.pathKey(full))
-            || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: e.name, parentId: folderId, createdAt: this.now(), vaultId: id, dirPath: full, book: false, pageOrder: [] }; this.folders.push(f); return f; });
-          if (sub.parentId !== folderId || sub.name !== e.name) this._commit(() => { sub.parentId = folderId; sub.name = e.name; });
-          seenFolders.add(sub.id);
-          await walk(full, sub.id);
+          let sub = folderByDir.get(F.pathKey(full));
+          if (!sub) {
+            sub = { id: crypto.randomUUID(), name: e.name, parentId: folderId, createdAt: this.now(), vaultId: id, dirPath: full, book: false, pageOrder: [] };
+            folderByDir.set(F.pathKey(full), sub);
+            walk.newFolders.push(sub);
+          } else if (sub.parentId !== folderId || sub.name !== e.name) {
+            walk.folderMoves.push({ folder: sub, parentId: folderId, name: e.name });
+          }
+          walk.seenFolders.add(sub.id);
+          await visit(full, sub.id);
         } else if (e.isFile()) {
           if (!VAULT_EXT.has(F.extOf(e.name))) continue;
-          let note = this.findByPath(full);
-          if (!note) {
-            let text = null;
-            try { text = F.readText(full).body; } catch (_) { continue; }
-            const orphan = this.notes.find((n) => n.vaultId === id && !n.trashedAt && n.filePath && !seenNotes.has(n.id) && n.body === text && !fs.existsSync(n.filePath));
-            if (orphan) {
-              this._commit(() => { orphan.filePath = full; orphan.title = stem(e.name); orphan.folderId = folderId; orphan.fileMtime = F.mtimeOf(full); });
-              note = orphan; updated++;
-            } else {
-              try {
-                const linked = await this.linkFile(full, { folderId, title: stem(e.name) });
-                this._commit(() => { linked.vaultId = id; });
-                note = linked;
-                added++;
-              } catch (_) { continue; }
-            }
-          } else {
-            let r;
-            try { r = await this.refreshFileNote(note.id); } catch (_) { seenNotes.add(note.id); continue; }
-            if (r.changed) updated++;
-            const known = note;
-            if (known.folderId !== folderId || known.vaultId !== id || known.trashedAt) {
-              this._commit(() => { known.folderId = folderId; known.vaultId = id; known.trashedAt = null; });
-            }
+          const known = noteByPath.get(F.pathKey(full));
+          if (!known) {
+            try { const read = F.readText(full); walk.newFiles.push({ full, folderId, body: read.body, mtime: read.mtime }); } catch (_) {  }
+            continue;
           }
-          seenNotes.add(note.id);
+          walk.seenNotes.add(known.id);
+          if (isFileNote(known) && fs.existsSync(known.filePath)) {
+            let change;
+            try { change = await this._fileChange(known); } catch (_) { continue; }
+            if (change) walk.refreshes.push(Object.assign({ note: known, full, from: known.fileMtime }, change));
+          }
+          if (known.folderId !== folderId || known.vaultId !== id || known.trashedAt) walk.placements.push({ note: known, full, folderId });
         }
       }
     };
-    await walk(vault.path, root.id);
-    const gone = allowRemovals ? this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !seenNotes.has(n.id) && !(n.filePath && fs.existsSync(n.filePath))) : [];
-    const goneFolders = allowRemovals ? this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))) : [];
-    if (gone.length || goneFolders.length) {
-      this._commit(() => {
-        const goneIds = new Set(gone.map((n) => n.id));
-        const goneFolderIds = new Set(goneFolders.map((f) => f.id));
-        this.notes = this.notes.filter((n) => !goneIds.has(n.id));
-        this.folders = this.folders.filter((f) => !goneFolderIds.has(f.id));
-        removed = gone.length;
-      });
+    await visit(rootPath, root.id);
+    return walk;
+  }
+
+  _vaultFoldersByDir(id: string) {
+    const byDir = new Map<string, Folder>();
+    for (const f of this.folders) if (f.vaultId === id && f.dirPath) byDir.set(F.pathKey(f.dirPath), f);
+    return byDir;
+  }
+
+  _applyVaultWalk(id: string, walk: VaultWalk, allowRemovals: boolean) {
+    let added = 0, updated = 0, removed = 0;
+    const fileMissing = (n: Note) => !(n.filePath && fs.existsSync(n.filePath));
+    const unseen = () => this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !walk.seenNotes.has(n.id) && fileMissing(n));
+    const goneFolders = () => allowRemovals ? this.folders.filter((f) => f.vaultId === id && !walk.seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))) : [];
+    const planned = walk.newFolders.length + walk.folderMoves.length + walk.refreshes.length + walk.placements.length + walk.newFiles.length;
+    const orphans = walk.newFiles.length || allowRemovals ? unseen() : [];
+    if (!planned && !(allowRemovals && orphans.length) && !goneFolders().length) return { added, updated, removed, notes: walk.seenNotes.size, folders: walk.seenFolders.size };
+    const orphansByBody = new Map<string, Note[]>();
+    for (const n of orphans) {
+      if (!n.filePath) continue;
+      const same = orphansByBody.get(n.body);
+      if (same) same.push(n); else orphansByBody.set(n.body, [n]);
     }
-    return { added, updated, removed, notes: seenNotes.size, folders: seenFolders.size };
+    this._commit(() => {
+      const inStore = new Set(this.notes);
+      const byPath = this._notesByPath();
+      const byDir = this._vaultFoldersByDir(id);
+      const renamed = new Map<string, string>();
+      const folderOf = (folderId: string) => renamed.get(folderId) || folderId;
+      const stillAt = (n: Note, full: string) => inStore.has(n) && !!n.filePath && F.pathKey(n.filePath) === F.pathKey(full);
+      for (const f of walk.newFolders) {
+        const existing = f.dirPath ? byDir.get(F.pathKey(f.dirPath)) : undefined;
+        if (existing) { renamed.set(f.id, existing.id); walk.seenFolders.add(existing.id); continue; }
+        f.parentId = f.parentId ? folderOf(f.parentId) : null;
+        this.folders.push(f);
+      }
+      for (const m of walk.folderMoves) { m.folder.parentId = folderOf(m.parentId); m.folder.name = m.name; }
+      for (const r of walk.refreshes) {
+        if (!stillAt(r.note, r.full) || r.note.fileMtime !== r.from) continue;
+        r.note.body = r.body; r.note.fileMtime = r.mtime; r.note.fileKind = r.kind;
+        if (r.changed) updated++;
+      }
+      for (const p of walk.placements) {
+        if (!stillAt(p.note, p.full)) continue;
+        p.note.folderId = folderOf(p.folderId); p.note.vaultId = id; p.note.trashedAt = null;
+      }
+      const fresh: Note[] = [];
+      for (const file of walk.newFiles) {
+        if (byPath.has(F.pathKey(file.full))) continue;
+        const name = stem(path.basename(file.full));
+        const orphan = (orphansByBody.get(file.body) || []).shift();
+        if (orphan && inStore.has(orphan) && !orphan.trashedAt) {
+          orphan.filePath = file.full; orphan.title = name; orphan.folderId = folderOf(file.folderId); orphan.fileMtime = F.mtimeOf(file.full);
+          walk.seenNotes.add(orphan.id);
+          updated++;
+          continue;
+        }
+        const note = this._newNote({ title: name, body: file.body, tags: [], folderId: folderOf(file.folderId), filePath: path.resolve(file.full), fileKind: F.kindOf(file.full), fileMtime: file.mtime, vaultId: id });
+        fresh.push(note);
+        walk.seenNotes.add(note.id);
+        added++;
+      }
+      if (fresh.length) this.notes = fresh.reverse().concat(this.notes);
+      if (!allowRemovals) return;
+      const gone = new Set(unseen().map((n) => n.id));
+      const goneFolderIds = new Set(goneFolders().map((f) => f.id));
+      if (gone.size) this.notes = this.notes.filter((n) => !gone.has(n.id));
+      if (goneFolderIds.size) this.folders = this.folders.filter((f) => !goneFolderIds.has(f.id));
+      removed = gone.size;
+    });
+    return { added, updated, removed, notes: walk.seenNotes.size, folders: walk.seenFolders.size };
   }
 
   createVaultNote(folderId: string, data?: NoteInput) {
@@ -1120,23 +1193,38 @@ class Store {
     return mtime;
   }
 
-  async refreshFileNote(id: string) {
-    const note = this.get(id);
-    if (!note || !note.filePath) return { changed: false, missing: false };
-    if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
+  async _fileChange(note: FileNote) {
     const known = F.kindOf(note.filePath);
     const rekind = ['docx', 'sheet', 'image'].includes(known) && known !== note.fileKind;
     const mtime = F.mtimeOf(note.filePath);
-    if (mtime === note.fileMtime && !rekind) return { changed: false, missing: false };
+    if (mtime === note.fileMtime && !rekind) return null;
     const kind = rekind ? known : note.fileKind;
     let body = rekind ? '' : note.body;
     if (kind !== null && F.TEXTED_KINDS.has(kind)) {
       const read = await F.readNoteText(kind, note.filePath);
       if (typeof read.body === 'string') body = read.body;
     }
-    const changed = rekind || body !== note.body || kind !== 'text';
-    this._commit(() => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
-    return { changed, missing: false };
+    return { body, mtime, kind, changed: rekind || body !== note.body || kind !== 'text' };
+  }
+
+  async refreshFileNote(id: string) {
+    const note = this.get(id);
+    if (!note || !isFileNote(note)) return { changed: false, missing: false };
+    if (!fs.existsSync(note.filePath)) return { changed: false, missing: true };
+    const change = await this._fileChange(note);
+    if (!change) return { changed: false, missing: false };
+    this._commit(() => { note.body = change.body; note.fileMtime = change.mtime; note.fileKind = change.kind; });
+    return { changed: change.changed, missing: false };
+  }
+
+  _notesByPath() {
+    const byPath = new Map<string, Note>();
+    for (const n of this.notes) {
+      if (!n.filePath) continue;
+      const key = F.pathKey(n.filePath);
+      if (!byPath.has(key)) byPath.set(key, n);
+    }
+    return byPath;
   }
 
   relinkFileNote(id: string, newPath: string, body?: string) {
@@ -1344,7 +1432,7 @@ class Store {
   setSettings(patch?: SettingsPatch) {
     const previous = this.settings;
     this.settings = sanitizeSettings(Object.assign({}, this.settings, patch || {}));
-    try { this.save(); } catch (err) { this.settings = previous; throw err; }
+    try { this.save({ content: false }); } catch (err) { this.settings = previous; throw err; }
     return this.getSettings();
   }
 

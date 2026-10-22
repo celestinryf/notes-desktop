@@ -51,13 +51,11 @@ function main() {
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
   });
-  const contentHash = () => crypto.createHash('sha1').update(JSON.stringify({ n: store.notes, f: store.folders })).digest('hex');
-  let lastContentHash = contentHash();
+  let lastContentRevision = store.contentRevision;
   const originalSave = store.save.bind(store);
-  store.save = () => {
-    originalSave();
-    const h = contentHash();
-    if (h !== lastContentHash) { lastContentHash = h; git.noteChanged(); }
+  store.save = (opts) => {
+    originalSave(opts);
+    if (store.contentRevision !== lastContentRevision) { lastContentRevision = store.contentRevision; git.noteChanged(); }
     return store;
   };
   let win: BrowserWindow | null = null;
@@ -67,13 +65,13 @@ function main() {
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
-    onNotesChanged: () => { lastContentHash = contentHash(); fanReloaded({ reason: 'vault' }); },
+    onNotesChanged: () => { lastContentRevision = store.contentRevision; fanReloaded({ reason: 'vault' }); },
   });
   const reminders = new ReminderScheduler(store, {
     tickMs: Number(process.env.NOTES_APP_REMINDER_TICK_MS) || 30000,
     notify: (note) => {
       const title = H.deriveTitle(note) || 'Reminder';
-      lastContentHash = contentHash();
+      lastContentRevision = store.contentRevision;
       if (win && !win.isDestroyed()) win.webContents.send('reminder:fired', { id: note.id, title });
       if (process.env.NOTES_APP_DRY_NOTIFY === '1' || !Notification.isSupported()) return;
       const n = new Notification({ title: '⏰ ' + title, body: H.plainTextFromMarkdown(note.body).slice(0, 200) || 'Open your note', icon: iconImage() });
@@ -83,7 +81,7 @@ function main() {
   });
   const live = new LiveShare(store, {
     pushDelayMs: Number(process.env.NOTES_APP_LIVE_PUSH_MS) || 250,
-    onRemote: (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
+    onRemote: (id) => { lastContentRevision = store.contentRevision; fanReloaded({ reason: 'live', id }); stickies.broadcast('notes:changed', { id }); },
     onStatus: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('live:status', { id, status }); },
   });
   const stickies = new StickyManager(store, {
@@ -227,7 +225,7 @@ function main() {
     if (!store.saveBlocked) return;
     try { store.load(); } catch (_) { return; }
     if (!store.saveBlocked) {
-      lastContentHash = contentHash();
+      lastContentRevision = store.contentRevision;
       reloadedSinceStart = true;
       applyTheme();
       registerHotkey(store.settings.hotkey);
@@ -407,7 +405,7 @@ function main() {
     if (win && !win.isDestroyed()) win.webContents.send('notes:reloaded', payload);
     stickies.broadcast('notes:reloaded', payload);
   }
-  store.onFileText = (id) => { lastContentHash = contentHash(); fanReloaded({ reason: 'file', id }); };
+  store.onFileText = (id) => { lastContentRevision = store.contentRevision; fanReloaded({ reason: 'file', id }); };
 
   let trayRefreshTimer: NodeJS.Timeout | undefined;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
@@ -801,7 +799,7 @@ function main() {
   handle('vaults:remove', (_e, id) => { vaults.close(id); const r = store.removeVault(id); closeOrphanStickies(); fanReloaded({ reason: 'vault' }); return r; });
   function closeOrphanStickies() { for (const sid of stickies.openIds()) if (!store.get(sid)) stickies.close(sid); }
   handle('vaults:sync', (_e, id) => vaults.sync(id, 'manual'));
-  handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentHash = contentHash(); closeOrphanStickies(); if (r && (r.added || r.updated || r.removed)) fanReloaded({ reason: 'vault' }); return r; });
+  handle('vaults:scan', async (_e, id) => { const r = await store.scanVault(id); lastContentRevision = store.contentRevision; closeOrphanStickies(); if (r && (r.added || r.updated || r.removed)) fanReloaded({ reason: 'vault' }); return r; });
   handle('vaults:initRepo', (_e, id, remote) => vaults.initRepo(id, remote));
   handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
   handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
@@ -822,7 +820,7 @@ function main() {
     if (!refreshed.manifest) throw new Error('the earlier workspace could not be read back (' + refreshed.imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
     const { imported, manifest } = refreshed;
     for (const nid of imported.updatedIds || []) live.noteChanged(nid);
-    if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentHash = contentHash(); fanReloaded({ reason: 'bot' }); }
+    if (imported && (imported.updated || imported.created || imported.conflicts)) { lastContentRevision = store.contentRevision; fanReloaded({ reason: 'bot' }); }
     const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
     return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null, imported };
   }
@@ -903,7 +901,7 @@ function main() {
         const note = opts.noteId ? store.get(opts.noteId) : null;
         if (note && note.vaultId) { store.scanVault(note.vaultId).then((r) => { if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); }).catch(() => {}); vaults.noteChanged(note.vaultId); }
       }
-      lastContentHash = contentHash();
+      lastContentRevision = store.contentRevision;
       if (store.settings.gitEnabled) git.noteChanged();
       end({ ok: code === 0, code, imported });
       fanReloaded({ reason: 'bot' });
@@ -942,7 +940,7 @@ function main() {
   handle('bot:importWorkspace', () => {
     if (botChild) return { error: 'A run is in progress; its edits are imported when it finishes.' };
     const r = workspace.importNotes(store, WORKSPACE_DIR);
-    lastContentHash = contentHash();
+    lastContentRevision = store.contentRevision;
     fanReloaded({ reason: 'bot' });
     return r;
   });
