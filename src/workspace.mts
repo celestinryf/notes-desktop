@@ -1,10 +1,9 @@
-// @ts-check
-'use strict';
 /* Workspace for the bot: a folder of Markdown files that mirrors the notes which do not already live on disk,
    so a coding agent can read and edit them with ordinary file tools. Export before a run, import after. */
-const fs = require('fs');
-const path = require('path');
-const H = require('./shared/helpers.ts');
+import fs from 'node:fs';
+import path from 'node:path';
+import * as H from './shared/helpers.mts';
+import { createHash } from 'node:crypto';
 
 const MANIFEST = '.notes-manifest.json';
 // Office files among the notes (Word documents, spreadsheets, presentations) go along as read-only Markdown copies of
@@ -31,7 +30,7 @@ function uniqueIn(used, base, ext) {
 
 // Relative directory for a folder id, mirroring the folder tree (plain folders only).
 function folderRelPath(store, folderId) {
-  const parts = [];
+  const parts: string[] = [];
   let cur = folderId ? store.getFolder(folderId) : null;
   let guard = 0;
   while (cur && guard++ < 1000) { parts.unshift(H.safeFilename(cur.name)); cur = cur.parentId ? store.getFolder(cur.parentId) : null; }
@@ -40,15 +39,19 @@ function folderRelPath(store, folderId) {
 
 // Writes every live, non-file-backed note into dir, and the text of the office files among the notes under
 // _documents (read-only). Returns the manifest { files: [{ id, rel, hash, readOnly? }] }.
-function exportNotes(store, dir) {
+type ManifestFile = { id: string, rel: string, hash: string, folderId: string | null, updatedAt: number, readOnly?: boolean, filePath?: string };
+type Manifest = { exportedAt: number, files: ManifestFile[] };
+type ImportResult = { updated: number, created: number, missing: number, conflicts: number, details: string[], updatedIds?: string[] };
+
+function exportNotes(store, dir): Manifest {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const used = new Map(); // relDir -> Set(names)
-  const files = [];
+  const files: ManifestFile[] = [];
   // Oldest first, so a title clash gives the suffix to the newer note and names stay stable between runs.
   const byAge = (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
   const live = store.notes.filter((n) => !n.trashedAt && !n.lock);
-  const write = (n, relDir, content, extra) => {
+  const write = (n, relDir: string, content: string, extra?: Pick<ManifestFile, 'readOnly' | 'filePath'>) => {
     const dirKey = relDir.toLowerCase(); // Windows folders Work and work are one folder
     if (!used.has(dirKey)) used.set(dirKey, new Set());
     const name = uniqueIn(used.get(dirKey), H.safeFilename(H.deriveTitle(n)), '.md');
@@ -68,19 +71,19 @@ function exportNotes(store, dir) {
 }
 
 function hashOf(text) {
-  return require('crypto').createHash('sha1').update(String(text)).digest('hex');
+  return createHash('sha1').update(String(text)).digest('hex');
 }
 
 // Reads the workspace back: changed files update their notes, new .md files become notes in the matching
 // folder, deleted files are reported but the notes are kept (deleting is a decision for a person).
-function importNotes(store, dir) {
+function importNotes(store, dir): ImportResult {
   const manifestPath = path.join(dir, MANIFEST);
   if (!fs.existsSync(manifestPath)) return { updated: 0, created: 0, missing: 0, conflicts: 0, details: [] };
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const known = new Map(manifest.files.map((f) => [f.rel.toLowerCase(), f]));
   let updated = 0, created = 0, missing = 0, conflicts = 0;
-  const details = [];
-  const updatedIds = [];
+  const details: string[] = [];
+  const updatedIds: string[] = [];
   for (const f of manifest.files) {
     const abs = insideWorkspace(dir, f.rel);
     if (!abs) { details.push('ignored (path outside the workspace): ' + String(f.rel)); continue; }
@@ -150,7 +153,7 @@ function folderIdForRel(store, relDir) {
 // If the import fails, nothing is exported: exporting starts by deleting the folder, which would throw
 // away whatever the import could not read.
 function refreshWorkspace(store, dir) {
-  let imported = null;
+  let imported: ImportResult;
   try { imported = importNotes(store, dir); } catch (err) { return { imported: { error: err.message }, manifest: null }; }
   const manifest = exportNotes(store, dir);
   return { imported, manifest };
@@ -171,4 +174,5 @@ function forgetNote(dir, noteId) {
   return true;
 }
 
-module.exports = { exportNotes, importNotes, refreshWorkspace, forgetNote, folderRelPath, MANIFEST, DOCUMENTS_DIR };
+export { exportNotes, importNotes, refreshWorkspace, forgetNote, folderRelPath, MANIFEST, DOCUMENTS_DIR };
+export type { ImportResult, Manifest, ManifestFile };

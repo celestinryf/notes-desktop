@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* MarkItDown (Microsoft's Python converter, `pip install "markitdown[all]"`) reads the files Notes has no reader of
    its own for: spreadsheets, e-books, Outlook messages and zips. Its Markdown is made for text analysis, not for
    people (its own README says so): it is the text a note keeps for search and the bot, and the source of
@@ -8,11 +6,11 @@
 
    It runs with no shell and no plugins: a plugin can send the file to an AI service, and Notes never does that.
    Callers run the size limit and the zip guard (files.readDocumentBuffer) on a zip-based file before calling it. */
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawn, execFile } = require('child_process');
-const { resolveExecutable, launchSpec } = require('./claude-bin');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, execFile } from 'node:child_process';
+import { resolveExecutable, launchSpec } from './claude-bin.mts';
 
 // What MarkItDown reads that nothing else in Notes does (Word, PDF, HTML and text have their own readers): the
 // extensions its converters accept by name (checked against markitdown 0.1.8; the macro and template variants and
@@ -57,7 +55,7 @@ async function toMarkdown(filePath) {
 // once the process (and on Windows the Python it starts) is gone.
 function run(exe, args) {
   const spec = launchSpec(exe, args);
-  return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+  return (new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(spec.file, spec.args, {
@@ -76,7 +74,7 @@ function run(exe, args) {
       else if (code === 0) resolve();
       else reject(new Error('MarkItDown could not read this file' + (err.trim() ? ': ' + lastLine(err) : '.')));
     });
-  }));
+  }) as Promise<void>);
 }
 // The markitdown.exe on Windows is a launcher that runs Python as a child; killing it alone leaves Python running.
 function killTree(child) {
@@ -85,4 +83,4 @@ function killTree(child) {
 }
 const lastLine = (s) => s.trim().split(/\r?\n/).pop().slice(0, 300);
 
-module.exports = { EXT, available, reads, toMarkdown };
+export { EXT, available, reads, toMarkdown };

@@ -137,7 +137,7 @@
     }
   });
 
-  // src/shared/helpers.ts
+  // src/shared/helpers.mts
   function isViewerOnlyFile(note) {
     return !!(note && note.filePath && note.fileKind !== "text");
   }

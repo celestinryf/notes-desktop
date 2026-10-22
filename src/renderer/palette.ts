@@ -5,7 +5,7 @@
    NotesPalette.create({ dialog, input, list, source }) returns { open(query), close(), isOpen() }.
    source(query) returns (or resolves to) items: { id, title, group, hint, keys, icon, run(opts) }.
    The list keeps the order source gives; run gets { newTab } (Ctrl+Enter or Ctrl+click). */
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import NotesIcons from './icons.js';
 import { escapeHtml } from './text.ts';
 

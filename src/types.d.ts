@@ -120,7 +120,7 @@ interface GitCommit { hash: string; at: number; subject: string }
 type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
 type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
 type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };
-// A live share as the page shows it (live.js reports it on every change).
+// A live share as the page shows it (live.mts reports it on every change).
 interface LiveStatus {
   role: 'host' | 'guest'; url: string; peers: number; connected: boolean; version?: number;
   error?: string | null; localOnly?: boolean; pending?: boolean; ended?: boolean;

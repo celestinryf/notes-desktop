@@ -1,10 +1,8 @@
-// @ts-check
-'use strict';
 /* Finds the Claude Code executable without going through a shell. npm installs `claude` on Windows as a
    .cmd shim that only cmd.exe can run; spawning through cmd.exe would mean quoting the prompt for cmd,
    which cannot be done safely (newlines, %VAR%, &, |). So the shim is read and the real target is launched. */
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 const NAMES = process.platform === 'win32' ? ['claude.exe', 'claude.cmd', 'claude'] : ['claude'];
 
@@ -45,7 +43,7 @@ function specFor(p) {
 
 // The first of names found on the search path, as a launch spec { file, isScript }, or null. opts.override names
 // one file instead (a .js stand-in, an .exe, or a shim); opts.pathDirs the directories to search (default: PATH).
-function resolveExecutable(names, opts) {
+function resolveExecutable(names, opts?) {
   opts = opts || {};
   if (opts.override) return specFor(path.resolve(opts.override));
   const dirs = (opts.pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
@@ -70,7 +68,7 @@ function resolveClaude(opts) {
 }
 
 // Finds a plain Node binary for running a .js target; null means use the host with ELECTRON_RUN_AS_NODE.
-function resolveNode(pathDirs) {
+function resolveNode(pathDirs?) {
   const dirs = (pathDirs || (process.env.PATH || '').split(path.delimiter)).filter(Boolean);
   const name = process.platform === 'win32' ? 'node.exe' : 'node';
   for (const d of dirs) { const p = path.join(d, name); if (exists(p)) return p; }
@@ -78,7 +76,7 @@ function resolveNode(pathDirs) {
 }
 
 // Builds the spawn call: [file, args, extraEnv] for child_process.spawn with shell: false.
-function launchSpec(spec, args, opts) {
+function launchSpec(spec, args, opts?) {
   opts = opts || {};
   if (!spec.isScript) return { file: spec.file, args: args.slice(), env: {} };
   const node = opts.node === undefined ? resolveNode(opts.pathDirs) : opts.node;
@@ -110,4 +108,4 @@ function checkSubscriptionAuth(text) {
   return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
 }
 
-module.exports = { resolveExecutable, resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
+export { resolveExecutable, resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };

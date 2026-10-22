@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Store, DEFAULT_SETTINGS, sanitizeSettings } = require('../../src/store');
+const { Store, DEFAULT_SETTINGS, sanitizeSettings } = require('../../src/store.mts');
 
 function tmpDir() {
   return require('../helpers/tmp').tmpDir('notes-store-'); // removed when the test process exits

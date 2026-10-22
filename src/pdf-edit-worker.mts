@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* Changes pdf-lib makes to a PDF, in a worker thread. workerData: { bytes, task, ... }, task one of
      'check'     nothing is changed; refuses a digitally signed PDF (see below)
      'rotate'    rotations: one entry per page, each 0, 90, 180 or 270 degrees clockwise, added to the page's own
@@ -8,10 +6,11 @@
                  the annotation (as pdf.js names it); author: the name a new note is signed with, or ''
    Posts back { ok, bytes } (no bytes for 'check') or { ok: false, error }.
    pdf-lib writes the whole file anew, which would break a digital signature, so a signed PDF is always refused. */
-const { parentPort, workerData } = require('worker_threads');
+import { parentPort, workerData } from 'node:worker_threads';
 const port = parentPort;
 if (!port) throw new Error('this script runs in a worker thread only');
-const { PDFDocument, PDFName, PDFNumber, PDFHexString, PDFString, PDFRef, PDFArray, PDFDict, degrees } = require('pdf-lib');
+import pdfLibModule from 'pdf-lib';
+const { PDFDocument, PDFName, PDFNumber, PDFHexString, PDFString, PDFRef, PDFArray, PDFDict, degrees } = pdfLibModule;
 
 const NOTE_SIZE = 20; // points: the usual size of a sticky note's icon
 const NOTE_FLAGS = 4 | 8 | 16; // Print, NoZoom, NoRotate: printed, and the icon keeps its size and stays upright

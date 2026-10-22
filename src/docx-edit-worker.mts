@@ -1,13 +1,11 @@
-// @ts-check
-'use strict';
 /* Writes edits into a Word document, in a worker thread. workerData: { bytes (the .docx the edits were made on),
-   patches: changed paragraphs of word/document.xml as ooxml.js makes them }. Every other part of the file is kept
+   patches: changed paragraphs of word/document.xml as ooxml.mts makes them }. Every other part of the file is kept
    as it was. Posts back { ok, bytes } or { ok: false, error }. */
-const { parentPort, workerData } = require('worker_threads');
+import { parentPort, workerData } from 'node:worker_threads';
 const port = parentPort;
 if (!port) throw new Error('this script runs in a worker thread only');
-const JSZip = require('jszip');
-const X = require('./docx-edit/ooxml');
+import JSZip from 'jszip';
+import * as X from './docx-edit/ooxml.mts';
 
 (async () => {
   try {

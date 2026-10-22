@@ -1,6 +1,6 @@
 import { el } from './dom.ts';
 import { state } from './state.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 
 // The note as HTML: what the rendered view shows, or a one-off render when the source view is up.

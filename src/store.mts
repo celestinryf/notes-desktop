@@ -1,22 +1,19 @@
-// @ts-check
-'use strict';
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const H = require('./shared/helpers.ts');
-const Themes = require('./shared/themes.ts');
-const F = require('./files');
-const L = require('./lock');
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import * as H from './shared/helpers.mts';
+import * as Themes from './shared/themes.mts';
+import * as F from './files.mts';
+import * as L from './lock.mts';
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
-/** @type {Readonly<Settings>} */
-const DEFAULT_SETTINGS = Object.freeze({
+const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
   theme: 'system',          // system | light | dark
-  colorScheme: 'notes',     // a scheme in src/shared/themes.js SCHEMES, or 'custom'; 'notes' is styles.css itself
+  colorScheme: 'notes',     // a scheme in src/shared/themes.mts SCHEMES, or 'custom'; 'notes' is styles.css itself
   customColors: null,       // { light?, dark? }: { background, text, accent } (#rrggbb) each; used by 'custom'
   fontSize: 16,
   openAtLogin: true,
@@ -69,14 +66,12 @@ function cleanFolderName(name) {
 // The longest reading order a book keeps, and so the most pages a split may make.
 const MAX_BOOK_PAGES = 5000;
 
-/** @returns {Folder | null} */
-function sanitizeFolder(raw, now) {
+function sanitizeFolder(raw, now): Folder | null {
   if (!raw || typeof raw !== 'object') return null;
   return folderFrom(raw, now);
 }
 
-/** @param {Record<string, any>} raw @returns {Folder} */
-function folderFrom(raw, now) {
+function folderFrom(raw: Record<string, any>, now): Folder {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name),
@@ -156,18 +151,17 @@ const TABS_MAX = 50;
 
 // The editor's tabs: { split, ratio (left side's share), active ('left' | 'right'), left, right }, each side
 // { ids: note ids in tab order, current: the id shown }. Unknown ids are dropped when a tab is opened.
-/** @returns {Panes} */
-function sanitizePanes(raw) {
+function sanitizePanes(raw): Panes {
   const p = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  const side = (v) => {
+  const side = (v): PaneSide => {
     const o = v && typeof v === 'object' ? v : {};
-    const ids = Array.isArray(o.ids) ? Array.from(new Set(o.ids.filter((x) => typeof x === 'string' && x && x.length <= 100))).slice(0, TABS_MAX) : [];
+    const ids = Array.isArray(o.ids) ? Array.from(new Set<string>(o.ids.filter((x) => typeof x === 'string' && x && x.length <= 100))).slice(0, TABS_MAX) : [];
     return { ids, current: ids.includes(o.current) ? o.current : null };
   };
   const left = side(p.left);
   const right = side(p.right);
   right.ids = right.ids.filter((id) => !left.ids.includes(id)); // a note is open on one side only
-  if (!right.ids.includes(right.current)) right.current = null;
+  if (right.current && !right.ids.includes(right.current)) right.current = null;
   const ratio = Number(p.ratio);
   return {
     split: !!p.split,
@@ -180,8 +174,7 @@ function sanitizePanes(raw) {
 
 function sanitizeSettings(input) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  /** @type {Settings} */
-  const s = Object.assign({}, DEFAULT_SETTINGS, src);
+  const s: Settings = Object.assign({}, DEFAULT_SETTINGS, src);
   const acc = H.parseAccelerator(s.hotkey);
   s.hotkey = acc.ok && acc.value ? acc.value : DEFAULT_SETTINGS.hotkey;
   s.theme = ['system', 'light', 'dark'].includes(s.theme) ? s.theme : 'system';
@@ -242,20 +235,17 @@ function sanitizeSticky(raw) {
 }
 
 // A live-share session recorded on a note so it can be resumed after a restart.
-/** @returns {Live | null} */
-function sanitizeLive(raw) {
+function sanitizeLive(raw): Live | null {
   if (!raw || typeof raw !== 'object' || (raw.role !== 'host' && raw.role !== 'guest') || typeof raw.url !== 'string') return null;
   return { role: raw.role, url: raw.url, token: typeof raw.token === 'string' ? raw.token : undefined, port: Number.isFinite(raw.port) ? raw.port : undefined, pending: raw.pending ? true : undefined };
 }
 
-/** @returns {Note | null} */
-function sanitizeNote(raw, now) {
+function sanitizeNote(raw, now): Note | null {
   if (!raw || typeof raw !== 'object') return null;
   return noteFrom(raw, now);
 }
 
-/** @param {Record<string, any>} raw @returns {Note} */
-function noteFrom(raw, now) {
+function noteFrom(raw: Record<string, any>, now): Note {
   const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
@@ -283,7 +273,23 @@ function noteFrom(raw, now) {
 }
 
 class Store {
-  constructor(dir, opts) {
+  dir: any;
+  file: string;
+  backupDir: string;
+  now: any;
+  notes: any[];
+  plain: Map<any, any>;
+  keys: Map<any, any>;
+  folders: any[];
+  vaults: any[];
+  settings: Settings;
+  lastBackupAt: number;
+  loadError: Error | null;
+  onFileText: ((id: string) => void) | null;
+  saveBlocked: boolean | undefined;
+  recoveredFromBackup: boolean | undefined;
+  backupSuspended: boolean | undefined;
+  constructor(dir, opts?) {
     opts = opts || {};
     this.dir = dir;
     this.file = path.join(dir, 'notes.json');
@@ -305,13 +311,13 @@ class Store {
 
   load() {
     fs.mkdirSync(this.dir, { recursive: true });
-    let raw = null;
+    let raw: ReturnType<typeof JSON.parse> | ReturnType<typeof this._loadNewestBackup> | null = null;
     this.saveBlocked = false;
     this.recoveredFromBackup = false;
     this.backupSuspended = false;
     this.loadError = null;
     if (fs.existsSync(this.file)) {
-      let text = null;
+      let text: string | null = null;
       let ioError = null;
       // A locked or busy file is not a corrupt file: retry the read briefly before deciding anything.
       for (let attempt = 0; attempt < 6 && text === null; attempt++) {
@@ -659,9 +665,9 @@ class Store {
   // ---- books -------------------------------------------------------------------
 
   _orderPages(folder, notes) {
-    const rank = new Map((folder.pageOrder || []).map((id, i) => [id, i]));
+    const rank = new Map<string, number>((folder.pageOrder || []).map((id, i) => [id, i]));
     return notes.slice().sort((a, b) => {
-      const ra = rank.has(a.id) ? rank.get(a.id) : Infinity, rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
+      const ra = rank.get(a.id) ?? Infinity, rb = rank.get(b.id) ?? Infinity;
       if (ra !== rb) return ra - rb;
       return (a.createdAt - b.createdAt) || a.id.localeCompare(b.id); // unlisted pages: oldest first, i.e. new pages go last
     });
@@ -710,7 +716,7 @@ class Store {
 
   // What a note links to, what links to it, and notes that share its tags. Locked bodies are only read
   // while unlocked this session (their stored body is empty); titles are always visible.
-  related(id, limit) {
+  related(id, limit?) {
     const note = this.get(id);
     if (!note) return null;
     const bodyOf = (n) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
@@ -902,20 +908,20 @@ class Store {
 
   // Makes the folder tree and notes match the directory. Returns counts. Idempotent and safe to call often.
   // opts.allowRemovals=false keeps mirrors of files that are momentarily absent (e.g. during a git rebase).
-  async scanVault(id, opts) {
+  async scanVault(id, opts?) {
     opts = opts || {};
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
     // An unplugged drive or an unmounted share is not an empty vault: touch nothing until it is back.
-    let rootEntries = null;
+    let rootEntries: fs.Dirent<string>[] | null = null;
     try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
     const root = this.vaultRootFolder(id) || this._commit(() => { const f = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path }; this.folders.push(f); return f; });
     const seenFolders = new Set([root.id]);
     const seenNotes = new Set();
     let added = 0, updated = 0, removed = 0;
     const walk = async (dir, folderId) => {
-      let entries = [];
+      let entries: fs.Dirent[] = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
       for (const e of entries) {
         const full = path.join(dir, e.name);
@@ -1032,7 +1038,7 @@ class Store {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
     this.relock(id); // a trashed locked note needs its password again
-    let moved = null;
+    let moved: { from: string, to: string } | null = null;
     if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
       const next = path.join(dir, uniqueName(dir, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md'));
@@ -1252,7 +1258,7 @@ class Store {
   }
 
   folderPath(id) {
-    const path = [];
+    const path: { id: string, name: string }[] = [];
     let cur = this.getFolder(id);
     let guard = 0;
     while (cur && guard++ < 10000) { path.unshift({ id: cur.id, name: cur.name }); cur = cur.parentId ? this.getFolder(cur.parentId) : null; }
@@ -1270,8 +1276,7 @@ class Store {
       if (!by.has(k)) by.set(k, []);
       by.get(k).push(n);
     }
-    /** @type {Record<string, OutlineRow[]>} */
-    const out = {};
+    const out: Record<string, OutlineRow[]> = {};
     for (const [k, list] of by) {
       const f = k ? this.getFolder(k) : null;
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
@@ -1462,5 +1467,4 @@ class Store {
   }
 }
 
-module.exports = {
-  STICKY_COLORS, sanitizeSticky, Store, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
+export { STICKY_COLORS, sanitizeSticky, Store, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };

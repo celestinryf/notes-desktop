@@ -1,13 +1,11 @@
-// @ts-check
-'use strict';
 /* Live share: edit one note together in real time over the local network, with no service in between.
    The host runs a tiny HTTP server for that note (state + server-sent events + updates); guests join with
    the link, get a local copy, and every edit on either side is pushed within a few hundred milliseconds.
    Last writer wins at whole-note granularity; the host's state is the reference. Main process only. */
-const http = require('http');
-const os = require('os');
-const crypto = require('crypto');
-const { URL } = require('url');
+import http from 'node:http';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { URL } from 'node:url';
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -19,11 +17,17 @@ function lanAddress() {
   return '127.0.0.1';
 }
 
-function readJson(req, limit) {
+function jsonObject(text: string): Record<string, unknown> {
+  const value = JSON.parse(text);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected a JSON object');
+  return value;
+}
+
+function readJson(req: http.IncomingMessage, limit: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
+    let size = 0; const chunks: Buffer[] = [];
     req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('too large')); req.destroy(); return; } chunks.push(c); });
-    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch (err) { reject(err); } });
+    req.on('end', () => { try { resolve(jsonObject(Buffer.concat(chunks).toString('utf8') || '{}')); } catch (err) { reject(err); } });
     req.on('error', reject);
   });
 }
@@ -34,6 +38,13 @@ function sameToken(a, b) {
 }
 
 class LiveShare {
+  store: any;
+  onRemote: any;
+  onStatus: any;
+  pushDelayMs: any;
+  sessions: Map<any, any>;
+  hosting: Map<any, any>;
+  clientId: string;
   constructor(store, opts) {
     opts = opts || {};
     this.store = store;
@@ -55,7 +66,7 @@ class LiveShare {
 
   // ---- host ------------------------------------------------------------------
 
-  host(noteId, opts) {
+  host(noteId, opts?) {
     opts = opts || {};
     const note = this.store.get(noteId);
     if (!note || note.trashedAt) throw new Error('Note not found');
@@ -64,8 +75,7 @@ class LiveShare {
     if (this.sessions.has(noteId)) return Promise.resolve(this.statusOf(noteId));
     if (this.hosting.has(noteId)) return this.hosting.get(noteId); // a second click while the first listen() is pending
     const token = opts.token || crypto.randomBytes(16).toString('hex');
-    /** @type {{ role: 'host', token: string, clients: Set<import('http').ServerResponse>, version: number, server: import('http').Server | null, url: string | null, port: number | null, error: string | null, local: boolean }} */
-    const session = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null, error: null, local: false };
+    const session: { role: 'host', token: string, clients: Set<import('http').ServerResponse>, version: number, server: import('http').Server | null, url: string | null, port: number | null, error: string | null, local: boolean } = { role: 'host', token, clients: new Set(), version: 1, server: null, url: null, port: null, error: null, local: false };
     const server = http.createServer((req, res) => this._handle(session, noteId, req, res));
     server.on('clientError', (_err, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch (_) { /* ignore */ } });
     const p = new Promise((resolve, reject) => {
@@ -137,7 +147,7 @@ class LiveShare {
       if (note.lock || note.filePath) { res.statusCode = 410; res.end('gone'); this.stop(noteId); return; }
       let data;
       try { data = await readJson(req, MAX_BODY); } catch (err) { res.statusCode = 400; res.end(String(err.message)); return; }
-      const patch = {};
+      const patch: { title?: string, body?: string } = {};
       if (typeof data.title === 'string') patch.title = data.title.slice(0, 2000);
       if (typeof data.body === 'string') patch.body = data.body.slice(0, MAX_BODY);
       try { this.store.update(noteId, patch); } catch (err) { res.statusCode = 409; res.end('The host could not apply that change.'); return; }
@@ -175,7 +185,7 @@ class LiveShare {
       note = opts.noteId ? this.store.get(opts.noteId) : this.store.create({ title: initial.title, body: initial.body, folderId: opts.folderId || null });
       if (!note) throw new Error('Note not found');
       if (opts.noteId) this.store.update(note.id, { title: initial.title, body: initial.body });
-      version = initial.version;
+      version = Number(initial.version) || 0;
     }
     const session = { role: 'guest', url: parsed.toString(), version, connected: false, req: null, retry: 0, pushTimer: null, pushing: false, dirty: !!opts.pending, pendingFlag: !!opts.pending, stopped: false, lastByteAt: 0 };
     this.sessions.set(note.id, session);
@@ -185,17 +195,17 @@ class LiveShare {
     return { noteId: note.id, status: this.statusOf(note.id) };
   }
 
-  _fetch(url, method, body) {
+  _fetch(url: string, method: string, body?: unknown): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const u = new URL(url);
       const data = body == null ? null : Buffer.from(JSON.stringify(body));
       const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method, headers: data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}, timeout: 8000 }, (res) => {
-        const chunks = [];
+        const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
           if (res.statusCode !== 200) return reject(new Error(res.statusCode === 410 ? 'The host ended the share.' : (text || 'HTTP ' + res.statusCode)));
-          try { resolve(JSON.parse(text)); } catch (err) { reject(err); }
+          try { resolve(jsonObject(text)); } catch (err) { reject(err); }
         });
       });
       req.on('timeout', () => req.destroy(new Error('timed out')));
@@ -295,7 +305,7 @@ class LiveShare {
     const note = this.store.get(noteId);
     try {
       const r = await this._fetch(session.url, 'POST', { title: note.title, body: note.body, clientId: this.clientId, base: session.version });
-      session.version = Math.max(session.version, r.version || 0);
+      session.version = Math.max(session.version, Number(r.version) || 0);
       session.error = null;
       if (session.pendingFlag) { session.pendingFlag = false; try { this.store.setLive(noteId, { role: 'guest', url: session.url, pending: false }); } catch (_) { /* paused */ } }
     } catch (err) {
@@ -364,4 +374,4 @@ class LiveShare {
   }
 }
 
-module.exports = { LiveShare, lanAddress };
+export { LiveShare, lanAddress };

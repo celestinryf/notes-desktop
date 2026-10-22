@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const T = require('../../src/shared/themes.ts');
+const T = require('../../src/shared/themes.mts');
 
 const HEX = /^#[0-9a-f]{6}$/;
 const premade = Object.keys(T.SCHEMES).filter((id) => !T.SCHEMES[id].builtIn);

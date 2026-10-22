@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const W = require('../../src/window-input');
+const W = require('../../src/window-input.mts');
 
 const key = (o) => Object.assign({ type: 'keyDown', control: true, meta: false, alt: false, shift: false }, o);
 

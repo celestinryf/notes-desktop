@@ -1,16 +1,16 @@
-// @ts-check
-'use strict';
 /* Keeps a git history of notes.json with an optional remote to push to.
    The repository lives in <dataDir>/history and holds a snapshot copy of notes.json. Git therefore never
    opens the live file, which matters on Windows where an open file cannot be replaced by the atomic save. */
-const fs = require('fs');
-const path = require('path');
-const { execFile } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
 
-function run(args, cwd, timeoutMs) {
+type GitRun = { ok: boolean, code: string | number | null | undefined, stdout: string, stderr: string, error: string | null };
+
+function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
   return new Promise((resolve) => {
     execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
@@ -21,6 +21,16 @@ function run(args, cwd, timeoutMs) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class GitSync {
+  dataDir: any;
+  source: string;
+  dir: string;
+  snapshot: string;
+  debounceMs: any;
+  now: any;
+  timer: NodeJS.Timeout | null;
+  busy: Promise<GitResult> | null;
+  state: GitState;
+  onChange: any;
   constructor(dataDir, opts) {
     opts = opts || {};
     this.dataDir = dataDir;
@@ -129,7 +139,7 @@ class GitSync {
     if (this.busy) await this.busy;
   }
 
-  async commit(message) {
+  async commit(message?) {
     if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
     // Chain on whatever is running so two callers can never run git at the same time in this repo.
     const prev = this.busy;
@@ -179,4 +189,4 @@ class GitSync {
   }
 }
 
-module.exports = { GitSync };
+export { GitSync };

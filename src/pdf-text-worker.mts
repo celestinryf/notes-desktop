@@ -1,8 +1,6 @@
-// @ts-check
-'use strict';
 /* Pulls the text out of a PDF, in a worker thread so a long PDF never stalls the app. Posts back one list of
    paragraphs per page; a page with no text (a scanned image) comes back empty. */
-const { parentPort, workerData } = require('worker_threads');
+import { parentPort, workerData } from 'node:worker_threads';
 const port = parentPort;
 if (!port) throw new Error('this script runs in a worker thread only');
 
@@ -10,11 +8,12 @@ const LIST_START = /^([•◦▪▫‣●○■□☐☑–—*-]|\d{1,3}[.)]|[a
 
 // Lines are joined into paragraphs. A new one starts at a vertical gap well over a line's height, at a change of
 // text size (a heading), and at a line that starts like a list item ("•", "3.", "a)").
-const newParagraph = (prev, ln, text) => Math.abs(prev.y - ln.y) > 1.6 * Math.max(ln.h, prev.h)
+type Line = { text: string, y: number, h: number };
+const newParagraph = (prev: Line, ln: Line, text: string) => Math.abs(prev.y - ln.y) > 1.6 * Math.max(ln.h, prev.h)
   || Math.abs(ln.h - prev.h) > 0.15 * Math.max(ln.h, prev.h) || LIST_START.test(text);
 function pageParagraphs(items) {
-  const lines = [];
-  let cur = null;
+  const lines: Line[] = [];
+  let cur: Line | null = null;
   for (const it of items) {
     if (typeof it.str !== 'string') continue; // marked-content markers
     if (!cur) cur = { text: '', y: it.transform[5], h: it.height || Math.abs(it.transform[3]) || 10 };
@@ -22,8 +21,8 @@ function pageParagraphs(items) {
     if (it.hasEOL) { lines.push(cur); cur = null; }
   }
   if (cur) lines.push(cur);
-  const paras = [];
-  let para = null, prev = null;
+  const paras: string[][] = [];
+  let para: string[] | null = null, prev: Line | null = null;
   for (const ln of lines) {
     const text = ln.text.replace(/\s+/g, ' ').trim();
     if (!text) { para = null; continue; }
@@ -36,12 +35,12 @@ function pageParagraphs(items) {
 }
 
 (async () => {
-  let task = null;
+  let task: ReturnType<typeof import('pdfjs-dist/legacy/build/pdf.mjs').getDocument> | null = null;
   try {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     task = pdfjs.getDocument({ data: new Uint8Array(workerData.bytes), disableFontFace: true, verbosity: 0 });
     const doc = await task.promise;
-    const pages = [];
+    const pages: string[][] = [];
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       pages.push(pageParagraphs((await page.getTextContent()).items));

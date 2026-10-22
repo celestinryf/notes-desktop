@@ -2,7 +2,7 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { NotesDocxEditor } from './docx-editor.ts';
 import { oneAtATime } from './one-at-a-time.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
 

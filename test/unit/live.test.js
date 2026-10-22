@@ -5,8 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { Store } = require('../../src/store');
-const { LiveShare } = require('../../src/live');
+const { Store } = require('../../src/store.mts');
+const { LiveShare } = require('../../src/live.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-live-'); // removed when the test process exits

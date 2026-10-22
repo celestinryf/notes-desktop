@@ -1,7 +1,7 @@
 import { el, setLabel } from './dom.ts';
 import { state, lockedNow } from './state.ts';
 import { src } from './code-editor.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { setActivity } from './activity.ts';
 import { tableShown } from './editor-view.ts';

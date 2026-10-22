@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* "Convert to…": writes an opened file out in another format, as a new file next to the original. The original is
    never touched and no existing file is ever overwritten.
 
@@ -7,12 +5,18 @@
    fence, a web page goes through turndown, a Word document through mammoth, a PDF gives its text), and every
    target can be made from Markdown. A few direct routes keep more: Word to PDF is printed from the layout Notes
    shows, Word to HTML and text come straight from mammoth, and a web page prints to PDF as itself. */
-const fs = require('fs');
-const path = require('path');
-const { runWorker } = require('./run-worker');
-const { extOf, readText, readDocumentBuffer, readDocxText } = require('./files');
-const { OOXML_EXT, ZIP_DOC_EXT } = require('./shared/helpers.ts');
-const markitdown = require('./markitdown');
+import fs from 'node:fs';
+import path from 'node:path';
+import { runWorker } from './run-worker.mts';
+import { extOf, readText, readDocumentBuffer, readDocxText } from './files.mts';
+import { OOXML_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
+import * as markitdown from './markitdown.mts';
+import { createRequire } from 'node:module';
+import type MarkdownIt from 'markdown-it';
+import type { ParagraphChild } from 'docx';
+
+const requireWhenNeeded = createRequire(import.meta.url);
+
 
 const FORMATS = {
   md: 'Markdown (.md)',
@@ -93,12 +97,13 @@ function fence(text, lang) {
   return f + (lang || '') + '\n' + String(text).replace(/\n$/, '') + '\n' + f + '\n';
 }
 
-let turndownService = null;
+type Turndown = { turndown: (html: string) => string, use: (plugin: unknown) => void, remove: (tags: string[]) => void };
+let turndownService: Turndown | null = null;
 function htmlToMarkdown(html) {
   if (!turndownService) {
-    const TurndownService = require('turndown');
+    const TurndownService: new (options: object) => Turndown = requireWhenNeeded('turndown');
     turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-', emDelimiter: '*' });
-    turndownService.use(require('turndown-plugin-gfm').gfm);
+    turndownService.use(requireWhenNeeded('turndown-plugin-gfm').gfm);
     turndownService.remove(['script', 'style', 'noscript', 'template', 'iframe', 'object', 'embed', 'head']);
   }
   return turndownService.turndown(String(html)).trim() + '\n';
@@ -107,8 +112,8 @@ function htmlToMarkdown(html) {
 // Links in a Word document can point anywhere; only web and mail links are kept as links.
 const SAFE_HREF = /^(https?:|mailto:)/i;
 function mammothOptions(convertImage) {
-  const mammoth = require('mammoth');
-  const opts = {
+  const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
+  const opts: NonNullable<Parameters<typeof mammoth.convertToHtml>[1]> = {
     transformDocument: (doc) => {
       // @ts-expect-error mammoth's typings leave out transforms, which its documentation lists
       for (const h of mammoth.transforms.getDescendantsOfType(doc, 'hyperlink')) if (h.href && !SAFE_HREF.test(h.href)) h.href = '';
@@ -134,8 +139,8 @@ function tablesForMarkdown(html) {
   });
 }
 
-async function docxToHtml(filePath, convertImage) {
-  const mammoth = require('mammoth');
+async function docxToHtml(filePath, convertImage?) {
+  const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
   const res = await mammoth.convertToHtml({ buffer: await readDocumentBuffer(filePath) }, mammothOptions(convertImage));
   return res.value;
 }
@@ -143,7 +148,7 @@ async function docxToHtml(filePath, convertImage) {
 // The text of a PDF as Markdown paragraphs. Says how many pages had no text (scanned), and refuses when none did.
 async function pdfToMarkdown(filePath) {
   if (fs.statSync(filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
-  const res = await runWorker('pdf-text-worker.js', { bytes: fs.readFileSync(filePath) }, PDF_TIMEOUT_MS, 'Reading the PDF took too long.');
+  const res = await runWorker<{ pages: string[][] }>('pdf-text-worker.mts', { bytes: fs.readFileSync(filePath) }, PDF_TIMEOUT_MS, 'Reading the PDF took too long.');
   if (!res.ok) throw new Error(res.error);
   const empty = res.pages.filter((p) => !p.length).length;
   if (empty === res.pages.length) throw new Error('This PDF has no text to convert; it is probably scanned pages. Converting it needs OCR, which Notes does not do.');
@@ -157,7 +162,7 @@ const urlSegment = (s) => encodeURIComponent(s).replace(/[()]/g, (c) => '%' + c.
 
 // The file as Markdown. imagesDir: where a Word document's pictures go ({ parent, folder() }, folder() making the
 // folder on first use and returning its name); without it they are inlined as data: URLs.
-async function toMarkdown(note, imagesDir) {
+async function toMarkdown(note, imagesDir?) {
   const src = sourceOf(note);
   const file = note.filePath;
   if (src === 'pdf') return pdfToMarkdown(file);
@@ -189,9 +194,12 @@ async function toMarkdown(note, imagesDir) {
 //   | { t: 'quote', blocks } | { t: 'table', rows: [{ header, cells: [runs] }] } | { t: 'hr' }
 // A run is { text, b, i, s, code, href } or { br: true } or { img: src, alt }.
 
-let markdownIt = null;
-function md() {
-  if (!markdownIt) markdownIt = require('markdown-it')({ html: true, linkify: false });
+let markdownIt: MarkdownIt | null = null;
+function md(): MarkdownIt {
+  if (!markdownIt) {
+    const createMarkdownIt: typeof MarkdownIt = requireWhenNeeded('markdown-it');
+    markdownIt = createMarkdownIt({ html: true, linkify: false });
+  }
   return markdownIt;
 }
 
@@ -199,16 +207,16 @@ const stripTags = (s) => String(s).replace(/<[^>]*>/g, '');
 
 // Markdown as HTML, with task items ("- [ ] x") shown as boxes the way the editor shows them. forPrint: pictures on
 // the web are replaced by their description, since the print window never fetches them.
-function renderMarkdown(markdown, forPrint) {
+function renderMarkdown(markdown, forPrint?) {
   let html = md().render(markdown).replace(/<li>(<p>)?\[( |x|X)\]\s/g, (m, p, x) => '<li>' + (p || '') + (x === ' ' ? '☐ ' : '☑ '));
   if (forPrint) html = html.replace(/<img src="(?!data:|file:)[a-z][a-z0-9+.-]*:[^"]*" alt="([^"]*)"[^>]*>/gi, (m, alt) => (alt ? '<em>[' + alt + ']</em>' : ''));
   return html;
 }
 
-function inlineRuns(tok) {
-  const runs = [];
+function inlineRuns(tok): Run[] {
+  const runs: Run[] = [];
   const st = { b: 0, i: 0, s: 0, href: null };
-  const push = (text, extra) => runs.push(Object.assign({ text, b: st.b > 0, i: st.i > 0, s: st.s > 0, href: st.href }, extra));
+  const push = (text, extra?) => runs.push(Object.assign({ text, b: st.b > 0, i: st.i > 0, s: st.s > 0, href: st.href }, extra));
   for (const c of (tok && tok.children) || []) {
     if (c.type === 'text') push(c.content);
     else if (c.type === 'softbreak') push(' ');
@@ -229,23 +237,19 @@ function inlineRuns(tok) {
   return runs;
 }
 
-/** @typedef {{ text?: string, bold?: boolean, italic?: boolean, code?: boolean, strike?: boolean, href?: string | null, img?: string | null, alt?: string, br?: boolean }} Run */
-/** @typedef {{ header: boolean, cells: Run[][] }} TableRow */
-/** @typedef {{ t: string, level?: number, runs?: Run[], tight?: boolean, ordered?: boolean, start?: number, items?: Block[][], rows?: TableRow[], lang?: string, text?: string, blocks?: Block[] }} Block */
+type Run = { text?: string, b?: boolean, i?: boolean, s?: boolean, code?: boolean, href?: string | null, img?: string | null, alt?: string, br?: boolean };
+type TableRow = { header: boolean, cells: Run[][] };
+type Block = { t: string, level?: number, runs?: Run[], tight?: boolean, ordered?: boolean, start?: number, items?: Block[][], rows?: TableRow[], lang?: string, text?: string, blocks?: Block[] };
 function markdownBlocks(src) {
   const tokens = md().parse(String(src), {});
-  /** @type {Block[]} */
-  const root = [];
-  /** @type {({ blocks: Block[], list?: undefined } | { list: Block, blocks?: undefined })[]} */
-  const stack = [{ blocks: root }];
+  const root: Block[] = [];
+  const stack: ({ blocks: Block[], list?: undefined } | { list: Block, blocks?: undefined })[] = [{ blocks: root }];
   const top = () => stack[stack.length - 1];
   // Blocks go into the open container; a list frame only takes items, so a block there is a markdown-it fault.
   const topBlocks = () => { const f = top(); if (!f.blocks) throw new Error('a block outside a list item'); return f.blocks; };
   const topItems = () => { const f = top(); if (!f.list || !f.list.items) throw new Error('a list item outside a list'); return f.list.items; };
-  /** @type {Block | null} */
-  let table = null;
-  /** @type {TableRow | null} */
-  let row = null;
+  let table: Block | null = null;
+  let row: TableRow | null = null;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     const inline = tokens[i + 1] && tokens[i + 1].type === 'inline' ? tokens[i + 1] : null;
@@ -327,8 +331,7 @@ function blockText(b) {
 }
 
 // Pixel size of a PNG, JPEG, GIF or BMP, read from its header; null for anything else.
-/** @returns {{ type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null} */
-function imageInfo(buf) {
+function imageInfo(buf): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null {
   if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { type: 'png', w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
   if (buf.length > 10 && buf.toString('latin1', 0, 4) === 'GIF8') return { type: 'gif', w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
   if (buf.length > 26 && buf.toString('latin1', 0, 2) === 'BM') return { type: 'bmp', w: buf.readInt32LE(18), h: Math.abs(buf.readInt32LE(22)) };
@@ -366,7 +369,7 @@ function imageBytes(src, baseDir) {
 const MAX_IMAGE_WIDTH = 600; // px, about the text width of an A4 or Letter page
 
 async function blocksToDocx(blocks, opts) {
-  const D = require('docx');
+  const D: typeof import('docx') = requireWhenNeeded('docx');
   const baseDir = opts.baseDir;
   const numbering = new Map(); // start number -> reference (every level of it counts from that number)
   let instance = 0;
@@ -384,8 +387,8 @@ async function blocksToDocx(blocks, opts) {
     return new D.ImageRun({ type: info.type, data: buf, transformation: { width: Math.round(info.w * scale), height: Math.round(info.h * scale) }, altText: r.alt ? { name: r.alt, description: r.alt, title: r.alt } : undefined });
   }
 
-  function runObjs(runs, extra) {
-    const out = [];
+  function runObjs(runs, extra?) {
+    const out: ParagraphChild[] = [];
     for (const r of runs) {
       if (r.br) { out.push(new D.TextRun({ text: '', break: 1 })); continue; }
       if (r.img !== undefined) { out.push(imageRun(r)); continue; }
@@ -459,9 +462,10 @@ async function blocksToDocx(blocks, opts) {
 
 // ---- HTML pages ---------------------------------------------------------------------------------
 
-const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
 // A standalone HTML page for an exported note, book or converted file. extraCss styles the parts (contents, page breaks).
-function htmlDocument(title, bodyHtml, extraCss) {
+function htmlDocument(title, bodyHtml, extraCss?) {
   return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
     '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
     '<body>' + String(bodyHtml || '') + '</body></html>\n';
@@ -527,7 +531,7 @@ async function convertFile(note, to, print) {
 
   if (src === 'docx' && to === 'md') {
     // Pictures go in a folder beside the new file, made only if there are any; removed again if the conversion fails.
-    let folder = null;
+    let folder: string | null = null;
     const imagesDir = { parent: dir, folder: () => folder || (folder = mkdirNew(dir, base + ' pictures')) };
     try {
       const { markdown } = await toMarkdown(note, imagesDir);
@@ -548,4 +552,4 @@ async function convertFile(note, to, print) {
   return { filePath: writeNew(dir, base, to, data), warning };
 }
 
-module.exports = { FORMATS, sourceOf, options, convertFile, toMarkdown, textToMarkdown, markdownBlocks, blocksToText, htmlDocument, escHtml, imageInfo, isInside, inlinePicturesOnly, writeNew };
+export { FORMATS, sourceOf, options, convertFile, toMarkdown, textToMarkdown, markdownBlocks, blocksToText, htmlDocument, escHtml, imageInfo, isInside, inlinePicturesOnly, writeNew };

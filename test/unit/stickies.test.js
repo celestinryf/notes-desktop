@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Store, sanitizeSticky } = require('../../src/store');
+const { Store, sanitizeSticky } = require('../../src/store.mts');
 
 const { tmpDir } = require('../helpers/tmp');
 const tmp = () => tmpDir('notes-sticky-'); // removed when the test process exits

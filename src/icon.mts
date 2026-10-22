@@ -1,5 +1,3 @@
-// @ts-check
-'use strict';
 /* Draws the app icon as raw BGRA pixels so no binary asset has to be checked in.
    A tangerine "sticker" with an ink border and three cream text lines. */
 
@@ -28,7 +26,7 @@ function drawIconBitmap(size) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const o = (y * size + x) * 4;
-      let px = null;
+      let px: number[] | null = null;
       if (insideRounded(x, y, border)) {
         px = TANGERINE;
         for (const ly of lines) {
@@ -46,4 +44,4 @@ function drawIconBitmap(size) {
   return buf;
 }
 
-module.exports = { drawIconBitmap };
+export { drawIconBitmap };

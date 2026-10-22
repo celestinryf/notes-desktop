@@ -1,6 +1,6 @@
 /* Renderer: vanilla JS, talks to the main process through window.notesApi (see preload.js). */
-import * as H from '../shared/helpers.ts';
-import * as NotesThemes from '../shared/themes.ts';
+import * as H from '../shared/helpers.mts';
+import * as NotesThemes from '../shared/themes.mts';
 import NotesIcons from './icons.js';
 import { NotesPalette } from './palette.ts';
 import { I, el, setIcon, setPressed } from './dom.ts';
@@ -58,7 +58,7 @@ import { createEditorText } from './editor-text.ts';
     syncTitleBar();
   }
 
-  // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.js); the
+  // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.mts); the
   // built-in one clears them, so the stylesheet's own colours show.
   function applyColorScheme(mode, settings) {
     const tokens = NotesThemes.resolve(settings, mode);
@@ -1879,7 +1879,7 @@ import { createEditorText } from './editor-text.ts';
 
   const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
 
-  // ---- reminders: see reminders.js ----
+  // ---- reminders: see reminders.mts ----
 
   const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
 

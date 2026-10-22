@@ -3,7 +3,7 @@ import { state, lockedNow } from './state.ts';
 import { find } from './find-state.ts';
 import { src, renderCodePosition } from './code-editor.ts';
 import { NotesCsv } from './csv-view.ts';
-import * as H from '../shared/helpers.ts';
+import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;

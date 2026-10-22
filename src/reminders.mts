@@ -1,9 +1,12 @@
-// @ts-check
-'use strict';
 /* Reminders: a note can carry a remindAt time; when it passes, the note is marked reminded and the
    notifier is called once. Main process only; the clock and the notifier are injectable for tests. */
 
 class ReminderScheduler {
+  store: any;
+  now: any;
+  notify: any;
+  tickMs: any;
+  timer: NodeJS.Timeout | null;
   constructor(store, opts) {
     opts = opts || {};
     this.store = store;
@@ -33,7 +36,7 @@ class ReminderScheduler {
 
   // Marks first, notifies second: a notifier that throws must not cause a reminder to fire again and again.
   tick() {
-    const fired = [];
+    const fired: Note[] = [];
     for (const n of this.due()) {
       try { this.store.markReminded(n.id, this.now()); } catch (_) { continue; } // saving paused: try again next tick
       fired.push(n);
@@ -43,4 +46,4 @@ class ReminderScheduler {
   }
 }
 
-module.exports = { ReminderScheduler };
+export { ReminderScheduler };

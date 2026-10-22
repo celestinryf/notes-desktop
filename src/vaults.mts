@@ -1,15 +1,16 @@
-// @ts-check
-'use strict';
 /* Vault manager: watches vault directories for changes, keeps the store in step, and runs git sync
    (commit local changes, pull with rebase, push) the way the Obsidian git plugin does. Main process only. */
-const fs = require('fs');
-const path = require('path');
-const { execFile } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
 
-function git(args, cwd, timeoutMs) {
+type GitRun = { ok: true, stdout: string, stderr: string, error: null } | { ok: false, stdout: string, stderr: string, error: string };
+
+function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
   return new Promise((resolve) => {
     execFile('git', args, { cwd, timeout: timeoutMs || 60000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
+      const out = { stdout: String(stdout || ''), stderr: String(stderr || '') };
+      resolve(err ? { ok: false, ...out, error: String(stderr || err.message).trim() } : { ok: true, ...out, error: null });
     });
   });
 }
@@ -17,6 +18,17 @@ function git(args, cwd, timeoutMs) {
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 
 class VaultManager {
+  store: any;
+  onChange: any;
+  onNotesChanged: any;
+  now: any;
+  debounceMs: any;
+  rescanDebounceMs: any;
+  watchers: Map<any, any>;
+  timers: Map<any, any>;
+  status: Map<any, any>;
+  busy: Map<any, any>;
+  queued: Map<any, any>;
   constructor(store, opts) {
     opts = opts || {};
     this.store = store;
@@ -156,7 +168,7 @@ class VaultManager {
     return this.statusOf(id);
   }
 
-  async initRepo(id, remote) {
+  async initRepo(id, remote): Promise<VaultResult> {
     if (typeof remote === 'string') remote = remote.trim();
     const v = this.store.getVault(id);
     if (!v) return { ok: false, error: 'Vault not found' };
@@ -219,7 +231,7 @@ class VaultManager {
           // Pull, then push. If the remote moved between the two (another device pushed just now), pull
           // once more and push again rather than reporting a rejection the next sync would clear anyway.
           for (let attempt = 0; attempt < 2; attempt++) {
-            const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true };
+            const pull = remoteHasBranch ? await git(AUTHOR.concat(['pull', '--rebase', '--autostash', '-q', 'origin', branch]), v.path, 120000) : { ok: true } as const;
             if (!pull.ok) {
               await git(['rebase', '--abort'], v.path);
               await this.refreshRepoStatus(id);
@@ -272,4 +284,4 @@ class VaultManager {
   }
 }
 
-module.exports = { VaultManager, git };
+export { VaultManager, git };
