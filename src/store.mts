@@ -10,6 +10,22 @@ import * as L from './lock.mts';
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
+const JOURNAL_MIN_BYTES = 1024 * 1024;
+const JOURNAL_SHARE_OF_BASE = 0.25;
+const STALE_JOURNALS_KEPT = 3;
+const STALE_JOURNAL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const SCAN_YIELD_EVERY = 256;
+const SCAN_READERS = 16;
+const SCAN_TARGETED_MAX = 1000;
+const BUSY_CODES = ['EPERM', 'EBUSY', 'EACCES'];
+
+type Change = { notes?: Note[]; dropped?: string[]; folders?: boolean; vaults?: boolean; settings?: boolean };
+type ScanChange = Change & { notes: Note[]; dropped: string[] };
+type RollbackScope = { notes: readonly Note[]; folders: boolean; vaults: boolean; settings: boolean };
+type DiskDir = { full: string; key: string; name: string; parentKey: string };
+type FoundFile = { full: string; key: string; name: string; dirKey: string };
+type DiskFile = FoundFile & { mtime: number | null; text?: string | null };
+type DiskView = { dirs: DiskDir[]; files: DiskFile[]; changed: Set<string> | null };
 
 const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
@@ -128,21 +144,197 @@ function sleepSync(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function replaceFile(tmp: string, target: string) {
-  let lastErr = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try { fs.renameSync(tmp, target); return; } catch (err) {
-      lastErr = err;
-      if (!['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) throw err;
+function retryWhileBusy<T>(fn: () => T): T {
+  for (let attempt = 0; ; attempt++) {
+    try { return fn(); } catch (err) {
+      if (attempt >= 4 || !BUSY_CODES.includes(err.code)) throw err;
       sleepSync(20 * (attempt + 1));
     }
   }
-  try {
-    fs.copyFileSync(tmp, target);
-    fs.unlinkSync(tmp);
-  } catch (_) {
-    throw lastErr;
+}
+
+function replaceFile(tmp: string, target: string) {
+  try { retryWhileBusy(() => fs.renameSync(tmp, target)); } catch (err) {
+    if (!BUSY_CODES.includes(err.code)) throw err;
+    try {
+      fs.copyFileSync(tmp, target);
+      fs.unlinkSync(tmp);
+    } catch (_) {
+      throw err;
+    }
   }
+}
+
+function writeFileAtomic(file: string, text: string) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, text, 'utf8');
+  replaceFile(tmp, file);
+}
+
+function readWithRetry(file: string): { text: string | null; error: Error | null } {
+  let error: Error | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try { return { text: fs.readFileSync(file, 'utf8'), error: null }; } catch (err) {
+      if (err.code === 'ENOENT') return { text: null, error: null };
+      error = err;
+      sleepSync(50 * (attempt + 1));
+    }
+  }
+  return { text: null, error };
+}
+
+function parseLine(line: string): unknown {
+  try { return JSON.parse(line); } catch (_) { return null; }
+}
+
+function parseJournal(text: string) {
+  const lines = text.split('\n').filter((l) => l.trim());
+  const header = lines.length ? parseLine(lines[0]) : null;
+  const journalId = isRecord(header) && typeof header.journalId === 'string' ? header.journalId : null;
+  return { header: isRecord(header) ? header : null, journalId, records: lines.slice(1).map(parseLine) };
+}
+
+function baseMatches(file: string, header: Record<string, unknown>) {
+  try {
+    const st = fs.statSync(file);
+    return st.size === header.baseSize && st.mtimeMs === header.baseMtime;
+  } catch (_) { return false; }
+}
+
+function readLibrary(dir: string): Record<string, unknown> | null {
+  const file = path.join(dir, 'notes.json');
+  const base = readWithRetry(file);
+  const raw = base.text === null ? null : parseLine(base.text);
+  if (!isRecord(raw)) return null;
+  const read = readWithRetry(path.join(dir, 'notes.journal'));
+  if (read.text === null) return raw;
+  const journal = parseJournal(read.text);
+  if (!journal.header || !journal.journalId || raw.journalId !== journal.journalId) return raw;
+  return replayJournal(raw, journal.records, !baseMatches(file, journal.header));
+}
+
+function restoreFields<T extends object>(target: T, copy: T) {
+  for (const k of Object.keys(target)) if (!Object.hasOwn(copy, k)) Reflect.deleteProperty(target, k);
+  Object.assign(target, copy);
+}
+
+const copyNote = (n: Note): Note => Object.assign({}, n, { tags: n.tags.slice() });
+const copySettings = (s: Settings): Settings => Object.assign({}, s, { expandedFolders: s.expandedFolders.slice(), treeExpanded: s.treeExpanded.slice() });
+const touchesContent = (c: Change) => !!((c.notes && c.notes.length) || (c.dropped && c.dropped.length) || c.folders);
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+function replayJournal(doc: Record<string, unknown>, lines: unknown[], baseWasEdited: boolean): Record<string, unknown> {
+  const records = lines.flatMap((line) => (isRecord(line) && Array.isArray(line.change) ? line.change : []));
+  const out = Object.assign({}, doc);
+  const notes: unknown[] = Array.isArray(doc.notes) ? doc.notes.slice() : [];
+  const idOf = (n: unknown) => (isObjectLike(n) && typeof n.id === 'string' ? n.id : null);
+  const inBase = new Map<string, number>();
+  notes.forEach((n, i) => { const nid = idOf(n); if (nid !== null && !inBase.has(nid)) inBase.set(nid, i); });
+  const front: unknown[] = [];
+  const inFront = new Map<string, number>();
+  const dropped = new Set<string>();
+  const baseIsNewer = (current: unknown, next: Record<string, unknown>) => baseWasEdited && isObjectLike(current) && isFiniteNumber(current.updatedAt) && isFiniteNumber(next.updatedAt) && current.updatedAt > next.updatedAt;
+  for (const rec of records) {
+    if (!isRecord(rec)) continue;
+    const note = rec.note;
+    const nid = idOf(note);
+    if (nid !== null && isRecord(note)) {
+      dropped.delete(nid);
+      const i = inBase.get(nid);
+      const j = inFront.get(nid);
+      if (i !== undefined) { if (!baseIsNewer(notes[i], note)) notes[i] = note; }
+      else if (j !== undefined) front[j] = note;
+      else { inFront.set(nid, front.length); front.push(note); }
+    } else if (typeof rec.drop === 'string') dropped.add(rec.drop);
+    else if (Array.isArray(rec.folders)) out.folders = rec.folders;
+    else if (Array.isArray(rec.vaults)) out.vaults = rec.vaults;
+    else if (isRecord(rec.settings)) out.settings = rec.settings;
+  }
+  out.notes = front.reverse().concat(notes).filter((n) => { const nid = idOf(n); return nid === null || !dropped.has(nid); });
+  return out;
+}
+
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]); }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+const skippedDir = (name: string) => VAULT_SKIP_DIRS.has(name) || name.startsWith('.');
+
+function readFoundFiles(found: readonly FoundFile[], known: Map<string, Note>) {
+  return mapLimit(found, SCAN_READERS, async (f): Promise<DiskFile> => {
+    const note = known.get(f.key);
+    if (note) {
+      const mtime = await F.mtimeOfAsync(f.full);
+      if (note.fileMtime === mtime) return Object.assign({ mtime }, f);
+    }
+    try { const r = await F.readTextAsync(f.full); return Object.assign({ mtime: r.mtime, text: r.body }, f); }
+    catch (_) { return Object.assign({ mtime: F.mtimeOf(f.full), text: null }, f); }
+  });
+}
+
+async function readVaultTree(root: string, known: Map<string, Note>): Promise<DiskView | null> {
+  try { fs.readdirSync(root); } catch (_) { return null; }
+  const dirs: DiskDir[] = [];
+  const found: FoundFile[] = [];
+  let seen = 0;
+  const walk = async (dir: string, dirKey: string) => {
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      if (++seen % SCAN_YIELD_EVERY === 0) await yieldToLoop();
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (skippedDir(e.name)) continue;
+        const key = F.pathKey(full);
+        dirs.push({ full, key, name: e.name, parentKey: dirKey });
+        await walk(full, key);
+      } else if (e.isFile() && VAULT_EXT.has(F.extOf(e.name))) {
+        found.push({ full, key: F.pathKey(full), name: e.name, dirKey });
+      }
+    }
+  };
+  await walk(root, F.pathKey(root));
+  return { dirs, files: await readFoundFiles(found, known), changed: null };
+}
+
+async function readVaultPaths(root: string, paths: readonly string[], known: Map<string, Note>, folderKeys: ReadonlyMap<string, Folder>): Promise<DiskView | null> {
+  const rootKey = F.pathKey(root);
+  const found: FoundFile[] = [];
+  const changed = new Set<string>();
+  for (const p of new Set(paths)) {
+    const full = path.resolve(root, p);
+    const key = F.pathKey(full);
+    if (key === rootKey) return null;
+    if (!key.startsWith(rootKey + '\\')) continue;
+    const parts = path.relative(root, full).split(/[\\/]/);
+    if (parts.slice(0, -1).some(skippedDir)) continue;
+    const st = await fs.promises.lstat(full).catch(() => null);
+    if (!st) {
+      if (folderKeys.has(key)) return null;
+      changed.add(key);
+      continue;
+    }
+    if (st.isDirectory()) {
+      if (skippedDir(parts[parts.length - 1]) || folderKeys.has(key)) continue;
+      return null;
+    }
+    if (!st.isFile() || !VAULT_EXT.has(F.extOf(full))) continue;
+    const dirKey = F.pathKey(path.dirname(full));
+    if (!folderKeys.has(dirKey)) return null;
+    changed.add(key);
+    found.push({ full, key, name: path.basename(full), dirKey });
+  }
+  return { dirs: [], files: await readFoundFiles(found, known), changed };
+}
+
+function readVaultText(full: string, mtime: number | null) {
+  try { const r = F.readText(full); return { mtime: r.mtime, text: r.body }; } catch (_) { return { mtime, text: null }; }
 }
 
 function clampFontSize(n: number) {
@@ -273,35 +465,55 @@ function isFileNote(note: Note | null): note is FileNote {
 class Store {
   dir: string;
   file: string;
+  journalFile: string;
   backupDir: string;
   now: () => number;
   notes: Note[];
   plain: Map<string, string>;
   keys: Map<string, Buffer>;
+  pathKeys: WeakMap<Note, { filePath: string; key: string }>;
   folders: Folder[];
   vaults: Vault[];
   settings: Settings;
   lastBackupAt: number;
+  lastCompactedAt: number;
   loadError: Error | null;
   onFileText: ((id: string) => void) | null;
+  onContentChange: (() => void) | null;
   saveBlocked: boolean | undefined;
   recoveredFromBackup: boolean | undefined;
   backupSuspended: boolean | undefined;
+  journalId: string | null;
+  journalReady: boolean;
+  journalBytes: number;
+  journalRecords: number;
+  baseBytes: number;
+  revision: number;
   constructor(dir: string, opts?: { now?: () => number }) {
     opts = opts || {};
     this.dir = dir;
     this.file = path.join(dir, 'notes.json');
+    this.journalFile = path.join(dir, 'notes.journal');
     this.backupDir = path.join(dir, 'backups');
     this.now = opts.now || Date.now;
     this.notes = [];
     this.plain = new Map();
     this.keys = new Map();
+    this.pathKeys = new WeakMap();
     this.folders = [];
     this.vaults = [];
     this.settings = Object.assign({}, DEFAULT_SETTINGS);
     this.lastBackupAt = 0;
+    this.lastCompactedAt = 0;
     this.loadError = null;
     this.onFileText = null;
+    this.onContentChange = null;
+    this.journalId = null;
+    this.journalReady = false;
+    this.journalBytes = 0;
+    this.journalRecords = 0;
+    this.baseBytes = 0;
+    this.revision = 0;
   }
 
   load() {
@@ -311,30 +523,32 @@ class Store {
     this.recoveredFromBackup = false;
     this.backupSuspended = false;
     this.loadError = null;
-    if (fs.existsSync(this.file)) {
-      let text: string | null = null;
-      let ioError = null;
-      for (let attempt = 0; attempt < 6 && text === null; attempt++) {
-        try { text = fs.readFileSync(this.file, 'utf8'); ioError = null; } catch (err) { ioError = err; sleepSync(50 * (attempt + 1)); }
-      }
-      if (text === null) {
-        this.loadError = ioError;
-        this.saveBlocked = true;
-      } else {
-        try {
-          raw = JSON.parse(text);
-        } catch (err) {
-          this.loadError = err;
-          const quarantined = this.file + '.corrupt-' + this.now();
-          try { fs.renameSync(this.file, quarantined); } catch (_) {
-            this.backupSuspended = true;
-          }
-          raw = this._loadNewestBackup();
-          this.recoveredFromBackup = true;
-          if (!raw && this.backupSuspended) this.saveBlocked = true;
+    this.journalId = null;
+    this.journalReady = false;
+    this.journalBytes = 0;
+    this.journalRecords = 0;
+    this.baseBytes = 0;
+    this.lastCompactedAt = 0;
+    const base = readWithRetry(this.file);
+    if (base.error) {
+      this.loadError = base.error;
+      this.saveBlocked = true;
+    } else if (base.text !== null) {
+      this.baseBytes = base.text.length;
+      try {
+        raw = JSON.parse(base.text);
+      } catch (err) {
+        this.loadError = err;
+        const quarantined = this.file + '.corrupt-' + this.now();
+        try { fs.renameSync(this.file, quarantined); } catch (_) {
+          this.backupSuspended = true;
         }
+        raw = this._loadNewestBackup();
+        this.recoveredFromBackup = true;
+        if (!raw && this.backupSuspended) this.saveBlocked = true;
       }
     }
+    if (!this.saveBlocked) raw = this._replayJournal(raw);
     const now = this.now();
     const doc: Record<string, unknown> = isObjectLike(raw) ? raw : {};
     const notes: unknown[] = Array.isArray(doc.notes) ? doc.notes : [];
@@ -380,32 +594,144 @@ class Store {
     try {
       const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort().reverse();
       for (const f of files) {
-        try { return JSON.parse(fs.readFileSync(path.join(this.backupDir, f), 'utf8')); } catch (_) {  }
+        const doc = parseLine(fs.readFileSync(path.join(this.backupDir, f), 'utf8'));
+        if (isRecord(doc)) return doc;
       }
     } catch (_) {  }
     return null;
   }
 
-  serialize() {
-    return { schemaVersion: SCHEMA_VERSION, savedAt: this.now(), settings: this.settings, vaults: this.vaults, folders: this.folders, notes: this.notes };
+  _replayJournal(raw: unknown): unknown {
+    const read = readWithRetry(this.journalFile);
+    if (read.error) {
+      this.loadError = read.error;
+      this.saveBlocked = true;
+      return raw;
+    }
+    if (read.text === null) return raw;
+    const journal = parseJournal(read.text);
+    if (!journal.header || !journal.journalId || !isRecord(raw) || raw.journalId !== journal.journalId) {
+      if (!journal.records.length) return raw;
+      try { fs.renameSync(this.journalFile, this.journalFile + '.stale-' + this.now()); } catch (_) {  }
+      if (!this.recoveredFromBackup || !isRecord(raw) || !journal.header || !isFiniteNumber(journal.header.baseMtime) || !isFiniteNumber(raw.savedAt) || journal.header.baseMtime <= raw.savedAt) return raw;
+      this.journalRecords = journal.records.length;
+      return replayJournal(raw, journal.records, true);
+    }
+    const baseWasEdited = !baseMatches(this.file, journal.header);
+    this.journalId = journal.journalId;
+    this.journalReady = !baseWasEdited;
+    this.journalBytes = Buffer.byteLength(read.text);
+    this.journalRecords = journal.records.length;
+    return replayJournal(raw, journal.records, baseWasEdited);
   }
 
-  save() {
+  serialize(journalId?: string | null) {
+    return { schemaVersion: SCHEMA_VERSION, savedAt: this.now(), journalId: journalId === undefined ? this.journalId : journalId, settings: this.settings, vaults: this.vaults, folders: this.folders, notes: this.notes };
+  }
+
+  _assertCanSave() {
     if (this.saveBlocked) {
       throw Object.assign(new Error('Your notes file could not be read when Notes started (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once the file is free.'), { code: 'ESAVEBLOCKED' });
     }
-    fs.mkdirSync(this.dir, { recursive: true });
-    this._maybeBackup();
-    const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.serialize(), null, 2), 'utf8');
-    replaceFile(tmp, this.file);
-    this.backupSuspended = false;
+  }
+
+  save(change?: Change) {
+    this._assertCanSave();
+    this.revision++;
+    if (change) {
+      const budget = this.journalReady && !this._compactionDue() ? Math.max(JOURNAL_MIN_BYTES, this.baseBytes * JOURNAL_SHARE_OF_BASE) - this.journalBytes : 0;
+      const records = this._records(change, budget);
+      if (records && !records.bytes) return this;
+      if (records) {
+        this._append(records.text, records.bytes);
+        return this;
+      }
+    }
+    this._compact();
     return this;
+  }
+
+  flush() {
+    if (this.journalRecords > 0) this.save();
+    return this;
+  }
+
+  _compactionDue() {
+    if (!fs.existsSync(this.file) || !fs.existsSync(this.journalFile)) return true;
+    return this.now() - this.lastCompactedAt >= BACKUP_MIN_INTERVAL_MS;
+  }
+
+  _compact() {
+    fs.mkdirSync(this.dir, { recursive: true });
+    const overwritesUnmovedCorruptFile = !!this.backupSuspended;
+    const journalId = crypto.randomUUID();
+    const text = JSON.stringify(this.serialize(journalId), null, 2);
+    writeFileAtomic(this.file, text);
+    this.journalId = journalId;
+    this.baseBytes = text.length;
+    this.lastCompactedAt = this.now();
+    this.backupSuspended = false;
+    if (!overwritesUnmovedCorruptFile) this._maybeBackup();
+    this.journalRecords = 0;
+    try {
+      const st = fs.statSync(this.file);
+      const header = JSON.stringify({ journalId, baseSize: st.size, baseMtime: st.mtimeMs });
+      writeFileAtomic(this.journalFile, header);
+      this.journalBytes = Buffer.byteLength(header);
+      this.journalReady = true;
+    } catch (_) {
+      this.journalReady = false;
+    }
+    this._removeStaleJournals(STALE_JOURNALS_KEPT);
+  }
+
+  _removeStaleJournals(keep: number) {
+    const prefix = path.basename(this.journalFile) + '.stale-';
+    let names: string[] = [];
+    try { names = fs.readdirSync(this.dir).filter((f) => f.startsWith(prefix)); } catch (_) { return; }
+    const now = this.now();
+    const stale = names.map((name) => { const at = Number(name.slice(prefix.length)); return { name, at: Number.isFinite(at) ? at : 0 }; }).sort((a, b) => b.at - a.at);
+    stale.forEach((s, i) => {
+      if (i < keep && now - s.at <= STALE_JOURNAL_MAX_AGE_MS) return;
+      try { fs.unlinkSync(path.join(this.dir, s.name)); } catch (_) {  }
+    });
+  }
+
+  _append(records: string, bytes: number) {
+    const before = this.journalBytes;
+    try { retryWhileBusy(() => fs.appendFileSync(this.journalFile, records, 'utf8')); } catch (err) {
+      try { fs.truncateSync(this.journalFile, before); } catch (_) { this.journalReady = false; }
+      throw err;
+    }
+    this.journalBytes = before + bytes;
+    this.journalRecords++;
+  }
+
+  _records(change: Change, budget: number): { text: string; bytes: number } | null {
+    const touched = Array.from(new Set(change.notes || []));
+    const index = touched.length > 1 ? new Map(this.notes.map((n, i) => [n, i])) : null;
+    const placed = touched.map((n) => ({ n, at: index ? (index.get(n) ?? -1) : this.notes.indexOf(n) }));
+    const records: unknown[] = placed.filter((p) => p.at === -1).map((p) => ({ drop: p.n.id }));
+    for (const p of placed.filter((x) => x.at !== -1).sort((a, b) => b.at - a.at)) records.push({ note: p.n });
+    for (const id of change.dropped || []) records.push({ drop: id });
+    if (change.folders) records.push({ folders: this.folders });
+    if (change.vaults) records.push({ vaults: this.vaults });
+    if (change.settings) records.push({ settings: this.settings });
+    if (!records.length) return { text: '', bytes: 0 };
+    const parts: string[] = [];
+    let bytes = 0;
+    for (const r of records) {
+      const part = JSON.stringify(r);
+      bytes += Buffer.byteLength(part) + 1;
+      if (bytes > budget) return null;
+      parts.push(part);
+    }
+    const text = '\n{"change":[' + parts.join(',') + ']}';
+    return { text, bytes: Buffer.byteLength(text) };
   }
 
   _maybeBackup() {
     const now = this.now();
-    if (this.backupSuspended) return;
     if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
     const stamp = H.fileStamp(now);
@@ -450,14 +776,7 @@ class Store {
     const now = this.now();
     const note = noteFrom(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
     if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
-    this.notes.unshift(note);
-    try {
-      this.save();
-    } catch (err) {
-      this.notes = this.notes.filter((n) => n !== note);
-      throw err;
-    }
-    return note;
+    return this._change({ notes: [note] }, () => { this.notes.unshift(note); return note; });
   }
 
   update(id: string, patch?: NoteUpdate) {
@@ -542,7 +861,7 @@ class Store {
     if (changed) {
       note.updatedAt = this.now();
       try {
-        this.save();
+        this.save({ notes: [note] });
       } catch (err) {
         const keep = {};
         if (fileWritten) Object.assign(keep, { body: note.body, fileMtime: note.fileMtime });
@@ -551,6 +870,7 @@ class Store {
         if (plainBefore !== undefined) this.plain.set(id, plainBefore);
         throw err;
       }
+      this._contentChanged();
     }
     return note;
   }
@@ -574,6 +894,7 @@ class Store {
     const body = note.body;
     const { blob, key } = L.lock(body, password);
     this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; });
+    this._removeStaleJournals(0);
     this.plain.set(id, body);
     this.keys.set(id, key);
     return this.publicNote(note);
@@ -617,7 +938,7 @@ class Store {
   markReminded(id: string, at: number) {
     const note = this.get(id);
     if (!note) return null;
-    return this._commit(() => { note.remindedAt = at; return note; });
+    return this._change({ notes: [note] }, () => { note.remindedAt = at; return note; });
   }
 
   setSticky(id: string, sticky: Partial<Sticky> | null) {
@@ -625,7 +946,7 @@ class Store {
     if (!note) return null;
     const next = sticky ? sanitizeSticky(Object.assign({}, note.sticky || {}, sticky)) : null;
     if (JSON.stringify(next) === JSON.stringify(note.sticky || null)) return note;
-    return this._commit(() => { note.sticky = next; return note; });
+    return this._change({ notes: [note] }, () => { note.sticky = next; return note; });
   }
 
   _orderPages(folder: Folder, notes: Note[]) {
@@ -647,7 +968,7 @@ class Store {
     const f = this.getFolder(folderId);
     if (!f) return null;
     if (!!f.book === !!on) return f;
-    return this._commit(() => {
+    return this._change({ folders: true }, () => {
       f.book = !!on;
       if (f.book && !(f.pageOrder || []).length) f.pageOrder = this.bookPages(folderId).map((n) => n.id);
       return f;
@@ -669,7 +990,7 @@ class Store {
       for (let j = i - 1; j >= 0; j--) { const k = next.indexOf(old[j]); if (k !== -1) { at = k + 1; break; } }
       next.splice(at, 0, id);
     });
-    return this._commit(() => { f.pageOrder = next; return f; });
+    return this._change({ folders: true }, () => { f.pageOrder = next; return f; });
   }
 
   related(id: string, limit?: number) {
@@ -699,7 +1020,7 @@ class Store {
     if (!note) return null;
     const next = sanitizeLive(live);
     if (JSON.stringify(next) === JSON.stringify(note.live || null)) return note;
-    return this._commit(() => { note.live = next; return note; });
+    return this._change({ notes: [note] }, () => { note.live = next; return note; });
   }
 
   stickies() {
@@ -745,7 +1066,7 @@ class Store {
     const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
     const originalTrashed = !opts.keepOriginal;
-    return this._commit(() => {
+    return this._change({ notes: pages.concat([note]), folders: true }, () => {
       this.folders.push(folder);
       this.notes.unshift(...pages);
       if (originalTrashed) { note.trashedAt = now; note.sticky = null; }
@@ -762,7 +1083,7 @@ class Store {
     if (pages.some((n) => n.updatedAt !== n.createdAt)) throw new Error('A page was edited after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
     const orig = originalId != null ? this.get(originalId) : null;
     if (originalId != null && !orig) throw new Error('The original note was deleted, so the split cannot be undone.');
-    return this._commit(() => {
+    return this._change({ notes: orig ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
       this.notes = this.notes.filter((n) => !pages.includes(n));
       if (!this.notes.some((n) => n.folderId === folder.id) && !this.folders.some((f) => f.parentId === folder.id)) this.folders = this.folders.filter((f) => f !== folder);
       if (orig && orig.trashedAt) orig.trashedAt = null;
@@ -775,24 +1096,39 @@ class Store {
     return found || this.createFolder({ name, parentId: parentId || null });
   }
 
-  _commit<T>(mutate: () => T): T {
-    const snapshot = {
-      notes: this.notes.map((n) => Object.assign({}, n, { tags: n.tags.slice() })),
-      folders: this.folders.map((f) => Object.assign({}, f)),
-      vaults: this.vaults.map((v) => Object.assign({}, v)),
-      settings: Object.assign({}, this.settings, { expandedFolders: this.settings.expandedFolders.slice(), treeExpanded: this.settings.treeExpanded.slice() }),
-    };
+  _commit<T>(mutate: () => T, change?: Change): T {
+    return this._guarded({ notes: this.notes, folders: true, vaults: true, settings: true }, mutate, change);
+  }
+
+  _change<T>(change: Change, mutate: () => T): T {
+    return this._guarded({ notes: change.notes || [], folders: !!change.folders, vaults: !!change.vaults, settings: !!change.settings }, mutate, change);
+  }
+
+  _guarded<T>(scope: RollbackScope, mutate: (remember: (n: Note) => void) => T, change: Change | undefined): T {
+    const notes = this.notes.slice();
+    const noteCopies = new Map<Note, Note>(scope.notes.map((n) => [n, copyNote(n)]));
+    const remember = (n: Note) => { if (!noteCopies.has(n)) noteCopies.set(n, copyNote(n)); };
+    const folders = scope.folders ? this.folders.map((f) => [f, Object.assign({}, f)] as const) : null;
+    const vaults = scope.vaults ? this.vaults.map((v) => [v, Object.assign({}, v)] as const) : null;
+    const settings = scope.settings ? copySettings(this.settings) : null;
+    let result: T;
     try {
-      const result = mutate();
-      this.save();
-      return result;
+      result = mutate(remember);
+      this.save(change);
     } catch (err) {
-      this.notes = snapshot.notes;
-      this.folders = snapshot.folders;
-      this.vaults = snapshot.vaults;
-      this.settings = snapshot.settings;
+      this.notes = notes;
+      for (const [n, copy] of noteCopies) restoreFields(n, copy);
+      if (folders) { this.folders = folders.map(([f]) => f); for (const [f, copy] of folders) restoreFields(f, copy); }
+      if (vaults) { this.vaults = vaults.map(([v]) => v); for (const [v, copy] of vaults) restoreFields(v, copy); }
+      if (settings) this.settings = settings;
       throw err;
     }
+    if (!change || touchesContent(change)) this._contentChanged();
+    return result;
+  }
+
+  _contentChanged() {
+    if (this.onContentChange) this.onContentChange();
   }
 
   _keyOf(id: string): Buffer {
@@ -823,7 +1159,7 @@ class Store {
     const inside = (a: string, b: string) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
     const overlap = this.vaults.find((v) => inside(vault.path, v.path) || inside(v.path, vault.path));
     if (overlap) throw Object.assign(new Error('That folder overlaps the vault "' + overlap.name + '"; one vault cannot sit inside another.'), { code: 'EOVERLAP' });
-    return this._commit(() => {
+    return this._change({ vaults: true, folders: true }, () => {
       this.vaults.push(vault);
       this.folders.push(folderFrom({ name: vault.name, vaultId: vault.id, dirPath: vault.path }, this.now()));
       return vault;
@@ -833,7 +1169,7 @@ class Store {
   updateVault(id: string, patch?: Partial<Vault>) {
     const v = this.getVault(id);
     if (!v) return null;
-    return this._commit(() => {
+    return this._change({ vaults: true, folders: true }, () => {
       const next = sanitizeVault(Object.assign({}, v, patch || {}, { id: v.id, path: v.path, createdAt: v.createdAt }), this.now());
       Object.assign(v, next);
       const root = this.vaultRootFolder(id);
@@ -855,73 +1191,144 @@ class Store {
     });
   }
 
-  async scanVault(id: string, opts?: { allowRemovals?: boolean }) {
+  async scanVault(id: string, opts?: { allowRemovals?: boolean; paths?: readonly string[] }) {
     opts = opts || {};
     const allowRemovals = opts.allowRemovals !== false;
     const vault = this.getVault(id);
     if (!vault) return null;
-    let rootEntries: fs.Dirent<string>[] | null = null;
-    try { rootEntries = fs.readdirSync(vault.path, { withFileTypes: true }); } catch (_) { return { added: 0, updated: 0, removed: 0, unavailable: true }; }
-    const root = this.vaultRootFolder(id) || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: this.now(), vaultId: id, dirPath: vault.path, book: false, pageOrder: [] }; this.folders.push(f); return f; });
+    const known = this._notesByPathKey();
+    const revision = this.revision;
+    let disk: DiskView | null = null;
+    if (opts.paths && opts.paths.length <= SCAN_TARGETED_MAX && this.vaultRootFolder(id)) {
+      const root = await fs.promises.stat(vault.path).catch(() => null);
+      if (!root || !root.isDirectory()) return { added: 0, updated: 0, removed: 0, unavailable: true };
+      disk = await readVaultPaths(vault.path, opts.paths, known, this._vaultFoldersByKey(id));
+    }
+    if (!disk) disk = await readVaultTree(vault.path, known);
+    if (!disk) return { added: 0, updated: 0, removed: 0, unavailable: true };
+    const current = this.getVault(id);
+    if (!current) return null;
+    const view = disk;
+    const change: ScanChange = { notes: [], dropped: [], folders: false };
+    return this._guarded({ notes: [], folders: true, vaults: false, settings: false }, (remember) => this._applyScan(current, view, revision, allowRemovals, change, remember), change);
+  }
+
+  _vaultFoldersByKey(id: string) {
+    const byKey = new Map<string, Folder>();
+    for (const f of this.folders) if (f.vaultId === id && f.dirPath) { const key = F.pathKey(f.dirPath); if (!byKey.has(key)) byKey.set(key, f); }
+    return byKey;
+  }
+
+  _applyScan(vault: Vault, disk: DiskView, readAtRevision: number, allowRemovals: boolean, change: ScanChange, remember: (n: Note) => void): VaultScan {
+    const id = vault.id;
+    const now = this.now();
+    const byKey = this._notesByPathKey();
+    const candidates = disk.changed ? Array.from(disk.changed, (k) => byKey.get(k)).filter((n): n is Note => !!n) : this.notes;
+    const folderByKey = this._vaultFoldersByKey(id);
+    let root = this.vaultRootFolder(id);
+    if (!root) {
+      root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
+      this.folders.push(root);
+      change.folders = true;
+    }
+    folderByKey.set(F.pathKey(vault.path), root);
     const seenFolders = new Set([root.id]);
+    for (const d of disk.dirs) {
+      const parent = folderByKey.get(d.parentKey);
+      if (!parent) continue;
+      let sub = folderByKey.get(d.key);
+      if (!sub) {
+        if (this.revision !== readAtRevision && !fs.existsSync(d.full)) continue;
+        sub = { id: crypto.randomUUID(), name: d.name, parentId: parent.id, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
+        this.folders.push(sub);
+        folderByKey.set(d.key, sub);
+        change.folders = true;
+      } else if (sub.parentId !== parent.id || sub.name !== d.name) {
+        sub.parentId = parent.id;
+        sub.name = d.name;
+        change.folders = true;
+      }
+      seenFolders.add(sub.id);
+    }
+    const onDisk = new Set(disk.files.map((f) => f.key));
+    const missing = (n: Note) => n.vaultId === id && !n.trashedAt && !onDisk.has(this._pathKeyOf(n) ?? '') && !(n.filePath && fs.existsSync(n.filePath));
     const seenNotes = new Set<string>();
+    const touched = new Set<Note>();
+    const fresh: Note[] = [];
     let added = 0, updated = 0, removed = 0;
-    const walk = async (dir: string, folderId: string) => {
-      let entries: fs.Dirent[] = [];
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
-      for (const e of entries) {
-        const full = path.join(dir, e.name);
-        if (e.isDirectory()) {
-          if (VAULT_SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
-          const sub = this.folders.find((f) => f.vaultId === id && f.dirPath && F.pathKey(f.dirPath) === F.pathKey(full))
-            || this._commit(() => { const f: Folder = { id: crypto.randomUUID(), name: e.name, parentId: folderId, createdAt: this.now(), vaultId: id, dirPath: full, book: false, pageOrder: [] }; this.folders.push(f); return f; });
-          if (sub.parentId !== folderId || sub.name !== e.name) this._commit(() => { sub.parentId = folderId; sub.name = e.name; });
-          seenFolders.add(sub.id);
-          await walk(full, sub.id);
-        } else if (e.isFile()) {
-          if (!VAULT_EXT.has(F.extOf(e.name))) continue;
-          let note = this.findByPath(full);
-          if (!note) {
-            let text = null;
-            try { text = F.readText(full).body; } catch (_) { continue; }
-            const orphan = this.notes.find((n) => n.vaultId === id && !n.trashedAt && n.filePath && !seenNotes.has(n.id) && n.body === text && !fs.existsSync(n.filePath));
-            if (orphan) {
-              this._commit(() => { orphan.filePath = full; orphan.title = stem(e.name); orphan.folderId = folderId; orphan.fileMtime = F.mtimeOf(full); });
-              note = orphan; updated++;
-            } else {
-              try {
-                const linked = await this.linkFile(full, { folderId, title: stem(e.name) });
-                this._commit(() => { linked.vaultId = id; });
-                note = linked;
-                added++;
-              } catch (_) { continue; }
-            }
-          } else {
-            let r;
-            try { r = await this.refreshFileNote(note.id); } catch (_) { seenNotes.add(note.id); continue; }
-            if (r.changed) updated++;
-            const known = note;
-            if (known.folderId !== folderId || known.vaultId !== id || known.trashedAt) {
-              this._commit(() => { known.folderId = folderId; known.vaultId = id; known.trashedAt = null; });
-            }
-          }
-          seenNotes.add(note.id);
+    let orphans: Map<string, Note[]> | null = null;
+    const orphanFor = (text: string) => {
+      if (!orphans) {
+        orphans = new Map();
+        for (const n of candidates) {
+          if (!n.filePath || !missing(n)) continue;
+          const same = orphans.get(n.body);
+          if (same) same.push(n); else orphans.set(n.body, [n]);
         }
       }
+      const same = orphans.get(text);
+      return same ? same.shift() : undefined;
     };
-    await walk(vault.path, root.id);
-    const gone = allowRemovals ? this.notes.filter((n) => n.vaultId === id && !n.trashedAt && !seenNotes.has(n.id) && !(n.filePath && fs.existsSync(n.filePath))) : [];
-    const goneFolders = allowRemovals ? this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))) : [];
-    if (gone.length || goneFolders.length) {
-      this._commit(() => {
-        const goneIds = new Set(gone.map((n) => n.id));
-        const goneFolderIds = new Set(goneFolders.map((f) => f.id));
-        this.notes = this.notes.filter((n) => !goneIds.has(n.id));
-        this.folders = this.folders.filter((f) => !goneFolderIds.has(f.id));
-        removed = gone.length;
-      });
+    for (const file of disk.files) {
+      const folder = folderByKey.get(file.dirKey);
+      if (!folder) continue;
+      const note = byKey.get(file.key);
+      if (note) {
+        const mtimeNow = note.fileMtime !== file.mtime ? F.mtimeOf(file.full) : note.fileMtime;
+        if (mtimeNow !== note.fileMtime) {
+          const read = note.fileKind !== 'text' ? { text: note.body, mtime: mtimeNow }
+            : file.text !== undefined && mtimeNow === file.mtime ? { text: file.text, mtime: file.mtime }
+            : readVaultText(file.full, mtimeNow);
+          if (read.text === null) { seenNotes.add(note.id); continue; }
+          if (read.text !== note.body || note.fileKind !== 'text') updated++;
+          remember(note);
+          note.body = read.text;
+          note.fileMtime = read.mtime;
+          touched.add(note);
+        }
+        if (note.folderId !== folder.id || note.vaultId !== id || note.trashedAt) {
+          remember(note);
+          note.folderId = folder.id;
+          note.vaultId = id;
+          note.trashedAt = null;
+          touched.add(note);
+        }
+        seenNotes.add(note.id);
+        continue;
+      }
+      if (this.revision !== readAtRevision && !fs.existsSync(file.full)) continue;
+      const read = file.text !== undefined ? { text: file.text, mtime: file.mtime } : readVaultText(file.full, file.mtime);
+      if (read.text === null) continue;
+      const orphan = orphanFor(read.text);
+      if (orphan) {
+        remember(orphan);
+        orphan.filePath = file.full;
+        orphan.title = stem(file.name);
+        orphan.folderId = folder.id;
+        orphan.fileMtime = read.mtime;
+        touched.add(orphan);
+        byKey.set(file.key, orphan);
+        seenNotes.add(orphan.id);
+        updated++;
+        continue;
+      }
+      const created = noteFrom({ id: crypto.randomUUID(), title: stem(file.name), body: read.text, tags: [], folderId: folder.id, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
+      fresh.push(created);
+      byKey.set(file.key, created);
+      seenNotes.add(created.id);
+      added++;
     }
-    return { added, updated, removed, notes: seenNotes.size, folders: seenFolders.size };
+    if (allowRemovals) {
+      const gone = new Set(candidates.filter((n) => !seenNotes.has(n.id) && missing(n)).map((n) => n.id));
+      if (gone.size) { this.notes = this.notes.filter((n) => !gone.has(n.id)); change.dropped = Array.from(gone); removed = gone.size; }
+      if (!disk.changed) {
+        const goneFolders = new Set(this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))).map((f) => f.id));
+        if (goneFolders.size) { this.folders = this.folders.filter((f) => !goneFolders.has(f.id)); change.folders = true; }
+      }
+    }
+    if (fresh.length) this.notes = fresh.slice().reverse().concat(this.notes);
+    change.notes = Array.from(touched).concat(fresh);
+    return disk.changed ? { added, updated, removed } : { added, updated, removed, notes: seenNotes.size, folders: seenFolders.size };
   }
 
   createVaultNote(folderId: string, data?: NoteInput) {
@@ -985,7 +1392,7 @@ class Store {
       note.filePath = next;
     }
     try {
-      return this._commit(() => { note.trashedAt = this.now(); note.sticky = null; return note; });
+      return this._change({ notes: [note] }, () => { note.trashedAt = this.now(); note.sticky = null; return note; });
     } catch (err) {
       const live = this.get(id) || note;
       if (moved) { try { fs.renameSync(moved.to, moved.from); live.filePath = moved.from; delete live.trashedFrom; } catch (_) {  } }
@@ -1009,7 +1416,7 @@ class Store {
       if (folder) note.folderId = folder.id;
       delete note.trashedFrom;
       try {
-        return this._commit(() => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
+        return this._change({ notes: [note] }, () => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
       } catch (err) {
         try { fs.renameSync(next, wasAt); } catch (_) {  }
         const live = this.get(id) || note;
@@ -1017,7 +1424,7 @@ class Store {
         throw err;
       }
     }
-    return this._commit(() => {
+    return this._change({ notes: [note] }, () => {
       note.trashedAt = null;
       if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
       note.updatedAt = this.now();
@@ -1035,7 +1442,9 @@ class Store {
     this.relock(id);
     const note = this.notes[idx];
     if (this._inVaultTrash(note)) fs.rmSync(note.filePath);
-    return this._commit(() => { this.notes.splice(idx, 1); return true; });
+    const destroyed = this._commit(() => { this.notes.splice(idx, 1); return true; });
+    this._removeStaleJournals(0);
+    return destroyed;
   }
 
   emptyTrash() {
@@ -1043,7 +1452,9 @@ class Store {
     if (!this.notes.some((n) => n.trashedAt)) return 0;
     for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) {  } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
-    return this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
+    const emptied = this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
+    this._removeStaleJournals(0);
+    return emptied;
   }
 
   tags() {
@@ -1067,7 +1478,25 @@ class Store {
 
   findByPath(filePath: string) {
     const key = F.pathKey(filePath);
-    return this.notes.find((n) => n.filePath && F.pathKey(n.filePath) === key) || null;
+    return this.notes.find((n) => n.filePath && this._pathKeyOf(n) === key) || null;
+  }
+
+  _pathKeyOf(n: Note) {
+    if (!n.filePath) return null;
+    const cached = this.pathKeys.get(n);
+    if (cached && cached.filePath === n.filePath) return cached.key;
+    const key = F.pathKey(n.filePath);
+    this.pathKeys.set(n, { filePath: n.filePath, key });
+    return key;
+  }
+
+  _notesByPathKey() {
+    const byKey = new Map<string, Note>();
+    for (const n of this.notes) {
+      const key = this._pathKeyOf(n);
+      if (key !== null && !byKey.has(key)) byKey.set(key, n);
+    }
+    return byKey;
   }
 
   async linkFile(filePath: string, opts?: LinkOptions) {
@@ -1108,7 +1537,7 @@ class Store {
     const note = this.get(id);
     const body = read.body;
     if (!note || note.filePath !== before.filePath || note.fileMtime !== before.fileMtime || typeof body !== 'string' || body === note.body) return;
-    this._commit(() => { note.body = body; });
+    this._change({ notes: [note] }, () => { note.body = body; });
     if (this.onFileText) this.onFileText(id);
   }
 
@@ -1116,7 +1545,7 @@ class Store {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
     const mtime = F.mtimeOf(note.filePath);
-    this._commit(() => { note.fileMtime = mtime; });
+    if (mtime !== note.fileMtime) this._change({ notes: [note] }, () => { note.fileMtime = mtime; });
     return mtime;
   }
 
@@ -1135,7 +1564,7 @@ class Store {
       if (typeof read.body === 'string') body = read.body;
     }
     const changed = rekind || body !== note.body || kind !== 'text';
-    this._commit(() => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
+    this._change({ notes: [note] }, () => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
     return { changed, missing: false };
   }
 
@@ -1143,7 +1572,7 @@ class Store {
     const note = this.get(id);
     if (!note || !note.filePath) return null;
     const oldName = path.basename(note.filePath);
-    this._commit(() => {
+    this._change({ notes: [note] }, () => {
       if (note.title === oldName) note.title = path.basename(newPath);
       note.filePath = newPath;
       note.fileKind = F.kindOf(newPath);
@@ -1238,14 +1667,7 @@ class Store {
       folder.dirPath = path.join(parent.dirPath, dirName);
       fs.mkdirSync(folder.dirPath, { recursive: true });
     }
-    this.folders.push(folder);
-    try {
-      this.save();
-    } catch (err) {
-      this.folders = this.folders.filter((f) => f !== folder);
-      throw err;
-    }
-    return folder;
+    return this._change({ folders: true }, () => { this.folders.push(folder); return folder; });
   }
 
   renameFolder(id: string, name: string) {
@@ -1253,6 +1675,8 @@ class Store {
     if (!f) return null;
     let next = cleanFolderName(name);
     if (next === f.name) return f;
+    let moved: Note[] = [];
+    let vaultRenamed = false;
     if (f.vaultId && f.dirPath && f.parentId) {
       const parentDir = path.dirname(f.dirPath);
       assertVaultDirName(next);
@@ -1260,13 +1684,13 @@ class Store {
       next = wanted.toLowerCase() === path.basename(f.dirPath).toLowerCase() ? wanted : uniqueName(parentDir, wanted, '');
       const newDir = path.join(parentDir, next);
       fs.renameSync(f.dirPath, newDir);
-      this._retargetVaultPaths(f.dirPath, newDir);
+      moved = this._retargetVaultPaths(f.dirPath, newDir);
       f.dirPath = newDir;
     } else if (f.vaultId && !f.parentId) {
       const v = this.getVault(f.vaultId);
-      if (v) v.name = next;
+      if (v) { v.name = next; vaultRenamed = true; }
     }
-    this._commit(() => { f.name = next; });
+    this._change({ notes: moved, folders: true, vaults: vaultRenamed }, () => { f.name = next; });
     return f;
   }
 
@@ -1274,11 +1698,15 @@ class Store {
     const oldKey = F.pathKey(oldDir);
     const under = (p: string | null | undefined): p is string => !!p && (F.pathKey(p) === oldKey || F.pathKey(p).startsWith(oldKey + '\\'));
     const swap = (p: string) => newDir + path.resolve(p).slice(path.resolve(oldDir).length);
+    const moved: Note[] = [];
     for (const n of this.notes) {
-      if (under(n.filePath)) n.filePath = swap(n.filePath);
-      if (under(n.trashedFrom)) n.trashedFrom = swap(n.trashedFrom);
+      let changed = false;
+      if (under(n.filePath)) { n.filePath = swap(n.filePath); changed = true; }
+      if (under(n.trashedFrom)) { n.trashedFrom = swap(n.trashedFrom); changed = true; }
+      if (changed) moved.push(n);
     }
     for (const d of this.folders) if (d.dirPath && under(d.dirPath) && F.pathKey(d.dirPath) !== oldKey) d.dirPath = swap(d.dirPath);
+    return moved;
   }
 
   moveFolder(id: string, parentId: string | null) {
@@ -1291,19 +1719,20 @@ class Store {
       if (this.descendantIds(id).has(parentId)) return { error: 'A folder cannot be moved into one of its own subfolders.' };
     }
     if ((f.parentId || null) === parentId) return { folder: f };
+    let moved: Note[] = [];
     if (f.vaultId) {
       const target = parentId ? this.getFolder(parentId) : null;
       if (!f.parentId) return { error: 'A vault root stays at the top level. Remove the vault in Settings instead.' };
       if (!target || target.vaultId !== f.vaultId || !target.dirPath || !f.dirPath) return { error: 'A vault folder can only move within its vault.' };
       const newDir = path.join(target.dirPath, uniqueName(target.dirPath, path.basename(f.dirPath), ''));
       fs.renameSync(f.dirPath, newDir);
-      this._retargetVaultPaths(f.dirPath, newDir);
+      moved = this._retargetVaultPaths(f.dirPath, newDir);
       f.dirPath = newDir;
       f.name = path.basename(newDir);
     } else if (parentId && this.getFolder(parentId)?.vaultId) {
       return { error: 'Plain folders cannot move into a vault. Create the folder inside the vault instead.' };
     }
-    this._commit(() => { f.parentId = parentId; });
+    this._change({ notes: moved, folders: true }, () => { f.parentId = parentId; });
     return { folder: f };
   }
 
@@ -1314,13 +1743,14 @@ class Store {
     if (f.vaultId && !parent) return { error: 'Remove a vault in Settings; its files stay on disk.' };
     if (f.vaultId && f.dirPath) {
       const parentDir = path.dirname(f.dirPath);
+      const byKey = this._notesByPathKey();
       for (const e of fs.readdirSync(f.dirPath, { withFileTypes: true })) {
         const from = path.join(f.dirPath, e.name);
         const ext = e.isDirectory() ? '' : path.extname(e.name);
         const to = path.join(parentDir, uniqueName(parentDir, e.isDirectory() ? e.name : stem(e.name), ext));
         fs.renameSync(from, to);
         if (e.isDirectory()) this._retargetVaultPaths(from, to);
-        else { const n = this.findByPath(from); if (n) n.filePath = to; }
+        else { const n = byKey.get(F.pathKey(from)); if (n) n.filePath = to; }
       }
       const dirKey = F.pathKey(f.dirPath);
       for (const n of this.notes) if (n.trashedFrom && F.pathKey(path.dirname(n.trashedFrom)) === dirKey) n.trashedFrom = path.join(parentDir, path.basename(n.trashedFrom));
@@ -1344,7 +1774,7 @@ class Store {
   setSettings(patch?: SettingsPatch) {
     const previous = this.settings;
     this.settings = sanitizeSettings(Object.assign({}, this.settings, patch || {}));
-    try { this.save(); } catch (err) { this.settings = previous; throw err; }
+    try { this.save({ settings: true }); } catch (err) { this.settings = previous; throw err; }
     return this.getSettings();
   }
 
@@ -1367,4 +1797,4 @@ class Store {
   }
 }
 
-export { STICKY_COLORS, sanitizeSticky, Store, isFileNote, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
+export { STICKY_COLORS, sanitizeSticky, Store, readLibrary, isFileNote, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };

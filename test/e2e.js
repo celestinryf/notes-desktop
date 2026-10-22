@@ -11,6 +11,7 @@ const ELECTRON = require('electron');
 const HOTKEY = 'Control+Alt+Shift+F9';
 const SENDKEYS_HOTKEY = '^%+{F9}';
 const { tmpDir } = require('./helpers/tmp');
+const { readLibrary } = require('../src/store.mts');
 const dataDir = tmpDir('notes-e2e-');
 const shotDir = process.env.NOTES_E2E_SHOTS || dataDir;
 
@@ -42,7 +43,6 @@ async function waitFor(label, predicate, timeoutMs) {
 async function main() {
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify({ settings: { hotkey: HOTKEY, openAtLogin: false, theme: 'light', gitEnabled: false }, notes: [] }));
   const runtimeFile = path.join(dataDir, 'runtime.json');
-  const notesFile = path.join(dataDir, 'notes.json');
   const rendererErrors = [];
 
   log('launching app hidden, data dir', dataDir);
@@ -78,7 +78,7 @@ async function main() {
     await page.keyboard.press('Enter');
     await page.keyboard.type('second task');
     const saved = await waitFor('typed note saved to disk', () => {
-      const d = readJson(notesFile);
+      const d = readLibrary(dataDir);
       const n = d && d.notes.find((x) => x.title === 'E2E Title');
       return n && n.body.includes('Body text typed into the hotkey window.') && n.body.includes('- [ ] first task\n- [ ] second task') ? n : null;
     }, 8000);

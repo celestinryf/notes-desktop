@@ -38,13 +38,30 @@ function kindOf(filePath: string): FileKind {
 
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 
-function readText(filePath: string) {
-  const stat = fs.statSync(filePath);
+function assertTextSize(stat: fs.Stats) {
   if (stat.size > MAX_TEXT_BYTES) throw Object.assign(new Error('File is larger than 4 MB'), { code: 'ETOOBIG' });
-  const bytes = fs.readFileSync(filePath);
+}
+
+function decodeText(bytes: Buffer, stat: fs.Stats) {
   let text;
   try { text = UTF8_STRICT.decode(bytes); } catch (_) { throw Object.assign(new Error('Not UTF-8 text'), { code: 'EENCODING' }); }
   return { body: text.replace(/\r\n/g, '\n'), mtime: stat.mtimeMs, size: stat.size, bom: bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf };
+}
+
+function readText(filePath: string) {
+  const stat = fs.statSync(filePath);
+  assertTextSize(stat);
+  return decodeText(fs.readFileSync(filePath), stat);
+}
+
+async function readTextAsync(filePath: string) {
+  const stat = await fs.promises.stat(filePath);
+  assertTextSize(stat);
+  return decodeText(await fs.promises.readFile(filePath), stat);
+}
+
+function mtimeOfAsync(filePath: string) {
+  return fs.promises.stat(filePath).then((s) => s.mtimeMs, () => null);
 }
 
 function hasBom(filePath: string) {
@@ -303,4 +320,4 @@ function safeList(dir: string) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
-export { kindOf, extOf, readText, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };
+export { kindOf, extOf, readText, readTextAsync, mtimeOfAsync, writeTextInPlace, readDocxText, readDocumentBuffer, readOfficeText, readNoteText, TEXTED_KINDS, readImage, odtText, rtfText, mtimeOf, pathKey, discoverAgentFiles, TEXT_EXT };

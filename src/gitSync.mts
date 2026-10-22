@@ -70,7 +70,8 @@ class GitSync {
   busy: Promise<GitResult> | null;
   state: GitState;
   onChange: (state: GitState) => void;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void }) {
+  beforeSnapshot: () => void;
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -82,6 +83,7 @@ class GitSync {
     this.busy = null;
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
+    this.beforeSnapshot = opts.beforeSnapshot || (() => {});
   }
 
   status() {
@@ -144,6 +146,7 @@ class GitSync {
   }
 
   async takeSnapshot() {
+    this.beforeSnapshot();
     let lastErr = null;
     for (let i = 0; i < COPY_RETRIES; i++) {
       try {

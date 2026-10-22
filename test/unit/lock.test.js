@@ -106,7 +106,7 @@ test('locked notes: title edits with an empty body are accepted, vault moves are
   store.restore(n.id);
   store.unlockNote(n.id, 'pw');
   const dup = store.duplicate(n.id);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'notes.json'), 'utf8')).notes.filter((x) => x.title === 'T2 (copy)').length, 1);
+  assert.equal(new Store(dir).load().notes.filter((x) => x.title === 'T2 (copy)').length, 1);
   assert.ok(dup.locked && dup.unlocked);
   store.trash(dup.id);
   store.unlockNote(dup.id, 'pw');
