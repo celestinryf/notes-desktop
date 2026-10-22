@@ -1,6 +1,3 @@
-/* The comments panel beside an open PDF, exposed as window.NotesPdfComments. It lists the PDF's sticky notes, and
-   other marks that carry a comment, and adds, retypes and deletes sticky notes. Those are standard PDF "Text"
-   annotations, which main writes into the file, so other PDF apps show them as comments too. */
 import { requireChild } from './pdf-editor.ts';
 import type { PdfComment, PdfController, PdfPoint } from './pdf-editor.ts';
 
@@ -20,14 +17,10 @@ export const NotesPdfComments = (function () {
     Caret: 'Insertion', FileAttachment: 'Attachment', Sound: 'Sound' };
   const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-  // panel: the .pdf-comments element. ctl: the NotesPdfEditor controller. hooks:
-  //   change(ops) -> Promise<bool>   writes the change (ops as main's files:pdfComments takes them) and reloads the PDF
-  //   say(text)
   function create(panel: HTMLElement, ctl: PdfController, hooks: PdfCommentsHooks) {
     const listEl = requireChild(panel, '.pdf-comments-list', HTMLElement);
     const addBtn = requireChild(panel, '[data-comments-act="add"]', HTMLButtonElement);
     const hint = requireChild(panel, '.pdf-comments-hint', HTMLElement);
-    // list: the comments as last read. editing: the id being retyped, or 'new' for draft (a place { page, x, y }).
     let list: PdfComment[] = [], editing: string | null = null, draft: PdfPoint | null = null, picking = false, working = false, readSeq = 0;
 
     function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -44,7 +37,6 @@ export const NotesPdfComments = (function () {
       return b;
     }
 
-    // A text box for a new or retyped comment, with Save and Cancel. Ctrl+Enter saves; Escape cancels.
     function editorCard(value: string, label: string) {
       const card = el('div', 'pdf-comment is-editing');
       card.append(el('div', 'pdf-comment-meta', label));
@@ -97,19 +89,18 @@ export const NotesPdfComments = (function () {
       const ids = new Set(list.map((c) => c.id));
       const shown = new Set<string>();
       const withReplies = (c: PdfComment, reply: boolean) => {
-        if (shown.has(c.id)) return; // a reply loop in a damaged PDF
+        if (shown.has(c.id)) return;
         shown.add(c.id);
         cards.push(commentCard(c, reply));
         for (const r of replies.get(c.id) || []) withReplies(r, true);
       };
-      for (const c of list) if (!(c.replyTo && ids.has(c.replyTo))) withReplies(c, false); // replies go under theirs
+      for (const c of list) if (!(c.replyTo && ids.has(c.replyTo))) withReplies(c, false);
       if (!cards.length) cards.push(el('p', 'pdf-comments-empty', 'No comments yet. Press Add comment, then click where it goes on the page.'));
       listEl.replaceChildren(...cards);
       const box = listEl.querySelector<HTMLTextAreaElement>('.pdf-comment-input');
       if (box) box.focus();
     }
 
-    // Reads the comments from the PDF on show. Drops a comment being written for another PDF (or version of it).
     async function refresh() {
       const my = ++readSeq;
       editing = null;
@@ -161,11 +152,9 @@ export const NotesPdfComments = (function () {
         if (text === c.text.trim()) { cancelEdit(); return; }
         op = { op: 'edit', page: c.page, ref: c.ref, text };
       }
-      // On success the PDF is reloaded, and refresh() then shows the list from the file.
       await run([op]);
     }
 
-    // The replies to c, and to those, as main deletes them with it.
     function repliesTo(c: PdfComment) {
       const found = new Set([c.id]);
       for (let grew = true; grew;) {
@@ -201,9 +190,7 @@ export const NotesPdfComments = (function () {
 
     return {
       refresh,
-      // Stops picking a place (the panel is closing, or another PDF is shown).
       stop() { ctl.cancelPick(); editing = null; draft = null; },
-      // A comment is being written: the PDF must not be reloaded under it.
       busy: () => !!editing || working,
     };
   }

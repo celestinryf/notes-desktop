@@ -1,6 +1,3 @@
-/* Pure helpers shared by the main process, the renderer, and the tests.
-   An ES module: main requires it, the renderer bundle imports it, the tests require it. */
-
 const UNTITLED = 'Untitled';
 
 type TitleSource = Partial<Pick<Note, 'title' | 'body'>> | null | undefined;
@@ -17,7 +14,6 @@ function firstLine(text?: string | null) {
   return '';
 }
 
-// Cuts by code point, so an emoji at the boundary is dropped whole rather than split into a lone surrogate.
 function truncate(text: string | null | undefined, max: number) {
   const s = String(text || '');
   if (s.length <= max) return s;
@@ -36,18 +32,13 @@ function deriveTitle(note: TitleSource) {
 
 function snippet(note: TitleSource, max?: number) {
   max = max || 100;
-  // The opening of the note is all a snippet shows: never strip a whole long note for it.
   const body = String((note && note.body) || '').slice(0, Math.max(600, max * 8));
   const title = String((note && note.title) || '').trim();
   const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  // Skip the first line when it is what the title came from.
-  // (Not a code fence: skipping its opening line would leave the closing one as text.)
   const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
-  // A run of list items reads as a list ("Oat milk, Lemons, Rice"), not as one run-on phrase.
   const kept = lines.slice(start);
   const isItem = (l: string) => /^([-*+]|\d+[.)])\s/.test(l);
   const listed = kept.map((l, i) => (isItem(l) && isItem(kept[i + 1] || '') && !/[.,;:!?]$/.test(l) ? l + ',' : l));
-  // The same Markdown stripping as read-aloud, so "## Goals" + "Ship it" reads "Goals. Ship it", not "Goals Ship it".
   const text = plainTextFromMarkdown(listed.join('\n')).replace(/\bcode block omitted\.\s*/g, '').replace(/\s+/g, ' ').trim();
   return truncate(text, max);
 }
@@ -147,7 +138,6 @@ function parseAccelerator(str: string): { ok: true, value: string } | { ok: fals
   const key = parts[parts.length - 1];
   const mods = parts.slice(0, -1);
   if (!mods.every((m) => MODIFIERS.has(m.toLowerCase()))) return { ok: false, reason: 'Unknown modifier in "' + str + '".' };
-  // Shift alone would make an ordinary capital letter or symbol unusable in every application.
   if (!mods.some((m) => m.toLowerCase() !== 'shift')) return { ok: false, reason: 'Use Ctrl, Alt, or Win together with the key (Shift alone would block normal typing).' };
   if (!isBindableKey(key)) return { ok: false, reason: '"' + key + '" is not a key that can be bound.' };
   const normMods = mods.map((m) => {
@@ -190,7 +180,6 @@ function markdownToNote(filename: string, content: string) {
   return { title, body: body.replace(/\s+$/, ''), tags };
 }
 
-// Draggable pane widths, in CSS px. The editor always keeps at least EDITOR_MIN.
 const PANE_LIMITS: Record<PaneName, { min: number, max: number, def: number }> = {
   sidebarWidth: { min: 160, max: 420, def: 232 },
   listWidth: { min: 220, max: 560, def: 300 },
@@ -205,8 +194,6 @@ function clampPane(name: PaneName, value: number) {
   return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
 }
 
-// Plain prose from Markdown for reading aloud: drops markup, keeps the words and sentence breaks.
-// "today 18:30", "tomorrow 09:00", "yesterday 09:00", "Tue, Oct 20 09:00", "Jan 2, 2027 09:00".
 function formatWhen(ts: number, now?: number) {
   now = now == null ? Date.now() : now;
   const d = new Date(ts), n = new Date(now);
@@ -220,18 +207,14 @@ function formatWhen(ts: number, now?: number) {
   return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + time;
 }
 
-// A mailto: URL for a note. Mail clients reject very long URLs, so the body is cut with a notice.
-// limit caps the ENCODED URL (Windows shell handlers reject roughly 2 KB), never splitting a surrogate pair.
 function mailtoFor(note: Pick<Note, 'title' | 'body'>, limit?: number) {
   limit = limit || 1900;
-  // Subjects are bounded too, so the head can never eat the whole budget.
   const subject = truncate(deriveTitle(note) || 'Note', 120);
   const body = String(note.body || '');
   const notice = '\n\n[Truncated for email. Share the full note as a PDF or Markdown file.]';
   const head = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';
   const full = head + encodeURIComponent(body);
   if (full.length <= limit) return { url: full, truncated: false };
-  // Find the longest prefix (in code points) whose encoded form fits with the notice.
   const points = Array.from(body);
   let lo = 0, hi = points.length;
   const budget = Math.max(0, limit - head.length - encodeURIComponent(notice).length);
@@ -262,7 +245,6 @@ function plainTextFromMarkdown(md: string) {
   return s;
 }
 
-// Splits prose into utterance-sized chunks; Chromium can go silent on very long single utterances.
 function speechChunks(text: string | null | undefined, max?: number) {
   max = max || 220;
   const out: string[] = [];
@@ -273,7 +255,6 @@ function speechChunks(text: string | null | undefined, max?: number) {
       const s = sRaw.trim();
       if (!s) continue;
       if (s.length > max) {
-        // One over-long sentence: flush what we have, then slice it on its own.
         if (cur) { out.push(cur); cur = ''; }
         for (let i = 0; i < s.length; i += max) out.push(s.slice(i, i + max));
         continue;
@@ -286,7 +267,6 @@ function speechChunks(text: string | null | undefined, max?: number) {
   return out;
 }
 
-// Ids of the notes a body links to with note://<id> links, in order, without repeats.
 function noteLinkIds(body: string) {
   const out: string[] = [];
   const re = /note:\/\/([0-9a-f][0-9a-f-]{7,})/gi;
@@ -296,69 +276,47 @@ function noteLinkIds(body: string) {
 }
 
 function safeFilename(name: string) {
-  // Cut by code point: a UTF-16 slice through an emoji would leave a lone surrogate, which the file system
-  // turns into U+FFFD, so the stored name and the name on disk would never match again.
   let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('').replace(/[. ]+$/, '');
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = 'note-' + s; // Windows device names
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = 'note-' + s;
   return s || UNTITLED;
 }
 
-// An opened file the app shows but does not edit as text: PDF, Word, anything binary.
 function isViewerOnlyFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind !== 'text');
 }
 
-// A file's extension in lower case, or its whole name when it has none (Makefile, Dockerfile).
 function extOf(filePath: string | null | undefined) {
   const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
   if (!base.includes('.')) return base;
   return base.slice(base.lastIndexOf('.') + 1);
 }
 
-// An opened text file that is not Markdown (.txt, code, config) is edited as the plain text it is, never rendered.
 function isPlainTextFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind === 'text' && !/\.(md|markdown|mdx)$/i.test(note.filePath));
 }
 
-// An opened file whose text is not Markdown: plain text, Word, PDF, a sheet, a picture.
 function isNonMarkdownFile(note: FileSource) {
   return isPlainTextFile(note) || isViewerOnlyFile(note);
 }
 
-// Word documents (fileKind 'docx'): everything WordCraft opens. Word's own zip formats are saved where they are; the
-// others (RTF, ODT, the old binary .doc) WordCraft saves as a .docx beside them, and the note moves to it.
 const WORD_EXT = new Set(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt']);
-const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']); // Word's zip formats: the simple editor and mammoth read these
+const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']);
 const WORD_TO_DOCX_EXT = new Set(['doc', 'dot', 'rtf', 'odt']);
-// Images (fileKind 'image'), shown by the image viewer.
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
-// Spreadsheets (fileKind 'sheet') open in GridCraft, the user's fork of ArtCraft's Rust spreadsheet, as Word
-// documents open in WordCraft. An .xlsx is saved where it is; the others GridCraft saves as an .xlsx beside them (as
-// WordCraft does with .odt), and the note moves to it. (.csv and .tsv stay text files: Notes shows them as a table
-// itself. Presentations are out of Notes' scope, the user's call on 2026-10-19.)
 const SHEET_EXT = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods']);
-// (.xlsm too: a macro workbook saved as .xlsx beside the original keeps the original's macros where they are.)
 const SHEET_TO_XLSX_EXT = new Set(['xlsm', 'xls', 'xlsb', 'ods']);
-// The Craft app that shows each kind of file.
 const CRAFT_OF: Partial<Record<FileKind, 'wordcraft' | 'gridcraft'>> = { docx: 'wordcraft', sheet: 'gridcraft' };
-// Documents that are zips (the Office and OpenDocument formats, e-books, zips themselves): the zip guard runs on them
-// before anything unpacks them, and a save under such a name must be a zip.
 const ZIP_DOC_EXT = new Set([...OOXML_EXT, 'odt', 'xlsx', 'xlsm', 'xlsb', 'ods', 'epub', 'zip']);
 
-// A comma- or tab-separated file: shown as a table, edited as text (Ctrl+E).
 function isTableFile(note: FileSource) {
   return !!note && isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
 }
 
-// A Word file the simple editor can show (Word's zip formats); the rest need WordCraft.
 function isOoxmlWordFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind === 'docx' && OOXML_EXT.has(extOf(note.filePath)));
 }
 
-// The text a reader sees in an ATX heading, for use as a title. Unlike plainTextFromMarkdown (made for speech)
-// it keeps list-like prefixes ("1. Setup"), underscores inside words (my_file.py) and backslash-escaped
-// characters, and drops only the formatting.
 function headingTitle(md: string) {
   const escaped: string[] = [];
   let s = String(md || '').replace(/\\([!-/:-@[-`{-~])/g, (_, c) => { escaped.push(c); return '\u0000' + (escaped.length - 1) + '\u0001'; });
@@ -366,19 +324,12 @@ function headingTitle(md: string) {
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
   s = s.replace(/<[^>\n]+>/g, '');
   s = s.replace(/(\*\*|~~)(\S(?:.*?\S)?)\1/g, '$2').replace(/\*(\S(?:.*?\S)?)\*/g, '$1');
-  // Underscores mark emphasis only at the edges of words; inside a word they are text.
   s = s.replace(/(^|\W)(__?)(\S(?:.*?\S)?)\2(?!\w)/g, '$1$3');
   s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   s = s.replace(/\u0000(\d+)\u0001/g, (_, i) => escaped[Number(i)]);
   return s.replace(/\s+/g, ' ').trim();
 }
 
-// Plans splitting a note into book pages at its headings. Returns { name, level, pages: [{ title, body }] };
-// fewer than two pages means the note cannot be split. Page titles come from headingTitle. Rules:
-// - Headings inside fenced code blocks do not count.
-// - The pages start at the highest heading level used. If that level appears once, as the note's first line,
-//   it is the book's title and the pages start at the next level down.
-// - Text before the first page heading becomes an "Introduction" page; deeper headings stay inside their page.
 function splitAtHeadings(markdown: string, fallbackName: string) {
   const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n');
   const heads: { i: number, level: number, text: string }[] = [];
@@ -423,8 +374,6 @@ function splitAtHeadings(markdown: string, fallbackName: string) {
   return { name: name || 'Book', level, pages };
 }
 
-// The file:/// URL of the folder an opened file is in (ending in "/", every segment encoded), which its relative
-// pictures are read from. null for a note with no file, or a file on a network share (never loaded, see the editor).
 function imageBaseFor(note: FileSource) {
   const p = note && note.filePath ? String(note.filePath).replace(/\\/g, '/') : '';
   if (!p || p.startsWith('//')) return null;
@@ -433,15 +382,10 @@ function imageBaseFor(note: FileSource) {
   return 'file:///' + parts.map((s, i) => (i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s))).join('/').replace(/^\/+/, '') + '/';
 }
 
-// A timestamp that is safe in a file name and sorts by time: 2026-10-16T21-04-05-123Z.
 function fileStamp(date?: number) {
   return new Date(date === undefined ? Date.now() : date).toISOString().replace(/[:.]/g, '-');
 }
 
-// How well a typed query matches a label, for the command palette: 0 is no match, higher is better.
-// An exact prefix beats everything, then the query whole at a word start ("trash" in "Move to trash"), then the
-// query spread over the label, where each character must continue the previous match or start a word: "nn" and
-// "new n" find "New note", "sv" finds "Split view", but "plan" does not find "Open a file as a note".
 function fuzzyScore(query: string | null | undefined, text: string | null | undefined) {
   const q = String(query || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const t = String(text || '').toLowerCase();

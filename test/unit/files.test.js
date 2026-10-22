@@ -8,7 +8,7 @@ const F = require('../../src/files.mts');
 const { Store } = require('../../src/store.mts');
 
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-files-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-files-');
 
 test('kindOf: extensions, sniffing, pdf and docx', () => {
   const dir = tmp();
@@ -83,7 +83,7 @@ test('store.linkFile loads text, edits write through, external edits are picked 
 test('non-UTF-8 text is linked read-only instead of being transcoded; BOM is preserved', async () => {
   const dir = tmp();
   const latin1 = path.join(dir, 'latin1.txt');
-  fs.writeFileSync(latin1, Buffer.from([0x63, 0x61, 0x66, 0xe9])); // "café" in Latin-1
+  fs.writeFileSync(latin1, Buffer.from([0x63, 0x61, 0x66, 0xe9]));
   const utf16 = path.join(dir, 'wide.txt');
   fs.writeFileSync(utf16, Buffer.from('﻿hello', 'utf16le'));
   const bom = path.join(dir, 'bom.md');

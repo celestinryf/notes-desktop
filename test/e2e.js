@@ -1,13 +1,4 @@
 'use strict';
-/* End-to-end proof of the global hotkey on a real Windows desktop.
-   The hotkey chord itself is pressed with real synthesized input (SendKeys), because that is what proves the
-   OS-level binding. Everything else is driven through the page via Playwright, so no stray text can land in
-   another window if a person is using the machine while this runs.
-   1. launch hidden with an isolated data dir and a test-only hotkey
-   2. press the hotkey: the window must appear and take focus
-   3. type a note and confirm it reaches notes.json
-   4. press the hotkey again: hidden; again: shown; Esc: hidden
-   Run with: npm run test:e2e */
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -19,7 +10,7 @@ const ROOT = path.resolve(__dirname, '..');
 const ELECTRON = require('electron');
 const HOTKEY = 'Control+Alt+Shift+F9';
 const SENDKEYS_HOTKEY = '^%+{F9}';
-const { tmpDir } = require('./helpers/tmp'); // removed when the run exits
+const { tmpDir } = require('./helpers/tmp');
 const dataDir = tmpDir('notes-e2e-');
 const shotDir = process.env.NOTES_E2E_SHOTS || dataDir;
 
@@ -77,9 +68,7 @@ async function main() {
     log('window shown and focused by the OS hotkey');
     await sleep(500);
 
-    // The first show on an empty store opens a fresh note with the title focused.
     await waitFor('fresh note ready', () => page.evaluate(() => document.activeElement && document.activeElement.id === 'titleInput'), 8000);
-    // The hotkey focused this window for real, so a person typing elsewhere can land a stray key here first.
     await page.keyboard.press('Control+a');
     await page.keyboard.type('E2E Title');
     await page.keyboard.press('Enter');
@@ -96,7 +85,6 @@ async function main() {
     log('note persisted:', JSON.stringify({ title: saved.title, body: saved.body }));
     await page.screenshot({ path: path.join(shotDir, 'e2e-light.png') });
 
-    // Zoom with real OS key presses (Ctrl+= used to do nothing because Electron's default menu wants Ctrl+Shift+=).
     const zoom = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel());
     sendKeys('^=');
     await waitFor('Ctrl+= zoomed in', async () => (await zoom()) === 0.5, 5000);
@@ -124,11 +112,11 @@ async function main() {
   } catch (err) {
     exitCode = 1;
     console.error('[e2e] FAIL:', err.message);
-    try { await page.screenshot({ path: path.join(shotDir, 'e2e-failure.png') }); } catch (_) { /* ignore */ }
+    try { await page.screenshot({ path: path.join(shotDir, 'e2e-failure.png') }); } catch (_) {  }
   } finally {
-    try { await app.evaluate(({ app: a }) => setTimeout(() => a.exit(0), 50)); } catch (_) { /* ignore */ }
+    try { await app.evaluate(({ app: a }) => setTimeout(() => a.exit(0), 50)); } catch (_) {  }
     await sleep(500);
-    try { await app.close(); } catch (_) { /* ignore */ }
+    try { await app.close(); } catch (_) {  }
   }
   process.exit(exitCode);
 }

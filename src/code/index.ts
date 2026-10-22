@@ -1,7 +1,3 @@
-// NotesCode: the editor (CodeMirror 6) for opened text files that are not Markdown: .txt, LaTeX, code and config.
-// Notes keeps the text in its own textarea too (saving, the title and the counts read it there); this edits and
-// shows it, and reports the person's edits with onChange. Edits Notes makes itself (load, setValue, setRangeText)
-// are not reported back. Colours and sizes come from the app's CSS tokens (styles.css, "code editor").
 import { EditorState, EditorSelection, Compartment, Annotation, Transaction, type TransactionSpec } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder } from '@codemirror/view';
 import { history, historyKeymap, standardKeymap, indentMore, indentLess, toggleComment, undo, redo } from '@codemirror/commands';
@@ -28,7 +24,6 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { r } from '@codemirror/legacy-modes/mode/r';
 import { perl } from '@codemirror/legacy-modes/mode/perl';
 
-// The languages Notes highlights, by file extension (as H.extOf gives it). Anything else is plain text.
 const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
   ['LaTeX', stex, ['tex', 'latex', 'sty', 'cls', 'ltx']],
   ['JavaScript', javascript, ['js', 'mjs', 'cjs', 'jsx']],
@@ -63,7 +58,6 @@ const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
 const BY_EXT = new Map<string, { name: string, mode: StreamParser<unknown>, language?: StreamLanguage<unknown> }>();
 for (const [name, mode, exts] of LANGUAGES) for (const ext of exts) BY_EXT.set(ext, { name, mode });
 
-// The language for a file extension: its name (for the status line) and its parser (made once), or plain text.
 export function languageFor(ext: string | null | undefined) {
   const found = BY_EXT.get(String(ext || '').toLowerCase());
   if (!found) return { name: 'Plain text', language: null, code: false };
@@ -71,7 +65,6 @@ export function languageFor(ext: string | null | undefined) {
   return { name: found.name, language: found.language, code: true };
 }
 
-// Syntax colours: the five --syn-* tokens, each 4.5:1 or more on the paper in both themes.
 const highlight = HighlightStyle.define([
   { tag: [t.keyword, t.tagName, t.controlKeyword, t.definitionKeyword, t.moduleKeyword, t.operatorKeyword], color: 'var(--syn-keyword)' },
   { tag: [t.string, t.special(t.string), t.regexp, t.character], color: 'var(--syn-string)' },
@@ -84,7 +77,6 @@ const highlight = HighlightStyle.define([
   { tag: t.invalid, color: 'var(--danger)' },
 ]);
 
-// The indentation the file already uses: a tab, or the smallest run of leading spaces (2 when there is none).
 export function detectIndent(text: string) {
   let tabs = 0, spaces = 0, unit = 0;
   for (const line of String(text).split('\n', 2000)) {
@@ -96,7 +88,6 @@ export function detectIndent(text: string) {
   return ' '.repeat(Math.min(Math.max(unit || 2, 2), 8));
 }
 
-// An edit Notes makes itself, so it is not reported back as the person's.
 const fromNotes = Annotation.define();
 
 const lineIsIndented = (state: EditorState) => {
@@ -110,8 +101,6 @@ const lineIsIndented = (state: EditorState) => {
   return false;
 };
 
-/* create({ parent, onChange(text), onSelection(), onEnter(shift) -> handled }) -> editor
-   onEnter: Enter (and Shift+Enter) go to Notes first, so the find bar can step between matches. */
 export type CodeEditorOptions = {
   parent: Element | DocumentFragment,
   onChange?: (text: string) => void,
@@ -127,8 +116,6 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
   const keys = [
     { key: 'Enter', run: () => !!(onEnter && onEnter(false)) },
     { key: 'Shift-Enter', run: () => !!(onEnter && onEnter(true)) },
-    // Tab indents (the selected lines, or at the caret); Shift+Tab outdents, and when nothing is indented lets focus
-    // move on, as it does everywhere else. A file that cannot be edited never keeps Tab.
     { key: 'Tab', run: (v: EditorView) => {
       if (v.state.readOnly) return false;
       if (v.state.selection.ranges.some((range) => !range.empty)) return indentMore(v);
@@ -150,7 +137,6 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
         lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(), history(), bracketMatching(),
         EditorView.lineWrapping, EditorState.tabSize.of(2), syntaxHighlighting(highlight),
         language.of(lang.language || []),
-        // Spelling is checked in prose (plain text), not in code or LaTeX commands.
         words.of(EditorView.contentAttributes.of({ spellcheck: lang.code ? 'false' : 'true', 'aria-label': 'Text of ' + (opts.label || 'the file') })),
         writable.of([EditorState.readOnly.of(!!opts.readOnly), EditorView.editable.of(!opts.readOnly)]),
         hint.of(opts.placeholder ? placeholder(opts.placeholder) : []),
@@ -169,13 +155,8 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
 
   return {
     dom: view.dom,
-    // A new document (another note, or the file read again): its undo history starts here.
     load(text: string, opts?: LoadOptions) { view.setState(stateFor(String(text || ''), opts || {})); },
     get value() { return view.state.doc.toString(); },
-    // The text replaced by Notes. Only the part that differs is changed, so the caret and the scroll stay where they
-    // were when the change is elsewhere. It is one undo step, unless history is false: text that came from outside
-    // (the file saved by another program, a live or vault update) is not the person's to undo, and undoing it would
-    // save the old text over the new.
     setValue(text: string, { history = true } = {}) {
       const next = String(text || '').replace(/\r\n?/g, '\n'), prev = view.state.doc.toString();
       if (next === prev) return;
@@ -186,7 +167,6 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
       const annotations = history ? [fromNotes.of(true)] : [fromNotes.of(true), Transaction.addToHistory.of(false)];
       view.dispatch({ changes: { from: start, to: endPrev, insert: next.slice(start, endNext) }, annotations });
     },
-    // The person's undo and redo from outside the keyboard (the context menu).
     undo() { return undo(view); },
     redo() { return redo(view); },
     get selectionStart() { return view.state.selection.main.from; },
@@ -194,7 +174,6 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
     setSelectionRange(from: number, to: number) {
       view.dispatch({ selection: EditorSelection.single(clamp(from), clamp(to === undefined ? from : to)), annotations: fromNotes.of(true) });
     },
-    // As a textarea's setRangeText: mode is 'select', 'start', 'end' or 'preserve' (the default).
     setRangeText(text: string, from: number, to: number, mode?: 'select' | 'start' | 'end' | 'preserve') {
       const a = clamp(from), b = Math.max(a, clamp(to)), insert = String(text);
       const spec: TransactionSpec = { changes: { from: a, to: b, insert }, annotations: fromNotes.of(true) };
@@ -203,13 +182,11 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
       else if (mode === 'end') spec.selection = EditorSelection.cursor(a + insert.length);
       view.dispatch(spec);
     },
-    // Scrolls a position to the middle of the view (a find match, a line).
     reveal(at: number) { view.dispatch({ effects: EditorView.scrollIntoView(clamp(at), { y: 'center' }) }); },
     focus() { view.focus(); },
     hasFocus() { return view.hasFocus; },
     contains(node: Element | null) { return !!node && view.dom.contains(node); },
     setReadOnly(readOnly: boolean) { view.dispatch({ effects: writable.reconfigure([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]) }); },
-    // The caret's line and column, counted from 1.
     position() {
       const head = view.state.selection.main.head, line = view.state.doc.lineAt(head);
       return { line: line.number, col: head - line.from + 1 };

@@ -41,8 +41,6 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     const text = el.replaceInput.value;
     if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile(state.current)) return;
     if (state.sourceMode) {
-      // Offsets can be stale (Tab, list keys and Restore change the text without an input event): recount
-      // first, and only replace text that really is the query.
       const wanted = find.active;
       runFind(true, true, true);
       if (!find.sourceHits.length) { runFind(true, true); return; }
@@ -53,15 +51,13 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
       if (!isQueryText(ta.value.slice(at, at + q.length), q)) { showActiveMatch(); return; }
       ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
       ta.setSelectionRange(at + text.length, at + text.length);
-      ta.dispatchEvent(new Event('input', { bubbles: true })); // autosave + recount
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
       runFind(true, true, true);
-      // Select the match that now follows the replacement (no stepping, which would skip one).
       if (find.sourceHits.length) { const next = find.sourceHits.findIndex((h) => h >= at + text.length); find.active = next === -1 ? 0 : next; showActiveMatch(); }
       return;
     }
     if (tableShown()) { toast('Switch to Text (Ctrl+E) to replace in this file.'); return; }
     if (!state.rich) return;
-    // Ranges may be stale (a restore or reload replaced the content): recount and check the text first.
     const wantedIdx = find.active;
     runFind(true, true, true);
     if (!find.ranges.length) { runFind(true, true); return; }
@@ -69,19 +65,17 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     const idx = find.active;
     if (!isQueryText(String(find.ranges[idx]), q)) { showActiveMatch(); return; }
     state.rich.replaceRanges([find.ranges[idx]], text);
-    runFind(true, true, true); // the quiet re-find keeps the index, which now points at the following match
-    // A replacement that itself contains the query ("cat" -> "cats") creates matches at the same spot: skip them.
+    runFind(true, true, true);
     const inside = findOffsets(text, q).length;
     if (find.ranges.length) { find.active = (idx + inside) % find.ranges.length; showActiveMatch(); }
   }
 
-  // Selects / highlights and scrolls to find.active without changing it.
   function showActiveMatch() {
     const q = el.findInput.value;
     if (state.sourceMode) {
       const at = find.sourceHits[find.active];
       if (at === undefined) return;
-      if (document.activeElement !== el.replaceInput) src.focus(); // Enter in the replace box keeps replacing
+      if (document.activeElement !== el.replaceInput) src.focus();
       src.setSelectionRange(at, at + q.length);
       src.reveal(at);
       el.findCount.textContent = (find.active + 1) + '/' + find.sourceHits.length;
@@ -134,16 +128,15 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     find.ranges = []; find.sourceHits = []; find.active = -1;
   }
 
-  // Ranges over the rendered editor's text nodes (matches may span node boundaries).
   function findRangesIn(root: HTMLDivElement, q: string) {
     const nodes: ({ node: Node; start: number; })[] = []; let text = '';
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
     const blockOf = (n: Node) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n instanceof Element) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; } // line breaks and inline images separate: a match never straddles them
+      if (n instanceof Element) { if (n.tagName === 'BR' || n.tagName === 'IMG') text += '\n'; continue; }
       const b = blockOf(n);
-      if (lastBlock && b !== lastBlock) text += '\n'; // a separator no query can contain
+      if (lastBlock && b !== lastBlock) text += '\n';
       lastBlock = b;
       nodes.push({ node: n, start: text.length }); text += n.nodeValue;
     }
@@ -152,21 +145,19 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
       while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (nodes[mid].start <= pos) lo = mid; else hi = mid - 1; }
       if (!nodes.length) return null;
       const node = nodes[lo].node;
-      return { node, offset: Math.min(pos - nodes[lo].start, (node.nodeValue || '').length) }; // a position inside a separator clamps to the node's end
+      return { node, offset: Math.min(pos - nodes[lo].start, (node.nodeValue || '').length) };
     };
     return findOffsets(text, q).map((pos) => {
       const s = locate(pos), e = locate(pos + q.length);
       if (!s || !e) return null;
       const r = document.createRange();
       r.setStart(s.node, s.offset);
-      // The end may fall exactly at a node boundary: keep it inside the node where the match ends.
       const prev = e.offset === 0 && pos + q.length > 0 ? locate(pos + q.length - 1) : null;
       if (prev) r.setEnd(prev.node, prev.offset + 1); else r.setEnd(e.node, e.offset);
       return r;
     }).flatMap((r) => (r ? [r] : []));
   }
 
-  // quiet: recount and re-highlight after the text changed, without moving the selection or scrolling.
   function runFind(forward?: boolean, fresh?: boolean, quiet?: boolean) {
     const q = el.findInput.value;
     const sameQuery = q === find.query;
@@ -175,18 +166,15 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     if (state.sourceMode) {
       if (fresh || !sameQuery || !find.sourceHits.length) {
         find.sourceHits = findOffsets(el.bodyInput.value, q);
-        // Start from the caret so Enter finds the next match after where the person is.
         const caret = src.selectionStart || 0;
         const idx = find.sourceHits.findIndex((h) => h >= caret);
-        find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) : -1; // past the last match wraps to the first
+        find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) : -1;
       } else if (find.sourceHits.length) {
         find.active = (find.active + (forward === false ? -1 : 1) + find.sourceHits.length) % find.sourceHits.length;
       }
       const n = find.sourceHits.length;
       if (n && find.active >= 0 && !quiet) {
         const at = find.sourceHits[find.active];
-        // A textarea shows its selection only while focused, so stepping (Enter, F3) moves focus to the
-        // text and keeps it there; F3 / Shift+F3 keep stepping from the text, Esc closes the bar.
         if (!fresh) src.focus();
         src.setSelectionRange(at, at + q.length);
         src.reveal(at);
@@ -197,7 +185,7 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     }
     if (fresh || !sameQuery || !find.ranges.length) {
       find.ranges = findRangesIn(tableShown() ? el.csvView : el.richEditor, q);
-      find.active = find.ranges.length ? (sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0) : -1; // after a replace, the next match now sits at the same index
+      find.active = find.ranges.length ? (sameQuery && find.active >= 0 ? Math.min(find.active, find.ranges.length - 1) : 0) : -1;
     } else if (find.ranges.length) {
       find.active = (find.active + (forward === false ? -1 : 1) + find.ranges.length) % find.ranges.length;
     }
@@ -215,8 +203,6 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     el.findCount.classList.toggle('is-none', !n);
   }
 
-  // The textarea auto-grows and .editor-scroll scrolls, so the match's visual position is measured with a
-  // mirror element that wraps exactly like the textarea (newline counting would undershoot on long lines).
   function scrollTextareaToSelection(at: number) {
     const ta = el.bodyInput;
     const scroller = ta.closest('.editor-scroll') || ta;
@@ -244,7 +230,6 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     else if (r.dry) toast('Print: dry run');
   }
 
-  // The open note as a page of its own, for the export window (title, then the rendered body).
   function exportOfCurrent() {
     const note = state.current;
     if (!note) return { name: 'Note', html: '' };

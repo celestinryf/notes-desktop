@@ -7,7 +7,7 @@ const path = require('path');
 const { Store, DEFAULT_SETTINGS, sanitizeSettings } = require('../../src/store.mts');
 
 function tmpDir() {
-  return require('../helpers/tmp').tmpDir('notes-store-'); // removed when the test process exits
+  return require('../helpers/tmp').tmpDir('notes-store-');
 }
 
 function makeStore(opts) {
@@ -150,14 +150,13 @@ test('corrupt data file is quarantined and the newest backup is used', () => {
   const { store, clock } = makeStore();
   const a = store.create({ title: 'keep me' });
   clock.tick(11 * 60 * 1000);
-  store.create({ title: 'triggers backup' }); // save() copies the previous file into backups/
+  store.create({ title: 'triggers backup' });
   assert.equal(fs.readdirSync(store.backupDir).length, 1);
   fs.writeFileSync(store.file, '{not json', 'utf8');
   const recovered = new Store(store.dir).load();
   assert.ok(recovered.loadError);
   assert.ok(recovered.get(a.id), 'note from backup survives');
   assert.ok(fs.readdirSync(store.dir).some((f) => f.startsWith('notes.json.corrupt-')));
-  // The recovery must be on disk immediately: a relaunch with no edits in between sees the same notes.
   assert.ok(fs.existsSync(store.file), 'recovered data written back');
   const relaunched = new Store(store.dir).load();
   assert.equal(relaunched.loadError, null);
@@ -178,8 +177,6 @@ test('a corrupt file that cannot be moved aside is never backed up and prunes no
     for (let launch = 0; launch < 3; launch++) {
       const s = new Store(store.dir).load();
       assert.ok(s.get(a.id), 'recovered from the good backup on launch ' + launch);
-      // The write-back succeeds here (only the quarantine rename is stuck), which lifts the suspension again;
-      // what matters is that backups/ was never touched by the corrupt file on the way.
       fs.writeFileSync(store.file, '{broken', 'utf8');
     }
   } finally {
@@ -196,7 +193,7 @@ test('backups are rate limited and capped', () => {
   for (let i = 0; i < 15; i++) {
     clock.tick(11 * 60 * 1000);
     store.create({ title: 'n' + i });
-    store.create({ title: 'm' + i }); // second save inside the window: no extra backup
+    store.create({ title: 'm' + i });
   }
   assert.equal(fs.readdirSync(store.backupDir).length, 10);
 });
@@ -314,7 +311,6 @@ test('folders: load repairs cycles, dangling parents, duplicates, and orphaned n
 
 test('an unreadable (not corrupt) notes file pauses saving instead of loading a stale backup over it', () => {
   const dir = tmpDir();
-  // A directory where the file should be makes every read fail with an I/O error, never a parse error.
   fs.mkdirSync(path.join(dir, 'notes.json'));
   const store = new Store(dir).load();
   assert.equal(store.saveBlocked, true);
@@ -354,7 +350,7 @@ test('a failed save during create leaves nothing behind in memory', () => {
   assert.throws(() => store.create({ title: 'ghost' }), /ENOSPC/);
   assert.throws(() => store.createFolder({ name: 'ghost folder' }), /ENOSPC/);
   store.save = realSave;
-  store.setSettings({ theme: 'dark' }); // an unrelated later save
+  store.setSettings({ theme: 'dark' });
   const reloaded = new Store(store.dir).load();
   assert.deepEqual(reloaded.notes.map((n) => n.title), ['existing']);
   assert.deepEqual(reloaded.folders, []);

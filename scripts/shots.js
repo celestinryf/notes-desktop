@@ -1,21 +1,4 @@
 'use strict';
-/* Screenshots of the real app in named scenes, for design work: look at what you changed before you call it done.
-   It runs against an isolated, seeded data folder (never the user's notes) and never takes keyboard focus.
-
-   npm run shots                         every scene, light and dark, into %TEMP%\shots-notes-app
-   npm run shots -- --scene main,settings --theme dark
-   npm run shots -- --size 820x560 --out C:\some\folder
-   npm run shots -- --list               the scene names
-   npm run shots -- --eval metrics.js    also evaluate a script in each scene and save its result as <scene>-<theme>.json
-                                         (for example the ui-audit skill's scripts/ui-metrics.js)
-   npm run shots -- --css try.css        also inject a stylesheet into each scene before the shot, to compare a
-                                         candidate style against the real one without editing styles.css
-   npm run shots -- --screen             also capture the window from the real screen as <scene>-<theme>-screen.png:
-                                         it includes the caption buttons Windows draws. The window comes to the front
-                                         for a moment, so do not use it while someone is typing.
-
-   Each PNG is named <scene>-<theme>.png. Open them with the Read tool to look at them.
-   A run first deletes the .png and .json files already in the output folder, so what is there is this run's. */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -46,8 +29,6 @@ function parseArgs(argv) {
   return out;
 }
 
-/* Sample data: a believable notebook, so layouts are judged with real lengths, not lorem ipsum. */
-// A real Word document (made with the docx library) and the file note that opens it, for scenes that need one.
 async function sampleWordNote(dir) {
   const { Document, Packer, Paragraph, HeadingLevel, TextRun } = require('docx');
   const doc = new Document({ sections: [{ children: [
@@ -62,7 +43,6 @@ async function sampleWordNote(dir) {
   return { id: 'n-word', title: 'Trail report.docx', body: '', tags: [], folderId: null, filePath: file, fileKind: 'docx', fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 1000 };
 }
 
-// Text files, and the file notes that open them in the code editor.
 const SAMPLE_FILES = {
   tex: ['trail.tex', String.raw`\documentclass{article}
 \usepackage{amsmath}
@@ -99,8 +79,6 @@ export function describe(trail) {
 }
 `],
 };
-// A long, wide table for the CSV view: made-up test readings (a fixture, never shown to anyone but the screenshots),
-// with gaps and "n/a" in a number column so its alignment is decided by the column, not cell by cell.
 function sampleReadings(rows) {
   const head = 'station,date,temp_c,humidity_pct,wind_kmh,pressure_hpa,rain_mm,notes';
   const out = [head];
@@ -113,7 +91,6 @@ function sampleReadings(rows) {
   }
   return out.join('\n') + '\n';
 }
-// A small picture for the image viewer: a gradient with a transparent band, as a real PNG.
 function samplePng(w, h) {
   const zlib = require('zlib');
   const raw = Buffer.alloc((w * 4 + 1) * h);
@@ -132,8 +109,6 @@ function samplePng(w, h) {
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// A spreadsheet from scripts/fixtures (a small file made once with openpyxl, since
-// Notes has no writer of its own for it) and the file note that opens it.
 function sampleOfficeNote(dir, kind) {
   const name = { sheet: 'Trail readings.xlsx' }[kind];
   const file = path.join(dir, name);
@@ -200,7 +175,6 @@ function seed(now) {
   return { schemaVersion: 1, settings: { hotkey: 'Control+Alt+Shift+F7', openAtLogin: false, gitEnabled: false }, folders, vaults: [], notes };
 }
 
-// Opens a note by title: from the list or the folder view when it is on screen, else through the palette.
 const openNote = (title) => async (page) => {
   if ((await page.inputValue('#titleInput').catch(() => '')) === title && await page.isVisible('#titleInput')) return;
   const row = page.locator('.note-row', { hasText: title }).first();
@@ -214,11 +188,10 @@ const openNote = (title) => async (page) => {
   }
   await sleep(500);
 };
-// Puts the caret at the end of the open note's text and types there.
 const typeAtEnd = (text, newLine) => async (page) => {
   await page.click('.rich-editor-content');
   await page.keyboard.press('Control+End');
-  await sleep(200); // the editor moves the caret on its next frame; Enter before that splits the word under the click
+  await sleep(200);
   if (newLine) await page.keyboard.press('Enter');
   await page.keyboard.type(text);
   await sleep(400);
@@ -260,7 +233,6 @@ const SCENES = {
     await page.mouse.move(x + 80, y); await sleep(500);
   } },
   'two-tabs': { about: 'Two tabs open: the tabs show (with one, they do not)', run: steps(openNote('Q4 planning'), key('Control+t'), openNote('Groceries')) },
-  // A test seed to prove derivation end to end, not a premade scheme (those are still to be designed with the user).
   'scheme-custom': { about: 'A custom colour scheme (test colours), derived from three seeds per mode', settings: { colorScheme: 'custom', customColors: {
     light: { background: '#f2f5f7', text: '#1b2530', accent: '#2b6cb0' }, dark: { background: '#141a21', text: '#e3e9ef', accent: '#5b9bd5' } } }, run: openNote('Q4 planning') },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
@@ -282,7 +254,6 @@ const SCENES = {
   small: { about: 'A small window (820x560) with a note open', size: { width: 820, height: 560 }, run: openNote('Q4 planning') },
 };
 
-// One fresh app per shot: the app restores tabs and panes at start, so reusing a window would leak one scene into the next.
 async function shoot(theme, name, opts) {
   const dataDir = tmpDir('notes-shots-');
   const data = seed(Date.now());
@@ -307,14 +278,13 @@ async function shoot(theme, name, opts) {
     await page.waitForSelector('#app');
     await app.evaluate(({ BrowserWindow }, size) => { BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height); }, SCENES[name].size || opts.size);
     await page.evaluate(() => { window.confirm = () => true; return document.fonts && document.fonts.ready.then(() => true); });
-    await sleep(900); // entrance animations
-    if (opts.css) await page.addStyleTag({ content: fs.readFileSync(opts.css, 'utf8') }); // a candidate style over the real one
+    await sleep(900);
+    if (opts.css) await page.addStyleTag({ content: fs.readFileSync(opts.css, 'utf8') });
     await SCENES[name].run(page);
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);
     await page.screenshot({ path: file });
     if (opts.screen) {
-      // Bring the window to the front, read its rectangle in physical pixels, and copy that part of the screen.
       const r = await app.evaluate(({ BrowserWindow, screen }) => {
         const w = BrowserWindow.getAllWindows()[0];
         w.setAlwaysOnTop(true, 'screen-saver');
@@ -328,19 +298,16 @@ async function shoot(theme, name, opts) {
         '-X', String(r.x), '-Y', String(r.y), '-Width', String(r.width), '-Height', String(r.height), '-Out', file.replace(/[.]png$/, '-screen.png')], { stdio: 'ignore' });
     }
     if (opts.eval) {
-      // Evaluated through the debugger, so the page's CSP (no eval) does not apply.
       const result = await page.evaluate(fs.readFileSync(opts.eval, 'utf8'));
       fs.writeFileSync(file.replace(/\.png$/, '.json'), JSON.stringify(result, null, 2));
     }
     return file;
   } finally {
-    // Wait for Electron to be gone before removing its data folder: Windows keeps files of a live process locked,
-    // and a folder that could not be removed would be left in %TEMP%.
     const proc = app.process();
     const gone = new Promise((resolve) => { if (proc.exitCode !== null) resolve(); else proc.once('exit', resolve); });
     await app.evaluate(({ app: a }) => a.exit(0)).catch(() => {});
     await Promise.race([gone, sleep(10000)]);
-    try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) { /* the exit cleanup tries again */ }
+    try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) {  }
   }
 }
 
@@ -354,7 +321,6 @@ async function main() {
   const unknown = names.filter((n) => !SCENES[n]);
   if (unknown.length) throw new Error('Unknown scene(s): ' + unknown.join(', ') + '. Use --list.');
   fs.mkdirSync(opts.out, { recursive: true });
-  // One run, one set of results: shots and metrics left from an earlier run would be read as this run's.
   for (const f of fs.readdirSync(opts.out)) if (/\.(png|json)$/i.test(f)) fs.rmSync(path.join(opts.out, f), { force: true });
   const all = [];
   for (const theme of opts.themes) for (const name of names) all.push(await shoot(theme, name, opts));

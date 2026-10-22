@@ -9,7 +9,7 @@ const { Store } = require('../../src/store.mts');
 const { LiveShare } = require('../../src/live.mts');
 
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-live-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-live-');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(label, fn, timeout = 5000) {
   const start = Date.now();
@@ -24,16 +24,13 @@ test('host and guest edit one note in real time; leaving keeps the note on both 
   const hostLive = new LiveShare(hostStore, { onRemote: (id, r) => hostRemote.push(r), onStatus: (id, s) => statuses.push(s), pushDelayMs: 20 });
   const guestLive = new LiveShare(guestStore, { onRemote: (id, r) => guestRemote.push(r), pushDelayMs: 20 });
   const note = hostStore.create({ title: 'Plan', body: 'v1' });
-  // Locked notes are refused.
   const locked = hostStore.create({ title: 'L', body: 'x' }); hostStore.lockNote(locked.id, 'pw');
   assert.throws(() => hostLive.host(locked.id), /locked/i);
   const status = await hostLive.host(note.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
   assert.match(status.url, /^http:\/\/127\.0\.0\.1:\d+\/live\/[0-9a-f]{32}$/);
   assert.deepEqual(hostStore.get(note.id).live.role, 'host');
-  // A wrong token is a 404, not a leak.
   const bad = await new Promise((resolve) => http.get(status.url.replace(/[0-9a-f]{32}$/, 'f'.repeat(32)), (res) => { res.resume(); resolve(res.statusCode); }));
   assert.equal(bad, 404);
-  // Not a share link.
   await assert.rejects(guestLive.join('http://127.0.0.1:1/nope'), /not a live share link/i);
 
   const joined = await guestLive.join(status.url);
@@ -43,14 +40,12 @@ test('host and guest edit one note in real time; leaving keeps the note on both 
   await until('guest connected', () => guestLive.statusOf(gNote.id).connected);
   await until('host sees a peer', () => hostLive.statusOf(note.id).peers === 1);
 
-  // Host edits -> guest gets it.
   hostStore.update(note.id, { body: 'v2 from host', title: 'Plan!' });
   hostLive.noteChanged(note.id);
   await until('guest received', () => guestStore.get(gNote.id).body === 'v2 from host');
   assert.equal(guestStore.get(gNote.id).title, 'Plan!');
   assert.equal(guestRemote.at(-1).from, 'host');
 
-  // Guest edits -> host gets it, and the guest does not re-apply its own echo.
   guestStore.update(gNote.id, { body: 'v3 from guest' });
   guestLive.noteChanged(gNote.id);
   await until('host received', () => hostStore.get(note.id).body === 'v3 from guest');
@@ -58,7 +53,6 @@ test('host and guest edit one note in real time; leaving keeps the note on both 
   await sleep(100);
   assert.equal(guestRemote.filter((r) => r.body === 'v3 from guest').length, 0, 'own edit not applied as remote');
 
-  // A second guest joins late and gets the current state; a host edit reaches both.
   const guest2Store = new Store(tmp()).load();
   const guest2 = new LiveShare(guest2Store, { pushDelayMs: 20 });
   const j2 = await guest2.join(status.url);
@@ -67,13 +61,11 @@ test('host and guest edit one note in real time; leaving keeps the note on both 
   hostStore.update(note.id, { body: 'v4' }); hostLive.noteChanged(note.id);
   await until('both guests', () => guestStore.get(gNote.id).body === 'v4' && guest2Store.get(j2.noteId).body === 'v4');
 
-  // Guest leaves: its note stays, flag cleared, host peer count drops.
   guestLive.stop(gNote.id);
   assert.equal(guestStore.get(gNote.id).live, null);
   assert.equal(guestStore.get(gNote.id).body, 'v4');
   await until('peer left', () => hostLive.statusOf(note.id).peers === 1);
 
-  // Host stops: the remaining guest is told, its note stays and is no longer live.
   hostLive.stop(note.id);
   assert.equal(hostStore.get(note.id).live, null);
   await until('guest2 disconnected', () => !guest2.statusOf(j2.noteId) || !guest2.statusOf(j2.noteId).connected);
@@ -90,17 +82,15 @@ test('a guest keeps edits made while the host is unreachable and pushes them whe
   const status = await hostLive.host(note.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
   const joined = await guestLive.join(status.url);
   await until('connected', () => guestLive.statusOf(joined.noteId).connected);
-  // Host goes away (server closed, flag kept as if the app crashed).
   const port = hostLive.sessions.get(note.id).port;
   const dead = hostLive.sessions.get(note.id).server;
-  dead.close(); dead.closeAllConnections(); // a crash drops the open event streams too
+  dead.close(); dead.closeAllConnections();
   hostLive.sessions.delete(note.id);
   await until('guest noticed', () => !guestLive.statusOf(joined.noteId).connected);
   guestStore.update(joined.noteId, { body: 'offline edit' });
   guestLive.noteChanged(joined.noteId);
   await sleep(150);
   assert.match(guestLive.statusOf(joined.noteId).error || '', /push/);
-  // Host restarts from its persisted flag: same port and token.
   const hostLive2 = new LiveShare(hostStore, { pushDelayMs: 20 });
   await hostLive2.restore();
   assert.equal(hostLive2.sessions.get(note.id).port, port);
@@ -120,17 +110,14 @@ test('end event stops the guest cleanly; a stuck flag clears with stop(); a resu
   const status = await hostLive.host(note.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
   const joined = await guestLive.join(status.url);
   await until('connected', () => guestLive.statusOf(joined.noteId).connected);
-  // Host stops -> the guest's session ends by itself (no endless reconnect), flag cleared, note kept.
   hostLive.stop(note.id);
   await until('guest ended', () => !guestLive.sessions.has(joined.noteId));
   assert.equal(guestStore.get(joined.noteId).live, null);
   assert.ok(statuses.some((s) => s && s.ended), 'ended status reported');
   assert.equal(guestStore.get(joined.noteId).body, 'host text');
-  // A flag without a session (failed resume) is cleared by stop().
   guestStore.setLive(joined.noteId, { role: 'guest', url: status.url });
   assert.equal(guestLive.stop(joined.noteId), true);
   assert.equal(guestStore.get(joined.noteId).live, null);
-  // Resume with pending offline edits: the local text wins and reaches the host.
   const note2 = hostStore.create({ title: 'M', body: 'host v1' });
   const s2 = await hostLive.host(note2.id, { hostname: '127.0.0.1', advertise: '127.0.0.1' });
   const local = guestStore.create({ title: 'M', body: 'typed offline' });
@@ -140,10 +127,8 @@ test('end event stops the guest cleanly; a stuck flag clears with stop(); a resu
   await until('offline text reached the host', () => hostStore.get(note2.id).body === 'typed offline');
   assert.equal(guestStore.get(local.id).body, 'typed offline', 'local copy not overwritten by the host state');
   await until('pending flag cleared', () => !guestStore.get(local.id).live.pending);
-  // POST without a JSON content type is refused.
   const code = await new Promise((resolve) => { const u = new URL(s2.url); const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'text/plain' } }, (res) => { res.resume(); resolve(res.statusCode); }); req.end('{"body":"x"}'); });
   assert.equal(code, 415);
-  // Locking a hosted note ends the share for guests (410 on their next push) rather than wiping them.
   hostStore.lockNote(note2.id, 'pw');
   guestStore.update(local.id, { body: 'after lock' }); guestLive2.noteChanged(local.id);
   await until('guest ended after lock', () => !guestLive2.sessions.has(local.id), 8000);
@@ -155,7 +140,7 @@ test('restore() with a busy remembered port falls back to a free port instead of
   const hostStore = new Store(tmp()).load();
   const note = hostStore.create({ title: 'Busy', body: 'b' });
   const blocker = http.createServer((_q, r) => r.end('x'));
-  await new Promise((r) => blocker.listen(0, '0.0.0.0', r)); // same wildcard bind as the host, so the port is truly taken
+  await new Promise((r) => blocker.listen(0, '0.0.0.0', r));
   const busyPort = blocker.address().port;
   hostStore.setLive(note.id, { role: 'host', url: 'http://127.0.0.1:' + busyPort + '/live/' + 'a'.repeat(32), token: 'a'.repeat(32), port: busyPort });
   const live = new LiveShare(hostStore, {});

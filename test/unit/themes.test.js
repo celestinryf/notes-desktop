@@ -6,8 +6,6 @@ const T = require('../../src/shared/themes.mts');
 const HEX = /^#[0-9a-f]{6}$/;
 const premade = Object.keys(T.SCHEMES).filter((id) => !T.SCHEMES[id].builtIn);
 
-// Every text colour must read on every surface, and under a hover or pressed fill; the colour on the accent on it.
-// Body text reaches 7:1 where the seeds allow it (every premade scheme must); 4.5:1 is the floor for any seed.
 function assertReadable(tokens, label, bodyMin = 7) {
   const surfaces = ['chrome', 'base', 'paper', 'raised'].map((k) => tokens[k]);
   for (const s of surfaces) assert.match(s, HEX, label + ' surface ' + s);

@@ -1,8 +1,4 @@
 'use strict';
-/* Live end-to-end check against the REAL claude CLI, a REAL GitHub repo, and real windows. Not part of the
-   test suite (it spends tokens and touches GitHub). Run: node scratchpad/live-check.js
-   Uses an isolated data dir; never touches production notes. Creates and deletes a private repo
-   notes-vault-livetest on the signed-in GitHub account. */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -36,8 +32,7 @@ let app, page, owner, repoUrl, vaultParent, otherClone;
 
 async function main() {
   owner = gh('api', 'user', '-q', '.login');
-  // Fresh private repo (delete a leftover first).
-  try { gh('api', '-X', 'DELETE', 'repos/' + owner + '/' + REPO); } catch (_) { /* none or no scope */ }
+  try { gh('api', '-X', 'DELETE', 'repos/' + owner + '/' + REPO); } catch (_) {  }
   try { gh('repo', 'create', owner + '/' + REPO, '--private', '--description', 'temporary live test of the notes app vault sync'); } catch (e) { log('repo create failed (reusing existing): ' + String(e.message).slice(0, 80)); }
   repoUrl = 'https://github.com/' + owner + '/' + REPO + '.git';
   log('repo', repoUrl);
@@ -45,7 +40,7 @@ async function main() {
 
   fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F7', openAtLogin: false, theme: 'light' }, notes: [] }));
   const env = Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1', NOTES_APP_VAULT_DEBOUNCE_MS: '1500' });
-  delete env.NOTES_APP_CLAUDE_BIN; // the real claude
+  delete env.NOTES_APP_CLAUDE_BIN;
   app = await electron.launch({ executablePath: ELECTRON_PATH, args: [ROOT], env });
   page = await app.firstWindow();
   const errors = [];
@@ -55,23 +50,20 @@ async function main() {
   await page.evaluate(() => { window.confirm = () => true; });
   await page.evaluate(() => window.notesApi.settings.set({ editorMode: 'source' }));
 
-  // 1. Clone the empty repo as a vault through the app's own IPC (what the Clone dialog calls).
   const clone = await page.evaluate(([url, dest]) => window.notesApi.vaults.clone(url, dest, 'livetest'), [repoUrl, vaultParent]);
   record('vault: clone empty GitHub repo', clone.ok, clone.ok ? clone.vault.path : clone.error);
   if (!clone.ok) throw new Error(clone.error);
   const vaultId = clone.vault.id;
   const rootFolderId = clone.vault.rootFolderId;
 
-  // 2. Create a note in the vault from the UI, type into it; expect a file, then a commit pushed to GitHub.
   await page.evaluate((fid) => window.notesApi.settings.set({ expandedFolders: [fid] }), rootFolderId);
-  await page.click('.nav-item[data-view="all"]'); // refresh the sidebar so the new vault folder is rendered
+  await page.click('.nav-item[data-view="all"]');
   await page.waitForSelector('.folder-row[data-id="' + rootFolderId + '"]', { timeout: 10000 });
   await page.click('.folder-row[data-id="' + rootFolderId + '"]');
   await waitFor('vault folder active', () => page.evaluate((id) => { const r = document.querySelector('.folder-row[data-id="' + id + '"]'); return r && r.classList.contains('is-active'); }, rootFolderId));
   await page.keyboard.press('Control+n');
   await waitFor('title focused', () => page.evaluate(() => document.activeElement && document.activeElement.id === 'titleInput'));
   await page.fill('#titleInput', NOTE);
-  // Source view so the Markdown textarea is the thing we type into (same as the UI tests' helper).
   if (await page.evaluate(() => document.getElementById('bodyInput').classList.contains('hidden'))) { await page.keyboard.press('Control+e'); await waitFor('source mode', () => page.evaluate(() => !document.getElementById('bodyInput').classList.contains('hidden'))); }
   await page.fill('#bodyInput', '# Live check\n\n- [ ] written from the app\n');
   const file = path.join(clone.vault.path, NOTE + '.md');
@@ -82,7 +74,6 @@ async function main() {
   }, 60000).catch(() => false);
   record('vault: auto-commit and push reach GitHub', !!pushed);
 
-  // 3. Another device: clone elsewhere, add a file, push; the app syncs and the note appears.
   otherClone = path.join(require('../test/helpers/tmp').tmpDir('notes-live-other-'), 'clone');
   git(path.dirname(otherClone), 'clone', '-q', repoUrl, otherClone);
   fs.writeFileSync(path.join(otherClone, OTHER + '.md'), 'Hello from the other device\n');
@@ -92,7 +83,6 @@ async function main() {
   record('vault: sync pulls another device\'s note', !!(sync.ok && appeared), sync.ok ? '' : sync.error);
   await page.screenshot({ path: path.join(shots, 'main-vault.png') });
 
-  // 4. Bot: real `claude -p` edits the vault note in front of the user.
   await page.click('.note-card:has-text("' + NOTE + '")');
   await waitFor('note open', () => page.evaluate((t) => document.getElementById('titleInput').value === t, NOTE));
   await page.keyboard.press('Control+Shift+a');
@@ -108,7 +98,6 @@ async function main() {
   record('bot: the edit shows up in the editor without reload', !!inApp);
   await page.screenshot({ path: path.join(shots, 'main-bot.png') });
 
-  // 5. Open terminal: a PowerShell running the generated script with claude as its child.
   const term = await page.evaluate((id) => window.notesApi.bot.openTerminal(id), readNotes().notes.find((n) => n.title === NOTE).id);
   const script = path.join(dataDir, 'bot-terminal.ps1');
   const scriptText = fs.existsSync(script) ? fs.readFileSync(script, 'utf8') : '';
@@ -122,14 +111,10 @@ async function main() {
   const haveClaude = termProcs.some((l) => /\|claude\.exe\|/.test(l));
   record('terminal: PowerShell runs the generated script', !!(term.ok && haveShell), term.ok ? scriptText.split(/\r?\n/).slice(0, 4).join(' / ') : term.error);
   record('terminal: an interactive claude is running inside it', haveClaude, termProcs.map((l) => l.split('|').slice(0, 3).join(':')).join(', '));
-  // Close what we opened.
-  // Only what we launched: match by process NAME and the exact command the app writes. (Matching on the
-  // command-line text alone once killed the shell running this script, whose own command line quoted it.)
   const ours = (l) => { const f = l.split('|'); return f[3] && /^("?powershell(.exe)?"? |wt.exe )/.test(f[3]) && /bot-terminal.ps1/.test(f[3]); };
   for (const l of termProcs) { const f = l.split('|'); if (f[2] === 'powershell.exe' && ours(l)) spawnSync('taskkill', ['/PID', f[0], '/T', '/F'], { stdio: 'ignore' }); }
   for (const l of termProcs) { const f = l.split('|'); if (f[2] === 'WindowsTerminal.exe' && ours(l)) spawnSync('taskkill', ['/PID', f[0], '/F'], { stdio: 'ignore' }); }
 
-  // 6. Sticky: real window, screenshot it.
   const noteId = readNotes().notes.find((n) => n.title === NOTE).id;
   const stickyPromise = app.waitForEvent('window', { timeout: 15000 });
   await page.evaluate((id) => window.notesApi.stickies.open(id), noteId);
@@ -145,7 +130,6 @@ async function main() {
   await sticky.click('#stickyCloseBtn');
   await waitFor('sticky gone', () => !readNotes().notes.find((n) => n.id === noteId).sticky);
 
-  // 7. Main window look, dark theme too.
   await page.evaluate(() => window.notesApi.settings.set({ theme: 'dark' }));
   await sleep(500);
   await page.screenshot({ path: path.join(shots, 'main-dark.png') });
@@ -155,7 +139,7 @@ async function main() {
 }
 
 main().catch((err) => { record('live run aborted', false, String(err && err.stack || err).slice(0, 400)); }).finally(async () => {
-  try { if (app) await app.evaluate(({ app }) => { app.exit(0); }); } catch (_) { /* ignore */ }
+  try { if (app) await app.evaluate(({ app }) => { app.exit(0); }); } catch (_) {  }
   log('repo kept (token lacks delete_repo): https://github.com/' + owner + '/' + REPO);
   log('data dir', dataDir, 'vault', vaultParent, 'shots', shots);
   console.log(JSON.stringify(results, null, 2));

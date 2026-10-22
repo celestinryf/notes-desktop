@@ -1,14 +1,4 @@
-/* Notes: the design system lives in the vault note "Notes App - Design System". Read it before changing this file.
-
-   Identity (pinned, from the club website): cream / peach / tangerine / ember / leaf / ink; Fraunces for display,
-   Geist for the interface, Geist Mono for code and paths only.
-   No shadows anywhere, and no dark edges round things in dark mode (the user dislikes them, 2026-10-19). Floating
-   layers (menus, dialogs, toasts, the find bar, select lists, the palette, the floating sidebar) stand apart by
-   their tone, with a thin warm hairline in light only; buttons and pills are flat.
-   Everything else is quiet: tonal surfaces instead of borders, one accent with one job, a 4px grid. */
-
 :root {
-  /* brand */
   --cream: #fbf1e4;
   --peach: #f6dcc3;
   --tangerine: #f47b3e;
@@ -16,78 +6,65 @@
   --leaf: #4f7a3a;
   --ink: #2a1a12;
 
-  /* surfaces, lowest to highest: the writing paper is the brightest thing on screen */
-  --chrome: #f3e4d1;      /* sidebar */
-  --base: #f8ecdc;        /* note list */
-  --paper: #fffaf3;       /* the editor */
-  --raised: #fffcf8;      /* menus, dialogs, palette */
+  --chrome: #f3e4d1;
+  --base: #f8ecdc;
+  --paper: #fffaf3;
+  --raised: #fffcf8;
   --hover: rgba(42, 26, 18, 0.06);
   --pressed: rgba(42, 26, 18, 0.1);
   --selected: var(--peach);
   --selected-fg: var(--ink);
-  --well: rgba(42, 26, 18, 0.05);   /* code, table heads, quiet fills inside the paper */
+  --well: rgba(42, 26, 18, 0.05);
 
-  /* text */
   --fg: var(--ink);
-  --fg-2: #5e4335;        /* secondary text: >= 4.5:1 on every surface */
-  --fg-3: #6f5444;        /* tertiary (meta, counts): >= 4.5:1 on every surface */
-  --accent-text: #a83a0f; /* links and tags on light surfaces */
+  --fg-2: #5e4335;
+  --fg-3: #6f5444;
+  --accent-text: #a83a0f;
   --danger: #a8340c;
   --ok: #3f6a2c;
 
-  /* lines */
-  --line: rgba(42, 26, 18, 0.1);    /* hairline between areas */
-  --line-2: rgba(42, 26, 18, 0.16); /* hairline inside a surface */
-  --field: rgba(42, 26, 18, 0.45);  /* outline of an input: >= 3:1 */
+  --line: rgba(42, 26, 18, 0.1);
+  --line-2: rgba(42, 26, 18, 0.16);
+  --field: rgba(42, 26, 18, 0.45);
   --field-bg: var(--raised);
   --scroll-thumb: rgba(42, 26, 18, 0.2);
 
-  /* the accent: fills only (primary button, selection, toggles that are on) */
   --accent: var(--tangerine);
   --accent-fg: var(--ink);
   --focus: var(--ember);
   --accent-hover: #f68a52;
-  --document-bg: #e6e0d6;  /* behind PDF pages: paper-white pages need a darker ground */
+  --document-bg: #e6e0d6;
 
-  /* floating layers: a thin warm hairline and a faint lift in light (the paper and a menu are nearly the same white);
-     neither in dark, where the raised tone is enough. The lift is Fluent 2's shadow8, about: a 2px ambient plus a
-     4px/8px key. Side-by-side shots (vault, research 2026-10-20) showed it reads in light only; the user chose it. */
   --float-line: var(--line-2);
   --float-shadow: 0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14);
-  /* code (the plain-text file editor): each >= 4.5:1 on the paper and raised surfaces, in both themes */
-  --syn-keyword: var(--accent-text);  /* keywords, LaTeX commands */
-  --syn-string: #8a5200;              /* strings */
-  --syn-atom: #3f6a2c;                /* numbers, atoms, types, LaTeX environment names */
-  --syn-comment: var(--fg-3);         /* comments (italic) */
-  --syn-punct: var(--fg-2);           /* brackets, operators */
+  --syn-keyword: var(--accent-text);
+  --syn-string: #8a5200;
+  --syn-atom: #3f6a2c;
+  --syn-comment: var(--fg-3);
+  --syn-punct: var(--fg-2);
 
-  /* type */
   --font-sans: 'Geist', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, Consolas, monospace;
   --font-display: 'Fraunces', ui-serif, Georgia, serif;
-  --t-xs: 12px;   /* meta, counts, shortcut hints */
-  --t-sm: 13px;   /* controls, list snippets, menus */
-  --t-md: 14px;   /* list titles, nav, body of dialogs */
-  --t-lg: 20px;   /* dialog titles */
-  --t-xl: 30px;   /* the note title */
+  --t-xs: 12px;
+  --t-sm: 13px;
+  --t-md: 14px;
+  --t-lg: 20px;
+  --t-xl: 30px;
   --editor-font-size: 16px;
-  --source-size: round(calc(var(--editor-font-size) * 0.92), 1px); /* Markdown source and the code editor: mono, a step smaller */
+  --source-size: round(calc(var(--editor-font-size) * 0.92), 1px);
 
-  /* space: a 4px grid; inside dense controls the half-steps 2, 6 and 10 are allowed (Fluent's ramp) */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
 
-  /* shape: three radii, plus 999px for pills */
-  --r-xs: 4px;   /* inline code, badges, highlights, the brand mark */
-  --r-sm: 6px;   /* controls, rows */
-  --r-md: 8px;   /* menus, fields, code blocks, dialogs, the palette */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
 
-  /* size */
-  --bar-h: 40px;      /* the top band across every pane; the window's caption buttons sit in it */
+  --bar-h: 40px;
   --control-h: 28px;
   --row-h: 32px;
-  --caption-w: 0px;   /* width of the window's caption buttons over the top-right corner (set by app.js) */
+  --caption-w: 0px;
 
-  /* motion */
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --dur-1: 100ms;
   --dur-2: 160ms;
@@ -100,7 +77,7 @@
   --chrome: #150e0a;
   --base: #1a120d;
   --paper: #211710;
-  --raised: #33261c;   /* a clear step above the paper (1.20:1) and the list (1.26:1): floating layers have no shadow */
+  --raised: #33261c;
   --hover: rgba(251, 241, 228, 0.06);
   --pressed: rgba(251, 241, 228, 0.1);
   --selected: rgba(244, 123, 62, 0.22);
@@ -108,27 +85,26 @@
   --well: rgba(251, 241, 228, 0.06);
   --fg: #f6eadb;
   --fg-2: #d3b9a4;
-  --fg-3: #bea592;     /* 4.5:1+ on every surface, also under a hover or pressed fill (4.69:1 on a pressed row in a menu) */
+  --fg-3: #bea592;
   --accent-text: #ffa070;
   --danger: #ff8a66;
   --ok: #9ccf80;
-  --line: rgba(0, 0, 0, 0.42);      /* separators are darker than the surfaces, never light */
+  --line: rgba(0, 0, 0, 0.42);
   --line-2: rgba(0, 0, 0, 0.55);
   --field: rgba(0, 0, 0, 0.6);
-  --field-bg: #160f0b;              /* fields are sunk into what they sit on */
+  --field-bg: #160f0b;
   --scroll-thumb: rgba(251, 241, 228, 0.16);
   --accent-fg: #1b120d;
   --focus: #ffa070;
   --accent-hover: #ff925c;
   --document-bg: #120c08;
-  --float-line: transparent;     /* no edge round floating layers in dark: neither light (never) nor black (disliked) */
-  --float-shadow: none;          /* a shadow is invisible on the dark paper; one strong enough to show would be that black edge */
+  --float-line: transparent;
+  --float-shadow: none;
   --syn-string: #e8b860;
   --syn-atom: #9ccf80;
   color-scheme: dark;
 }
 
-/* ---- base -------------------------------------------------------------------------------------------- */
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
@@ -165,18 +141,14 @@ kbd {
 kbd + kbd { margin-left: 2px; }
 .keys { margin-left: auto; padding-left: var(--s4); font-size: var(--t-xs); color: var(--fg-3); white-space: nowrap; }
 
-/* Drag the window by its top band; everything you can press stays pressable. */
 .drag-region { -webkit-app-region: drag; }
 .drag-region button, .drag-region input, .drag-region select, .drag-region label, .drag-region a, .drag-region .tab, .drag-region .tabs { -webkit-app-region: no-drag; }
 
-/* ---- layout -------------------------------------------------------------------------------------------- */
 .app {
   --sidebar-w: 232px;
   --list-w: 300px;
   display: grid;
   grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr);
-  /* One row exactly the window's height. Without it the implicit row grows to fit its content, the panes
-     never overflow, and nothing scrolls (the body hides its own overflow). */
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
 }
@@ -187,8 +159,6 @@ kbd + kbd { margin-left: 2px; }
 .app.list-collapsed .list-pane { display: none; }
 .app-sidebar, .list-pane { position: relative; }
 .app > * { min-height: 0; }
-/* Each pane keeps its own column: a hidden pane leaves the grid, and without this the next pane would slide
-   into its zero-width column. */
 .app-sidebar { grid-column: 1; grid-row: 1; }
 .list-pane { grid-column: 2; grid-row: 1; }
 .editor-pane { grid-column: 3; grid-row: 1; }
@@ -205,8 +175,6 @@ kbd + kbd { margin-left: 2px; }
 body.is-resizing { cursor: col-resize; user-select: none; }
 body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 
-/* ---- shared controls ----------------------------------------------------------------------------------- */
-/* Quiet buttons: no outline at rest, a tonal step on hover, a deeper one when pressed or on. */
 .tool-btn, .icon-btn, .mini-btn, .foot-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: var(--control-h);
@@ -240,7 +208,6 @@ body.is-resizing iframe, body.is-resizing textarea { pointer-events: none; }
 .btn:hover { background: var(--hover); }
 .btn-small { height: var(--control-h); padding: 0 10px; }
 .btn-block { width: 100%; }
-/* The primary action: the accent fill, flat (buttons and pills have no outline or hard shadow). */
 .btn-primary {
   border: none;
   background: var(--accent); color: var(--accent-fg);
@@ -266,10 +233,6 @@ textarea.input { height: auto; padding: 8px 10px; }
 .select-quiet { height: 24px; padding: 0 2px 0 6px; border-color: transparent; background-color: transparent; color: var(--fg-3); font-size: var(--t-xs); }
 .select-quiet:hover { background-color: var(--hover); }
 
-/* ---- dropdowns: the browser's own select, styled (appearance: base-select) ------------------------------------ */
-/* Keyboard, type-ahead and screen readers stay the browser's. The list is a floating layer, its rows are the
-   menus' rows, the chosen row is filled (no checkmark glyph), and the arrow is Lucide's chevron-down, drawn with a
-   mask because a pseudo-element cannot hold the icon markup. */
 select, ::picker(select) { appearance: base-select; }
 select { display: inline-flex; align-items: center; gap: var(--s1); cursor: pointer; }
 select::picker-icon {
@@ -304,15 +267,12 @@ select option:disabled { opacity: 0.45; cursor: default; }
 input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--ember); }
 :root[data-theme="dark"] input[type="range"], :root[data-theme="dark"] input[type="checkbox"] { accent-color: var(--tangerine); }
 
-/* ---- floating layers: menus, the find bar, dialogs, the palette, toasts, the floating sidebar, select lists --- */
-/* Their raised tone sets them apart, with a hairline and a faint lift in light only; flat in dark.
-   Select lists take the same look in ::picker(select) below. */
 .popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .palette, .toast {
   border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow);
   background: var(--raised); color: var(--fg);
 }
 .popover {
-  position: fixed; z-index: 30; /* above the floating sidebar (25) that opens some of them */
+  position: fixed; z-index: 30;
   display: flex; flex-direction: column;
   min-width: 200px; max-width: 340px;
   padding: var(--s1);
@@ -338,7 +298,6 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .menu-group + .menu-group { margin-top: var(--s1); padding-top: var(--s1); border-top: 1px solid var(--line-2); }
 .menu-group:not(:has(> :not(.hidden))) { display: none; }
 .menu { min-width: 260px; }
-/* The "/" and "[[" menu under the caret. */
 .inline-menu { min-width: 240px; max-height: 320px; overflow-y: auto; }
 .inline-item { display: flex; align-items: center; gap: var(--s2); min-height: 30px; padding: 0 var(--s2); border-radius: var(--r-sm); font-size: var(--t-sm); cursor: pointer; }
 .inline-item .icon { color: var(--fg-3); }
@@ -352,7 +311,6 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 @keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes fade { from { opacity: 0; } }
 
-/* ---- sidebar -------------------------------------------------------------------------------------------- */
 .app-sidebar {
   display: flex; flex-direction: column;
   gap: var(--s2);
@@ -362,13 +320,9 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   min-width: 0;
 }
 .sidebar-top { display: flex; align-items: center; height: var(--bar-h); padding: 0 var(--s1); flex: none; }
-/* While it floats, the pane toggles wait in the top bar, so the floating sidebar has no header. */
 .app.sidebar-float .sidebar-top { display: none; }
 .app.sidebar-float .app-sidebar { padding-top: var(--s2); }
 
-/* Floating (pin off, or a window too narrow to dock it): out of sight until the pointer reaches the left edge or
-   the toggle is pressed, then over the page with a small margin all round. It floats, so it takes the floating
-   layers' look (above). */
 .sidebar-edge { display: none; position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--s2); }
 .app.sidebar-float .sidebar-edge { display: block; }
 .sidebar-actions { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s1) var(--s2); }
@@ -382,7 +336,6 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   transition: transform var(--dur-2) var(--ease), visibility 0s linear var(--dur-2);
 }
 .app.sidebar-float.sidebar-peek .app-sidebar { transform: none; visibility: visible; transition: transform var(--dur-2) var(--ease); }
-/* Its right edge resizes it, as the docked sidebar's does (same width, same handle; app.js setupResizer). */
 .search-trigger {
   display: flex; align-items: center; gap: var(--s2);
   height: 32px; padding: 0 var(--s2) 0 10px;
@@ -431,15 +384,11 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .nav-heading-tools { display: flex; gap: 2px; }
 .nav-item.is-drop-target, .folder-row.is-drop-target { background: var(--selected); color: var(--selected-fg); box-shadow: inset 0 0 0 2px var(--accent); }
 
-/* folder tree (the sidebar's folders and the note list's folder view share this geometry: VS Code's and Obsidian's)
-   A row is a 24px chevron box and the name, nothing else in front: no folder or note icons (user, 2026-10-19).
-   Each level indents by the chevron's width, so a child's chevron sits under its parent's name. */
 .nav.folders { overflow-y: auto; flex: 0 1 auto; max-height: 45%; min-height: 0; }
 .tree { --indent: 24px; }
 .folder-row { gap: 0; padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); cursor: pointer; }
 .folder-row > .row-mark, .folder-row > .count, .folder-row > .vault-badge { margin-left: var(--s1); }
 .folder-row:focus-visible, .note-tree .tree-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-/* Each level's children hang from a line under their parent's chevron; the branch you are in draws it darker. */
 .tree-children { position: relative; }
 .tree-children::before { content: ''; position: absolute; top: 2px; bottom: 2px; left: calc(var(--s1) + var(--depth, 0) * var(--indent) + 12px); width: 1px; background: var(--line-2); pointer-events: none; }
 :root[data-theme="dark"] .tree-children::before { background: rgba(251, 241, 228, 0.1); }
@@ -482,7 +431,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .folder-row .vault-badge.is-error { color: var(--danger); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* tags */
 .nav.tags { overflow-y: auto; flex: 1; min-height: 0; }
 .nav.tags .nav-item { font-weight: 400; }
 .nav.tags .nav-item span:first-child::before { content: '#'; color: var(--fg-3); margin-right: 2px; }
@@ -493,7 +441,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .hotkey-hint { margin: 0; padding: 0 var(--s2); font-size: var(--t-xs); color: var(--fg-3); line-height: 1.4; }
 .hotkey-hint span { white-space: nowrap; color: var(--fg-2); font-weight: 500; }
 
-/* ---- note list ------------------------------------------------------------------------------------------ */
 .list-pane {
   display: flex; flex-direction: column;
   background: var(--base);
@@ -506,7 +453,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .search { height: 28px; padding-left: 32px; border-color: transparent; background: var(--well); font-size: var(--t-sm); }
 .search:hover { border-color: var(--line-2); }
 .search::placeholder { color: var(--fg-3); }
-/* The clear button is Lucide's x in our grey, not the browser's blue circle. */
 .search::-webkit-search-cancel-button {
   -webkit-appearance: none; appearance: none; width: 16px; height: 16px; cursor: pointer;
   background: var(--fg-3);
@@ -521,9 +467,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 }
 .list-crumb { color: var(--fg-3); font-weight: 500; }
 .list-title-actions { display: flex; align-items: center; gap: var(--s1); flex: none; }
-/* Rows: a note is one line, its title, with small marks trailing (pin, sticky, lock, live, file kind, reminder,
-   folder). No snippet, no date, no box (user, 2026-10-19: "just the titles"). The list and the folder view share
-   the same row; the folder view adds the chevron box and the indent. */
 .note-list { list-style: none; margin: 0; padding: 0 var(--s2) var(--s4); overflow-y: auto; flex: 1; scrollbar-gutter: stable; }
 .note-row, .note-tree .tree-row {
   display: flex; align-items: center; gap: 0;
@@ -549,11 +492,9 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .row-meta { flex: none; display: inline-flex; align-items: center; gap: var(--s1); max-width: 40%; margin-left: var(--s2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .row-meta .icon { width: 12px; height: 12px; flex: none; }
 .note-row.is-active .row-meta { color: inherit; opacity: 0.8; }
-/* A search result whose match is in the body: the matching text on a second line under the title. */
 .note-row:has(.row-meta.match) { flex-wrap: wrap; padding-bottom: 6px; }
 .row-meta.match { flex: 1 0 100%; max-width: none; order: 99; display: block; margin: 0; padding-left: 0; font-weight: 400; line-height: 1.4; }
 .note-row .page-no { flex: none; margin-right: var(--s2); }
-/* The folder view: folders with their notes, and the open note's headings under it. */
 .note-tree { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); scrollbar-gutter: stable; }
 .note-tree .tree-row { padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); }
 .tree-chevron, .tree-spacer { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--fg-3); transition: transform var(--dur-2) var(--ease); }
@@ -565,7 +506,6 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .note-tree .tree-heading { min-height: 24px; font-size: var(--t-xs); color: var(--fg-3); }
 .note-tree .tree-heading:hover { color: var(--fg); }
 .tree-outline::before { background: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
-/* The List / Folders switch in the list's title row: two icon buttons, the one in use filled. */
 .seg-icons { padding: 2px; }
 .segmented.seg-icons button { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; color: var(--fg-2); }
 .segmented.seg-icons button:hover { color: var(--fg); }
@@ -582,16 +522,13 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .remind-mark .icon { width: 12px; height: 12px; }
 .remind-mark.is-overdue { color: var(--danger); font-weight: 600; }
 
-/* ---- editor pane ---------------------------------------------------------------------------------------- */
 .editor-pane { position: relative; display: flex; flex-direction: row; min-width: 0; background: var(--paper); }
-/* One side of the editor pane: its tabs above the note. A split adds a divider and the right side (an iframe). */
 .pane-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .split-divider { flex: none; width: 5px; cursor: col-resize; background: var(--line); touch-action: none; transition: background var(--dur-1); }
 .split-divider:hover, .split-divider.is-dragging { background: var(--accent); }
 .pane-peer { flex: 0 0 var(--peer-w, 50%); min-width: 0; border: none; background: var(--paper); }
-.editor-pane.is-resizing .pane-peer { pointer-events: none; } /* the drag would be lost to the iframe */
+.editor-pane.is-resizing .pane-peer { pointer-events: none; }
 
-/* tabs */
 .tab-bar { flex: none; display: flex; align-items: center; gap: var(--s1); height: var(--bar-h); padding: 0 var(--s2); border-bottom: 1px solid var(--line); background: var(--base); }
 
 .bar-toggles, .note-actions { display: flex; align-items: center; gap: 2px; align-self: center; flex: none; }
@@ -599,10 +536,8 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .bar-toggles .tool-btn.is-on { background: transparent; color: var(--fg-2); }
 .bar-toggles .tool-btn.is-on:hover { background: var(--hover); color: var(--fg); }
 .tab-bar .tool-btn { flex: none; }
-/* No note on this side: nothing for the note's actions to act on. */
 .pane-main:has(> .editor.hidden) .note-actions { display: none; }
 .editor-pane.is-split .pane-main.is-active-side .tab-bar, body.pane-guest .pane-main.is-active-side .tab-bar { box-shadow: inset 0 -2px 0 var(--accent); }
-/* One tab showing a note and no split: no tabs, and no + (Ctrl+T and Ctrl+click still open a tab). */
 .tab-bar.is-solo .tabs, .tab-bar.is-solo .tab-add { display: none; }
 .tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: 0; align-self: center; align-items: center; overflow-x: auto; scrollbar-width: none; }
 .tab {
@@ -621,14 +556,11 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .tab-close .icon { width: 14px; height: 14px; }
 .tab-close:hover { opacity: 1; background: var(--pressed); }
 .tab-bar.is-drop-target { background: var(--selected); }
-/* The window's caption buttons sit over the top-right corner of the rightmost pane: keep clear of them. */
 .editor-pane:not(.is-split) .tab-bar, body.pane-guest .tab-bar { padding-right: calc(var(--caption-w) + var(--s2)); }
 
-/* The right side of a split is this page again, showing only the editor. */
 body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
 body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-edge, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
 
-/* nothing open */
 .editor-empty { position: relative; flex: 1; display: grid; place-items: center; padding: var(--s5); }
 .editor-empty-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s3); max-width: 360px; text-align: center; }
 .editor-empty-title { margin: 0; font-family: var(--font-display); font-size: var(--t-lg); font-weight: 600; }
@@ -639,11 +571,9 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .shortcut-list dd { margin: 0; }
 .editor-empty-foot { margin: var(--s2) 0 0; font-size: var(--t-xs); color: var(--fg-3); }
 
-/* the note */
 .pane-main { container-type: inline-size; container-name: side; }
 .editor { flex: 1; display: flex; flex-direction: column; min-height: 0; container-type: inline-size; container-name: editor; }
 .toolbar-sep { width: 1px; height: 16px; margin: 0 var(--s1); background: var(--line-2); flex: none; }
-/* The folder a note is in, over its title (choosing another folder moves the note). */
 .note-path { display: flex; min-height: var(--control-h); margin: 0 0 0 -8px; }
 .crumb { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 44px; overflow: hidden; color: var(--fg-3); }
 .crumb > .icon { position: absolute; left: 8px; pointer-events: none; }
@@ -659,7 +589,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .folder-select:hover { background-color: var(--hover); color: var(--fg); }
 .folder-select:focus-visible { outline: 2px solid var(--focus); }
 
-/* A narrow side (small window, or one side of a split): labels give way to icons, rare details go. */
 @container side (max-width: 720px) {
   #sourceBtn .lbl, #shareBtn > span, #restoreBtn > span, #destroyBtn > span { display: none; }
   #sourceBtn, #shareBtn, #restoreBtn, #destroyBtn { width: var(--control-h); padding: 0; }
@@ -674,7 +603,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   .title-input { font-size: 24px; }
 }
 
-/* what is running: floats over the bottom right of the editor side, above the reader, with or without a note */
 .activity { position: absolute; z-index: 9; right: var(--s4); bottom: calc(28px + var(--s3)); display: flex; flex-direction: column; align-items: flex-end; gap: var(--s2); }
 .activity:empty { display: none; }
 .activity-chip {
@@ -691,7 +619,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .activity-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: breathe 1.2s ease-in-out infinite alternate; }
 @keyframes breathe { from { opacity: 1; } to { opacity: 0.35; } }
 
-/* The writing column scrolls as one block and fills the pane, or sits left, center, or right at a chosen width. */
 .editor-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-gutter: stable; }
 .editor-column {
   --editor-col-width: 760px;
@@ -705,7 +632,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .editor-column.align-center { margin: 0 auto; }
 .editor-column.align-right { margin: 0 0 0 auto; }
 .editor-column.full-width { max-width: none; }
-/* A PDF or Word document is a page of its own; it gets the whole pane, whatever the writing width is. */
 .editor-column.shows-document { max-width: none; margin: 0; padding: var(--s2) var(--s3) var(--s3); }
 
 .title-input {
@@ -746,18 +672,14 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   tab-size: 2;
 }
 .body-input:focus { outline: none; }
-/* ---- CSV and TSV as a table (csv-view.js): read-only; Ctrl+E edits the file as text --------------------------- */
-/* A table or an image takes the rest of the pane under the note's header, with its own scrolling (app.js fillPane). A short
-   table keeps its own height, so its scrollbar stays under its last row. */
 .editor-column.fills-pane { height: 100%; flex: 1 1 auto; max-width: none; padding-bottom: var(--s3); }
 .editor-column.fills-pane .editor-body { flex: 1 1 auto; min-height: 0; }
-.editor-column.fills-pane > :not(.editor-body) { flex-shrink: 0; } /* the header keeps its size; only the table or picture gives way */
+.editor-column.fills-pane > :not(.editor-body) { flex-shrink: 0; }
 .editor.fills-pane .editor-scroll { overflow: hidden; }
 .csv-view { flex: 0 1 auto; min-height: 0; overflow: auto; border-radius: var(--r-md); }
 .csv-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .csv-table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: var(--t-sm); }
 .csv-table th, .csv-table td { max-width: 360px; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; vertical-align: top; background: var(--paper); }
-/* Zebra rows by tone; drawn opaque so the sticky row numbers cover what scrolls under them. */
 .csv-table tbody tr:nth-child(even) > * { background: linear-gradient(var(--well), var(--well)), var(--paper); }
 .csv-table thead th { position: sticky; top: 0; z-index: 2; background: var(--chrome); font-weight: 600; }
 .csv-table .rownum { position: sticky; left: 0; z-index: 1; color: var(--fg-3); font-size: var(--t-xs); font-weight: 400; text-align: right; }
@@ -765,21 +687,14 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .csv-table .num { text-align: right; }
 .csv-note { margin: var(--s3) 0; color: var(--fg-3); font-size: var(--t-sm); }
 
-/* ---- images (app.js showImage): fitted to the pane; a click or Enter shows the actual size -------------------- */
-/* The picture is centred by its auto margins, which give way when it is larger than the pane, so its actual size scrolls
-   from the top left rather than being cut off. */
 .image-viewer { display: flex; flex: 1 1 0; min-height: 0; margin: 0; padding: var(--s3); overflow: auto; border-radius: var(--r-md); background: var(--document-bg); }
-/* A transparent picture shows over a checkerboard, as image viewers do. */
 .image-viewer img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; background: conic-gradient(color-mix(in srgb, var(--fg) 9%, transparent) 25%, transparent 0 50%, color-mix(in srgb, var(--fg) 9%, transparent) 0 75%, transparent 0) 0 0 / 8px 8px; }
-/* A picture has no words to count. */
 .editor.shows-image :is(#statusWords, #statusChars, .status-bar .dot) { display: none; }
 .image-viewer.is-actual img { max-width: none; max-height: none; cursor: zoom-out; }
 .image-viewer img:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* A .txt file is prose: the writing font and size, as a note's text, not the mono of Markdown source and code. */
 .body-input.is-prose { font-family: var(--font-sans); font-size: var(--editor-font-size); }
 
-/* ---- the code editor (CodeMirror) for plain-text files, shown in the textarea's place (app.js showCode) ---- */
 .body-input.uses-code { display: none; }
 .code-host { display: none; }
 .body-input.uses-code:not(.hidden) + .code-host { display: block; min-height: 320px; }
@@ -804,7 +719,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .status-code { margin-left: auto; color: var(--fg-3); }
 .status-code:not(.hidden) + .status-right { margin-left: 0; }
 
-/* The rendered editor (Tiptap): the reading and writing surface. */
 .rich-editor { flex: 1 0 auto; display: flex; flex-direction: column; cursor: text; }
 .rich-editor-content {
   flex: 1 0 auto;
@@ -860,7 +774,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .rich-editor-content img[src] { display: inline-block; max-width: 100%; border-radius: var(--r-md); margin: 0.4em 0; vertical-align: middle; }
 .rich-editor-content .ProseMirror-selectednode { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-/* ---- opened files ------------------------------------------------------------------------------------- */
 .file-row {
   display: flex; align-items: center; gap: var(--s1);
   margin: 0 0 var(--s2);
@@ -878,13 +791,9 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   background: color-mix(in srgb, var(--accent) 16%, var(--paper));
   font-size: var(--t-sm);
 }
-/* A Word document: a tool row (hidden when it cannot be edited) over the sandboxed frame showing it. */
 .docx-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
 .docx-editor.read-only .docx-toolbar { display: none; }
 .docx-view { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
-/* WordCraft's full editor for Word documents: it has its own ribbon, so it gets the whole note area. */
-/* A Craft app (WordCraft, GridCraft) in its frame: a whole office app, so it gets the note's area and
-   shows its own title, counts and status. */
 .craft-frame { flex: 1 1 auto; width: 100%; min-height: 320px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--paper); }
 .craft-frame.is-opening { visibility: hidden; }
 .editor-column.shows-craft { height: 100%; flex: 1 1 auto; }
@@ -892,7 +801,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .editor-column.shows-craft .editor-body { flex: 1 1 auto; min-height: 0; }
 .editor.shows-craft .editor-scroll { overflow: hidden; }
 .editor.shows-craft :is(#statusWords, #statusChars, .status-bar .dot) { display: none; }
-/* The PDF editor: a tool row over pdf.js's viewer, which must sit in an absolutely positioned, scrolling box. */
 .pdf-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
 .pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: var(--s1); border-bottom: 1px solid var(--line-2); background: var(--raised); }
 .pdf-toolbar .tool-btn.is-on { background: var(--selected); color: var(--selected-fg); }
@@ -900,9 +808,7 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-grow { flex: 1; }
 .pdf-body { display: flex; flex: 1; min-height: 0; }
 .pdf-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
-/* Picking the place for a new comment. */
 .pdf-editor.picking .pdfViewer .page, .pdf-editor.picking .pdfViewer .page * { cursor: crosshair !important; }
-/* The comments panel, beside the pages. */
 .pdf-comments { display: none; flex: 0 0 280px; max-width: 45%; flex-direction: column; min-height: 0; border-left: 1px solid var(--line-2); background: var(--paper); }
 .pdf-editor.commenting .pdf-comments { display: flex; }
 .pdf-comments.is-working { opacity: 0.6; pointer-events: none; }
@@ -922,7 +828,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-comment-acts { display: flex; justify-content: flex-end; gap: var(--s1); margin-top: 6px; }
 .pdf-comment-acts:empty { display: none; }
 .pdf-viewport { position: absolute; inset: 0; overflow: auto; background: var(--document-bg); }
-/* The page organizer replaces the tool row and the pages while it is open. */
 .pdf-pages { display: none; flex: 1; flex-direction: column; min-height: 0; }
 .pdf-editor.organizing .pdf-pages { display: flex; }
 .pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-body { display: none; }
@@ -939,7 +844,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .sign-type { display: flex; gap: 6px; }
 .sign-type .input { flex: 1; }
 .sign-status:empty { display: none; }
-/* Always white, like paper, so the ink shows in either theme. */
 .sign-pad { display: block; width: 100%; max-width: 600px; aspect-ratio: 600 / 220; margin: var(--s2) 0; border: 1px dashed var(--field); border-radius: var(--r-md); background: #fff; touch-action: none; cursor: crosshair; }
 .app.is-dropping::after {
   content: 'Drop files to open them as notes';
@@ -951,7 +855,6 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   pointer-events: none;
 }
 
-/* ---- books: pages as document tabs ------------------------------------------------------------------- */
 .book-strip { display: flex; align-items: center; gap: var(--s1); margin: 0 0 var(--s3); padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
 .book-name { font-family: var(--font-display); font-weight: 600; font-size: var(--t-md); white-space: nowrap; }
 button.book-name { height: var(--control-h); padding: 0 var(--s2); border: none; border-radius: var(--r-sm); background: transparent; color: inherit; cursor: pointer; }
@@ -965,7 +868,6 @@ button.book-name:hover { background: var(--hover); }
 .book-tab.is-active { background: var(--selected); color: var(--selected-fg); font-weight: 600; }
 .book-tab.is-active .no { color: inherit; opacity: 0.7; }
 .book-tab.drop-before { box-shadow: -2px 0 0 var(--accent); }
-/* Whole-book reading view: every page in order, over the editor. */
 .book-reader { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--paper); }
 .book-reader-bar { display: flex; align-items: center; gap: var(--s1); height: var(--bar-h); padding: 0 calc(var(--caption-w) + var(--s2)) 0 var(--s4); border-bottom: 1px solid var(--line); background: var(--base); }
 .book-reader-title { font-family: var(--font-display); font-weight: 600; font-size: var(--t-md); }
@@ -986,7 +888,6 @@ button.book-name:hover { background: var(--hover); }
 .split-pages { margin: 0 0 var(--s4); padding: var(--s2) var(--s3) var(--s2) var(--s6); max-height: 40vh; overflow: auto; border-radius: var(--r-md); background: var(--well); display: grid; gap: 3px; }
 .split-pages .lines { color: var(--fg-3); font-size: var(--t-xs); margin-left: 6px; }
 
-/* ---- related notes ------------------------------------------------------------------------------------- */
 .related { margin-top: var(--s6); padding-top: var(--s4); border-top: 1px solid var(--line); display: grid; gap: var(--s3); }
 .related h3 { margin: 0 0 6px; font-size: var(--t-xs); color: var(--fg-3); font-weight: 600; }
 .related ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -997,13 +898,11 @@ button.book-name:hover { background: var(--hover); }
 .related .tags { color: var(--fg-3); font-size: var(--t-xs); margin-left: 4px; }
 @media print { .book-strip, .related { display: none !important; } }
 
-/* ---- live share ----------------------------------------------------------------------------------------- */
 .live-row { display: flex; align-items: center; gap: var(--s2); margin: 0 0 var(--s2); padding: var(--s1) var(--s1) var(--s1) var(--s3); border-radius: var(--r-md); background: color-mix(in srgb, var(--leaf) 12%, var(--paper)); font-size: var(--t-sm); }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); box-shadow: 0 0 0 3px color-mix(in srgb, var(--leaf) 28%, transparent); }
 .live-row.is-off { background: color-mix(in srgb, var(--danger) 10%, var(--paper)); }
 .live-row.is-off .live-dot { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 28%, transparent); }
 
-/* ---- locked notes --------------------------------------------------------------------------------------- */
 .lock-screen { display: flex; align-items: center; justify-content: center; padding: var(--s7) var(--s4); }
 .lock-screen-card { display: flex; flex-direction: column; align-items: center; gap: var(--s3); width: min(340px, 100%); }
 .lock-screen-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--well); color: var(--fg-2); }
@@ -1012,7 +911,6 @@ button.book-name:hover { background: var(--hover); }
 .lock-screen-card .input { width: 100%; }
 .lock-screen-error { margin: 0; min-height: 1em; font-size: var(--t-xs); color: var(--danger); }
 
-/* ---- reminders, history, find ------------------------------------------------------------------------- */
 .quick-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .field-hint { margin: 0 0 var(--s2); font-size: var(--t-sm); color: var(--fg-2); }
 .dialog-wide { width: min(860px, 94vw); }
@@ -1041,19 +939,17 @@ button.book-name:hover { background: var(--hover); }
 ::highlight(settings-match) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .tool-btn.is-recording { color: var(--danger); }
 
-/* ---- print: the note only ----------------------------------------------------------------------------- */
 @media print {
   .body-input.uses-code:not(.hidden) { display: block !important; }
   .code-host { display: none !important; }
   .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
-  .app { display: block !important; } /* one column: the hidden panes' grid columns would push the note right */
+  .app { display: block !important; }
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }
   .rich-editor-content, #bodyInput { font-size: 12pt; }
   #bodyInput { border: none; height: auto !important; overflow: visible !important; }
 }
 
-/* ---- the Claude Code panel ----------------------------------------------------------------------------- */
 .bot-panel {
   display: flex; flex-direction: column; gap: var(--s2);
   max-height: 45%;
@@ -1089,7 +985,6 @@ button.book-name:hover { background: var(--hover); }
 .bot-output .bot-meta { color: var(--fg-3); }
 .bot-panel.is-running .bot-prompt { opacity: 0.7; }
 
-/* ---- status bar -------------------------------------------------------------------------------------- */
 .status-bar {
   flex: none;
   display: flex; gap: var(--s3); align-items: center;
@@ -1104,7 +999,6 @@ button.book-name:hover { background: var(--hover); }
 .status-right.is-saving { color: var(--fg-2); }
 .status-right.is-saved { color: var(--ok); }
 
-/* ---- dialogs ------------------------------------------------------------------------------------------ */
 .modal {
   padding: 0;
   width: min(520px, 92vw);
@@ -1112,12 +1006,8 @@ button.book-name:hover { background: var(--hover); }
   overflow-y: auto;
 }
 .modal[open] { animation: pop var(--dur-2) var(--ease) both; }
-/* Never name a class after one pdf_viewer.css styles for its own UI (it loads first, on every page). Ours were
-   called .sidebar and .dialog, which gave the sidebar a border and shadow and every dialog font: message-box
-   (Arial). The check is in the vault note "Notes App - Testing and Gotchas". */
 .modal::backdrop { background: rgba(42, 26, 18, 0.2); }
 :root[data-theme="dark"] .modal::backdrop { background: rgba(0, 0, 0, 0.5); }
-/* Settings previews its changes on the page round it, so nothing dims that page. */
 #settingsDialog::backdrop, :root[data-theme="dark"] #settingsDialog::backdrop { background: transparent; }
 .dialog-small { width: min(420px, 92vw); }
 .dialog-form { padding: var(--s5); display: flex; flex-direction: column; gap: var(--s4); }
@@ -1132,7 +1022,6 @@ button.book-name:hover { background: var(--hover); }
 .dialog-actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; padding-top: var(--s1); }
 .dialog-foot { margin: 0; font-family: var(--font-mono); font-size: var(--t-xs); color: var(--fg-3); word-break: break-all; }
 
-/* Settings: sections listed on the left, one scrolling page on the right. */
 .dialog-settings { width: min(780px, 94vw); height: min(640px, calc(100vh - 40px)); overflow: hidden; }
 .settings-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); height: 100%; }
 .settings-nav { display: flex; flex-direction: column; gap: 1px; padding: var(--s4) var(--s2); background: var(--chrome); border-right: 1px solid var(--line); }
@@ -1142,7 +1031,6 @@ button.book-name:hover { background: var(--hover); }
 .settings-nav a.is-active { background: var(--pressed); color: var(--fg); font-weight: 600; }
 .settings-nav a .icon { color: var(--fg-3); }
 .settings-body { display: flex; flex-direction: column; min-height: 0; }
-/* Search sits over the sections: a word typed hides every setting without it, and empty sections with them. */
 .settings-search { flex: none; margin: var(--s4) var(--s5) 0; }
 .settings-search .search { height: 32px; }
 .settings-nav a.is-dim { color: var(--fg-3); opacity: 0.55; }
@@ -1154,8 +1042,6 @@ button.book-name:hover { background: var(--hover); }
 .settings-section > h3 { margin: 0; font-size: var(--t-md); font-weight: 600; }
 .settings-actions { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s5); border-top: 1px solid var(--line); }
 .settings-actions .field-help { color: var(--fg-3); }
-/* Appearance: the scheme swatches, a radiogroup of samples (paper, text and accent of each scheme in the current
-   mode); the chosen one is ringed in the focus colour (a coloured indicator, not a border). */
 .scheme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s2) var(--s3); }
 .scheme-swatch { display: flex; flex-direction: column; gap: 6px; padding: 0; border: none; border-radius: var(--r-md); background: transparent; color: var(--fg-2); font-size: var(--t-sm); font-weight: 500; text-align: left; cursor: pointer; }
 .scheme-swatch:hover { color: var(--fg); }
@@ -1167,7 +1053,6 @@ button.book-name:hover { background: var(--hover); }
 .scheme-swatch:focus-visible .swatch-sample { outline: 2px solid var(--focus); outline-offset: 2px; }
 .swatch-accent { width: 24px; height: 8px; border-radius: var(--r-xs); }
 .swatch-name { padding: 0 2px; }
-/* The custom colour pickers: the browser's own colour input, in the field's shape. */
 .color-row { display: flex; gap: var(--s4); flex-wrap: wrap; }
 .color-field { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); font-weight: 500; }
 .color-field input { width: 48px; height: 32px; padding: 2px; border: 1px solid var(--field); border-radius: var(--r-sm); background: var(--field-bg); cursor: pointer; }
@@ -1175,13 +1060,11 @@ button.book-name:hover { background: var(--hover); }
 .color-field input::-webkit-color-swatch { border: none; border-radius: var(--r-xs); }
 .color-field input:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
 
-/* Segmented control. */
 .segmented { display: inline-flex; align-self: flex-start; padding: 2px; border-radius: var(--r-md); background: var(--well); }
 .segmented button { height: 26px; padding: 0 var(--s3); border: none; border-radius: var(--r-sm); background: transparent; color: var(--fg-2); font-size: var(--t-sm); font-weight: 500; transition: background var(--dur-1); }
 .segmented button:hover { color: var(--fg); }
 .segmented button.is-on { background: var(--raised); color: var(--fg); font-weight: 600; }
 
-/* Vaults */
 .vault-list { display: flex; flex-direction: column; gap: var(--s2); }
 .vault-item { display: flex; flex-direction: column; gap: var(--s1); padding: var(--s2) 10px; border-radius: var(--r-md); background: var(--well); }
 .vault-head { display: flex; align-items: center; gap: var(--s2); font-weight: 600; }
@@ -1192,7 +1075,6 @@ button.book-name:hover { background: var(--hover); }
 .vault-actions .input { max-width: 260px; height: var(--control-h); font-size: var(--t-xs); }
 .vault-empty { font-size: var(--t-sm); color: var(--fg-2); }
 
-/* ---- the command palette ------------------------------------------------------------------------------ */
 .palette {
   position: fixed; top: 12vh; margin: 0 auto;
   width: min(620px, calc(100vw - 32px));
@@ -1224,7 +1106,6 @@ button.book-name:hover { background: var(--hover); }
 .palette-foot { display: flex; align-items: center; gap: var(--s4); flex: none; padding: var(--s2) var(--s4); border-top: 1px solid var(--line-2); font-size: var(--t-xs); color: var(--fg-3); }
 .palette-foot kbd { margin-right: 2px; }
 
-/* ---- toast ------------------------------------------------------------------------------------------- */
 .toast {
   position: fixed; left: 50%; bottom: var(--s5); transform: translateX(-50%);
   display: flex; align-items: center; gap: var(--s3);
@@ -1238,7 +1119,6 @@ button.book-name:hover { background: var(--hover); }
 .toast button { height: var(--control-h); padding: 0 10px; border: none; border-radius: var(--r-sm); background: var(--pressed); color: var(--fg); font-weight: 600; }
 .toast button:hover { background: var(--selected); color: var(--selected-fg); }
 
-/* ---- scrollbars --------------------------------------------------------------------------------------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }

@@ -1,6 +1,3 @@
-/* Desktop sticky window. Tints are palette-derived; the dark theme deepens them. Flat, like every floating layer: its
-   tint sets it apart, with no outline or shadow (the user dislikes them; see the vault note "Notes App - Design
-   System"). */
 :root[data-color="peach"] { --sticky-bg: #f6dcc3; --sticky-bar: #f0cdaa; }
 :root[data-color="cream"] { --sticky-bg: #fbf1e4; --sticky-bar: #f3e3cc; }
 :root[data-color="leaf"]  { --sticky-bg: #dfe9d3; --sticky-bar: #cddcbd; }

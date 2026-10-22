@@ -1,18 +1,7 @@
-/* The Craft apps edit office files inside Notes: WordCraft (Word documents) and GridCraft (spreadsheets), the user's
-   forks of ArtCraft's Rust office apps (github.com/celestinryf/<name>), each built to WebAssembly and shown in a
-   frame of its own. A build is served from its folder under a private scheme named after the app (wordcraft://app,
-   gridcraft://app); the frame and the page talk with postMessage (see apps/<name>-web/src/host.rs in each fork, and
-   renderer/craft-frame.js).
-
-   This module only finds and serves the builds. Without one, Notes shows what it can on its own: its simple Word
-   editor; for spreadsheets, a banner and "Open with…".
-   Build one with `trunk build --release` in the fork's apps/<name>-web; the output is <repo>\dist\web. */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// NOTES_APP_<NAME>_DIR names a build folder; NOTES_APP_NO_<NAME>=1 (or NOTES_APP_NO_CRAFTS=1 for all of them) means
-// none, which the tests use to drive Notes' own editors whatever is built on this computer.
 const APPS: Record<string, { label: string, env: string }> = {
   wordcraft: { label: 'WordCraft', env: 'WORDCRAFT' },
   gridcraft: { label: 'GridCraft', env: 'GRIDCRAFT' },
@@ -24,7 +13,6 @@ const MIME: Record<string, string> = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.txt': 'text/plain; charset=utf-8',
 };
 
-// Where an app's build is: its NOTES_APP_<NAME>_DIR, else the fork's own output folder in the usual clone; null for none.
 function buildDir(key: string) {
   const app = APPS[key];
   if (!app || process.env.NOTES_APP_NO_CRAFTS === '1' || process.env['NOTES_APP_NO_' + app.env] === '1') return null;
@@ -32,12 +20,10 @@ function buildDir(key: string) {
   return candidates.find((d) => { try { return fs.statSync(path.join(d, 'index.html')).isFile(); } catch (_) { return false; } }) || null;
 }
 
-// Must run before the app is ready.
 function registerSchemes(protocol: Electron.Protocol) {
   protocol.registerSchemesAsPrivileged(KEYS.map((scheme) => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true } })));
 }
 
-// The file a <app>://app/<path> request names, inside the build folder; null for anything outside it.
 function resolve(dir: string, url: string) {
   let rel;
   try { rel = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, '') || 'index.html'; } catch (_) { return null; }
@@ -47,7 +33,6 @@ function resolve(dir: string, url: string) {
   return file;
 }
 
-// Serves every app's build. Returns which are there: { wordcraft, gridcraft }.
 function serve(protocol: Electron.Protocol) {
   const ready: Record<string, boolean> = {};
   for (const key of KEYS) {

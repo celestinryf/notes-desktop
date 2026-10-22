@@ -47,8 +47,6 @@ type EditorViewDeps = {
 };
 
 export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }: EditorViewDeps) {
-  // The textarea (#bodyInput) always mirrors the Markdown, whichever view is showing,
-  // so saving, word counts, and the source view all read one place.
   function createRichEditor() {
     if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
     state.rich = window.NotesEditor.create(el.richEditor, {
@@ -57,7 +55,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       onTrigger: (t: InlineTrigger | null) => showInlineMenu(t),
       onTriggerKey: (e: KeyboardEvent) => inlineMenuKey(e),
       onUpdate: (md: string) => {
-        // A plain file (a CSV in its table view, say) is never the rendered editor's to write: its text is its own.
         if (state.sourceMode || !state.currentId || isPlainTextFile(state.current)) return;
         if (md === el.bodyInput.value) return;
         el.bodyInput.value = md;
@@ -70,10 +67,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); followLink(a.getAttribute('href')); }
     });
   }
-
-  // ---- the inline menu: "/" for blocks, "[[" for a link to a note ------------------------------------
-  // The editor reports the trigger (what was typed, and where); this draws the choices under it. Escape closes it
-  // until the trigger starts again somewhere else.
 
   const SLASH = [
     { kind: 'h1', title: 'Heading 1', icon: 'type', keys: '# ', words: 'title big' },
@@ -104,7 +97,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     } else {
       const known = !inline.notes || !inline.trigger || inline.trigger.kind !== 'link' ? await api.notes.list({ sort: 'updated' }) : inline.notes;
       inline.notes = known;
-      if (seq !== inline.seq) return; // typing moved on while the notes loaded
+      if (seq !== inline.seq) return;
       const q = t.query.trim();
       const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
       const scored = q ? notes.map((n) => ({ n, s: H.fuzzyScore(q, H.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
@@ -139,7 +132,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
         keys.textContent = it.keys;
         b.append(keys);
       }
-      // mousedown, not click: the editor must keep focus, or blurring it would close the menu first.
       b.addEventListener('mousedown', (e) => { e.preventDefault(); chooseInline(i); });
       b.addEventListener('mousemove', () => { if (inline.active !== i) { inline.active = i; paintInline(); } });
       menu.append(b);
@@ -164,7 +156,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     inline.items = [];
   }
 
-  // Keys while the menu is open. Returns true when the menu used the key.
   function inlineMenuKey(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return false;
     const trigger = inline.trigger;
@@ -178,7 +169,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     }
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); chooseInline(inline.active); return true; }
     if (e.key === 'Escape') {
-      e.preventDefault(); e.stopPropagation(); // Escape closes the menu, not the window
+      e.preventDefault(); e.stopPropagation();
       inline.dismissedAt = trigger.kind + ':' + trigger.from;
       hideInlineMenu();
       return true;
@@ -195,7 +186,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     hideInlineMenu();
     if (t.kind === 'slash') {
       if (it.kind === 'date') { rich.insertTextAt(range, new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })); return; }
-      if (it.kind === 'link') { rich.insertTextAt(range, '[['); return; } // reopens as the note picker
+      if (it.kind === 'link') { rich.insertTextAt(range, '[['); return; }
       if (it.kind) rich.insertBlock(range, it.kind);
       return;
     }
@@ -204,7 +195,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       let created;
       try { created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null }); }
       catch (err) { toast('Could not create the note: ' + (err.message || err)); return; }
-      if (state.currentId !== noteId) return; // moved to another note meanwhile; the new note still exists
+      if (state.currentId !== noteId) return;
       const typed = '[[' + t.query;
       const at = rich.textAt(range) === typed ? range : null;
       if (at) rich.insertLinkAt(at, it.create, 'note://' + created.id);
@@ -217,10 +208,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (it.note) rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
   }
 
-  // Which view shows the open note's text: the rendered editor, or the source (the textarea, or the code editor in
-  // its place). A PDF, Word or other binary file shows neither (its own viewer does), and nor does a locked note.
-  // Set from the note every time, never left over from the last one: in source mode a text file opened after a Word
-  // or PDF file used to keep the textarea hidden, and showed nothing.
   function syncTextViews(note: PublicNote | null) {
     const none = lockedNow() || isViewerOnlyFile(note);
     const isTable = H.isTableFile(note);
@@ -232,8 +219,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (table && note) renderTable(note);
   }
 
-  // A CSV or TSV file as a table (csv-view.js), from the text as it is now. Read-only: Ctrl+E edits it as text.
-  let tableDrawn: { id: string, text: string } | null = null; // last drawn, so a redraw (a mode switch, a poll) keeps the scroll
+  let tableDrawn: { id: string, text: string } | null = null;
   let tableStats: { rows: number; cols: number; } | null = null;
   function renderTable(note: PublicNote) {
     const text = el.bodyInput.value;
@@ -243,14 +229,11 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     }
     updateStatus(note);
   }
-  // A table or an image takes the rest of the pane, with its own scrolling, rather than a box scrolling in a page.
   function fillPane(on: boolean) {
     el.editorColumn.classList.toggle('fills-pane', on);
     el.editor.classList.toggle('fills-pane', on);
   }
 
-  // The Source button names what it switches to: for Markdown the rendered view or the source, for a CSV the table or
-  // the text. Set whenever the note or the mode changes.
   function syncSourceButton() {
     const table = H.isTableFile(state.current);
     const label = state.sourceMode ? (table ? 'Table' : 'Rendered') : (table ? 'Text' : 'Source');
@@ -280,9 +263,8 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (!next && !state.rich && !H.isTableFile(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
     const rich = state.rich;
     if (!next && rich && state.currentId && !isPlainTextFile(state.current)) {
-      // Re-check with the text as it is now: it may have become lossy (or clean) while editing in source.
       state.currentLossless = rich.setMarkdown(el.bodyInput.value);
-      if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false; // a real file gets the strict test
+      if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
       if (state.currentLossless === false) {
         state.lossyOverride = state.currentId;
         toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
@@ -293,7 +275,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     focusBody();
   }
 
-  // Ctrl+click on a link: a note link opens that note, an attachment opens with its app, the web goes outside.
   async function followLink(href: string | null) {
     href = String(href || '');
     if (/^note:\/\//i.test(href)) {
@@ -313,7 +294,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     const existing = state.rich.activeLink();
     if (!existing && !state.rich.hasSelection()) { toast('Select the text to link first'); return; }
     state.linkRange = state.rich.selectionRange();
-    // The note picker lists every other live note by title.
     el.linkNoteSelect.innerHTML = '<option value="">— pick a note —</option>';
     api.notes.list({ sort: 'title' }).then((notes) => {
       for (const n of notes) { if (n.id === state.currentId) continue; const o = document.createElement('option'); o.value = 'note://' + n.id; o.textContent = H.truncate(H.deriveTitle(n), 60); el.linkNoteSelect.append(o); }
@@ -326,7 +306,6 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     el.linkInput.select();
   }
 
-  // The table's rows and columns, for the status line while a table shows.
   function tableStatsNow() { return tableStats; }
 
   return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };

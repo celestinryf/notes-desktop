@@ -1,9 +1,6 @@
-/* Draws the app icon as raw BGRA pixels so no binary asset has to be checked in.
-   A tangerine "sticker" with an ink border and three cream text lines. */
-
-const INK = [0x12, 0x1a, 0x2a];        // BGR of #2a1a12
-const TANGERINE = [0x3e, 0x7b, 0xf4];  // BGR of #f47b3e
-const CREAM = [0xe4, 0xf1, 0xfb];      // BGR of #fbf1e4
+const INK = [0x12, 0x1a, 0x2a];
+const TANGERINE = [0x3e, 0x7b, 0xf4];
+const CREAM = [0xe4, 0xf1, 0xfb];
 
 function drawIconBitmap(size: number) {
   const buf = Buffer.alloc(size * size * 4);

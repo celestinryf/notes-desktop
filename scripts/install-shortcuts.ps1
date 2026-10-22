@@ -1,6 +1,3 @@
-# Creates a Start Menu shortcut for Notes, launches the app, and confirms the
-# login-time autostart entry the app writes for itself.
-# Run: npm run install:shortcuts
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -32,7 +29,6 @@ $d.Description = 'Notes (Ctrl+Alt+N toggles it from anywhere)'
 $d.Save()
 Write-Host "Desktop shortcut: $desktopLnk"
 
-# Launch (or focus) the app now. The app registers its own autostart entry.
 $running = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'electron.exe' -and $_.CommandLine -like "*$root*" }
 if (-not $running) {
   Start-Process -FilePath $electron -ArgumentList ('"' + $root + '"') -WorkingDirectory $root

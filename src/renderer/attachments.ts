@@ -27,9 +27,6 @@ export function createAttachments({ api, flushSave, refresh }: AttachmentsDeps) 
     for (const b of bad) toast('Could not attach ' + b.name + ': ' + b.error);
   }
 
-  // Puts a Markdown link at the caret in whichever view is up, and saves.
-  // A CSV's table is read-only: adding a link, an attachment or a recording waits for its text view. Checked before a
-  // file is picked or recorded, so nothing is copied for a link that cannot go in.
   function refuseInTable() {
     if (!tableShown()) return false;
     toast('Switch to Text (Ctrl+E) to add this to the file.');
@@ -63,7 +60,6 @@ export function createAttachments({ api, flushSave, refresh }: AttachmentsDeps) 
     await flushSave();
     const items = await api.attachments.pick();
     if (state.currentId === forNote) { insertAttachmentLinks(items); return; }
-    // The person moved to another note while the picker was open: the files belong to the note they chose.
     const ok = items.filter(attached);
     if (!ok.length) { insertAttachmentLinks(items); return; }
     const target = await api.notes.get(forNote);
@@ -79,7 +75,7 @@ export function createAttachments({ api, flushSave, refresh }: AttachmentsDeps) 
 
   async function toggleRecording() {
     if (rec.recorder) { rec.recorder.stop(); return; }
-    if (rec.starting) return; // the microphone prompt is still up
+    if (rec.starting) return;
     if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile(state.current)) { toast('Open an editable, unlocked note first.'); return; }
     if (refuseInTable()) return;
     if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Recording is not available here.'); return; }
@@ -111,7 +107,6 @@ export function createAttachments({ api, flushSave, refresh }: AttachmentsDeps) 
           insertLinkIntoNote(label, saved.href);
           toast('Voice memo saved (' + mm + ':' + ss + '). Ctrl+click the link to play it.');
         } else {
-          // The person moved to another note meanwhile: the memo still belongs to the note it was recorded in.
           const target = await api.notes.get(rec.noteId);
           if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile(target)) {
             await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, '') + '\n\n' : '') + '[' + label + '](' + saved.href + ')\n' });

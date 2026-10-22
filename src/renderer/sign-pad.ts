@@ -1,15 +1,11 @@
-/* A pad to draw a signature on, exposed as window.NotesSignPad. The picture it gives back is cropped to the strokes,
-   on a transparent background, so it sits on a PDF page like ink. */
 type Point = { x: number, y: number };
 type Box = { x0: number, y0: number, x1: number, y1: number };
 
 export const NotesSignPad = (function () {
   'use strict';
   const INK = '#1b1f4a';
-  const PAD = 6; // px kept around the strokes when cropping
+  const PAD = 6;
 
-  // canvas: drawn at its CSS size times the screen's pixel ratio, so the signature stays sharp on a high-DPI screen
-  // and when the PDF is zoomed or printed. Call fit() each time the pad is shown.
   function create(canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('The signature pad needs a 2D canvas.');
@@ -24,7 +20,6 @@ export const NotesSignPad = (function () {
       box = null;
     }
 
-    // Pointer position in the canvas's own pixels (it may be drawn at another size on screen).
     function point(e: PointerEvent): Point {
       const r = canvas.getBoundingClientRect();
       return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
@@ -81,7 +76,6 @@ export const NotesSignPad = (function () {
       box = null;
     }
 
-    // Shows a saved signature (a PNG blob), centred, so it can be used as it is or drawn over.
     async function load(blob: Blob) {
       clear();
       const img = await createImageBitmap(blob);
@@ -92,7 +86,6 @@ export const NotesSignPad = (function () {
       box = { x0: x, y0: y, x1: x + w, y1: y + h };
     }
 
-    // Writes a typed name on the pad in a handwriting-like face: the way to sign without drawing.
     function writeName(name: string) {
       clear();
       const text = String(name || '').trim();
@@ -110,7 +103,6 @@ export const NotesSignPad = (function () {
       return true;
     }
 
-    // The strokes as a PNG blob, cropped; null when nothing is drawn.
     function toBlob(): Promise<Blob | null> {
       if (!box) return Promise.resolve(null);
       const pad = PAD * scale;

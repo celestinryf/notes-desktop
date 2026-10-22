@@ -1,10 +1,8 @@
 import { el, I } from './dom.ts';
 
-// A long-running mode must stay visible and stoppable while its menu is closed.
-
 export interface Activity { text: string; icon: string; stop: () => void; stopLabel: string }
 interface ActivityEntry { chip: HTMLButtonElement; text: HTMLSpanElement; a: Activity }
-const activities = new Map<string, ActivityEntry>(); // key -> { chip, a }
+const activities = new Map<string, ActivityEntry>();
 export function setActivity(key: string, a: Activity | null) {
   const had = activities.get(key);
   if (!a) { if (had) { had.chip.remove(); activities.delete(key); } return; }

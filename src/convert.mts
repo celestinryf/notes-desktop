@@ -1,10 +1,3 @@
-/* "Convert to…": writes an opened file out in another format, as a new file next to the original. The original is
-   never touched and no existing file is ever overwritten.
-
-   Markdown is the hub. Every source can become Markdown (a .txt is escaped so it reads the same, code goes in a
-   fence, a web page goes through turndown, a Word document through mammoth, a PDF gives its text), and every
-   target can be made from Markdown. A few direct routes keep more: Word to PDF is printed from the layout Notes
-   shows, Word to HTML and text come straight from mammoth, and a web page prints to PDF as itself. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { runWorker } from './run-worker.mts';
@@ -34,14 +27,10 @@ const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const PDF_TIMEOUT_MS = 2 * 60 * 1000;
 
-// What the file is, for conversion: md | txt | code | html | docx | pdf | office, or null when it cannot be converted.
 function sourceOf(note: Note | null) {
   if (!note || !note.filePath) return null;
   if (note.fileKind === 'pdf') return 'pdf';
-  // Word's zip formats convert here; an .odt, .rtf or .doc is converted by WordCraft's own Save As instead.
   if (note.fileKind === 'docx') return OOXML_EXT.has(extOf(note.filePath)) ? 'docx' : null;
-  // Spreadsheets, and the files Notes cannot show (an e-book, an Outlook message, a zip): their text, read by
-  // MarkItDown when it is installed.
   if (note.fileKind === 'sheet' || note.fileKind === 'binary') {
     return markitdown.available() && markitdown.reads(extOf(note.filePath)) ? 'office' : null;
   }
@@ -53,7 +42,6 @@ function sourceOf(note: Note | null) {
 }
 
 const DOCX_KEEPS = 'Keeps headings, lists, bold and italic, links, tables and pictures; fonts, colours, page layout, headers, footers and comments are left out.';
-// What each direction loses, said before the person picks it. '' means nothing of note is lost.
 const PDF_TEXT_ONLY = 'Text only: the PDF\'s layout, pictures and fonts are left out. A scanned PDF has no text to convert.';
 const OFFICE_TEXT = 'The text, headings, lists and tables as MarkItDown reads them; layout, pictures, charts, formulas and formatting are left out.';
 const LOSS: Record<string, Record<string, string>> = {
@@ -66,25 +54,20 @@ const LOSS: Record<string, Record<string, string>> = {
   office: { md: OFFICE_TEXT, txt: 'Text only, as MarkItDown reads it: layout, pictures, charts, formulas and formatting are left out.', html: OFFICE_TEXT, docx: OFFICE_TEXT, pdf: OFFICE_TEXT },
 };
 
-// The formats this note can be converted to, with what each one loses.
 function options(note: Note | null) {
   const src = sourceOf(note);
   if (!src) return [];
   return Object.keys(FORMATS).filter((to) => to !== src).map((to) => ({ to, label: FORMATS[to], note: LOSS[src][to] || '' }));
 }
 
-// ---- Markdown in --------------------------------------------------------------------------------
-
-// Escapes one line of plain text so Markdown shows it exactly as written.
 function escapeMarkdownLine(line: string) {
   return line
     .replace(/[\\`*_[\]<>|~&]/g, '\\$&')
-    .replace(/^(\s*)([#>+=-])/, '$1\\$2') // headings, quotes, list items, setext underlines
-    .replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3') // "1." would start a numbered list
-    .replace(/^[ \t]+/, (m: string) => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length)); // leading space would make a code block
+    .replace(/^(\s*)([#>+=-])/, '$1\\$2')
+    .replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3')
+    .replace(/^[ \t]+/, (m: string) => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length));
 }
 
-// Plain text as Markdown that reads the same: blank lines separate paragraphs, single line breaks are kept.
 function textToMarkdown(text: string) {
   return String(text).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:\n[ \t]*)*\n/)
     .map((p) => p.replace(/^\n+|\n+$/g, ''))
@@ -111,7 +94,6 @@ function htmlToMarkdown(html: string) {
   return turndownService.turndown(String(html)).trim() + '\n';
 }
 
-// Links in a Word document can point anywhere; only web and mail links are kept as links.
 const SAFE_HREF = /^(https?:|mailto:)/i;
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type ImageConverter = Parameters<typeof import('mammoth').images.imgElement>[0];
@@ -119,7 +101,7 @@ function mammothOptions(convertImage?: ImageConverter | null) {
   const mammoth: typeof import('mammoth') = requireWhenNeeded('mammoth');
   const opts: NonNullable<Parameters<typeof mammoth.convertToHtml>[1]> = {
     transformDocument: (doc) => {
-      // @ts-expect-error mammoth's typings leave out transforms, which its documentation lists
+      // @ts-expect-error
       for (const h of mammoth.transforms.getDescendantsOfType(doc, 'hyperlink')) if (h.href && !SAFE_HREF.test(h.href)) h.href = '';
       return doc;
     },
@@ -128,12 +110,9 @@ function mammothOptions(convertImage?: ImageConverter | null) {
   return opts;
 }
 
-// Markdown tables need a header row and one line per cell. Word tables often have neither (mammoth marks a header
-// only when Word does, and puts each cell's text in paragraphs), so the first row becomes the header and a cell's
-// paragraphs become line breaks. A table holding another table is left as it is (turndown keeps it as HTML).
 function tablesForMarkdown(html: string) {
   return String(html).replace(/<table>[\s\S]*?<\/table>/g, (table) => {
-    if (table.indexOf('<table', 1) >= 0) return table; // the lazy match stopped at a nested table's end
+    if (table.indexOf('<table', 1) >= 0) return table;
     let t = table.replace(/<\/p>\s*<p>/g, '<br>').replace(/<\/?p>/g, '');
     if (!/<th[\s>]/.test(t)) {
       t = t.replace(/^<table>(<tbody>)?<tr>([\s\S]*?)<\/tr>/, (m, tbody, cells) =>
@@ -149,7 +128,6 @@ async function docxToHtml(filePath: string, convertImage?: ImageConverter | null
   return res.value;
 }
 
-// The text of a PDF as Markdown paragraphs. Says how many pages had no text (scanned), and refuses when none did.
 async function pdfToMarkdown(filePath: string) {
   if (fs.statSync(filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
   const res = await runWorker<{ pages: string[][] }>('pdf-text-worker.mts', { bytes: fs.readFileSync(filePath) }, PDF_TIMEOUT_MS, 'Reading the PDF took too long.');
@@ -161,17 +139,14 @@ async function pdfToMarkdown(filePath: string) {
   return { markdown, warning };
 }
 
-// One path segment for a Markdown link: "#", "?" and brackets in a file name must not end or break the link.
 const urlSegment = (s: string) => encodeURIComponent(s).replace(/[()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 
-// The file as Markdown. imagesDir: where a Word document's pictures go ({ parent, folder() }, folder() making the
-// folder on first use and returning its name); without it they are inlined as data: URLs.
 async function toMarkdown(note: FileNote, imagesDir?: { parent: string, folder: () => string }) {
   const src = sourceOf(note);
   const file = note.filePath;
   if (src === 'pdf') return pdfToMarkdown(file);
   if (src === 'office') {
-    if (ZIP_DOC_EXT.has(extOf(file))) await readDocumentBuffer(file); // the size limit and the zip guard first
+    if (ZIP_DOC_EXT.has(extOf(file))) await readDocumentBuffer(file);
     return markitdown.toMarkdown(file);
   }
   if (src === 'docx') {
@@ -192,12 +167,6 @@ async function toMarkdown(note: FileNote, imagesDir?: { parent: string, folder: 
   return { markdown: textToMarkdown(body), warning: '' };
 }
 
-// ---- Markdown to blocks -------------------------------------------------------------------------
-// A small document model shared by the text and Word writers:
-//   { t: 'h', level, runs } | { t: 'p', runs } | { t: 'list', ordered, start, items: [[block]] } | { t: 'code', lang, text }
-//   | { t: 'quote', blocks } | { t: 'table', rows: [{ header, cells: [runs] }] } | { t: 'hr' }
-// A run is { text, b, i, s, code, href } or { br: true } or { img: src, alt }.
-
 let markdownIt: MarkdownIt | null = null;
 function md(): MarkdownIt {
   if (!markdownIt) {
@@ -209,8 +178,6 @@ function md(): MarkdownIt {
 
 const stripTags = (s: string) => String(s).replace(/<[^>]*>/g, '');
 
-// Markdown as HTML, with task items ("- [ ] x") shown as boxes the way the editor shows them. forPrint: pictures on
-// the web are replaced by their description, since the print window never fetches them.
 function renderMarkdown(markdown: string, forPrint?: boolean) {
   let html = md().render(markdown).replace(/<li>(<p>)?\[( |x|X)\]\s/g, (m, p, x) => '<li>' + (p || '') + (x === ' ' ? '☐ ' : '☑ '));
   if (forPrint) html = html.replace(/<img src="(?!data:|file:)[a-z][a-z0-9+.-]*:[^"]*" alt="([^"]*)"[^>]*>/gi, (m, alt) => (alt ? '<em>[' + alt + ']</em>' : ''));
@@ -236,7 +203,6 @@ function inlineRuns(tok: Token | null): Run[] {
     else if (c.type === 'link_close') st.href = null;
     else if (c.type === 'image') runs.push({ img: c.attrGet('src'), alt: c.content });
     else if (c.type === 'html_inline' && /^<br\s*\/?>$/i.test(c.content)) runs.push({ br: true });
-    // Other inline HTML tags are dropped; the text between them stays.
   }
   return runs;
 }
@@ -259,7 +225,6 @@ function markdownBlocks(src: string) {
   const root: Block[] = [];
   const stack: ({ blocks: Block[], list?: undefined } | { list: ListBlock, blocks?: undefined })[] = [{ blocks: root }];
   const top = () => stack[stack.length - 1];
-  // Blocks go into the open container; a list frame only takes items, so a block there is a markdown-it fault.
   const topBlocks = () => { const f = top(); if (!f.blocks) throw new Error('a block outside a list item'); return f.blocks; };
   const topItems = () => { const f = top(); if (!f.list || !f.list.items) throw new Error('a list item outside a list'); return f.list.items; };
   let table: TableBlock | null = null;
@@ -269,7 +234,7 @@ function markdownBlocks(src: string) {
     const inline = tokens[i + 1] && tokens[i + 1].type === 'inline' ? tokens[i + 1] : null;
     switch (t.type) {
       case 'heading_open': topBlocks().push({ t: 'h', level: Number(t.tag.slice(1)), runs: inlineRuns(inline) }); break;
-      case 'paragraph_open': topBlocks().push({ t: 'p', runs: inlineRuns(inline), tight: !!t.hidden }); break; // hidden: in a tight list
+      case 'paragraph_open': topBlocks().push({ t: 'p', runs: inlineRuns(inline), tight: !!t.hidden }); break;
       case 'bullet_list_open':
       case 'ordered_list_open': {
         const list: ListBlock = { t: 'list', ordered: t.type === 'ordered_list_open', start: Number(t.attrGet('start')) || 1, items: [] };
@@ -283,7 +248,7 @@ function markdownBlocks(src: string) {
       case 'fence': case 'code_block': topBlocks().push({ t: 'code', lang: String(t.info || '').trim().split(/\s+/)[0], text: t.content.replace(/\n$/, '') }); break;
       case 'hr': topBlocks().push({ t: 'hr' }); break;
       case 'html_block': {
-        if (/^\s*<(style|script)\b/i.test(t.content)) break; // code, not text
+        if (/^\s*<(style|script)\b/i.test(t.content)) break;
         const text = stripTags(t.content).trim();
         if (text) topBlocks().push({ t: 'p', runs: [{ text }] });
         break;
@@ -297,8 +262,6 @@ function markdownBlocks(src: string) {
   }
   return root;
 }
-
-// ---- writers ------------------------------------------------------------------------------------
 
 function runsText(runs: Run[]) {
   let out = '', linkText = '';
@@ -323,7 +286,6 @@ function blocksToText(blocks: Block[]) {
   let out = '';
   blocks.forEach((b, k) => {
     const text = blockText(b);
-    // In a tight list an item's text and its nested list sit on consecutive lines.
     out += (k === 0 ? '' : blocks[k - 1].tight ? '\n' : '\n\n') + text;
   });
   return out;
@@ -344,7 +306,6 @@ function blockText(b: Block): string {
   return '';
 }
 
-// Pixel size of a PNG, JPEG, GIF or BMP, read from its header; null for anything else.
 function imageInfo(buf: Buffer): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: number, h: number } | null {
   if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { type: 'png', w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
   if (buf.length > 10 && buf.toString('latin1', 0, 4) === 'GIF8') return { type: 'gif', w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
@@ -360,32 +321,29 @@ function imageInfo(buf: Buffer): { type: 'png' | 'gif' | 'bmp' | 'jpg', w: numbe
   return null;
 }
 
-// Whether file is inside dir (or is dir). Network paths (\\server\share) never are.
 function isInside(file: string, dir: string) {
   if (/^[\\/]{2}/.test(file)) return false;
   const rel = path.relative(path.resolve(dir), path.resolve(file));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
-// A picture's bytes, from a data: URL or a file in the source's folder. Pictures on the web or a network share are
-// never fetched (a share would send the Windows login to whoever runs it), and nothing outside the folder is read.
 function imageBytes(src: string | null | undefined, baseDir: string) {
   const s = String(src || '');
   const data = /^data:image\/[a-z+]+;base64,(.*)$/i.exec(s);
   if (data) return Buffer.from(data[1], 'base64');
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || /^[\\/]{2}/.test(s)) return null; // a URL, file: included, or a share
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || /^[\\/]{2}/.test(s)) return null;
   let file;
   try { file = path.resolve(baseDir, decodeURIComponent(s.split(/[?#]/)[0])); } catch (_) { return null; }
   if (!isInside(file, baseDir)) return null;
   try { return fs.statSync(file).size <= MAX_IMAGE_BYTES ? fs.readFileSync(file) : null; } catch (_) { return null; }
 }
 
-const MAX_IMAGE_WIDTH = 600; // px, about the text width of an A4 or Letter page
+const MAX_IMAGE_WIDTH = 600;
 
 async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: string }) {
   const D: typeof import('docx') = requireWhenNeeded('docx');
   const baseDir = opts.baseDir;
-  const numbering = new Map(); // start number -> reference (every level of it counts from that number)
+  const numbering = new Map();
   let instance = 0;
   const numberingRef = (start: number) => {
     if (!numbering.has(start)) numbering.set(start, 'ordered-' + start);
@@ -418,7 +376,6 @@ async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: str
     return out;
   }
 
-  // A task item's "[ ] " or "[x] " becomes a box.
   function taskRuns(runs: Run[]) {
     const first = runs[0];
     const text = first && !first.br && first.img === undefined ? first.text : undefined;
@@ -427,7 +384,6 @@ async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: str
     return [{ ...first, text: (m[1] === ' ' ? '☐ ' : '☑ ') + text.slice(m[0].length) }, ...runs.slice(1)];
   }
 
-  // ctx: paragraph properties that apply to everything inside (quote borders, list indents); level: list depth.
   function walk(list: Block[], ctx: IParagraphOptions, level: number, out: (Paragraph | Table)[]) {
     for (const b of list) {
       if (b.t === 'h') out.push(new D.Paragraph(Object.assign({ heading: headingLevels['HEADING_' + Math.min(6, b.level)], children: runObjs(b.runs) }, ctx)));
@@ -476,27 +432,19 @@ async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: str
   return D.Packer.toBuffer(doc);
 }
 
-// ---- HTML pages ---------------------------------------------------------------------------------
-
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 const escHtml = (s: string) => String(s).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
-// A standalone HTML page for an exported note, book or converted file. extraCss styles the parts (contents, page breaks).
 function htmlDocument(title: string, bodyHtml: string, extraCss?: string) {
   return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
     '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
     '<body>' + String(bodyHtml || '') + '</body></html>\n';
 }
-// On paper a converted document is black on white, edge to edge of the printable area.
 const PRINT_CSS = '@media print{body{background:#fff;margin:0;max-width:none;padding:0}pre{white-space:pre-wrap}}';
 
-// Markdown pictures that are not inlined (data: URLs) become their description.
 function inlinePicturesOnly(markdown: string) {
   return String(markdown).replace(/!\[([^\]]*)\]\((?!data:)(?:<[^>]*>|[^)\s]*)(?:\s+"[^"]*")?\)/g, (m, alt) => (alt ? '*[' + alt + ']*' : ''));
 }
 
-// ---- writing the new file -----------------------------------------------------------------------
-
-// Calls make(name) with "<stem><ext>", then "<stem> (2)<ext>" and so on, until one is not taken (make throws EEXIST).
 function firstFree(stem: string, ext: string, make: (name: string) => void) {
   for (let n = 1; n < 1000; n++) {
     const name = stem + (n > 1 ? ' (' + n + ')' : '') + ext;
@@ -505,29 +453,24 @@ function firstFree(stem: string, ext: string, make: (name: string) => void) {
   throw new Error('Too many converted copies already exist next to this file.');
 }
 
-// Writes data to a new "<base>.<ext>" in dir and returns its path. Never overwrites ('wx'); a write that fails part
-// way removes what it wrote.
 function writeNew(dir: string, base: string, ext: string, data: string | Buffer) {
   return path.join(dir, firstFree(base, '.' + ext, (name) => {
     const file = path.join(dir, name);
-    const fd = fs.openSync(file, 'wx'); // throws EEXIST (or anything else) before anything is created
+    const fd = fs.openSync(file, 'wx');
     try { fs.writeFileSync(fd, data); fs.closeSync(fd); } catch (err) {
-      try { fs.closeSync(fd); } catch (_) { /* already closed */ }
-      fs.rmSync(file, { force: true }); // ours: the open above created it
+      try { fs.closeSync(fd); } catch (_) {  }
+      fs.rmSync(file, { force: true });
       throw err;
     }
   }));
 }
 
-// A new, empty folder "<name>" in dir; returns its name.
 const mkdirNew = (dir: string, name: string) => firstFree(name, '', (folder) => fs.mkdirSync(path.join(dir, folder)));
 
 type Printers = {
   html: (doc: string, baseDir: string) => Promise<Buffer>,
   docx: (bytes: Buffer) => Promise<{ pdf: Buffer, warning: string }>,
 };
-// Converts the file behind note to format `to`. print renders PDFs, which needs a window that main owns:
-// print.html(doc, baseDir) -> Buffer, print.docx(bytes) -> { pdf, warning }. Returns { filePath, warning }.
 async function convertFile(note: Note | null, to: string, print: Printers) {
   const src = sourceOf(note);
   if (!src || !isFileNote(note)) throw new Error('This file cannot be converted.');
@@ -539,7 +482,6 @@ async function convertFile(note: Note | null, to: string, print: Printers) {
   const base = path.basename(file, path.extname(file)) || path.basename(file);
   const title = base;
 
-  // Direct routes, which keep more than going through Markdown.
   if (src === 'docx' && to === 'pdf') {
     const out = await print.docx(await readDocumentBuffer(file));
     return { filePath: writeNew(dir, base, 'pdf', out.pdf), warning: out.warning || '' };
@@ -550,7 +492,6 @@ async function convertFile(note: Note | null, to: string, print: Printers) {
   if (src === 'code' && to === 'txt') return { filePath: writeNew(dir, base, 'txt', readText(file).body), warning: '' };
 
   if (src === 'docx' && to === 'md') {
-    // Pictures go in a folder beside the new file, made only if there are any; removed again if the conversion fails.
     let folder: string | null = null;
     const imagesDir = { parent: dir, folder: () => folder || (folder = mkdirNew(dir, base + ' pictures')) };
     try {

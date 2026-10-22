@@ -3,7 +3,6 @@ import { pageElement } from './page-element.ts';
 
 export const I = (name: string) => NotesIcons.svg(name);
 
-// A button's words live in its .lbl span when it has one, so its icon and shortcut hint survive a relabel.
 export function setLabel(btn: HTMLButtonElement, text: string) {
   const l = btn.querySelector('.lbl');
   if (l) l.textContent = text; else btn.textContent = text;

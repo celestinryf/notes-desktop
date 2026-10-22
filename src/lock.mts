@@ -1,5 +1,3 @@
-/* Note locking: the body is encrypted with AES-256-GCM under a key derived from a password with scrypt.
-   The record on disk keeps only the ciphertext; plaintext lives in memory for the session once unlocked. */
 import crypto from 'node:crypto';
 import { isObjectLike } from './shared/helpers.mts';
 
@@ -9,7 +7,6 @@ function deriveKey(password: string, salt: Buffer): Buffer {
   return crypto.scryptSync(String(password), salt, 32, SCRYPT);
 }
 
-// Encrypts plain under key. The salt is carried along so the same password keeps working.
 function encrypt(plain: string, key: Buffer, saltB64: string): NoteLock {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -23,14 +20,12 @@ function decrypt(blob: NoteLock, key: Buffer): string {
   return Buffer.concat([d.update(Buffer.from(blob.ct, 'base64')), d.final()]).toString('utf8');
 }
 
-// New lock: fresh salt, derived key, encrypted body. Returns { blob, key }.
 function lock(plain: string, password: string): { blob: NoteLock, key: Buffer } {
   const salt = crypto.randomBytes(16);
   const key = deriveKey(password, salt);
   return { blob: encrypt(plain, key, salt.toString('base64')), key };
 }
 
-// Returns { body, key } or null when the password is wrong (or the data was tampered with).
 function unlock(blob: NoteLock | null, password: string): { body: string, key: Buffer } | null {
   if (!blob) return null;
   const key = deriveKey(password, Buffer.from(blob.salt, 'base64'));

@@ -42,7 +42,6 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }: 
     await flushSave();
     el.botOutput.textContent = '';
     if (!prompt) {
-      // Empty prompt: pull in whatever a terminal session changed in the workspace.
       const r = await api.bot.importWorkspace();
       botAppend(!('updated' in r) || r.error ? ('Import failed: ' + r.error + '\n') : ('Pulled in workspace edits. ' + importSummary(r) + '\n' + (r.details || []).map((d) => '  ' + d).join('\n') + (r.details && r.details.length ? '\n' : '')), r.error ? 'bot-err' : 'bot-meta');
       await refresh({ keepEditor: true });
@@ -77,7 +76,6 @@ export function createBotPanel({ api, flushSave, refresh, applyFreshFileBody }: 
         if (imp && 'conflicts' in imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith('conflict')).map((d) => '  ' + d).join('\n') + '\n', 'bot-err');
       }
       refresh({ keepEditor: true }).then(async () => {
-        // Reload the open note from the store in case the agent edited it.
         if (state.currentId && !state.dirty) { const wanted = state.currentId; const fresh = await api.notes.get(wanted); if (fresh && fresh.id === state.currentId && !state.dirty && !state.inflight.has(fresh.id) && fresh.body !== el.bodyInput.value) { applyFreshFileBody(fresh); toast('This note was updated by the bot.'); } }
       });
     } else if (ev.type === 'reloaded') {

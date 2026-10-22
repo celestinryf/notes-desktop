@@ -1,6 +1,3 @@
-/* The page organizer for an open PDF, exposed as window.NotesPdfPages: turn, move and remove pages, and add pages
-   from another PDF. Changes are only a plan until Apply; then pdf.js builds the new page order and main turns the
-   pages and writes the file. */
 import NotesIcons from './icons.js';
 import { requireChild } from './pdf-editor.ts';
 import type { PdfController } from './pdf-editor.ts';
@@ -20,13 +17,8 @@ export const NotesPdfPages = (function () {
   'use strict';
   const THUMB_W = 130, THUMB_H = 170;
 
-  // panel: the .pdf-pages element. ctl: the NotesPdfEditor controller of the open PDF. hooks:
-  //   pickPdf() -> Promise<{ name, bytes } | null>   a PDF to take pages from
-  //   apply({ pageInfos, rotations }) -> Promise<bool>   pageInfos null when the order is unchanged
-  //   close()   say(text)
   function create(panel: HTMLElement, ctl: PdfController, hooks: PdfPagesHooks) {
     const grid = requireChild(panel, '.pdf-pages-grid', HTMLElement);
-    // items: the pages in their new order, { src, index, turn }. src 'self' is this PDF; others are added PDFs.
     let items: PageItem[] = [], sources = new Map<string, PageSource>(), canvases = new Map<string, HTMLCanvasElement>(), added = 0, working = false;
 
     function open() {
@@ -38,7 +30,6 @@ export const NotesPdfPages = (function () {
       render();
     }
 
-    // Each page is drawn once; a card is rebuilt around the same canvas when the plan changes.
     function sourceOf(src: string) {
       const source = sources.get(src);
       if (!source) throw new Error('No page source ' + src + '.');
@@ -55,7 +46,6 @@ export const NotesPdfPages = (function () {
       return c;
     }
 
-    // A turned page is scaled so it still fits its box.
     function fit(c: HTMLCanvasElement) {
       const turn = Number(c.dataset.turn || 0);
       const w = c.offsetWidth || THUMB_W, h = c.offsetHeight || THUMB_H;
@@ -135,7 +125,6 @@ export const NotesPdfPages = (function () {
       if (!reordered && !rotations.some(Boolean)) { hooks.close(); return; }
       let pageInfos: PdfPageInfo[] | null = null;
       if (reordered) {
-        // pdf.js takes each document's pages in their own order and puts them at the given new positions.
         const bySrc = new Map<string, { index: number, pos: number }[]>();
         items.forEach((it, pos) => {
           let list = bySrc.get(it.src);

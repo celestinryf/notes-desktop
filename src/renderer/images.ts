@@ -5,12 +5,10 @@ import { ipcErrorText } from './text.ts';
 type ImagesDeps = { api: NotesApi, showBanner: (text: string) => void };
 
 export function createImages({ api, showBanner }: ImagesDeps) {
-  // An image file, fitted to the pane; a click (or Enter) shows it at its actual size, and again fits it. The picture
-  // comes from the main process as bytes and is shown from a blob: URL, so the page never reads files itself.
   let imageUrl: string | null = null, imageSeq = 0;
   async function showImage(note: PublicNote) {
     const seq = ++imageSeq;
-    el.imageView.removeAttribute('src'); // the last picture never shows under this note's name
+    el.imageView.removeAttribute('src');
     el.imageViewer.classList.remove('hidden', 'is-actual');
     syncImageToggle();
     try {
@@ -36,7 +34,6 @@ export function createImages({ api, showBanner }: ImagesDeps) {
     el.imageViewer.classList.toggle('is-actual');
     syncImageToggle();
   }
-  // The picture is a toggle button (fit, or actual size): it says which, and so does the status line.
   function syncImageToggle() {
     const actual = el.imageViewer.classList.contains('is-actual');
     el.imageView.setAttribute('aria-pressed', String(actual));

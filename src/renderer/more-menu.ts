@@ -13,7 +13,6 @@ export function closeMoreMenu() {
   el.moreBtn.setAttribute('aria-expanded', 'false');
 }
 
-// Arrow keys, Home and End move through any open menu; Tab leaves it.
 export function bindMenuKeys() {
   document.addEventListener('keydown', (e) => {
     const menu = e.target instanceof Element ? e.target.closest('.popover[role="menu"]') : null;

@@ -7,7 +7,7 @@ const path = require('path');
 const { Store, sanitizeSticky } = require('../../src/store.mts');
 
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-sticky-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-sticky-');
 
 test('sanitizeSticky clamps sizes, defaults colour and onTop, rejects junk', () => {
   assert.equal(sanitizeSticky(null), null);
@@ -29,13 +29,10 @@ test('setSticky persists across reload, merges patches, trash clears it, update(
   store = new Store(dir).load();
   assert.deepEqual(store.get(a.id).sticky, { x: 100, y: 50, w: 400, h: 300, color: 'leaf', onTop: false });
   assert.deepEqual(store.stickies().map((n) => n.id), [a.id]);
-  // update() ignores a sticky field: only setSticky may change it.
   store.update(b.id, { sticky: { x: 1, y: 1 }, body: 'x' });
   assert.equal(store.get(b.id).sticky, null);
-  // Clearing.
   store.setSticky(a.id, null);
   assert.equal(store.get(a.id).sticky, null);
-  // Trash removes a sticky so it does not come back at login; restore does not bring it back.
   store.setSticky(a.id, { x: 1, y: 2 });
   store.trash(a.id);
   assert.equal(store.get(a.id).sticky, null);

@@ -20,7 +20,6 @@ interface SharingDeps {
 }
 
 export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive }: SharingDeps) {
-  // Which share actions apply to the open note; the share menu and the command palette both use it.
   function syncShareMenu() {
     const n = state.current;
     if (!n) return;
@@ -45,8 +44,8 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
     if (!note) return;
     if (note.locked && !note.unlocked) { toast('Unlock the note first.'); return; }
     await flushSave();
-    if (!state.current || state.current.id !== note.id) return; // the person moved on
-    note = state.current; // the saved view, including a title typed a moment ago
+    if (!state.current || state.current.id !== note.id) return;
+    note = state.current;
     const titleLine = note.title ? note.title + '\n\n' : '';
     try {
       if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
@@ -63,7 +62,6 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
         }
         const chosen = await api.app.pdfPath(note.id);
         if (!chosen.ok) { if (!chosen.canceled) toast('Could not save PDF: ' + chosen.error); return; }
-        // The page is what prints: it must still show this very note, unlocked, with nothing unsaved.
         if (state.currentId !== note.id || lockedNow()) { toast('The note changed while the dialog was open; nothing was saved.'); return; }
         await flushSave();
         const r = await api.app.writePdf(chosen.filePath);

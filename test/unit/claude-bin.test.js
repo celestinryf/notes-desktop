@@ -7,7 +7,7 @@ const path = require('path');
 const CB = require('../../src/claude-bin.mts');
 
 const { tmpDir } = require('../helpers/tmp');
-const tmp = () => tmpDir('notes-cb-'); // removed when the test process exits
+const tmp = () => tmpDir('notes-cb-');
 const win = process.platform === 'win32';
 
 test('an npm .cmd shim is resolved to the executable it runs, never run through a shell', { skip: !win && 'windows shim' }, () => {
@@ -40,11 +40,8 @@ test('a shim pointing at a cli.js runs under node; a .js override does too; a mi
   const hosted = CB.launchSpec(spec, ['-p', 'x'], { node: null });
   assert.equal(hosted.file, process.execPath);
   assert.equal(hosted.env.ELECTRON_RUN_AS_NODE, '1');
-  // Override with a script stand-in (what the UI tests use).
   assert.deepEqual(CB.resolveClaude({ override: cli }), { file: cli, isScript: true });
-  // Nothing installed.
   assert.equal(CB.resolveClaude({ pathDirs: [tmp()], home: tmp() }), null);
-  // A shim whose target is gone.
   const broken = tmp();
   if (win) fs.writeFileSync(path.join(broken, 'claude.cmd'), '"%dp0%\\nowhere\\claude.exe" %*\r\n');
   else fs.writeFileSync(path.join(broken, 'claude'), 'exec node "$basedir/nowhere/cli.js"\n');

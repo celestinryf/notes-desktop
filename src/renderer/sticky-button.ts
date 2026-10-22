@@ -17,8 +17,6 @@ export function createStickyButton({ api, flushSave, refreshCurrentMeta }: Stick
     el.stickyBtn.classList.toggle('is-on', on);
     setLabel(el.stickyBtn, on ? 'Take off the desktop' : 'Stick to the desktop');
     el.stickyBtn.title = on ? 'Remove this note from the desktop (Ctrl+Shift+T)' : 'Put this note on the desktop as a sticky (Ctrl+Shift+T)';
-    // A sticky shows rendered Markdown, so neither a PDF/Word file nor a plain-text file can become one (one that
-    // already is can still be removed).
     const notMarkdown = isViewerOnlyFile(note) || isPlainTextFile(note);
     el.stickyBtn.disabled = !note || !!note.trashedAt || (notMarkdown && !on) || !!note.locked;
     el.stickyBtn.title = note && note.locked ? 'Locked notes cannot be stickies' : el.stickyBtn.title;

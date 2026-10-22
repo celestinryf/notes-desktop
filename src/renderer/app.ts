@@ -1,4 +1,3 @@
-/* Renderer: vanilla JS, talks to the main process through window.notesApi (see preload.js). */
 import * as H from '../shared/helpers.mts';
 import * as NotesThemes from '../shared/themes.mts';
 import NotesIcons from './icons.js';
@@ -67,8 +66,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile } = H;
   const closestTo = (e: Event, selector: string) => e.target instanceof Element ? e.target.closest<HTMLElement>(selector) : null;
 
-  // ---- theme & settings ----------------------------------------------------
-
   function effectiveTheme(settings?: Settings & Partial<Settings>) {
     const s = settings || state.settings;
     const t = s ? s.theme : 'system';
@@ -76,7 +73,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return state.systemDark ? 'dark' : 'light';
   }
 
-  // Shows a theme and colour scheme on the page: the saved settings, or the Settings dialog's unsaved draft.
   function applyTheme(settings?: Settings & Partial<Settings>) {
     const theme = effectiveTheme(settings);
     document.documentElement.dataset.theme = theme;
@@ -84,8 +80,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     syncTitleBar();
   }
 
-  // A colour scheme other than the built-in one (styles.css) sets its tokens on the page (src/shared/themes.mts); the
-  // built-in one clears them, so the stylesheet's own colours show.
   function applyColorScheme(mode: Exclude<Theme, 'system'>, settings: Settings | null) {
     const tokens = NotesThemes.resolve(settings, mode);
     const style = document.documentElement.style;
@@ -107,22 +101,18 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.sortSelect.value = settings.sort;
     applyPaneWidths(settings.sidebarWidth, settings.listWidth);
     applyEditorLayout(settings);
-    if (el.settingsDialog.open && settingsDirty()) previewSettings(); // the dialog's draft stays on top of what was saved
-    if (opts && opts.fromPeer) return; // the other side's Ctrl+E is for the note it shows
-    // A note flagged as lossy stays in source whatever the global preference, unless the user overrode it; a
-    // plain-text file always does.
-    if (H.isTableFile(state.current)) return; // a CSV keeps its own view (table or text) whatever the Markdown setting
+    if (el.settingsDialog.open && settingsDirty()) previewSettings();
+    if (opts && opts.fromPeer) return;
+    if (H.isTableFile(state.current)) return;
     const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich || isPlainTextFile(state.current);
     const wantSource = settings.editorMode === 'source' || forcedSource;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
   }
 
-  // The window draws its own caption buttons (minimise, maximise, close) over the top-right corner. Paint them in
-  // the colour of what is under them, and tell the CSS how wide they are so nothing hides beneath them.
   function syncTitleBar() {
     if (GUEST) return;
     const css = getComputedStyle(document.documentElement);
-    const color = css.getPropertyValue('--base').trim(); // the top bar (and the reader's bar) are --base
+    const color = css.getPropertyValue('--base').trim();
     const symbol = css.getPropertyValue('--fg').trim();
     const wco = navigator.windowControlsOverlay;
     const rect = wco && wco.visible ? wco.getTitlebarAreaRect() : null;
@@ -143,24 +133,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.editorColumn.style.setProperty('--editor-col-width', (settings.editorWidth || 760) + 'px');
   }
 
-  // ---- resizable panes -----------------------------------------------------
-
-  // The sidebar is docked (it takes its column) or hidden, as Zen's compact mode does it: out of the way until the
-  // pointer reaches the window's left edge, then floating over the page with a small margin. The toggle (Ctrl+\)
-  // hides and docks it. A window too narrow to dock it hides it the same way (layout, not a setting: widening the
-  // window docks it again).
-  // The pane toggles live in the sidebar's header while it is docked, and move to the start of the top bar when it
-  // hides, so they can always be reached (as Obsidian does).
   const NARROW_W = 1000;
-  const PEEK_EDGE_PX = 24; // how close to the left edge the pointer must come for the hidden sidebar to float in
-  let sidebarPeek: 'hover' | 'sticky' | null = null; // hidden but shown: 'hover' (leaves with the pointer) or 'sticky' (until Esc or a click outside)
+  const PEEK_EDGE_PX = 24;
+  let sidebarPeek: 'hover' | 'sticky' | null = null;
   let peekTimer: ReturnType<typeof setTimeout> | undefined;
   const isNarrow = () => window.innerWidth < NARROW_W;
   function sidebarLayout() {
     if (settingsNow().sidebarCollapsed) return 'float';
     return isNarrow() ? 'float' : 'docked';
   }
-  // Hidden from the grid: the sidebar takes no column.
   function sidebarHidden() { return sidebarLayout() !== 'docked'; }
   function applySidebar() {
     const layout = sidebarLayout();
@@ -183,7 +164,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (fromKeyboard) {
       peekReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const target = el.sidebar.querySelector<HTMLElement>('.nav-item.is-active, .folder-row.is-active') || el.newNoteBtn;
-      // Not over a name field the same call just opened (Ctrl+Shift+N): moving focus would cancel it.
       setTimeout(() => { if (!state.editingFolder && !el.sidebar.contains(document.activeElement)) target.focus(); }, 0);
     }
   }
@@ -200,14 +180,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       else if (state.current) focusBody();
     }
   }
-  // Something needs the sidebar on screen (a new folder's name field lives there): float it in.
   function showSidebar() {
     if (sidebarLayout() === 'float') peekSidebar('sticky');
   }
-  // The toggle and Ctrl+\: dock or hide. In a window too narrow to dock it, it floats in and out instead.
   function toggleSidebar() {
     if (GUEST) { toPeer({ type: 'command', name: 'toggleSidebar' }); return; }
-    // Too narrow to dock: the toggle floats it in and out, and the saved choice stays as it is.
     if (isNarrow()) { if (sidebarPeek) unpeekSidebar(); else peekSidebar('sticky'); return; }
     const collapsed = !!settingsNow().sidebarCollapsed;
     sidebarPeek = null;
@@ -215,12 +192,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
   function bindSidebarFloat() {
     if (GUEST) return;
-    // Stay while something in it is still being used: a name being typed, or its folder menu.
     const busy = () => state.editingFolder || state.menuFolderId || document.body.classList.contains('is-resizing')
       || (!!document.activeElement && el.sidebar.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'));
-    // The hover zone is measured from the pointer, not from an element, so nothing under it goes dead: the edge strip
-    // stays narrow and only catches a drag. Nearness is the x position alone (a sidebar sliding in or out under the
-    // pointer is the target of moves meanwhile); near the edge or over the sidebar, it stays, whatever order the events come in.
     let nearEdge = false;
     const leaveSoon = () => {
       clearTimeout(peekTimer);
@@ -233,8 +206,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     document.addEventListener('mousemove', (e) => {
       const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
       const near = e.clientX <= PEEK_EDGE_PX;
-      // While near and still hidden, every move re-arms the short wait: a sidebar that could not float in a moment
-      // ago (the layout was still changing) floats in on the next move, not only after leaving and coming back.
       if (near && !sidebarPeek) { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); }
       if (near === nearEdge) return;
       nearEdge = near;
@@ -253,7 +224,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function paneBudget() {
-    // Space the two left panes may share while the editor keeps its minimum width.
     return Math.max(0, window.innerWidth - H.EDITOR_MIN);
   }
 
@@ -263,7 +233,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const sidebarShown = sidebarHidden() ? 0 : sidebar;
     const over = sidebarShown + list - paneBudget();
     if (over > 0) {
-      // Shrink the list first, then the sidebar, never below their minimums.
       const listGive = Math.min(over, list - H.PANE_LIMITS.listWidth.min);
       list -= listGive;
       const rest = over - listGive;
@@ -301,7 +270,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         const widths = { sidebar: start.sidebar, list: start.list };
         widths[mine] = start[mine] + (ev.clientX - startX);
         const fit = applyPaneWidths(widths.sidebar, widths.list);
-        // Dragging the sidebar can squeeze the list; keep both panes honest.
         if (fit[other] !== start[other]) start[other] = fit[other];
       };
       const onUp = () => {
@@ -343,13 +311,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return res;
   }
 
-  // ---- data loading --------------------------------------------------------
-
   async function refresh(opts?: RefreshOpts) {
     opts = opts || {};
     const listOpts: ListOpts = { query: state.query, sort: settingsNow().sort };
     if (state.view === 'trash') listOpts.trashed = true;
-    else if (state.query) { /* a search looks across every live note, whatever is selected */ }
+    else if (state.query) {  }
     else if (state.view === 'pinned') listOpts.pinned = true;
     else if (state.view === 'reminders') listOpts.reminders = true;
     else if (state.view === 'tag') listOpts.tag = state.tag || undefined;
@@ -365,7 +331,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     state.tree = tree;
     state.folderPath = folderPath;
     if (state.view === 'folder' && !folderPath.length) {
-      // The folder we were looking at is gone; fall back to all notes, and stop starting in it.
       state.view = 'all'; state.folderId = null;
       if (settingsNow().lastFolderId && !GUEST) updateSettings({ lastFolderId: null }).catch(() => {});
       el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all'));
@@ -376,15 +341,13 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     renderFolders();
     renderFolderSelect();
     renderList();
-    // Page order or titles may have changed elsewhere (list, another window, a reorder): keep the strip in step.
     if (state.current && (book.id || bookOf(state.current))) renderBookStrip(state.current);
     const inList = treeModeActive() ? inTreeScope(state.currentId) : notes.some((n) => n.id === state.currentId);
     if (!inList && !opts.keepEditor) {
       const tabId = tabs.ids[tabs.at];
-      if (!state.currentId && tabId) await selectNote(tabId); // this side's tab, at start or after its note closed
-      else if (GUEST) { /* the right side has no list: it shows only the notes it is asked to */ }
+      if (!state.currentId && tabId) await selectNote(tabId);
+      else if (GUEST) {  }
       else if (tabs.split && tabs.active === 'right') {
-        // The list leads the active side: a new view opens its first note there, unless that side shows one of its notes.
         if (notes.length && !notes.some((n) => n.id === tabs.peerCurrent)) openNote(notes[0].id);
       } else if (notes.length) await selectNote(notes[0].id);
       else clearEditor();
@@ -431,7 +394,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const tree = treeModeActive();
     el.noteList.innerHTML = '';
     const empty = tree ? !treeHasContent() : !state.notes.length;
-    el.noteList.classList.toggle('hidden', tree || empty); // an empty list would still take the pane and push the empty state down
+    el.noteList.classList.toggle('hidden', tree || empty);
     el.noteTree.classList.toggle('hidden', !tree || empty);
     el.listModeSeg.classList.toggle('hidden', !treeModePossible());
     syncListModeSeg();
@@ -462,7 +425,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       li.title = H.deriveTitle(n);
       li.innerHTML = rowInner(n, q);
       if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.prepend(no); }
-      // Ctrl+click or middle-click opens the note in a new tab.
       li.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
       li.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
       if (!n.trashedAt) {
@@ -470,7 +432,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         li.addEventListener('dragstart', (e) => {
           if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; }
           li.classList.add('is-dragging');
-          toPeer({ type: 'drag', id: n.id }); // it can be dropped on the right side's tabs
+          toPeer({ type: 'drag', id: n.id });
         });
         li.addEventListener('dragend', () => { li.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
       }
@@ -506,23 +468,18 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return '<span class="row-meta remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
-  // One renderer for a note row's contents, shared by the list, the folder view and single-row refreshes, so the
-  // pin, sticky, lock, live, file and reminder marks never disappear after a save. The row is the title; everything
-  // else trails it as a small mark (the user: "just the titles", 2026-10-19). Takes a note or an outline entry.
   function rowInner(n: RowSource, q: string) {
-    const title = n.body === undefined ? n.title : H.deriveTitle(n); // outline entries carry a derived title already
+    const title = n.body === undefined ? n.title : H.deriveTitle(n);
     const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
     const marks = (n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '')
       + (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
       + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
       + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? ' (' + n.live.role + ')' : '') + '">' + I('radio') + '</span>' : '');
-    // In search results a note whose title does not carry the match shows the matching text, dimmed, so the row says why it is there.
     const inTitle = !q || H.tokenize(q).some((t) => title.toLowerCase().includes(t));
     const why = inTitle || (n.locked && !n.unlocked) ? '' : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + '</span>';
     return '<span class="row-name">' + highlight(title, q) + '</span>' + why + marks + fileMark + reminderMark(n) + whereMark(n);
   }
 
-  // The text around the first word of the query in the note's body (or its tags), on one line, about 80 characters.
   function matchExcerpt(n: RowSource, q: string) {
     const body = String(n.body || '').replace(/\s+/g, ' ');
     const low = body.toLowerCase();
@@ -535,7 +492,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return text;
   }
 
-  // The folder a note is in, dimmed at the row's end, only where the folder is not already on screen.
   function whereMark(n: RowSource) {
     if (!n.folderId || treeModeActive() || (state.view === 'folder' && !state.query)) return '';
     const f = flattenTree(state.tree).find((x) => x.id === n.folderId);
@@ -558,22 +514,16 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (pageNo) li.prepend(pageNo);
   }
 
-  // ---- views ---------------------------------------------------------------
-
   async function setView(view: RendererState['view'], arg: string | null = null, refreshOpts?: RefreshOpts) {
     await flushSave();
     state.view = view;
     state.tag = view === 'tag' ? arg : null;
     state.folderId = view === 'folder' ? arg : null;
     el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === view));
-    // Remember the folder so the app starts in it next time.
     if (!GUEST && (settingsNow().lastFolderId || null) !== state.folderId) updateSettings({ lastFolderId: state.folderId }).catch(() => {});
     await refresh(refreshOpts);
   }
 
-  // The list shows the folder (or book) of the note in front of the user. Called when a note is opened from
-  // outside the list (a link, the related panel, a search result) so the list never shows some other folder.
-  // A search keeps looking everywhere until it is cleared; the trash and unfiled notes keep their own views.
   async function scopeListToNote(note: PublicNote | null) {
     if (!note || state.query) return;
     if (note.trashedAt) { if (state.view !== 'trash') await setView('trash', null, { keepEditor: true }); return; }
@@ -581,7 +531,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (state.view === 'folder' || state.view === 'trash') await setView('all', null, { keepEditor: true });
   }
 
-  // Applies the search box. Clearing a search brings the list back to the folder of the note now open.
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   async function endSearchStep() {
     const had = !!state.query;
@@ -590,7 +539,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (had && !state.query) await scopeListToNote(state.current);
   }
 
-  // The list can be put away while a note is open; with no note open it always shows, so there is a way back.
   function syncListCollapsed() {
     const collapsed = !!(settingsNow().listCollapsed && state.current);
     el.app.classList.toggle('list-collapsed', collapsed);
@@ -601,27 +549,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     updateSettings({ listCollapsed: !settingsNow().listCollapsed });
   }
 
-  // Search lives in the list, so anything that needs it brings the list back first.
   async function showList() {
     if (settingsNow().listCollapsed) await updateSettings({ listCollapsed: false });
   }
-
-  // ---- folders -------------------------------------------------------------
 
   function folderParents() {
     const m = new Map<string, string | null>();
     for (const f of flattenTree(state.tree)) m.set(f.id, f.parentId || null);
     return m;
   }
-  // A folder and its ancestors, outermost first.
   function pathTo(id: string | null) {
     const parents = folderParents();
     const out: string[] = [];
     for (let x: string | null | undefined = id; x && parents.has(x) && out.length < 200; x = parents.get(x)) out.unshift(x);
     return out;
   }
-  // The sidebar opens one folder path at a time (the user's rule): the newest folder opened and the folders around it.
-  // Older settings could hold several open branches; only the newest one counts, and only as far down as it is open.
   function expandedSet() {
     const list = (settingsNow().expandedFolders) || [];
     if (!list.length) return new Set<string>();
@@ -636,7 +578,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else {
       const cur = Array.from(expandedSet());
       const i = id === null ? -1 : cur.indexOf(id);
-      next = i >= 0 ? cur.slice(0, i) : cur; // closing a folder closes what is open inside it
+      next = i >= 0 ? cur.slice(0, i) : cur;
     }
     await updateSettings({ expandedFolders: next });
     renderFolders();
@@ -655,7 +597,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function renderFolders() {
     const open = expandedSet();
     const editing = state.editingFolder;
-    // A background refresh must not rebuild the tree under an open name field: that would blur it and commit early.
     const liveInput = el.folderTree.querySelector<HTMLInputElement>('.folder-input');
     if (editing && liveInput && liveInput.dataset.editKey === editKey(editing)) return;
     const refocus = treeFocusKey(el.folderTree);
@@ -667,7 +608,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       el.folderTree.append(d);
       return;
     }
-    // The branch holding the folder on show draws its guide lines darker, so you can see where you are.
     const here = new Set(state.view === 'folder' ? pathTo(state.folderId) : []);
     const holding = state.current && state.current.folderId ? state.current.folderId : null;
     for (const id of holding ? pathTo(holding) : []) here.add(id);
@@ -727,7 +667,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         row.append(menu);
       }
 
-      // Showing a folder also opens it (and so closes any other open branch): one path at a time.
       row.addEventListener('click', () => {
         if (editing && editing.mode === 'rename' && editing.id === node.id) return;
         if (kids && !isOpen) setExpanded(node.id, true);
@@ -771,16 +710,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else restoreTreeFocus(el.folderTree, refocus);
   }
 
-  // ---- the middle pane as folders with their notes ("Note list: Folders" in Settings) ----
-  // Only where a tree means something: all notes, or one folder. Pinned, reminders, trash, tags and searches stay lists.
-
   function treeModePossible() {
     return !state.query && (state.view === 'all' || state.view === 'folder');
   }
   function treeModeActive() {
     return !!state.settings && state.settings.listMode === 'tree' && treeModePossible();
   }
-  // Is the note somewhere in what the tree shows? (In a folder view the tree also shows its subfolders' notes.)
   function inTreeScope(noteId: string | null) {
     const out = state.outline || {};
     const scope = state.view === 'folder' ? state.folderId : null;
@@ -792,7 +727,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return false;
   }
 
-  // The open note's headings, for its outline in the tree. Skips code fences; the text loses its Markdown marks.
   function headingsOf(md: string) {
     const out: ({ level: number; text: string; })[] = [];
     let fence = false;
@@ -816,7 +750,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return headingsOf(md).slice(0, 60);
   }
 
-  // Jumps to the i-th heading of the open note, in whichever view is showing.
   function jumpToHeading(i: number) {
     if (state.sourceMode) {
       const lines = el.bodyInput.value.split('\n');
@@ -871,7 +804,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       row.addEventListener('dragstart', (e) => { if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; } row.classList.add('is-dragging'); toPeer({ type: 'drag', id: n.id }); });
       row.addEventListener('dragend', () => { row.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
       into.append(row);
-      // The open note's outline, as Google Docs shows it: its headings, indented by level; a click goes there.
       if (active && heads.length > 1) {
         const group = treeGroup(depth, true);
         group.classList.add('tree-outline');
@@ -947,7 +879,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (active && state.revealInTree === state.currentId) { active.scrollIntoView({ block: 'nearest' }); state.revealInTree = null; }
   }
 
-  // When a note opens, the sidebar opens the path to its folder (one path at a time) and marks the folder.
   function revealInSidebar(note: PublicNote | null) {
     if (GUEST) return;
     const parents = note && note.folderId ? pathTo(note.folderId).slice(0, -1) : [];
@@ -956,7 +887,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     setExpanded(parents[parents.length - 1], true);
   }
 
-  // When a note opens, the folder view opens the folders around it, once (they can be closed again).
   function revealInTree(note: PublicNote | null) {
     if (GUEST || !treeModeActive() || !note || !note.folderId) return;
     const path = pathTo(note.folderId);
@@ -967,7 +897,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else renderNoteTree();
   }
 
-  // The outline follows typing, at most twice a second, and only redraws when the headings changed.
   let outlineTimer: ReturnType<typeof setTimeout> | undefined, outlineSig = '';
   function scheduleOutline() {
     if (!treeModeActive()) return;
@@ -1007,7 +936,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   function startCreateFolder(parentId: string | null, asBook?: boolean) {
     closeFolderMenu();
-    showSidebar(); // the name field lives there
+    showSidebar();
     state.editingFolder = { mode: 'create', parentId: parentId || null, book: !!asBook };
     if (parentId && !expandedSet().has(parentId)) { setExpanded(parentId, true); return; }
     renderFolders();
@@ -1034,7 +963,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         if (!name) { renderFolders(); return; }
         const folder = await api.folders.create({ name, parentId: edit.parentId });
         if (edit.book) {
-          // A new book opens on its first page, ready for a title.
           await api.folders.setBook(folder.id, true);
           const page = await api.notes.create({ folderId: folder.id, title: '' });
           await setView('folder', folder.id, { keepEditor: true });
@@ -1050,7 +978,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         await refresh({ keepEditor: true });
       }
     } catch (err) {
-      renderFolders(); // never leave a dead name field behind
+      renderFolders();
       toast('Could not save the folder: ' + (err.message || err));
     }
   }
@@ -1075,7 +1003,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function moveNoteToFolder(noteId: string, folderId: string | null) {
     const existing = state.notes.find((n) => n.id === noteId) || (state.currentId === noteId ? state.current : null);
-    if (existing && (existing.folderId || null) === (folderId || null)) return; // already there
+    if (existing && (existing.folderId || null) === (folderId || null)) return;
     await flushSave();
     let updated;
     try { updated = await api.notes.update(noteId, { folderId: folderId || null }); }
@@ -1123,7 +1051,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     none.value = '';
     none.textContent = 'No folder';
     sel.append(none);
-    // Each folder by its full path ("Work / Project Atlas"), so the closed box reads as a breadcrumb.
     const path: string[] = [];
     for (const node of flattenTree(state.tree)) {
       path.length = node.depth;
@@ -1151,9 +1078,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     placePopover(menu, anchor, ev);
   }
 
-  // Shows a popover menu at the pointer (right-click) or under its anchor, kept inside the window. Under an anchor
-  // it lines up with the anchor's right edge when the anchor sits in the right half, and opens upward if it must.
-
   function closeFolderMenu() {
     state.menuFolderId = null;
     el.folderMenu.classList.add('hidden');
@@ -1174,41 +1098,31 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (action === 'delete') deleteFolder(id);
   }
 
-  // ---- vaults: see vaults-panel.js ----
-
   const { syncVault, removeVault, addVaultFolder, openCloneDialog, submitClone, renderVaultList, describeVaultStatus } = createVaultsPanel({ api, refresh, flushSave, setView, leaveSettings, setExpanded });
-
-  // ---- tabs and split view ---------------------------------------------------
-  // Each side of the editor pane has its own row of tabs, and selectNote shows a note in the side's current tab.
-  // The right side of a split is this page again in an iframe (?pane=right) that shows only the editor, so it has
-  // every editor feature. The two copies talk with postMessage. A note is open on one side only, so two editors
-  // never write the same note: asking for it on one side shows it where it already is.
 
   const GUEST = new URLSearchParams(location.search).get('pane') === 'right';
   const SIDE = GUEST ? 'right' : 'left';
   const tabs: { ids: (string | null)[], at: number, titles: Map<string, string>, split: boolean, active: 'left' | 'right', activeHere: boolean, ratio: number,
     frame: HTMLIFrameElement | null, peerReady: boolean, queue: PeerMessage[], peerIds: string[], peerCurrent: string | null, dragIndex: number | null, peerDrag: string | null } = {
-    ids: [],            // note ids in tab order; null is an empty tab
-    at: 0,              // the tab on screen
-    titles: new Map(),  // id -> title shown on a tab that is not on screen
-    split: false,       // left side: the right side is open
-    active: 'left',     // left side: the side the list opens notes in (the one last clicked or typed in)
-    activeHere: false,  // right side: this side is the active one
-    ratio: 0.5,         // left side: its share of the width
-    frame: null,        // left side: the right side's iframe
+    ids: [],
+    at: 0,
+    titles: new Map(),
+    split: false,
+    active: 'left',
+    activeHere: false,
+    ratio: 0.5,
+    frame: null,
     peerReady: false,
-    queue: [],          // left side: messages for the right side sent before it was ready
-    peerIds: [],        // the other side's open notes
+    queue: [],
+    peerIds: [],
     peerCurrent: null,
-    dragIndex: null,    // a tab of this side being dragged
-    peerDrag: null,     // a tab or note card being dragged on the other side
+    dragIndex: null,
+    peerDrag: null,
   };
 
   function peerWindow() { return GUEST ? window.parent : (tabs.frame && tabs.frame.contentWindow); }
   function toPeer(msg: PeerMessage) {
     if (!GUEST && !tabs.split) return;
-    // Queue before touching the iframe's window: reading contentWindow while the iframe is still about:blank
-    // makes Electron run the preload there, and not again for the page, which then has no API.
     if (!GUEST && !tabs.peerReady) { tabs.queue.push(msg); return; }
     const w = peerWindow();
     if (!w || w === window) return;
@@ -1223,7 +1137,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     peerChangedTimer = setTimeout(() => toPeer({ type: 'changed' }), 250);
   }
 
-  // Events from the main process reach the left side only; it hands them on to the right side.
   const mainEvents: { [N in MainEventName]?: (...args: MainEventArgsMap[N]) => unknown } = {};
   function fromMain<N extends MainEventName>(name: N, subscribe: (handler: (...args: MainEventArgs<N>) => void) => unknown, handler: (...args: MainEventArgs<N>) => unknown) {
     const slots: { [P in N]?: (...args: MainEventArgsMap[P]) => unknown } = mainEvents;
@@ -1247,7 +1160,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (GUEST) { renderTabs(); return; }
     tabs.ratio = panes.ratio;
     tabs.active = panes.split ? panes.active : 'left';
-    // Until the right side has loaded and reported, its saved tabs stand for it (so a save meanwhile keeps them).
     tabs.peerIds = panes.split ? panes.right.ids.slice() : [];
     tabs.peerCurrent = panes.split ? panes.right.current : null;
     renderTabs();
@@ -1288,9 +1200,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.tabList.replaceChildren(frag);
     const active = el.tabList.querySelector('.tab.is-active');
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    // One tab showing a note, and no split: no tabs (the user's rule, PR 71). The bar itself stays, for the note's
-    // actions and the window's buttons. A blank editor keeps its + (the way to a tab then), and a split keeps both
-    // sides' tabs, for Close side and the active side's mark.
     el.tabBar.classList.toggle('is-solo', !GUEST && !tabs.split && tabs.ids.length === 1 && !!tabs.ids[0]);
     syncTitleBar();
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
@@ -1299,7 +1208,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (missing.length) loadTabTitles(missing);
   }
 
-  // Live title of the tab on screen while the title is typed.
   function renderActiveTabTitle() {
     const label = el.tabList.querySelector('.tab.is-active .tab-title');
     if (label && state.current) label.textContent = tabTitle(state.currentId);
@@ -1311,10 +1219,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     titlesLoading = true;
     let gone: string[] = [];
     try {
-      const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => undefined))); // undefined: could not ask
+      const notes = await Promise.all(ids.map((id) => api.notes.get(id).catch(() => undefined)));
       notes.forEach((n, i) => { if (n) tabs.titles.set(ids[i], H.deriveTitle(n)); else if (n === null) gone.push(ids[i]); });
     } finally { titlesLoading = false; }
-    // A note deleted while its tab was in the background: the tab goes.
     gone = gone.filter((id) => id !== state.currentId);
     for (const id of gone) { const i = tabs.ids.indexOf(id); if (i >= 0) removeTabAt(i); }
     if (gone.length) tabsChanged(); else renderTabs();
@@ -1325,7 +1232,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (i < tabs.at || tabs.at >= tabs.ids.length) tabs.at = Math.max(0, tabs.at - 1);
   }
 
-  // Puts the note just shown into a tab: its own tab if it has one, a new tab if asked, or the current tab.
   function placeInTab(id: string, newTab?: boolean) {
     const i = tabs.ids.indexOf(id);
     if (i >= 0) tabs.at = i;
@@ -1352,27 +1258,22 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         right: { ids: tabs.split ? tabs.peerIds.slice() : [], current: tabs.split ? tabs.peerCurrent : null },
       };
       if (JSON.stringify(panes) === JSON.stringify(settingsNow().panes)) return;
-      updateSettings({ panes }).catch(() => {}); // only the layout; losing one write costs nothing
+      updateSettings({ panes }).catch(() => {});
     }, 1500);
   }
 
-  // Runs tab work in the same queue as note switches, so a close and a switch never interleave their saves.
   function inTurn(fn: () => Promise<unknown>) {
     const run = state.selecting.then(fn).catch((err) => console.error('tab change failed', err));
     state.selecting = run;
     return run;
   }
 
-  // Writes what is open (or asks to leave it) before the tab changes. False when the person chose to stay.
   async function leaveNote() {
     if (tts.active) stopReadAloud();
-    // A PDF's or Word document's edits are not the note's text, so state.dirty does not cover them. If they cannot
-    // be written, stay on the document: switching would close it and lose them.
     if (!(await flushDocuments({ commit: true })) && !window.confirm('Your changes to this document could not be saved (is it open in another app?). Leave it anyway and lose them?')) return false;
-    // Flush again if keystrokes landed while the flush was in flight, so nothing typed during the switch is dropped.
     let guard = 0;
     while (state.dirty && guard++ < 3) await flushSave();
-    stashIfDirty(); // still dirty means the disk is refusing writes; the patch lives on and is retried
+    stashIfDirty();
     return true;
   }
 
@@ -1391,7 +1292,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   function newEmptyTab() {
     return inTurn(async () => {
-      if (tabs.ids[tabs.at] === null && !state.currentId) return; // already on an empty tab
+      if (tabs.ids[tabs.at] === null && !state.currentId) return;
       if (!(await leaveNote())) return;
       blankEditor();
       const at = tabs.ids.length ? tabs.at + 1 : 0;
@@ -1410,7 +1311,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         const nextId = tabs.ids[j];
         if (nextId) {
           await selectNoteNow(nextId);
-          if (state.currentId !== nextId) return; // the switch was refused; the tab stays
+          if (state.currentId !== nextId) return;
         } else {
           if (!(await leaveNote())) return;
           blankEditor();
@@ -1425,7 +1326,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       tabs.ids = [];
       tabs.at = 0;
       tabsChanged();
-      if (GUEST) toPeer({ type: 'close' }); // the right side's last tab closes the split
+      if (GUEST) toPeer({ type: 'close' });
     });
   }
 
@@ -1434,7 +1335,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     showTab((tabs.at + step + tabs.ids.length) % tabs.ids.length);
   }
 
-  // Opens a note from outside the editor (the list, a new note, a reminder, a sticky): in the active side.
   function openNote(id: string, opts?: OpenOpts) {
     opts = opts || {};
     if (!GUEST && tabs.split && !tabs.ids.includes(id) && (peerHas(id) || tabs.active === 'right')) {
@@ -1444,8 +1344,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     return selectNote(id, opts);
   }
-
-  // ---- the split ----
 
   function setActiveSide(side: 'left' | 'right') {
     if (GUEST || tabs.active === side) return;
@@ -1477,7 +1375,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.editorPane.classList.add('is-split');
     el.splitDivider.classList.remove('hidden');
     el.editorPane.append(f);
-    if (!restoring) tabs.active = 'right'; // a new split is where the next note from the list goes
+    if (!restoring) tabs.active = 'right';
     el.paneMain.classList.toggle('is-active-side', tabs.active === 'left');
     renderTabs();
     if (!restoring) saveLayoutSoon();
@@ -1485,7 +1383,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function closeSplit() {
     if (GUEST || !tabs.split) return;
-    if (!(await flushPeer({ leave: true }))) return; // the right side kept an unsaved document open
+    if (!(await flushPeer({ leave: true }))) return;
     if (!tabs.split) return;
     dropFrame();
   }
@@ -1507,7 +1405,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     saveLayoutSoon();
   }
 
-  // Asks the right side to write what it has. leave: also its documents, asking the person if they cannot be.
   let flushSeq = 0;
   const peerWaits = new Map<number, (reply: { ok?: boolean } | null) => void>();
   function askPeer(msg: { type: 'flush'; leave: boolean } | { type: 'release'; id: string }, ms: number): Promise<{ ok?: boolean } | null> {
@@ -1521,15 +1418,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   async function flushPeer(opts?: { leave?: boolean }) {
     if (GUEST || !tabs.split || !tabs.peerReady) return true;
     const leave = !!(opts && opts.leave);
-    // Leaving may wait for the person to answer a question about an unsaved document.
     const reply = await askPeer({ type: 'flush', leave }, leave ? 10 * 60 * 1000 : 5000);
-    // Leaving needs a yes: no answer means the right side's work is not known to be written. A plain flush (hide,
-    // quit) must never hold the window, so it gives up after the time main allows anyway.
     if (leave) return !!(reply && reply.ok);
     return true;
   }
 
-  // Moves a note that is open on the other side to this one: that side closes its tab (writing it) first.
   async function takeFromPeer(id: string) {
     if (!peerHas(id)) return true;
     const reply = await askPeer({ type: 'release', id }, 10 * 60 * 1000);
@@ -1586,7 +1479,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       case 'release': {
         const i = tabs.ids.indexOf(m.id);
         if (i >= 0) await closeTab(i);
-        // Text of that note kept for a retry lives here: the other side must not open the note over it.
         const ok = !tabs.ids.includes(m.id) && !state.pending.has(m.id);
         if (!ok && state.pending.has(m.id)) toast('That note has text that could not be saved yet; it stays here until it is.');
         toPeer({ type: 'reply', seq: m.seq, ok });
@@ -1601,14 +1493,13 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   async function onPeerWrite() {
-    if (!GUEST) await refresh({ keepEditor: true }); // the right side has no list to keep current
+    if (!GUEST) await refresh({ keepEditor: true });
     tabs.titles.clear();
     renderTabs();
     const id = state.currentId;
     if (id && !state.dirty && !(await api.notes.get(id)) && state.currentId === id) { clearEditor(); if (!GUEST) await refresh(); }
   }
 
-  // Shortcuts pressed on the right side that belong to the list or the whole window.
   function runSideCommand(name: string, m?: { title?: string }) {
     if (GUEST) return;
     if (name === 'newNote') newNote({ title: m && typeof m.title === 'string' ? m.title : '' });
@@ -1625,7 +1516,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (!src.undoRedo(cmd)) document.execCommand(cmd === 'redo' ? 'redo' : 'undo');
   }
 
-  // Dropping a tab or a note card on a tab bar: reorder this side's tabs, or open the note here.
   function dropIndex(e: DragEvent) {
     const t = closestTo(e, '.tab');
     return t ? Number(t.dataset.index) : tabs.ids.length;
@@ -1667,7 +1557,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (closestTo(e, '.tab-close')) closeTab(i); else showTab(i);
     });
     el.tabList.addEventListener('auxclick', (e) => { const t = closestTo(e, '.tab'); if (t && e.button === 1) { e.preventDefault(); closeTab(Number(t.dataset.index)); } });
-    el.tabList.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // no autoscroll on middle-click
+    el.tabList.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
     el.tabList.addEventListener('dragstart', (e) => {
       const t = closestTo(e, '.tab');
       if (!t) return;
@@ -1700,7 +1590,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     el.paneMain.addEventListener('focusin', () => setActiveSide('left'));
     el.paneMain.addEventListener('pointerdown', () => setActiveSide('left'), true);
-    // Drag the divider to share the width; double-click shares it equally.
     el.splitDivider.addEventListener('pointerdown', (e) => {
       if (!tabs.split) return;
       e.preventDefault();
@@ -1727,9 +1616,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.splitDivider.addEventListener('dblclick', () => { tabs.ratio = 0.5; applyRatio(); saveLayoutSoon(); });
   }
 
-  // ---- editor --------------------------------------------------------------
-
-  // The note in the current tab is gone (trashed, deleted, split into a book): the tab is left empty.
   function clearEditor() {
     blankEditor();
     if (tabs.ids.length) { tabs.ids[tabs.at] = null; tabsChanged(); }
@@ -1747,9 +1633,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     markActiveRow(null);
   }
 
-  // Selections run one at a time: two quick switches must not interleave their loads and flushes.
   state.selecting = Promise.resolve();
-  // opts: { newTab, focus: 'title' | 'body' }. Shows the note in this side's current tab (see placeInTab).
   function selectNote(id: string, opts?: OpenOpts) {
     const run = state.selecting.then(() => selectNoteNow(id, opts)).catch((err) => console.error('selectNote failed', err));
     state.selecting = run;
@@ -1758,46 +1642,37 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function selectNoteNow(id: string, opts?: OpenOpts) {
     opts = opts || {};
-    // Open on the other side of the split: show it there, never in two editors at once.
     if (peerHas(id)) { toPeer({ type: 'open', id, focus: opts.focus || 'body' }); return; }
     if (state.currentId === id && state.current) { focusAfterOpen(opts.focus); return; }
     if (!(await leaveNote())) return;
-    if (state.inflight.has(id)) await state.inflight.get(id); // a write for the incoming note is still landing
-    // Read the incoming note only now, after every write that could change it has settled.
+    if (state.inflight.has(id)) await state.inflight.get(id);
     const note = await api.notes.get(id);
     if (!note) {
       const gone = tabs.ids.indexOf(id);
       if (gone >= 0 && id !== state.currentId) { removeTabAt(gone); tabsChanged(); }
       return;
     }
-    // Keystrokes that arrived during that read belong to the outgoing note: save or stash them too.
     if (state.dirty) { await flushSave(); stashIfDirty(); }
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
     syncListCollapsed();
-    closeAllBookMenus(); // a page or book menu belongs to the note that was open
-    if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader(); // left that book: its reading view goes too
+    closeAllBookMenus();
+    if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader();
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
     el.bodyInput.value = note.body;
     const hasPending = applyPendingTo(note);
-    // Only Markdown goes into the rendered editor. A plain-text file is always shown as the text it is, and a
-    // PDF or Word file is shown by its own viewer, so neither gets the Markdown checks or their toasts.
     const plainFile = isPlainTextFile(note);
     const markdown = !plainFile && !isViewerOnlyFile(note);
     let lossless = true;
     if (state.rich) {
       lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : '');
-      // A real file on disk gets the strict test: the rendered view may only be used if it reproduces the
-      // file exactly, otherwise the first keystroke would reformat someone's CLAUDE.md or README.
       if (markdown && note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
     }
     state.currentLossless = lossless;
     state.lossyOverride = null;
     el.bodyInput.placeholder = plainFile ? 'Plain text.' : 'Markdown source. Ctrl+E switches back to the rendered view.';
-    // A note the rendered view cannot show faithfully opens as source, so nothing is rewritten by just looking.
-    // A CSV opens as its table; other plain files as their text; Markdown by the setting (or as source when lossy).
     const wantSource = H.isTableFile(note) ? false : (plainFile || settingsNow().editorMode === 'source' || !lossless || !state.rich);
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (markdown && !lossless && state.lossyToastFor !== note.id) {
@@ -1809,7 +1684,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     autoGrow();
     const inTrash = !!note.trashedAt;
     const fileReadOnly = isViewerOnlyFile(note);
-    el.sourceBtn.classList.toggle('hidden', (plainFile && !H.isTableFile(note)) || fileReadOnly); // nothing to switch between
+    el.sourceBtn.classList.toggle('hidden', (plainFile && !H.isTableFile(note)) || fileReadOnly);
     syncSourceButton();
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
@@ -1850,7 +1725,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     focusAfterOpen(opts.focus);
   }
 
-  // The open note's row, in whichever of the list and the folder view is showing (null clears both).
   function markActiveRow(id: string | null) {
     for (const root of [el.noteList, el.noteTree]) {
       root.querySelectorAll<HTMLElement>('.note-row').forEach((r) => {
@@ -1870,7 +1744,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const body = el.bodyInput.value;
     const stats = tableStatsNow();
     if (stats && tableShown()) {
-      // A table is counted in rows and columns, not words.
       el.statusWords.textContent = stats.rows.toLocaleString() + (stats.rows === 1 ? ' row' : ' rows');
       el.statusChars.textContent = stats.cols + (stats.cols === 1 ? ' column' : ' columns');
     } else {
@@ -1887,53 +1760,28 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.statusSaved.classList.toggle('is-saved', label === 'Saved');
   }
 
-  // ---- books, and the reading view: see books.js ----
-
   const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
-
-  // ---- live share: see live-share.js ----
 
   const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
 
-  // ---- find in note, print: see find-bar.js ----
-
   const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
-
-  // ---- the editor view: see editor-view.js ----
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
 
-  // ---- related notes: see related.js ----
-
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
-
-  // ---- desktop stickies: see sticky-button.js ----
 
   const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
 
-  // ---- locking: see locking.js ----
-
   const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
-
-  // ---- reminders: see reminders.mts ----
 
   const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
 
-  // ---- sharing: see sharing.js ----
-
   const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
-
-  // ---- attachments and voice memos: see attachments.js ----
 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
-  // ---- earlier versions: see history-dialog.js ----
-
   const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
 
-  // ---- the open note's meta row --------------------------------------------
-
-  // Re-reads the open note's metadata (not its body) after something outside the editor changed it.
   async function refreshCurrentMeta() {
     if (!state.currentId) return;
     const fresh = await api.notes.get(state.currentId);
@@ -1949,41 +1797,24 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     await refresh({ keepEditor: true });
   }
 
-  // ---- bot: Claude Code over the notes: see bot-panel.js ----
-
   const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
-
-  // ---- speech: read aloud and dictate: see speech.js ----
 
   const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api });
 
-  // ---- file-backed notes ---------------------------------------------------
-
-  // ---- the PDF on show: see pdf-note.js ----
-
   const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
-
-  // ---- Documents in the Craft apps: see craft-notes.js ----
 
   const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow });
 
-  // ---- the Word document on show: see word-note.js ----
-
   const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
 
-  // A link inside a shown document (Word, PDF): a web link opens only on Ctrl+click, anything else never.
   function externalLinkClick(e: MouseEvent, href: string) {
     if (!/^https?:\/\//i.test(href)) return;
     if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
     else toast('This link goes to ' + href + '. Ctrl+click to open it.');
   }
 
-  // ---- images: see images.js ----
-
   const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
 
-  // A file's badge, in the list and over the note: a text file's language as it is written (LaTeX, Python,
-  // Markdown, Plain text), or the kind of any other file as the acronym it is (PDF, DOCX).
   function fileBadge(note: RowSource) {
     const documentKinds: (FileKind | null)[] = ['docx', 'sheet', 'image'];
     if (documentKinds.includes(note.fileKind)) return H.extOf(note.filePath).toUpperCase();
@@ -2004,7 +1835,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     closeConvertMenu();
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || !!(note.fileKind && H.CRAFT_OF[note.fileKind])));
     el.editor.classList.toggle('shows-image', isFile && note.fileKind === 'image');
-    // A Craft app is a whole office app: it gets the note's area, and shows its own title, counts and status.
     const craft = isFile ? craftFor(note) : null;
     const inCraft = !!craft && craft.usable();
     el.editorColumn.classList.toggle('shows-craft', inCraft);
@@ -2021,7 +1851,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
       showPdf(note);
     } else if (note.fileKind === 'docx') {
-      // WordCraft (when it is built) is the full editor, with its own ribbon; the simple editor is the fallback.
       el.docxEditor.classList.toggle('hidden', useWordCraft());
       showBanner(useWordCraft() ? '' : 'Opening the Word document…');
       showDocx(note);
@@ -2035,13 +1864,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
-  // ---- Convert to: see convert-menu.js ----
-
   const { openConvertMenu, closeConvertMenu, convertCurrent } = createConvertMenu({ api, flushSave, openFiles });
 
-  // ---- opened documents as one ----
-
-  // Opened documents (PDF, Word, the Craft apps') as one: unsaved edits, edits in progress, and saving them.
   const documentDirty = () => pdfDirty() || docxDirty() || craftDirty();
   const documentBusy = () => pdfBusy() || docxDirty() || craftDirty();
   async function flushDocuments(opts: { commit?: boolean }) {
@@ -2051,8 +1875,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return pdfSaved && docxSaved && craftSaved;
   }
 
-  // ---- files, saving, and the note's lifecycle ----
-  // An empty text hides the banner.
   function showBanner(text: string) {
     el.fileBanner.textContent = text;
     el.fileBanner.classList.toggle('hidden', !text);
@@ -2069,8 +1891,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (state.view === 'trash') { state.view = 'all'; el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all')); }
       await refresh({ keepEditor: true });
       if (res.firstId && res.firstId === state.currentId) {
-        // Opening the file that is already open: linking re-read it, so show it as it is now (unless the person
-        // has unsaved typing in it). Selecting it again would do nothing, and the poll would then see no change.
         const fresh = await api.notes.get(res.firstId);
         if (fresh && state.current && state.currentId === fresh.id && !state.dirty && !state.inflight.has(fresh.id)
           && (fresh.body !== el.bodyInput.value || fresh.fileMtime !== state.current.fileMtime)) applyFreshFileBody(fresh);
@@ -2080,37 +1900,30 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     toast((res.linked.length ? 'Opened ' + res.linked.length + (res.linked.length === 1 ? ' file' : ' files') : 'Nothing opened') + failed);
   }
 
-  // While a file-backed note is open and untouched, pick up changes made by other programs.
   async function pollCurrentFile() {
     const note = state.current;
-    if (!note || !note.filePath || state.dirty || document.hidden || documentBusy()) return; // document edits in progress: never reload under them
+    if (!note || !note.filePath || state.dirty || document.hidden || documentBusy()) return;
     let res;
     try { res = await api.files.refresh(note.id); } catch (_) { return; }
-    if (documentBusy()) return; // editing started during the check
+    if (documentBusy()) return;
     if (state.currentId !== note.id) return;
     if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
-      // Re-check after the second round trip: the user may have switched notes or started typing meanwhile.
-      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return; // a save that landed in the gap must not be overwritten
+      if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
       applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }
   }
 
-  // Puts a re-read file body into the editor and re-applies the strict rendered/source decision for files.
   function applyFreshFileBody(fresh: PublicNote) {
     state.current = fresh;
-    // Replacing the editor text while clean means any stashed older patch is obsolete: it must never be
-    // retried over the text we are now showing.
     if (!state.dirty) state.pending.delete(fresh.id);
     src.reload(fresh.body);
-    // A PDF, Word file or image is shown by its own viewer: show the new version there (a note that just became one, an
-    // old .rtf or image, leaves the code editor too).
     if (isViewerOnlyFile(fresh)) { showCode(fresh, true); renderFileRow(fresh); updateStatus(fresh); return; }
     if (H.isTableFile(fresh) && tableShown()) renderTable(fresh);
     if (state.rich && !isPlainTextFile(fresh)) {
-      let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true }); // same note, new text: keep the caret
+      let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
       if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
       if (!lossless && !state.sourceMode && state.lossyOverride !== fresh.id) {
@@ -2125,12 +1938,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function reloadCurrentFile() {
     if (!state.current || !state.current.filePath) return;
-    await commitPdf(); // a stroke or text box in progress counts as an edit here
+    await commitPdf();
     if ((state.dirty || documentDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
     const id = state.currentId;
     if (!id) return;
     state.dirty = false;
-    forgetShownPdf(); // a PDF or Word document is shown again from the file even if it did not change, dropping its edits
+    forgetShownPdf();
     forgetShownDocx();
     for (const c of Object.values(crafts)) c.forget();
     const res = await api.files.refresh(id);
@@ -2158,7 +1971,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     scheduleOutline();
     if (!state.currentId || (state.current && state.current.trashedAt)) return;
     state.dirty = true;
-    // Edits that bypass the input event (Tab, list keys, Ctrl+B/I/K wrappers) still keep find's offsets honest.
     if (find.open && state.sourceMode) runFind(true, true, true);
     setSaved('Saving…');
     if (state.saveTimer) clearTimeout(state.saveTimer);
@@ -2166,14 +1978,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (state.current) updateStatus(state.current);
   }
 
-  // Patches that failed to save are kept per note (state.pending: id -> patch) and retried until they land,
-  // even after the user has switched notes, so a locked or full disk never discards an edit.
-
   function currentPatch() {
     const patch: FieldsPatch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
-    // Read-only file kinds (PDF, Word, binary) still take title and tag edits; their body is not ours to write.
     if (isViewerOnlyFile(state.current)) delete patch.body;
-    if (lockedNow()) delete patch.body; // the locked view has no body to offer
+    if (lockedNow()) delete patch.body;
     return patch;
   }
 
@@ -2192,14 +2000,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       label: 'Keep mine',
       run: async () => {
         state.conflictShown = null;
-        // Send what the person has NOW: the open fields if the note is still open, else the newest stash.
         const latest = state.currentId === id ? currentPatch() : (state.pending.get(id) || patch);
         try {
           const updated = await api.notes.update(id, Object.assign({}, latest, { force: true }));
           if (state.pending.get(id) === patch || state.pending.get(id) === latest) state.pending.delete(id);
           if (state.currentId === id && updated) {
             state.current = updated;
-            // Typing during the save keeps dirty and saves again; otherwise the fields and the store agree.
             const same = JSON.stringify(currentPatch()) === JSON.stringify(latest);
             state.dirty = !same;
             if (same) setSaved('Saved'); else scheduleSave();
@@ -2218,23 +2024,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     setTimeout(() => { state.saveErrorShown = false; }, 10000);
   }
 
-  // Retry every pending patch except the open note's, whose latest text lives in the fields and goes through flushSave.
   async function retryPending() {
     let failed = false;
     for (const id of Array.from(state.pending.keys())) {
       if (id === state.currentId) continue;
-      const patch = state.pending.get(id); // read at send time: the entry may have been replaced meanwhile
+      const patch = state.pending.get(id);
       if (!patch) continue;
       try {
         const updated = await api.notes.update(id, patch);
-        if (state.pending.get(id) === patch) state.pending.delete(id); // only clear what was actually written
+        if (state.pending.get(id) === patch) state.pending.delete(id);
         if (updated) {
           const idx = state.notes.findIndex((n) => n.id === id);
           if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
           toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
         }
       } catch (err) {
-        // A file that changed on disk is a decision, not a retry: offer it once and stop looping on it.
         if (/changed on disk/i.test(String(err && err.message))) { offerConflictChoice(id, patch); continue; }
         failed = true;
         reportSaveFailure(err);
@@ -2243,26 +2047,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (failed) scheduleRetry();
   }
 
-  // Called before the editor moves away from a note: keep unsaved input alive as that note's pending patch.
   function stashIfDirty() {
     if (state.dirty && state.currentId) state.pending.set(state.currentId, currentPatch());
     if (state.pending.size) scheduleRetry();
   }
 
-  // When a note with a pending patch is opened, show the unsaved text, not the stale disk copy.
   function applyPendingTo(note: PublicNote) {
     const p = state.pending.get(note.id);
     if (!p) return false;
     el.titleInput.value = p.title;
     el.tagsInput.value = p.tags;
-    if (typeof p.body === 'string' && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body; // never show a stale plaintext on a relocked note
+    if (typeof p.body === 'string' && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body;
     return true;
   }
 
 
-  // Resolves true when the open note is saved (or had nothing to save), false when the write failed.
-  // Saves the open note: a PDF's or Word document's edits, then the text. opts.fromBlur: the window only lost focus (see flushPdf).
-  // Resolves false if anything is still unsaved.
   async function flushSave(opts?: { fromBlur?: boolean }) {
     const docsSaved = await flushDocuments({ commit: !(opts && opts.fromBlur === true) });
     const textSaved = await flushTextSave();
@@ -2285,7 +2084,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       state.pending.set(id, patch);
       if (state.currentId === id) { state.dirty = true; setSaved('Save failed'); }
       if (/changed on disk/i.test(String(err && err.message))) {
-        // Someone else changed the file: no silent retry. Reload takes theirs; Keep mine writes yours over it.
         offerConflictChoice(id, patch);
         return false;
       }
@@ -2299,11 +2097,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (state.currentId === id) {
       state.current = updated;
       updateStatus(updated);
-      setSaved(state.dirty ? 'Saving…' : 'Saved'); // typing during the write means another save is coming
+      setSaved(state.dirty ? 'Saving…' : 'Saved');
       renderRelatedSoon();
       if (book.id && patch.title !== undefined) { const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t'); if (t) t.textContent = H.truncate(H.deriveTitle(updated) || 'Untitled', 28); }
-      // A vault note's title is its file name: the store may have settled it (illegal characters, a clash),
-      // and the file row must show the renamed path.
       if (updated.filePath && el.filePath.textContent !== updated.filePath) { el.filePath.textContent = updated.filePath; el.filePath.title = updated.filePath; }
       if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
     }
@@ -2315,12 +2111,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (settingsNow().sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
       else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
     }
-    // Tags may have changed: cheap to refresh the tag list.
     api.notes.tags().then(renderTags);
     return true;
   }
 
-  // opts.title starts the note with that title (the palette's "New note ..."). A click handler passes an event: ignored.
   async function newNote(opts?: { title?: string }) {
     const title = opts && typeof opts.title === 'string' ? opts.title.trim() : '';
     await flushSave();
@@ -2397,7 +2191,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   async function emptyTrash() {
-    // Only what is listed: with a search active, "Empty trash" must not delete trashed notes the user cannot see.
     const listed = state.notes.slice();
     const n = listed.length;
     if (!n) return;
@@ -2436,15 +2229,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
-  // ---- the code editor: see code-editor.js ----
-
   const { showCode } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
 
-  // ---- editor text helpers: see editor-text.js ----
-
   const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
-
-  // ---- settings dialog -----------------------------------------------------
 
   function openSettings() {
     const s = settingsNow();
@@ -2476,13 +2263,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     refreshGitStatus();
     el.settingsScroll.scrollTop = 0;
     markSettingsSection();
-    el.settingsSearch.focus(); // Ctrl+, then type: the fastest way to a setting
+    el.settingsSearch.focus();
   }
 
-  // ---- the settings draft ---------------------------------------------------
-  // Settings changed in the dialog are held here, shown on the page as a preview, and written only by Save changes.
-  // Closing the dialog with changes (Esc, Cancel, a click outside) asks first. Actions in the dialog (Commit now,
-  // Add a folder, Import) are not settings and run at once.
   let draft: SettingsPatch = {};
   const settingKeys = (o: SettingsPatch) => Object.keys(o).filter((k): k is keyof Settings => k in settingsNow());
   const same = (a: SettingValue | undefined, b: SettingValue | undefined) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
@@ -2493,7 +2276,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     previewSettings();
     syncSettingsDirty();
   }
-  // What can be seen changes on the page as it is picked: theme and colours, text size, the writing column.
   function previewSettings() {
     const s = draftSettings();
     applyTheme(s);
@@ -2506,7 +2288,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.saveSettingsBtn.disabled = !dirty;
     el.settingsDirtyNote.textContent = dirty ? 'Unsaved changes' : '';
     el.cancelSettingsBtn.textContent = dirty ? 'Cancel' : 'Close';
-    // History's buttons act on the saved settings: while those fields are unsaved they wait for Save changes.
     const gitPending = 'gitEnabled' in draft || 'gitRemote' in draft;
     el.gitCommitBtn.disabled = gitPending || el.gitCommitBtn.dataset.off === '1';
     el.gitPushBtn.disabled = gitPending || el.gitPushBtn.dataset.off === '1';
@@ -2517,7 +2298,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const res = await updateSettings(patch);
     draft = {};
     if (res.error) {
-      // The hotkey could not be bound: everything else was saved; the dialog stays open on the problem.
       el.hotkeyError.textContent = res.error;
       el.hotkeyInput.value = H.displayAccelerator(res.settings.hotkey).replace(/ /g, '');
       syncSettingsDirty();
@@ -2531,34 +2311,29 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
   function discardSettings() {
     draft = {};
-    if (state.settings) applySettings(state.settings); // the preview goes; the page shows what is saved
+    if (state.settings) applySettings(state.settings);
     closeSettings();
   }
   function closeSettings() {
     draft = {};
     el.settingsDialog.close();
   }
-  // Esc, Cancel or a click outside: straight out when nothing changed, otherwise the question.
   function requestCloseSettings() {
     if (!settingsDirty()) { closeSettings(); return; }
     const names = settingKeys(draft).filter((k) => !same(draft[k], settingsNow()[k])).map((k) => SETTING_NAMES[k] || k);
     el.settingsSaveList.textContent = 'Not saved yet: ' + names.join(', ') + '.';
     el.settingsSaveDialog.showModal();
   }
-  // An action in the dialog that goes on to close it (a vault added, notes imported) keeps unsaved changes by
-  // saving them: nothing the person set should be lost on the way out.
   async function leaveSettings() {
     if (settingsDirty()) await saveSettings(); else closeSettings();
   }
 
-  // What each setting is called in the "Save your changes?" question.
   const SETTING_NAMES: Partial<Record<keyof Settings, string>> = {
     hotkey: 'Global hotkey', theme: 'Theme', colorScheme: 'Colour scheme', customColors: 'Custom colours', sidebarCollapsed: 'Hide the sidebar',
     openAtLogin: 'Start at sign-in', alwaysOnTop: 'Keep above other windows', fontSize: 'Text size', editorWidth: 'Column width', editorAlign: 'Column position',
     ttsVoice: 'Read-aloud voice', ttsRate: 'Read-aloud speed', gitEnabled: 'Git history', gitRemote: 'Git remote',
   };
 
-  // ---- Appearance: scheme swatches and custom colours --------------------------
   const T = () => NotesThemes;
   function renderSchemeGrid() {
     const s = draftSettings();
@@ -2592,14 +2367,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       b.setAttribute('aria-checked', String(on));
       b.tabIndex = on ? 0 : -1;
     }
-    // The pickers show the colours of the mode on screen: the custom ones, or the chosen scheme's as a start.
     const seed = T().seedsOf(s.colorScheme, s.customColors, mode);
     el.customBgInput.value = seed.background; el.customTextInput.value = seed.text; el.customAccentInput.value = seed.accent;
     el.customModeNote.textContent = '(' + mode + ')';
     el.schemeResetBtn.disabled = s.colorScheme === T().BUILT_IN;
   }
   function chooseScheme(id: string | undefined) { setDraft({ colorScheme: id }); }
-  // A picked colour makes the scheme custom, for the mode on screen, starting from the chosen scheme's colours.
   function pickCustomColor() {
     const s = draftSettings();
     const mode = effectiveTheme(s);
@@ -2626,13 +2399,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.schemeResetBtn.addEventListener('click', () => setDraft({ colorScheme: T().BUILT_IN, customColors: null }));
   }
 
-  // The settings nav: a link jumps to its section, and the section in view is the one marked.
   function markSettingsSection() {
     const top = el.settingsScroll.getBoundingClientRect().top;
     const sections = [...el.settingsScroll.querySelectorAll<HTMLElement>('.settings-section')].filter((s) => s.offsetParent);
     let current = sections[0];
     for (const sec of sections) if (sec.getBoundingClientRect().top - top < 80) current = sec;
-    // At the bottom, the last section is the one being read even if it is short.
     if (el.settingsScroll.scrollTop + el.settingsScroll.clientHeight >= el.settingsScroll.scrollHeight - 4) current = sections[sections.length - 1];
     el.settingsNav.querySelectorAll('a').forEach((a) => a.classList.toggle('is-active', !!current && a.getAttribute('href') === '#' + current.id));
   }
@@ -2642,7 +2413,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       const a = closestTo(e, 'a[href^="#"]');
       if (!a) return;
       e.preventDefault();
-      // A section the search had hidden comes back whole when its link is clicked.
       if (a.classList.contains('is-dim')) { el.settingsSearch.value = ''; filterSettings(); }
       const href = a.getAttribute('href');
       const sec = href ? el.settingsScroll.querySelector(href) : null;
@@ -2651,7 +2421,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.settingsScroll.addEventListener('scroll', markSettingsSection, { passive: true });
     el.settingsSearch.addEventListener('input', filterSettings);
     el.settingsSearch.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') e.preventDefault(); // the form would submit and close the dialog
+      if (e.key === 'Enter') e.preventDefault();
       else if (e.key === 'Escape' && el.settingsSearch.value) { e.preventDefault(); e.stopPropagation(); el.settingsSearch.value = ''; filterSettings(); }
     });
     el.settingsDialog.addEventListener('keydown', (e) => {
@@ -2659,9 +2429,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     });
   }
 
-  // Search in Settings: every word typed must appear in a setting's label, help, options or buttons. Settings that
-  // do not match hide, so do sections left empty (their nav links dim; a click on one clears the search). Matches
-  // are marked with the CSS Custom Highlight API, which leaves the fields' DOM alone.
   function filterSettings() {
     const tokens = H.tokenize(el.settingsSearch.value);
     const ranges: Range[] = [];
@@ -2767,10 +2534,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     setDraft({ hotkey: parsed.value });
   }
 
-  // ---- the command palette (Ctrl+P) -----------------------------------------------------------
-  // Every command in the app, plus every note. Items backed by a button use the button itself, so a command is
-  // offered exactly when its button would be usable, under the same name, and does exactly what the button does.
-
   let palette: ReturnType<typeof NotesPalette.create> | null = null;
   function openPalette(query?: string) {
     if (!palette) palette = NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
@@ -2780,14 +2543,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const buttonWords = (b: HTMLButtonElement) => ((b.querySelector('.lbl') || {}).textContent || b.getAttribute('aria-label') || b.textContent || '').trim();
   const shortcutIn = (b: HTMLButtonElement) => ((b.querySelector('.keys') || {}).textContent || (/\((Ctrl[^)]*|F\d+|Esc)\)/.exec(b.title || '') || [])[1] || '').trim();
-  // Usable: not hidden by the app, not disabled, not removed by the page's own CSS (the right side hides some).
   const usable = (b: HTMLButtonElement) => !!b && !b.disabled && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none';
 
   function commandList() {
     const noteOpen = !!state.current && !el.editor.classList.contains('hidden');
     const fromButton = (b: HTMLButtonElement, group: string, extra?: Partial<Command>): Command => Object.assign({ id: b.id, group, title: buttonWords(b), icon: b.dataset.icon, keys: shortcutIn(b), ok: usable(b) && (group !== 'This note' || noteOpen), run: () => b.click() }, extra);
     const cmd = (id: string, group: string, title: string, icon: string, keys: string, run: () => unknown, ok?: boolean, keywords?: string): Command => ({ id, group, title, icon, keys, run, ok: ok === undefined ? true : ok, keywords });
-    // On the right side of a split, these run on the left side (which has the sidebar and list), as their keys do.
     const side = (name: string, fn: () => unknown) => (GUEST ? () => toPeer({ type: 'command', name }) : fn);
     if (noteOpen) syncShareMenu();
     const list = [
@@ -2847,10 +2608,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return out;
   }
 
-  // ---- global keyboard -----------------------------------------------------
-
   function onKeydown(e: KeyboardEvent) {
-    if (e.isComposing || e.keyCode === 229) return; // never hide the window or act on a key an IME is still composing
+    if (e.isComposing || e.keyCode === 229) return;
     const ctrl = e.ctrlKey || e.metaKey;
     const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfOpen() || docxOpen())) {
@@ -2860,8 +2619,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       return;
     }
     if (e.key === 'Escape') {
-      if (inDialog) return; // dialog handles it
-      if (el.pdfEditor.contains(document.activeElement)) return; // pdf.js ends the edit in progress; the window stays
+      if (inDialog) return;
+      if (el.pdfEditor.contains(document.activeElement)) return;
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.moreMenu.classList.contains('hidden')) { e.preventDefault(); closeMoreMenu(); el.moreBtn.focus(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
@@ -2904,9 +2663,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         case 's': e.preventDefault(); flushSave().then((ok) => toast(ok ? 'Saved' : 'Save failed, will retry')); return;
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); toggleSidebar(); return;
-        // Ctrl+Delete deletes the next word inside text fields; only trash when focus is elsewhere.
         case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
-        // In the rendered view, Ctrl+B and Ctrl+I are handled by the editor itself.
         case 'b': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('**', '**'); } return;
         case 'i': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
@@ -2949,14 +2706,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
-  // ---- wiring --------------------------------------------------------------
-
   function bind() {
     el.newNoteBtn.addEventListener('click', () => newNote());
     el.emptyNewNoteBtn.addEventListener('click', () => newNote());
     el.paletteBtn.addEventListener('click', () => openPalette());
     el.moreBtn.addEventListener('click', () => { if (el.moreMenu.classList.contains('hidden')) openMoreMenu(); else closeMoreMenu(); });
-    // Every item does its job and closes the menu; the item's own click handler runs first.
     el.moreMenu.addEventListener('click', (e) => { if (closestTo(e, '.menu-item')) closeMoreMenu(); });
     bindMenuKeys();
     bindSettingsNav();
@@ -2978,12 +2732,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.convertMenu.addEventListener('click', (e) => { const b = closestTo(e, '[data-to]'); if (b) convertCurrent(b.dataset.to ?? ''); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
     el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
-    // Images: a click or Enter toggles fitted and actual size; the status line gives the picture's size.
     el.imageView.addEventListener('click', toggleImageSize);
     el.imageView.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleImageSize(); } });
     el.imageView.addEventListener('load', syncImageToggle);
     el.imageView.addEventListener('error', () => {
-      if (!el.imageView.getAttribute('src')) return; // cleared on purpose
+      if (!el.imageView.getAttribute('src')) return;
       showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open with…" to open it.');
     });
     el.agentFilesBtn.addEventListener('click', addAgentFiles);
@@ -2997,7 +2750,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       state.vaultStatus[id] = status;
       if (status.lastError && status.lastError !== before.lastError) toast('Vault: ' + status.lastError);
       renderFolders();
-      // Never rebuild the list under a field the user is typing in; just refresh that vault's status line.
       const typing = document.activeElement && el.vaultList.contains(document.activeElement);
       if (typing) {
         const item = el.vaultList.querySelector('.vault-item[data-id="' + id + '"] .vault-status');
@@ -3049,11 +2801,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.lockDialog.addEventListener('close', () => focusBody());
     el.lockScreen.addEventListener('submit', (e) => { e.preventDefault(); unlockFromScreen(); });
     fromMain('relocked', api.on.relocked, async (ids) => {
-      // Plaintext kept for a retry must go too: it can no longer be saved (ELOCKED) and must not linger.
       for (const id of ids) state.pending.delete(id);
-      for (const id of ids) tabs.titles.delete(id); // a tab title can be the first line of the unlocked text
+      for (const id of ids) tabs.titles.delete(id);
       renderTabs();
-      if (readerOpen()) closeReader(); // it may show pages that were unlocked a moment ago
+      if (readerOpen()) closeReader();
       if (state.currentId && ids.includes(state.currentId)) { state.dirty = false; const fresh = await api.notes.get(state.currentId); if (fresh) applyLockedNote(fresh); }
       refresh({ keepEditor: true });
     });
@@ -3063,7 +2814,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.remindCancelBtn.addEventListener('click', () => el.remindDialog.close());
     el.remindDialog.addEventListener('close', () => focusBody());
     api.on.notice((text) => toast(String(text)));
-    // Undo/Redo from the right-click menu: the rich editor has its own history; the textarea uses the native one.
     api.on.editCommand(runEditCommand);
     api.on.reminderFired(({ id, title }) => {
       toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await openNote(id, { focus: 'body' }); } });
@@ -3107,7 +2857,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.ttsRateInput.addEventListener('input', () => { el.ttsRateValue.textContent = Number(el.ttsRateInput.value).toFixed(1) + '×'; });
     el.ttsRateInput.addEventListener('change', () => setDraft({ ttsRate: Number(el.ttsRateInput.value) }));
     setInterval(pollCurrentFile, 3000);
-    // Drag files from Explorer onto the window to open them.
     let dragDepth = 0;
     document.addEventListener('dragenter', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) { dragDepth++; el.app.classList.add('is-dropping'); } });
     document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; el.app.classList.remove('is-dropping'); } });
@@ -3128,7 +2877,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     setupResizer(el.sidebarResizer, 'sidebarWidth');
     setupResizer(el.listResizer, 'listWidth');
 
-    // Folders
     el.newFolderBtn.addEventListener('click', () => startCreateFolder(state.view === 'folder' ? state.folderId : null));
     el.folderSelect.addEventListener('change', () => { if (state.currentId) moveNoteToFolder(state.currentId, el.folderSelect.value || null); });
     el.folderMenu.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((b) => b.addEventListener('click', () => folderMenuAction(b.dataset.action)));
@@ -3141,7 +2889,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (!el.convertMenu.classList.contains('hidden') && !el.convertMenu.contains(target) && !el.fileConvertBtn.contains(target)) closeConvertMenu();
       if (!el.lockMenu.classList.contains('hidden') && !el.lockMenu.contains(target) && !el.lockBtn.contains(target)) el.lockMenu.classList.add('hidden');
     });
-    wireDropTarget(el.navAll, null); // dropping on "All notes" moves a note or folder to the top level
+    wireDropTarget(el.navAll, null);
     window.addEventListener('resize', () => {
       if (!state.settings) return;
       applySidebar();
@@ -3164,7 +2912,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.bodyInput.addEventListener('input', autoGrow);
     el.richEditor.addEventListener('mousedown', (e) => { if (e.target === el.richEditor && state.rich) { e.preventDefault(); state.rich.focus('end'); } });
 
-    // Link dialog (rendered view)
     el.linkForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const href = el.linkInput.value.trim();
@@ -3175,7 +2922,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.linkCancelBtn.addEventListener('click', () => el.linkDialog.close());
     el.linkDialog.addEventListener('close', () => focusBody());
 
-    // Writing column layout
     el.alignSeg.querySelectorAll<HTMLButtonElement>('button[data-align]').forEach((b) => b.addEventListener('click', () => { const align = b.dataset.align; if (align === 'left' || align === 'center' || align === 'right') { setDraft({ editorAlign: align }); syncAlignSeg(align); } }));
     el.editorWidthInput.addEventListener('input', () => {
       el.editorWidthValue.textContent = el.editorWidthInput.value + 'px';
@@ -3188,7 +2934,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       setDraft({ editorWidth: full ? 0 : Number(el.editorWidthInput.value) || 760 });
     });
 
-    // Git history
     el.gitEnabledInput.addEventListener('change', () => setDraft({ gitEnabled: el.gitEnabledInput.checked }));
     const commitRemote = () => setDraft({ gitRemote: el.gitRemoteInput.value.trim() });
     el.gitRemoteInput.addEventListener('change', commitRemote);
@@ -3219,7 +2964,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     window.addEventListener('blur', () => flushSave({ fromBlur: true }));
     window.addEventListener('beforeunload', () => flushSave());
 
-    // Settings dialog
     el.hotkeyInput.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') return;
       e.preventDefault();
@@ -3257,9 +3001,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.dataFolderBtn.addEventListener('click', () => api.app.openDataFolder());
     el.settingsDialog.addEventListener('close', () => { if (state.current) focusBody(); });
     el.settingsForm.addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
-    el.settingsDialog.addEventListener('cancel', (e) => { e.preventDefault(); requestCloseSettings(); }); // Esc
+    el.settingsDialog.addEventListener('cancel', (e) => { e.preventDefault(); requestCloseSettings(); });
     el.cancelSettingsBtn.addEventListener('click', requestCloseSettings);
-    el.settingsDialog.addEventListener('mousedown', (e) => { if (e.target === el.settingsDialog) requestCloseSettings(); }); // the backdrop
+    el.settingsDialog.addEventListener('mousedown', (e) => { if (e.target === el.settingsDialog) requestCloseSettings(); });
     el.settingsSaveDialog.addEventListener('cancel', (e) => { e.preventDefault(); el.settingsSaveDialog.close(); });
     el.settingsSaveKeepBtn.addEventListener('click', () => el.settingsSaveDialog.close());
     el.settingsSaveDiscardBtn.addEventListener('click', () => { el.settingsSaveDialog.close(); discardSettings(); });
@@ -3267,14 +3011,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (saveForm) saveForm.addEventListener('submit', (e) => { e.preventDefault(); el.settingsSaveDialog.close(); saveSettings(); });
     bindAppearance();
 
-    // Main-process events
     let shownBusy = false;
     api.on.shown(async () => {
-      // 'shown' can arrive twice around startup (first paint plus the ready handshake); never overlap.
       if (shownBusy) return;
       shownBusy = true;
       try {
-        await state.initDone; // the first show can arrive before the initial load has finished
+        await state.initDone;
         if (el.settingsDialog.open) return;
         if (state.current) {
           if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();
@@ -3285,7 +3027,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
           focusBody();
           return;
         }
-        // Only start a fresh note when there truly are none, not when the current view is just empty.
         const counts = await api.notes.counts();
         if (counts.all === 0) await newNote();
       } finally {
@@ -3293,27 +3034,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       }
     });
     api.on.newNote(newNote);
-    // Both sides write at once; main stops waiting after its own limit (longer on quit, for PDF and Word saves).
     api.on.flush(async () => { try { await Promise.all([flushSave().then(retryPending), flushPeer()]); } finally { api.app.flushDone(); } });
     fromMain('reloaded', api.on.reloaded, async (info) => {
       const reason = info && info.reason;
       await refresh({ keepEditor: true });
-      tabs.titles.clear(); // titles of notes in other tabs may have changed too
+      tabs.titles.clear();
       renderTabs();
-      // The store may now hold a newer body for the open note (a pull, a rescan, the bot). Show it, unless
-      // the user is mid-edit; in that case leave their text and tell them.
       if (state.currentId) {
         const wanted = state.currentId;
         const fresh = await api.notes.get(wanted);
-        if (fresh && fresh.id !== state.currentId) return; // the person moved on while we were asking
+        if (fresh && fresh.id !== state.currentId) return;
         if (!fresh && wanted === state.currentId && !state.dirty) { clearEditor(); if (!GUEST) await refresh(); return; }
         if (fresh && state.current && reason === 'live' && fresh.body === el.bodyInput.value && fresh.title !== el.titleInput.value && !state.dirty) { el.titleInput.value = fresh.title; state.current.title = fresh.title; refreshRow(fresh); }
-        // A PDF or Word file is shown from the file, so a new version of it (same text or not) is shown too.
         if (fresh && state.current && isViewerOnlyFile(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
         else if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
-            // Someone else typed. Take their text unless this person is typing right now or a save of their
-            // text is still in flight; their next save wins then.
             if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
           } else if (!state.dirty && !state.inflight.has(fresh.id)) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
           else toast('This note changed elsewhere while you were editing. Your text is kept; ' + (fresh.filePath ? 'use Reload to take the disk version.' : 'reopen the note to see the other version.'));
@@ -3325,7 +3060,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     fromMain('systemTheme', api.on.systemTheme, (t) => { state.systemDark = t === 'dark'; applyTheme(); });
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev) => { state.systemDark = ev.matches; applyTheme(); });
 
-    // Keep "x min ago" labels honest.
     setInterval(() => { if (!document.hidden) { renderList(); if (state.current) updateStatus(state.current); } }, 60000);
   }
 
@@ -3340,14 +3074,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     restoreTabs(settings);
     bind();
     bindTabs();
-    // Start in the folder the list showed last time, if it still exists (refresh falls back to all notes).
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();
     if (GUEST) { toPeer({ type: 'hello' }); return; }
-    if (!state.currentId && state.notes.length) await selectNote(state.notes[0].id); // a saved tab's note is gone
+    if (!state.currentId && state.notes.length) await selectNote(state.notes[0].id);
     if (panesOf(settings).split) openSplit(true);
     if (state.current) focusBody();
-    // Tell main we can receive events now; it replays 'app:shown' if the window is already on screen.
     api.app.rendererReady().catch(() => {});
   }
 

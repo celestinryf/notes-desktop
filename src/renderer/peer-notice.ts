@@ -14,7 +14,6 @@ function wrapWrites<T extends object>(ns: T, writes: Writes<T>, onWrite: () => v
 export function withPeerNotice(raw: NotesApi, onWrite: () => void): NotesApi {
   if (!raw) return raw;
   const out = Object.assign({}, raw);
-  // Writes that change notes, folders or files. After one, the other side reloads its list and its note.
   const wrap = <K extends keyof NotesApi>(ns: K, writes: Writes<NotesApi[K]>) => {
     if (raw[ns]) out[ns] = wrapWrites(raw[ns], writes, onWrite);
   };

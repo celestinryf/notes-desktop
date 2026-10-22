@@ -26,9 +26,6 @@ const baseName = (path: string) => {
 };
 
 export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow }: CraftNotesDeps) {
-  // WordCraft (Word documents) and GridCraft (spreadsheets): the user's forks of ArtCraft's Rust office apps, built to
-  // WebAssembly and shown in a frame each (craft-frame.js, one protocol for both). One controller per app. Its note
-  // is the document on show, { id, fileMtime, name } as read or last saved.
   const CRAFT_UI: Record<CraftKey, CraftUi> = {
     wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
     gridcraft: { label: 'GridCraft', what: 'spreadsheet', frame: () => el.gridcraftFrame, bytes: (id) => api.files.documentBytes(id), openWith: 'Excel', without: 'spreadsheets cannot be shown for now.' },
@@ -37,7 +34,6 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const ui = CRAFT_UI[key];
     const frame = () => ui.frame();
     let fc: CraftFrame | null = null, note: CraftDoc | null = null, shownKey: string | null = null, seq = 0, down = false;
-    // The build is there, this is the main window, and the app started the last time it was asked to.
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
       if (!fc) {
@@ -52,11 +48,8 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
             clear();
             showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
           },
-          // The Craft apps are always dark: dark chrome and a dark page, whatever Notes' own theme (the user's choice,
-          // 2026-10-19). The page's darkness is only how the app shows it; the file is unchanged.
           theme: 'dark',
           darkPage: true,
-          // The build is there but did not start: its documents do without it until Notes restarts.
           onUnavailable: () => {
             down = true;
             clear();
@@ -74,15 +67,12 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       if (shownKey === k) return;
       shownKey = k;
       const s = ++seq;
-      // The last document is closed at once, and the frame stays out of sight until the new one has opened, so
-      // nothing is typed into a document that is about to be replaced.
       note = null;
       if (fc) fc.close();
       frame().classList.add('is-opening');
       showBanner('Opening in ' + ui.label + '…');
       try {
         const bytes = await ui.bytes(n.id);
-        // Moved on (another note, or this one again) while the file was read: that later open wins.
         if (s !== seq || !state.current || state.current.id !== n.id) return;
         if (!n.filePath) throw new Error('the note has no file');
         const name = baseName(n.filePath);
@@ -101,18 +91,12 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       if (fc) fc.close();
       frame().classList.add('hidden');
     }
-    // The app saved (Ctrl+S there, or a save Notes asked for): write it to the file with Notes' usual safety. target is
-    // the document the save was made in, which may no longer be on show.
-    // Returns { ok, own }: own when the save is the note's document (written over it, into its "(edited)" copy, or as
-    // the file it moved to), not a copy under another name.
     async function saveFromFrame(name: string, bytes: Uint8Array, target: CraftDoc | null) {
       if (!target) return { ok: false, own: true };
       try {
         const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
         if ('exported' in r) {
           const copy = baseName(r.exported);
-          // own: the document's own save went into a copy beside the file (Notes never writes over a presentation),
-          // so the document counts as saved; the file is unchanged.
           toast(r.own ? 'Saved as ' + copy + ' beside this file, which is unchanged.' : 'Saved ' + copy + ' next to the ' + ui.what + '.', { label: 'Open', run: () => openFiles([r.exported]) });
           return { ok: true, own: !!r.own };
         }
@@ -128,10 +112,6 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
         return { ok: false, own: true };
       }
     }
-    // The app saved a format it reads but does not write (an .odt as a .docx, an .xls as an .xlsx) beside the
-    // original, and the note moved to that file. Once this save has settled (a save made while leaving the note must
-    // finish first), the note is shown by its new file and opened again in the app under that name, so its next save
-    // goes there.
     function movedTo(target: CraftDoc, r: Extract<CraftSave, { relinked: string }>) {
       target.fileMtime = r.mtime;
       toast('Saved as ' + baseName(r.relinked) + ' beside the original, which is unchanged. This note is that file now.');
@@ -146,15 +126,12 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       }, 0);
     }
     const dirty = () => !!(fc && note && fc.isDirty());
-    // Leaving the note, hiding or quitting: have the app save first.
     const flush = async () => (fc && dirty() ? fc.requestSave(15000) : true);
-    // The next show opens the document again from the file, even the same version (a reload from disk).
     const forget = () => { shownKey = null; };
     return { usable, show, clear, dirty, flush, forget };
   }
   const crafts = { wordcraft: craftViewer('wordcraft'), gridcraft: craftViewer('gridcraft') };
   const useWordCraft = () => crafts.wordcraft.usable();
-  // The Craft app for a file note, or null.
   const craftFor = (n: PublicNote | null) => {
     const key = n && n.filePath && n.fileKind ? H.CRAFT_OF[n.fileKind] : undefined;
     return key ? crafts[key] : null;
@@ -165,7 +142,6 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     for (const c of Object.values(crafts)) ok = (await c.flush()) && ok;
     return ok;
   }
-  // A spreadsheet: GridCraft, or nothing but a banner (Notes has no editor of its own for it).
   function showCraftOnly(n: PublicNote) {
     const key = n.fileKind ? H.CRAFT_OF[n.fileKind] : undefined;
     if (!key) return;

@@ -1,6 +1,4 @@
 'use strict';
-/* Bundles the renderer pages, src/renderer/app.ts and sticky.ts with the modules they import, into
-   src/renderer/vendor/<name>.bundle.js. The vendor bundles from `npm run build` stay separate scripts. */
 const path = require('path');
 const esbuild = require('esbuild');
 

@@ -1,7 +1,5 @@
-// The open note is locked and not unlocked for now: its text is hidden and nothing may write it.
 export const lockedNow = () => !!(state.current && state.current.locked && !state.current.unlocked);
 
-// The settings, which init loads before anything that reads them runs. Asking earlier is a bug, and says so.
 export function settingsNow() {
   if (!state.settings) throw new Error('settings are read before they were loaded');
   return state.settings;
@@ -19,8 +17,8 @@ export const state: RendererState = {
   notes: [],
   currentId: null,
   current: null,
-  sourceMode: false,    // false: rendered editor, true: raw Markdown textarea
-  rich: null,           // rendered editor instance (window.NotesEditor)
+  sourceMode: false,
+  rich: null,
   settings: null,
   info: null,
   systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches,

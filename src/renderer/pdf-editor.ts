@@ -1,6 +1,3 @@
-/* The PDF viewer and editor for opened PDFs, exposed as window.NotesPdfEditor. It drives pdf.js's own viewer and
-   Firefox's annotation editors (highlight, text box, drawing, picture); the PDF is parsed in pdf.js's worker, never
-   on this page. Edits stay in pdf.js's annotation storage until save() turns them into the PDF's own bytes. */
 export type PdfComment = { id: string, page: number, ref: number[] | null, kind: string, text: string, author: string, date: Date | null, rect: number[], replyTo: string | null };
 export type PdfPoint = { page: number, x: number, y: number };
 export function requireChild<T extends Element>(root: ParentNode, selector: string, type: new () => T): T {
@@ -23,15 +20,11 @@ export const NotesPdfEditor = (function () {
   type LoadingTask = ReturnType<typeof lib.getDocument>;
   type PdfDocument = Awaited<LoadingTask['promise']>;
   type ViewLocation = { pageNumber: number, scale: number | string, top: number, left: number };
-  // pdf.js's worker, fonts and character maps load from its package, next to the app.
   const PKG = new URL('../../node_modules/pdfjs-dist/', document.baseURI).href;
   lib.GlobalWorkerOptions.workerSrc = PKG + 'build/pdf.worker.min.mjs';
 
   const T = lib.AnnotationEditorType;
 
-  // pdf.js focuses a mark when a drawing ends or the tool changes (the person clicked outside the page: Save, Add
-  // comment), and the browser then scrolls to it, throwing the person back to an earlier page. pdf.js has no option for
-  // this, so a focus() inside a PDF viewer never scrolls; the element is in view anyway when the person is using it.
   const plainFocus = HTMLElement.prototype.focus;
   HTMLElement.prototype.focus = function (options) {
     return plainFocus.call(this, options === undefined && this.closest && this.closest('.pdf-viewport') ? { preventScroll: true } : options);
@@ -46,7 +39,6 @@ export const NotesPdfEditor = (function () {
     iccUrl: PKG + 'iccs/',
   };
 
-  // Draws page index (0-based) of document d into canvas, `width` CSS pixels wide, with any unsaved marks.
   async function drawPage(d: PdfDocument, index: number, canvas: HTMLCanvasElement, width: number) {
     const page = await d.getPage(index + 1);
     const ratio = window.devicePixelRatio || 1;
@@ -59,20 +51,13 @@ export const NotesPdfEditor = (function () {
   const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
   type ModeName = keyof typeof MODES;
   const isModeName = (name: string): name is ModeName => name in MODES;
-  // Annotation kinds that can carry a comment (PDF "markup" annotations). A text box is left out: its text is on the
-  // page itself.
   const MARKUP = new Set(['Text', 'Line', 'Square', 'Circle', 'Polygon', 'PolyLine', 'Highlight', 'Underline', 'Squiggly',
     'StrikeOut', 'Stamp', 'Caret', 'Ink', 'FileAttachment', 'Sound']);
-  // pdf.js names an annotation by its object: "12R", or "12R3" when the generation is not 0.
   function refOf(id: string) {
     const m = /^(\d+)R(\d*)$/.exec(String(id || ''));
     return m ? [Number(m[1]), Number(m[2] || 0)] : null;
   }
 
-  // root holds a .pdf-viewport whose first child is the .pdfViewer element. hooks:
-  //   onDirty(bool)  the edits now differ (or no longer differ) from what was last written to the file
-  //   onState(state) { mode, canUndo, canRedo, scale } for the toolbar
-  //   onLink(event, href) a link in the PDF was clicked (the caller decides whether to open it)
   function create(root: HTMLElement, hooks: PdfEditorHooks) {
     const container = requireChild(root, '.pdf-viewport', HTMLDivElement);
     const eventBus = new PV.EventBus();
@@ -84,24 +69,16 @@ export const NotesPdfEditor = (function () {
       annotationMode: lib.AnnotationMode.ENABLE_FORMS,
       annotationEditorMode: T.NONE,
       imageResourcesPath: PKG + 'web/images/',
-      // pdf.js's default palette (its viewer's highlightEditorColors). Without it the highlight tool throws.
       annotationEditorHighlightColors: 'yellow=#FFFF98,green=#53FFBC,blue=#80EBFF,pink=#FFCBE6,red=#FF4F5F,'
         + 'yellow_HCM=#FFFFCC,green_HCM=#53FFBC,blue_HCM=#80EBFF,pink_HCM=#F6B8FF,red_HCM=#C50043',
     });
     linkService.setViewer(viewer);
 
-    // savedHash: pdf.js's hash of the edits last written to disk ('' = none). Unsaved means the current hash differs.
-    // pdf.js's own "modified" flag cannot be used for this: saveDocument() clears it whether or not the write that
-    // follows succeeds, and edits made while a save runs never set it again.
     let task: LoadingTask | null = null, doc: PdfDocument | null = null, seq = 0, dirty = false, mode: ModeName = 'select', savedHash = '', modeEpoch = 0;
-    // touched: the person has used an editing tool or a form field since the PDF was opened. Until then, what pdf.js
-    // itself writes into the storage while drawing pages (form fields' default values) is not an edit.
     let touched = false;
     const undo = { canUndo: false, canRedo: false };
     const report = () => hooks.onState && hooks.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
 
-    // location: where the person is in the PDF (page, point at the top left, zoom), as pdf.js reports it. restore: the
-    // location to go back to once the next PDF is laid out, when it is the same PDF reopened after the app changed it.
     let location: ViewLocation | null = null, restore: ViewLocation | null = null;
     eventBus.on('updateviewarea', (e: { location: ViewLocation }) => { location = e.location; });
     eventBus.on('pagesinit', () => {
@@ -112,8 +89,6 @@ export const NotesPdfEditor = (function () {
       viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: 'XYZ' }, at.left, at.top, null], allowNegativeOffset: true });
     });
     eventBus.on('scalechanging', report);
-    // A fitted zoom (page width) fits again when the space changes: the window is resized, or the comments open.
-    // Only on a change of width, and in the next frame, so the refit's own layout does not feed back into the observer.
     let fittedWidth = 0;
     new ResizeObserver(() => {
       const w = container.clientWidth;
@@ -131,15 +106,12 @@ export const NotesPdfEditor = (function () {
       refreshDirty();
       report();
     });
-    // pdf.js reports some edits (moving, resizing, retyping a box) through no event at all, so the Save label is
-    // checked again after anything the person does in the PDF.
     const EDIT_LAYERS = '.annotationLayer, .annotationEditorLayer';
     for (const type of ['pointerdown', 'keydown']) {
       container.addEventListener(type, (e) => { if (e.target instanceof Element && e.target.closest(EDIT_LAYERS)) touched = true; }, true);
     }
     for (const type of ['pointerup', 'keyup', 'input', 'change', 'focusout']) container.addEventListener(type, () => setTimeout(refreshDirty, 0));
 
-    // A link in the PDF never navigates the app page; the caller handles it (internal "#page" links are pdf.js's).
     container.addEventListener('click', (e) => {
       const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null;
       if (!a) return;
@@ -158,10 +130,7 @@ export const NotesPdfEditor = (function () {
       if (hooks.onDirty) hooks.onDirty(v);
     }
 
-    // Other PDFs opened for their pages (adding pages from another PDF); closed with this one.
     const others = new Set<LoadingTask>();
-    // bytes may be a view into a larger buffer (as IPC delivers it), which pdf.js's page extraction would read past,
-    // so a tight copy of its own is kept; another copy goes to getDocument, which takes over what it is given.
     async function openOther(bytes: Uint8Array) {
       const own = new Uint8Array(bytes);
       const t = lib.getDocument(Object.assign({ data: own.slice() }, LOAD_OPTIONS));
@@ -178,7 +147,7 @@ export const NotesPdfEditor = (function () {
     async function unload() {
       cancelPick();
       closeOthers();
-      // @ts-expect-error pdf.js unloads on null; its typings say a document only
+      // @ts-expect-error
       viewer.setDocument(null);
       linkService.setDocument(null);
       const t = task;
@@ -190,8 +159,6 @@ export const NotesPdfEditor = (function () {
       if (t) await t.destroy().catch(() => {});
     }
 
-    // Shows the PDF in bytes (a Uint8Array). opts.keepView: it is the PDF on show, reopened after the app rewrote it,
-    // so the same page and zoom are shown again. Resolves false if another open() or close() came first.
     async function open(bytes: Uint8Array, opts?: { keepView?: boolean }) {
       const my = ++seq;
       const at = opts && opts.keepView ? location : null;
@@ -201,7 +168,6 @@ export const NotesPdfEditor = (function () {
       task = t;
       const d = await t.promise;
       if (my !== seq) return false;
-      // pdf.js would only log this (and show nothing): a PDF without pages is refused here, so the caller can say so.
       if (d.numPages < 1) { task = null; await t.destroy().catch(() => {}); throw new Error('this PDF has no pages.'); }
       doc = d;
       restore = at;
@@ -223,7 +189,6 @@ export const NotesPdfEditor = (function () {
       await unload();
     }
 
-    // internal: a switch made by commit(), not by the person (who may pick another tool meanwhile).
     function setMode(name: string, internal?: boolean) {
       if (!doc || !isModeName(name)) return false;
       try { viewer.annotationEditorMode = { mode: MODES[name] }; } catch (_) { return false; }
@@ -233,7 +198,6 @@ export const NotesPdfEditor = (function () {
       return true;
     }
 
-    // Resolves once pdf.js has finished switching to editor type t (switches are asynchronous), or after a second.
     function modeSwitched(t: number): Promise<void> {
       return new Promise((resolve) => {
         const done = () => { clearTimeout(timer); eventBus.off('annotationeditormodechanged', onChanged); resolve(); };
@@ -243,9 +207,6 @@ export const NotesPdfEditor = (function () {
       });
     }
 
-    // Finishes the drawing or typing in progress, so it counts as an edit: pdf.js commits it when the tool changes,
-    // so the tool is left and, once that switch is done, taken up again.
-    // If the person picks a tool while this waits, theirs stands.
     async function commit() {
       if (!doc || mode === 'select') return;
       const m = mode, epoch = modeEpoch;
@@ -257,8 +218,6 @@ export const NotesPdfEditor = (function () {
       if (setMode(m, true)) await back;
     }
 
-    // Adds a picture (a signature) to the middle of the page on show, through pdf.js's picture tool, which stays on
-    // so the picture can be moved and resized at once. file: a File holding a PNG.
     async function placePicture(file: File) {
       if (!doc) return false;
       if (mode !== 'picture') {
@@ -270,8 +229,6 @@ export const NotesPdfEditor = (function () {
       return true;
     }
 
-    // Waits for a click on a page: resolves { page (0-based), x, y } in that page's PDF space, or null when cancelled
-    // (Escape, cancelPick, another PDF). The tool goes back to Read first, so the click makes no mark.
     let picking: ((value: PdfPoint | null) => void) | null = null;
     function pickPoint(): Promise<PdfPoint | null> {
       cancelPick();
@@ -287,7 +244,6 @@ export const NotesPdfEditor = (function () {
           const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
           const r = pageEl.getBoundingClientRect();
           const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
-          // The click that follows must not open a link under it either.
           const eat = (c: MouseEvent) => { c.preventDefault(); c.stopPropagation(); };
           container.addEventListener('click', eat, true);
           setTimeout(() => container.removeEventListener('click', eat, true), 400);
@@ -308,9 +264,6 @@ export const NotesPdfEditor = (function () {
     }
     function cancelPick() { if (picking) picking(null); }
 
-    // The comments in the PDF as saved: sticky notes, and other marks (highlights and the like) that carry a comment.
-    // [{ id, page (0-based), ref ([num, gen], null when it cannot be changed), kind, text, author, date, rect,
-    // replyTo (id) }]. null when another PDF was opened meanwhile.
     async function comments() {
       const d = doc, list: PdfComment[] = [];
       if (!d) return null;
@@ -319,7 +272,6 @@ export const NotesPdfEditor = (function () {
         if (d !== doc) return null;
         for (const a of annots) {
           const text = (a.contentsObj && a.contentsObj.str) || '';
-          // A review state ("Accepted") is a reply with no text of its own; it is not listed.
           if (!MARKUP.has(a.subtype) || (a.subtype !== 'Text' && !text.trim()) || a.state) continue;
           list.push({
             id: a.id,
@@ -337,17 +289,14 @@ export const NotesPdfEditor = (function () {
       return list;
     }
 
-    // Shows the place on page (0-based) where rect is.
     function goTo(page: number, rect: number[]) {
       if (!doc || page >= doc.numPages) return;
       viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: 'XYZ' }, rect[0] - 40, rect[3] + 40, null], allowNegativeOffset: true });
     }
 
-    // The PDF with its edits: { bytes, hash }, hash identifying exactly the edits in those bytes (pass it to
-    // markSaved once they are on disk). null when nothing is open.
     async function save() {
       if (!doc) return null;
-      const hash = currentHash(); // saveDocument() serializes the same storage, synchronously, in this same turn
+      const hash = currentHash();
       const bytes = await doc.saveDocument();
       return { bytes, hash };
     }
@@ -367,13 +316,10 @@ export const NotesPdfEditor = (function () {
       drawPage: (i: number, canvas: HTMLCanvasElement, width: number) => (doc ? drawPage(doc, i, canvas, width) : Promise.resolve()),
       openOther,
       closeOthers,
-      // A new PDF from pdf.js: pageInfos as for PDFDocumentProxy.extractPages (document null = this PDF). Only what
-      // the kept pages use is written, so a removed page leaves nothing behind in the file.
       extractPages: (pageInfos: Parameters<PdfDocument['extractPages']>[0]) => { if (!doc) throw new Error('no PDF is open'); return doc.extractPages(pageInfos); },
       markSaved(hash: string) { if (doc) { savedHash = hash; refreshDirty(); } },
       isOpen: () => !!doc,
       isDirty: () => !!doc && currentHash() !== savedHash,
-      // Unsaved edits, or a tool in use whose stroke or text is not committed yet.
       hasPendingWork: () => !!doc && (currentHash() !== savedHash || mode !== 'select'),
       undo: () => eventBus.dispatch('editingaction', { source: null, name: 'undo' }),
       redo: () => eventBus.dispatch('editingaction', { source: null, name: 'redo' }),

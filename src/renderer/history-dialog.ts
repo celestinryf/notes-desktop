@@ -31,8 +31,8 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyDialog.showModal();
     const r = await api.app.historyVersions(note.id, 80);
     if (!r.ok) { el.historyStatus.textContent = r.error; return; }
-    hist.noteId = note.id; // Restore only ever writes into the note these versions belong to
-    hist.versions = r.versions.filter((v) => v.body !== r.current); // what differs from now
+    hist.noteId = note.id;
+    hist.versions = r.versions.filter((v) => v.body !== r.current);
     hist.index = -1;
     el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : 'No earlier version differs from the current text yet.';
     hist.versions.forEach((v, i) => {
@@ -69,13 +69,13 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     src.value = v.body;
     if (state.rich) {
       let lossless = state.rich.setMarkdown(v.body);
-      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false; // a real file gets the strict test
+      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
       state.lossyOverride = null;
-      if (!lossless && !state.sourceMode) applyEditorMode(true); // text the rendered view would rewrite opens as source
+      if (!lossless && !state.sourceMode) applyEditorMode(true);
     }
     autoGrow();
-    if (find.open) runFind(true, true, true); // the text changed under the find bar
+    if (find.open) runFind(true, true, true);
     scheduleSave();
     const ok = await flushSave();
     if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
