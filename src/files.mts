@@ -15,7 +15,6 @@ import * as markitdown from './markitdown.mts';
 import { runWorker } from './run-worker.mts';
 
 
-
 function kindOf(filePath: string): FileKind {
   const ext = extOf(filePath);
   if (ext === 'pdf') return 'pdf';
