@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
@@ -12,6 +12,48 @@ function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
     execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
     });
+  });
+}
+
+function eachBlob(specs: string[], cwd: string, timeoutMs: number, visit: (index: number, text: string | null) => void): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['cat-file', '--batch'], { cwd, windowsHide: true });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    let pending: Buffer[] = [], have = 0, need = -1, index = 0, done = false;
+    const joined = () => { const all = pending.length === 1 ? pending[0] : Buffer.concat(pending, have); pending = [all]; return all; };
+    const keepFrom = (all: Buffer, at: number) => { pending = [all.subarray(at)]; have = all.length - at; };
+    const drain = () => {
+      while (index < specs.length) {
+        if (need < 0) {
+          const all = joined();
+          const eol = all.indexOf(10);
+          if (eol === -1) return;
+          const header = all.toString('utf8', 0, eol);
+          keepFrom(all, eol + 1);
+          const size = Number(header.slice(header.lastIndexOf(' ') + 1));
+          if (/ (missing|ambiguous)$/.test(header) || !Number.isInteger(size)) { visit(index++, null); continue; }
+          need = size + 1;
+        }
+        if (have < need) return;
+        const all = joined();
+        const text = all.toString('utf8', 0, need - 1);
+        keepFrom(all, need);
+        need = -1;
+        visit(index++, text);
+      }
+    };
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      while (index < specs.length) visit(index++, null);
+      resolve(ok);
+    };
+    child.stdout.on('data', (d: Buffer) => { pending.push(d); have += d.length; if (need < 0 || have >= need) drain(); });
+    child.stdin.on('error', () => {});
+    child.on('error', () => finish(false));
+    child.on('close', (code) => finish(code === 0));
+    child.stdin.end(specs.map((s) => s + '\n').join(''));
   });
 }
 
@@ -174,9 +216,9 @@ class GitSync {
     });
   }
 
-  async showNotesAt(hash: string) {
-    const r = await run(['show', hash + ':notes.json'], this.dir);
-    return r.ok ? r.stdout : null;
+  async eachNotesAt(hashes: string[], visit: (index: number, text: string | null) => void) {
+    if (!hashes.length) return true;
+    return eachBlob(hashes.map((h) => h + ':notes.json'), this.dir, 20000, visit);
   }
 }
 

@@ -15,6 +15,7 @@ const notesFile = path.join(dataDir, 'notes.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readNotes = () => JSON.parse(fs.readFileSync(notesFile, 'utf8'));
 const findNote = (title) => readNotes().notes.find((n) => n.title === title);
+const historyAt = (rev) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':notes.json'], { encoding: 'utf8' }); } catch (_) { return ''; } };
 
 async function waitFor(label, fn, timeout = 6000) {
   const start = Date.now();
@@ -29,6 +30,7 @@ async function waitFor(label, fn, timeout = 6000) {
 let app, page;
 const rendererErrors = [];
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
+const waitForDomWithin = (timeout, fn) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn), timeout);
 
 test.before(async () => {
   fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3, listMode: 'list', listLayout: 1 }, notes: [] }));
@@ -413,12 +415,12 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   fs.chmodSync(notesFile, 0o444);
   try {
     await page.fill('#bodyInput', 'typed while locked');
-    await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
+    await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await page.click('.note-row:has-text("Alpha")');
     await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
     assert.equal(findNote('Gamma (copy)').body, 'before lock', 'nothing reached disk while locked');
     await page.fill('#bodyInput', 'alpha edited while locked');
-    await waitForDom(() => document.getElementById('statusSaved').textContent === 'Save failed', 8000);
+    await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await page.click('.note-row:has-text("Gamma (copy)")');
     await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
     assert.equal(await page.inputValue('#bodyInput'), 'typed while locked', 'pending edit shown on reselect');
@@ -504,7 +506,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 
   await sleep(400);
   fs.writeFileSync(mdPath, '# From disk\n\nreplaced by another program\n');
-  await waitForDom(() => document.getElementById('bodyInput').value.includes('replaced by another program'), 10000);
+  await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('replaced by another program'));
 
   const softPath = path.join(fileDir, 'soft.md');
   fs.writeFileSync(softPath, 'first line\nsecond line\n');
@@ -602,7 +604,7 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
   await sleep(600);
   fs.writeFileSync(path.join(vaultDir, 'Groceries.md'), '- eggs\n- milk from another device\n');
-  await waitForDom(() => document.getElementById('bodyInput').value.includes('milk from another device'), 15000);
+  await waitForDomWithin(15000, () => document.getElementById('bodyInput').value.includes('milk from another device'));
 
   await page.click('.note-row:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
@@ -642,14 +644,14 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await app.evaluate(() => { process.env.FAKE_CLAUDE_AUTH = 'apiKey'; });
   await page.fill('#botPrompt', 'Append a bullet to the current note');
   await page.keyboard.press('Control+Enter');
-  await waitForDom(() => /bills API credits/.test(document.getElementById('botOutput').textContent), 10000);
+  await waitForDomWithin(10000, () => /bills API credits/.test(document.getElementById('botOutput').textContent));
   assert.doesNotMatch(await page.textContent('#botOutput'), /fake claude: cwd/, 'nothing ran');
   await app.evaluate(() => { process.env.FAKE_CLAUDE_AUTH = 'none'; });
   await page.keyboard.press('Control+Enter');
-  await waitForDom(() => /not signed in/.test(document.getElementById('botOutput').textContent), 10000);
+  await waitForDomWithin(10000, () => /not signed in/.test(document.getElementById('botOutput').textContent));
   await app.evaluate(() => { delete process.env.FAKE_CLAUDE_AUTH; });
   await page.keyboard.press('Control+Enter');
-  await waitForDom(() => [...document.querySelectorAll('#botOutput .bot-meta')].some((s) => s.textContent.startsWith('\nDone')), 20000);
+  await waitForDomWithin(20000, () => [...document.querySelectorAll('#botOutput .bot-meta')].some((s) => s.textContent.startsWith('\nDone')));
   const out = await page.textContent('#botOutput');
   assert.match(out, /Claude Code, on your Claude Max subscription \(no API credits\)/);
   assert.match(out, /api key env: absent/);
@@ -669,7 +671,7 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   fs.writeFileSync(wsFile, 'bot target body\n- added by the bot\n- typed in a terminal\n', 'utf8');
   await page.fill('#botPrompt', '');
   await page.click('#botRunBtn');
-  await waitForDom(() => /Pulled in workspace edits/.test(document.getElementById('botOutput').textContent), 10000);
+  await waitForDomWithin(10000, () => /Pulled in workspace edits/.test(document.getElementById('botOutput').textContent));
   await waitFor('terminal edit imported', () => /typed in a terminal/.test(findNote('Gamma (copy)').body));
   await waitForDom(() => document.getElementById('bodyInput').value.includes('typed in a terminal'));
   await page.evaluate((id) => window.notesApi.notes.destroy(id), findNote('Bot created this').id);
@@ -703,7 +705,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await sticky.keyboard.press('Control+End');
   await sticky.keyboard.type('eggs');
   await waitFor('sticky edit saved', () => /eggs/.test(findNote('Gamma (copy)').body), 8000);
-  await waitForDom(() => /eggs/.test(document.getElementById('bodyInput').value), 8000);
+  await waitForDomWithin(8000, () => /eggs/.test(document.getElementById('bodyInput').value));
 
   await page.fill('#bodyInput', '- [x] done from main\n');
   await waitFor('main edit saved', () => findNote('Gamma (copy)').body === '- [x] done from main\n');
@@ -812,18 +814,18 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Control+Shift+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'needle');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   await page.keyboard.press('Enter');
-  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['needle one\nhay\n'.length, 'needle one\nhay\nneedle'.length], 'source view selects the active match');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'bodyInput', 'focus moves to the text so the selection is visible');
   await page.keyboard.press('Shift+F3');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [0, 6]);
   await page.keyboard.press('Enter');
-  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
   await page.keyboard.press('Shift+Enter');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), 'needle one\nhay\nneedle two\n', 'text untouched by stepping');
   await page.click('#findInput');
   await page.keyboard.press('Escape');
@@ -831,32 +833,32 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Control+Shift+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'NEEDLE');
-  await waitForDom(() => document.getElementById('findCount').textContent === '1/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   assert.equal(await page.evaluate(() => CSS.highlights.get('notes-find').size), 2, 'two highlighted ranges');
   await page.keyboard.press('Enter');
-  await waitForDom(() => document.getElementById('findCount').textContent === '2/2', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
   await page.click('.rich-editor-content');
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' needle three');
-  await waitForDom(() => /\/3$/.test(document.getElementById('findCount').textContent), 8000);
+  await waitForDomWithin(8000, () => /\/3$/.test(document.getElementById('findCount').textContent));
   await page.fill('#findInput', 'onehay');
-  await waitForDom(() => document.getElementById('findCount').textContent === 'No matches', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === 'No matches');
   await page.fill('#findInput', 'NEEDLE');
-  await waitForDom(() => /\/3$/.test(document.getElementById('findCount').textContent), 8000);
+  await waitForDomWithin(8000, () => /\/3$/.test(document.getElementById('findCount').textContent));
   await page.keyboard.press('Escape');
   await waitForDom(() => !CSS.highlights.has('notes-find'));
   await useSourceMode(true);
   await page.keyboard.press('Control+Shift+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'zzzz-not-here');
-  await waitForDom(() => document.getElementById('findCount').textContent === 'No matches', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === 'No matches');
   await page.keyboard.press('Escape');
   await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
-  await waitForDom(() => !document.getElementById('app').classList.contains('hidden'), 2000);
+  await waitForDomWithin(2000, () => !document.getElementById('app').classList.contains('hidden'));
   const visible = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
   assert.equal(visible, true, 'Escape in the find bar must not hide the app');
   await page.keyboard.press('Control+Shift+p');
-  await waitForDom(() => /Print: dry run/.test(document.getElementById('toast').textContent), 8000);
+  await waitForDomWithin(8000, () => /Print: dry run/.test(document.getElementById('toast').textContent));
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
@@ -879,9 +881,9 @@ test('reminders: set from the dialog, shown on the card and in the Reminders vie
   await page.click('.nav-item[data-view="reminders"]');
   await waitForDom(() => document.querySelectorAll('.note-row').length === 1 && /Gamma/.test(document.querySelector('.note-row').textContent));
   await page.evaluate((nid) => window.notesApi.notes.update(nid, { remindAt: Date.now() + 600 }), id);
-  await waitForDom(() => /⏰ Gamma \(copy\)/.test(document.getElementById('toast').textContent), 8000);
+  await waitForDomWithin(8000, () => /⏰ Gamma \(copy\)/.test(document.getElementById('toast').textContent));
   await waitFor('marked reminded', () => { const n = findNote('Gamma (copy)'); return n.remindedAt && n.remindedAt >= n.remindAt; });
-  await waitForDom(() => !!document.querySelector('.note-row .remind-mark.is-overdue'), 8000);
+  await waitForDomWithin(8000, () => !!document.querySelector('.note-row .remind-mark.is-overdue'));
   await waitForDom(() => document.getElementById('countReminders').classList.contains('is-overdue'));
   await page.keyboard.press('Control+Shift+m');
   await page.waitForSelector('#remindDialog[open]');
@@ -1047,7 +1049,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   const post = (u, data) => new Promise((resolve, reject) => { const body = Buffer.from(JSON.stringify(data)); const req = http.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': body.length } }, (res) => { let t = ''; res.on('data', (d) => (t += d)); res.on('end', () => resolve({ status: res.statusCode, text: t })); }); req.on('error', reject); req.end(body); });
   const r = await post(local, { title: 'Gamma (copy)', body: 'shared v3 from the other side', clientId: 'tester' });
   assert.equal(r.status, 200);
-  await waitForDom(() => document.getElementById('bodyInput').value === 'shared v3 from the other side', 8000);
+  await waitForDomWithin(8000, () => document.getElementById('bodyInput').value === 'shared v3 from the other side');
   await waitFor('stored', () => findNote('Gamma (copy)').body === 'shared v3 from the other side');
   const bad = await new Promise((resolve) => http.get(local.replace(/[0-9a-f]{32}$/, '0'.repeat(32)), (res) => { res.resume(); resolve(res.statusCode); }));
   assert.equal(bad, 404);
@@ -1064,7 +1066,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   await page.waitForSelector('#liveDialog[open]');
   await page.fill('#liveLinkInput', local);
   await page.click('#liveSubmitBtn');
-  await waitForDom(() => /ECONNREFUSED|refused|HTTP|ended|closed/i.test(document.getElementById('liveError').textContent), 10000);
+  await waitForDomWithin(10000, () => /ECONNREFUSED|refused|HTTP|ended|closed/i.test(document.getElementById('liveError').textContent));
   await page.click('#liveCancelBtn');
   assert.equal(readNotes().notes.length, before, 'no note created for a failed join');
   void id;
@@ -1141,13 +1143,13 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   await useSourceMode(true);
   await page.fill('#bodyInput', 'version one');
   await waitFor('v1 saved', () => findNote('Gamma (copy)').body === 'version one');
-  await sleep(1200);
+  await waitFor('v1 in the history', () => historyAt('HEAD').includes('"body": "version one"'), 15000);
   await page.fill('#bodyInput', 'version two');
   await waitFor('v2 saved', () => findNote('Gamma (copy)').body === 'version two');
   await sleep(1200);
   await page.keyboard.press('Control+Shift+h');
   await page.waitForSelector('#historyDialog[open]');
-  await waitForDom(() => document.querySelectorAll('#historyList li').length >= 1, 15000);
+  await waitForDomWithin(15000, () => document.querySelectorAll('#historyList li').length >= 1);
   await waitForDom(() => /version one/.test(document.getElementById('historyList').textContent) || /version one/.test(document.getElementById('historyPreview').textContent));
   const items = await page.$$eval('#historyList li', (els) => els.map((e) => e.textContent));
   const idx = items.findIndex((t) => /version one/.test(t));
@@ -1187,7 +1189,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat.'))), /Not an attachment/);
   assert.match(String(await page.evaluate(() => window.notesApi.attachments.open('attachment://evil.bat%3A%3A%24DATA'))), /Not an attachment/);
   await page.keyboard.press('Control+Shift+g');
-  await waitForDom(() => document.getElementById('recordBtn').classList.contains('is-recording'), 8000);
+  await waitForDomWithin(8000, () => document.getElementById('recordBtn').classList.contains('is-recording'));
   await sleep(1200);
   await clickTool('#recordBtn');
   await waitFor('recording saved', () => fs.existsSync(path.join(dataDir, 'attachments')) && fs.readdirSync(path.join(dataDir, 'attachments')).some((f) => /^Recording .*\.webm$/.test(f) && fs.statSync(path.join(dataDir, 'attachments', f)).size > 0), 15000);
@@ -1294,10 +1296,10 @@ test('books: a folder becomes a book with page tabs; pages turn, get added and r
   await page.evaluate((id) => window.notesApi.notes.update(id, { tags: 'novel' }), three.id);
   await page.click('#bookTabs .book-tab[data-id="' + two.id + '"]');
   await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 2');
-  await waitForDom(() => !document.getElementById('relatedIn').classList.contains('hidden') && /Chapter 1/.test(document.getElementById('relatedIn').textContent), 8000);
+  await waitForDomWithin(8000, () => !document.getElementById('relatedIn').classList.contains('hidden') && /Chapter 1/.test(document.getElementById('relatedIn').textContent));
   await page.click('#bookTabs .book-tab[data-id="' + one.id + '"]');
   await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 1');
-  await waitForDom(() => /Chapter 2/.test(document.getElementById('relatedOut').textContent) && /Chapter 3/.test(document.getElementById('relatedTags').textContent), 8000);
+  await waitForDomWithin(8000, () => /Chapter 2/.test(document.getElementById('relatedOut').textContent) && /Chapter 3/.test(document.getElementById('relatedTags').textContent));
   await page.click('#relatedOut button');
   await waitForDom(() => document.getElementById('titleInput').value === 'Chapter 2');
   await page.click('.folder-row[data-id="' + folder.id + '"]', { button: 'right' });
@@ -1822,7 +1824,7 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   const outside = await page.evaluate((id) => window.notesApi.notes.create({ title: 'Outside note', body: 'see [it](note://' + id + ')' }), inside.id);
   await page.click('.nav-item[data-view="all"]');
   await page.click('.note-row:has-text("Outside note")');
-  await waitForDom(() => /Inside the folder/.test(document.getElementById('relatedOut').textContent), 8000);
+  await waitForDomWithin(8000, () => /Inside the folder/.test(document.getElementById('relatedOut').textContent));
   await page.click('#relatedOut button');
   await waitForDom(() => document.getElementById('titleInput').value === 'Inside the folder');
   await waitForDom(() => document.getElementById('listTitle').textContent.includes('Scoped folder'));
