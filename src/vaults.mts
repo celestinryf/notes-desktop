@@ -30,6 +30,7 @@ class VaultManager {
   status: Map<string, VaultStatus>;
   busy: Map<string, Promise<VaultResult>>;
   queued: Map<string, Promise<VaultResult>>;
+  changedPaths: Map<string, Set<string> | null>;
   constructor(store: Store, opts?: { onChange?: (vaultId: string, status: VaultStatus) => void, onNotesChanged?: (vaultId: string, scan: VaultScan) => void, now?: () => number, debounceMs?: number, rescanDebounceMs?: number }) {
     opts = opts || {};
     this.store = store;
@@ -43,6 +44,7 @@ class VaultManager {
     this.status = new Map();
     this.busy = new Map();
     this.queued = new Map();
+    this.changedPaths = new Map();
   }
 
   _status(id: string): VaultStatus {
@@ -91,6 +93,7 @@ class VaultManager {
     for (const k of Object.keys(t)) clearTimeout(t[k]);
     this.timers.delete(id);
     this.status.delete(id);
+    this.changedPaths.delete(id);
   }
 
   closeAll() {
@@ -104,6 +107,7 @@ class VaultManager {
       const w = fs.watch(v.path, { recursive: true }, (_event, filename) => {
         const name = String(filename || '');
         if (/(^|[\\/])(\.git|\.trash|\.obsidian)([\\/]|$)/.test(name)) return;
+        this.diskChanged(id, name ? [name] : null);
         this.scheduleRescan(id);
         if (v.autoSync) this.scheduleCommit(id);
       });
@@ -114,14 +118,26 @@ class VaultManager {
     }
   }
 
+  diskChanged(id: string, names: readonly string[] | null) {
+    const pending = this.changedPaths.get(id);
+    if (names === null || pending === null) { this.changedPaths.set(id, null); return; }
+    const next = pending || new Set<string>();
+    for (const n of names) next.add(n);
+    this.changedPaths.set(id, next);
+  }
+
   scheduleRescan(id: string) {
     const t = this._timers(id);
     clearTimeout(t.rescan);
     t.rescan = setTimeout(async () => {
+      const pending = this.changedPaths.get(id);
+      this.changedPaths.delete(id);
+      const paths = pending ? Array.from(pending) : null;
       try {
-        const r = await this.store.scanVault(id, { allowRemovals: !this.busy.has(id) });
+        const busy = this.busy.has(id);
+        const r = await this.store.scanVault(id, { allowRemovals: !busy, paths: paths || undefined });
         if (r && (r.added || r.updated || r.removed)) this.onNotesChanged(id, r);
-        if (this.busy.has(id)) this.scheduleRescan(id);
+        if (busy) { this.diskChanged(id, paths); this.scheduleRescan(id); }
       } catch (err) { this._set(id, { lastError: 'scan: ' + err.message }); }
     }, this.rescanDebounceMs);
   }

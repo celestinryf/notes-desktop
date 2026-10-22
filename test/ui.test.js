@@ -10,10 +10,14 @@ const { _electron: electron } = require('playwright-core');
 const ROOT = path.resolve(__dirname, '..');
 const ELECTRON_PATH = require('electron');
 const { tmpDir } = require('./helpers/tmp');
+const { readLibrary } = require('../src/store.mts');
 const dataDir = tmpDir('notes-ui-');
 const notesFile = path.join(dataDir, 'notes.json');
+const journalFile = path.join(dataDir, 'notes.journal');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const readNotes = () => JSON.parse(fs.readFileSync(notesFile, 'utf8'));
+const readNotes = () => { const d = readLibrary(dataDir); if (!d) throw new Error('notes.json could not be read'); return d; };
+const savedText = () => [notesFile, journalFile].filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+const setSavesReadOnly = (on) => { for (const f of [notesFile, journalFile]) { try { fs.chmodSync(f, on ? 0o444 : 0o666); } catch (_) {  } } };
 const findNote = (title) => readNotes().notes.find((n) => n.title === title);
 const historyAt = (rev) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':notes.json'], { encoding: 'utf8' }); } catch (_) { return ''; } };
 
@@ -402,7 +406,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
 });
 
 test.afterEach(() => {
-  try { fs.chmodSync(notesFile, 0o666); } catch (_) {  }
+  setSavesReadOnly(false);
 });
 
 test('an edit that cannot be saved survives switching notes and lands once the disk allows it', { timeout: 60000 }, async () => {
@@ -412,7 +416,7 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   await page.fill('#bodyInput', 'before lock');
   await waitFor('baseline saved', () => findNote('Gamma (copy)').body === 'before lock');
   const alphaBefore = findNote('Alpha').body;
-  fs.chmodSync(notesFile, 0o444);
+  setSavesReadOnly(true);
   try {
     await page.fill('#bodyInput', 'typed while locked');
     await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
@@ -430,7 +434,7 @@ test('an edit that cannot be saved survives switching notes and lands once the d
     assert.equal(findNote('Alpha').body, alphaBefore);
     assert.equal(await page.inputValue('#bodyInput'), 'typed while locked');
   } finally {
-    fs.chmodSync(notesFile, 0o666);
+    setSavesReadOnly(false);
   }
   await waitFor('both pending edits landed after unlock', () => findNote('Gamma (copy)').body === 'typed while locked' && findNote('Alpha').body === 'alpha edited while locked', 15000);
   await waitForDom(() => document.getElementById('statusSaved').textContent === 'Saved');
@@ -968,12 +972,12 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.fill('#lockPassword2', 'pw-one');
   await page.click('#lockSubmitBtn');
   await waitFor('locked on disk', () => { const n = findNote('Gamma (copy)'); return n.lock && n.lock.ct && n.body === ''; });
-  assert.ok(!fs.readFileSync(notesFile, 'utf8').includes('flamingo'), 'no plaintext in notes.json');
+  assert.ok(!savedText().includes('flamingo'), 'no plaintext in notes.json or its journal');
   await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Unlocked');
   assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 4242-flamingo', 'still readable right after locking');
   await page.fill('#bodyInput', 'the launch code is 9999-pelican');
   await sleep(900);
-  await waitFor('edit encrypted', () => !fs.readFileSync(notesFile, 'utf8').includes('pelican') && findNote('Gamma (copy)').body === '');
+  await waitFor('edit encrypted', () => !savedText().includes('pelican') && findNote('Gamma (copy)').body === '');
   await clickTool('#lockBtn');
   await page.waitForSelector('#lockMenu:not(.hidden)');
   await page.click('#lockMenu [data-action="relock"]');

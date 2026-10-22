@@ -30,7 +30,8 @@
     "build:code": "esbuild src/code/index.ts --bundle --format=iife --global-name=NotesCode --target=chrome120 --minify --outfile=src/renderer/vendor/code.bundle.js",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
     "build:app": "node scripts/build-renderer.js",
-    "notices": "node scripts/make-notices.js"
+    "notices": "node scripts/make-notices.js",
+    "bench": "node --expose-gc scripts/bench-scale.js"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
