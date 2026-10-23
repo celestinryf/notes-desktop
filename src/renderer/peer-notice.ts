@@ -26,7 +26,6 @@ export function withPeerNotice(raw: NotesApi, onWrite: () => void): NotesApi {
   wrap('live', ['host', 'join', 'stop']);
   wrap('vaults', ['add', 'clone', 'update', 'remove', 'sync', 'scan', 'initRepo']);
   wrap('agentFiles', ['link']);
-  wrap('bot', ['importWorkspace']);
   wrap('app', ['importMarkdown']);
   return out;
 }

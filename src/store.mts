@@ -23,6 +23,7 @@ const SCAN_TARGETED_MAX = 1000;
 const BUSY_CODES = ['EPERM', 'EBUSY', 'EACCES'];
 
 type Change = { notes?: Note[]; dropped?: string[]; folders?: boolean; vaults?: boolean; settings?: boolean };
+type MoveReport = { notesDir: string; notes: number; folders: number; links: number; renamed: { kind: 'note' | 'folder'; from: string; to: string }[] };
 type ScanChange = Change & { notes: Note[]; dropped: string[] };
 type RollbackScope = { notes: readonly Note[]; folders: boolean; vaults: boolean; settings: boolean };
 type DiskDir = { full: string; key: string; name: string; parentKey: string };
@@ -166,6 +167,31 @@ function moveFileSync(from: string, to: string) {
   }
 }
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
+const MOVING_MARKER = '.notes-moving.json';
+
+function folderDirName(name: string) {
+  const safe = H.safeFilename(name);
+  return /^\./.test(safe) || VAULT_SKIP_DIRS.has(safe.toLowerCase()) ? H.safeFilename('Folder ' + safe.replace(/^\.+/, '')) : safe;
+}
+
+function clearUnfinishedMove(dir: string, marker: string) {
+  const raw = fs.existsSync(marker) ? parseLine(fs.readFileSync(marker, 'utf8')) : null;
+  if (!isRecord(raw)) return;
+  const inside = (rel: unknown): string | null => {
+    if (typeof rel !== 'string' || !rel) return null;
+    const full = path.resolve(dir, rel);
+    return F.pathKey(full).startsWith(F.pathKey(dir) + '\\') ? full : null;
+  };
+  for (const entry of Array.isArray(raw.files) ? raw.files : []) {
+    const full = isRecord(entry) ? inside(entry.rel) : null;
+    const at = isRecord(entry) && isFiniteNumber(entry.at) ? entry.at : null;
+    const mtime = full ? F.mtimeOf(full) : null;
+    if (full && at !== null && mtime !== null && Math.abs(mtime - at) < 2000) { try { fs.rmSync(full, { force: true }); } catch (_) {  } }
+  }
+  const dirs = (Array.isArray(raw.dirs) ? raw.dirs : []).map(inside).filter((d): d is string => !!d).sort((a, b) => b.length - a.length);
+  for (const d of dirs) { try { fs.rmdirSync(d); } catch (_) {  } }
+  fs.rmSync(marker, { force: true });
+}
 
 function assertVaultDirName(name: string) {
   const safe = H.safeFilename(name);
@@ -1034,7 +1060,7 @@ class Store {
     try {
       this._commit(() => {
         note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now();
-        if (sealedPath) { note.filePath = sealedPath; note.fileMtime = F.mtimeOf(sealedPath); note.title = note.title.trim() ? stem(path.basename(sealedPath)) : ''; }
+        if (sealedPath) { note.filePath = sealedPath; note.fileMtime = F.mtimeOf(sealedPath); }
         return note;
       }, undefined, { notes: [note], dropped: [], purge: true });
     } catch (err) {
@@ -1088,7 +1114,7 @@ class Store {
     try {
       this._commit(() => {
         note.lock = null; note.body = text; note.updatedAt = this.now();
-        if (plainPath) { note.filePath = plainPath; note.fileMtime = F.mtimeOf(plainPath); note.title = note.title.trim() ? stem(path.basename(plainPath)) : ''; syncFileTags(note); }
+        if (plainPath) { note.filePath = plainPath; note.fileMtime = F.mtimeOf(plainPath); syncFileTags(note); }
         return note;
       }, undefined, { notes: [note], dropped: [] });
     } catch (err) {
@@ -1294,7 +1320,7 @@ class Store {
         const text = withTags(p.body, note.tags);
         writeFileAtomic(full, text);
         written.push(full);
-        Object.assign(p, { body: text, filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: note.vaultId, title: p.title.trim() ? stem(path.basename(full)) : '' });
+        Object.assign(p, { body: text, filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: note.vaultId, title: p.title.trim() ? p.title : '' });
         syncFileTags(p);
       }
       if (trashOriginal && note.vaultId) {
@@ -1337,6 +1363,114 @@ class Store {
     if (folder.dirPath && !this.folders.includes(folder)) { try { fs.rmdirSync(folder.dirPath); } catch (_) {  } }
     if (orig && origInBin) this.restore(orig.id);
     return result;
+  }
+
+  moveIntoHome(dir: string): MoveReport {
+    this._assertCanSave();
+    if (this.homeVault()) throw new Error('The notes are already in a notes folder.');
+    this.flush();
+    const now = this.now();
+    const vault = sanitizeVault({ path: dir, name: 'Notes', home: true, autoSync: false, id: crypto.randomUUID(), createdAt: now }, now);
+    if (!vault) throw new Error('The notes folder needs a path.');
+    const inside = (a: string, b: string) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
+    const overlap = this.vaults.find((v) => inside(vault.path, v.path) || inside(v.path, vault.path));
+    if (overlap) throw Object.assign(new Error('The notes folder overlaps the vault "' + overlap.name + '".'), { code: 'EOVERLAP' });
+    fs.mkdirSync(vault.path, { recursive: true });
+    const marker = path.join(vault.path, MOVING_MARKER);
+    clearUnfinishedMove(vault.path, marker);
+
+    const plainFolders: Folder[] = [];
+    const addChildren = (parentId: string | null) => {
+      for (const f of this.folders) if (!f.vaultId && (f.parentId || null) === parentId && !plainFolders.includes(f)) { plainFolders.push(f); addChildren(f.id); }
+    };
+    addChildren(null);
+    const notes = this.notes.filter((n) => !n.filePath && !n.vaultId);
+    const taken = new Set<string>();
+    const claim = (parent: string, base: string, ext: string) => {
+      for (let i = 1; ; i++) {
+        const full = path.join(parent, (i === 1 ? base : base + ' ' + i) + ext);
+        const key = F.pathKey(full);
+        if (!taken.has(key) && !fs.existsSync(full)) { taken.add(key); return full; }
+      }
+    };
+    const dirOf = new Map<string, string>();
+    for (const f of plainFolders) dirOf.set(f.id, claim((f.parentId && dirOf.get(f.parentId)) || vault.path, folderDirName(f.name), ''));
+    const bin = path.join(vault.path, '.trash');
+    const plan = new Map<Note, { full: string; origin: string }>();
+    for (const n of notes) {
+      const at = (n.folderId && dirOf.get(n.folderId)) || vault.path;
+      const base = H.safeFilename(n.title.trim() || (n.lock ? LOCKED_NAME : H.deriveTitle({ title: '', body: n.body })));
+      const ext = n.lock ? '.' + LOCK_EXT : '.md';
+      const full = claim(n.trashedAt ? bin : at, base, ext);
+      plan.set(n, { full, origin: n.trashedAt ? path.join(at, path.basename(full)) : full });
+    }
+    const linkTarget = new Map<string, string>();
+    for (const [n, p] of plan) if (!n.lock && !n.trashedAt) linkTarget.set(n.id.toLowerCase(), p.full);
+    let links = 0;
+    const relinkText = (text: string, fromDir: string) => text.replace(/(!?)(\[[^\]\n]*\])\(note:\/\/([0-9a-f][0-9a-f-]{7,})\/?\)/gi, (whole, bang: string, label: string, id: string) => {
+      const target = bang ? null : linkTarget.get(id.toLowerCase());
+      if (!target) return whole;
+      links++;
+      return label + '(' + path.relative(fromDir, target).split(path.sep).map((part) => encodeURIComponent(part).replace(/\(/g, '%28').replace(/\)/g, '%29')).join('/') + ')';
+    });
+    const relink = (body: string, fromDir: string) => body.split(/((?:```|~~~)[\s\S]*?(?:```|~~~|$)|`[^`\n]*`)/).map((part, i) => (i % 2 ? part : relinkText(part, fromDir))).join('');
+
+    const written: string[] = [];
+    const made: string[] = [];
+    const undo = () => {
+      for (const file of written.reverse()) { try { fs.rmSync(file, { force: true }); } catch (_) {  } }
+      for (const d of made.reverse()) { try { fs.rmdirSync(d); } catch (_) {  } }
+      try { fs.rmSync(marker, { force: true }); } catch (_) {  }
+    };
+    const texts = new Map<Note, string>();
+    try {
+      const rel = (p: string) => path.relative(vault.path, p);
+      fs.writeFileSync(marker, JSON.stringify({ files: Array.from(plan, ([n, p]) => ({ rel: rel(p.full), at: n.updatedAt })), dirs: Array.from(dirOf.values(), rel).concat(notes.some((n) => n.trashedAt) ? [rel(bin)] : []) }));
+      for (const d of dirOf.values()) { fs.mkdirSync(d); made.push(d); }
+      if (notes.some((n) => n.trashedAt) && !fs.existsSync(bin)) { fs.mkdirSync(bin); made.push(bin); }
+      for (const [n, p] of plan) {
+        const text = n.lock ? lockFileText(n.lock, n.tags) : withTags(relink(n.body, path.dirname(p.origin)), n.tags);
+        fs.writeFileSync(p.full, text, { encoding: 'utf8', flag: 'wx' });
+        written.push(p.full);
+        const at = new Date(n.updatedAt);
+        fs.utimesSync(p.full, at, at);
+        texts.set(n, text);
+      }
+    } catch (err) {
+      undo();
+      throw err;
+    }
+    const renamed: MoveReport['renamed'] = [];
+    let report: MoveReport;
+    try {
+      report = this._commit(() => {
+        this.vaults.push(vault);
+        for (const f of plainFolders) {
+          const d = dirOf.get(f.id) || vault.path;
+          if (path.basename(d) !== f.name) renamed.push({ kind: 'folder', from: f.name, to: path.basename(d) });
+          f.vaultId = vault.id;
+          f.dirPath = d;
+          f.name = path.basename(d);
+        }
+        for (const [n, p] of plan) {
+          const text = texts.get(n) || '';
+          n.filePath = p.full;
+          n.fileKind = 'text';
+          n.fileMtime = F.mtimeOf(p.full);
+          n.vaultId = vault.id;
+          n.body = n.lock ? '' : text;
+          if (!n.title.trim()) n.title = '';
+          if (n.trashedAt) n.trashedFrom = p.origin;
+          syncFileTags(n);
+        }
+        return { notesDir: vault.path, notes: plan.size, folders: plainFolders.length, links, renamed };
+      }, undefined, null);
+    } catch (err) {
+      undo();
+      throw err;
+    }
+    try { fs.rmSync(marker, { force: true }); } catch (_) {  }
+    return report;
   }
 
   ensureFolder(name: string, parentId: null) {
@@ -1683,7 +1817,7 @@ class Store {
     writeFileAtomic(full, text);
     try {
       return this.create(Object.assign({}, data, {
-        title: title.trim() ? stem(path.basename(full)) : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
+        title: title.trim() ? title : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
         folderId: folder ? folder.id : null, filePath: full, fileKind: 'text' as const, fileMtime: F.mtimeOf(full), vaultId: home.id,
       }));
     } catch (err) {
@@ -1701,7 +1835,8 @@ class Store {
     if (!numberedName(current, wanted) || (explicit && current !== wanted && !wantedTaken)) {
       try { this._renameVaultFile(note, wanted); } catch (err) { if (explicit) throw err; }
     }
-    return explicit ? stem(path.basename(note.filePath)) : '';
+    const named = stem(path.basename(note.filePath));
+    return !explicit ? '' : numberedName(named, H.safeFilename(explicit)) ? title : named;
   }
 
   _adopt(note: Note, target: Folder | null) {
@@ -1722,7 +1857,7 @@ class Store {
     note.fileMtime = F.mtimeOf(full);
     note.vaultId = vault.id;
     note.folderId = target ? target.id : null;
-    note.title = home && !note.title.trim() ? '' : stem(path.basename(full));
+    note.title = home ? (note.title.trim() ? note.title : '') : stem(path.basename(full));
     syncFileTags(note);
     return full;
   }
@@ -2188,4 +2323,5 @@ class Store {
   }
 }
 
-export { STICKY_COLORS, sanitizeSticky, Store, readLibrary, isFileNote, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
+export type { MoveReport };
+export { MOVING_MARKER, STICKY_COLORS, sanitizeSticky, Store, readLibrary, isFileNote, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };

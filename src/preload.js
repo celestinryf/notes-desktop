@@ -114,7 +114,6 @@ const notesApi = {
     run: invoke('bot:run'),
     cancel: invoke('bot:cancel'),
     openTerminal: invoke('bot:openTerminal'),
-    importWorkspace: invoke('bot:importWorkspace'),
   },
   book: {
     export: invoke('book:export'),

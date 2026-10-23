@@ -116,7 +116,7 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
     const note = state.current;
     if (!note || note.trashedAt) return;
     if (note.locked) { toast('Unlock and remove the lock first: a locked note cannot be split.'); return; }
-    if (note.filePath) { toast('This note is a file on disk; only notes kept in the app can be split.'); return; }
+    if (note.filePath && !note.home) { toast('This note is a file on disk; only notes kept in the app can be split.'); return; }
     await flushSave();
     if (!state.current || state.current.id !== note.id) return;
     const plan = H.splitAtHeadings(state.current.body, H.deriveTitle(state.current));

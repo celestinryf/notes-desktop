@@ -45,7 +45,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
 
   function onLockButton() {
     const note = state.current;
-    if (!note || note.trashedAt || note.filePath) return;
+    if (!note || note.trashedAt || (note.filePath && !note.home)) return;
     if (!note.locked) { openLockDialog('set'); return; }
     if (!note.unlocked) { el.lockScreenPassword.focus(); return; }
     placePopover(el.lockMenu, el.moreMenu.contains(el.lockBtn) ? el.moreBtn : el.lockBtn);

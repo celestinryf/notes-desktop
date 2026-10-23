@@ -123,7 +123,10 @@ interface AppInfo {
   version: string; dataDir: string; hotkey: string; hotkeyRegistered: boolean; hotkeyFallback: boolean; hotkeyDisplay: string;
   platform: NodeJS.Platform; crafts: Record<string, boolean>; loadError: string | null; documentsDir: string; saveBlocked: boolean;
   drySpeech: boolean; recoveredNotes: number | null; craftTrace: boolean;
+  notesDir: string | null; homeVaultId: string | null; movedToFiles: MovedToFiles | null; filesError: string | null;
 }
+interface MovedToFiles { notesDir: string; notes: number; folders: number; links: number; renamed: { kind: 'note' | 'folder'; from: string; to: string }[]; backupDir: string; at: number }
+interface FilesMove { report: MovedToFiles | null; error: string | null }
 type TraceFields = Record<string, string | number | boolean | null>;
 interface SettingsResult { settings: Settings; info: AppInfo; error?: string | null }
 interface RelatedItem { id: string; title: string; trashed?: boolean; locked?: boolean; missing?: boolean; sharedTags?: string[] }
@@ -160,7 +163,6 @@ interface ConvertOption { to: string; label: string; note: string }
 type ConvertResult = { ok: true; filePath: string; warning: string } | { ok: false; error: string };
 type MarkdownResult = { ok: true; markdown: string } | { ok: false; error: string };
 type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: false; error: string };
-interface WorkspaceImport { updated: number; created: number; missing: number; conflicts: number; details: string[]; updatedIds?: string[]; error?: string }
 type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
 
 interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
@@ -268,7 +270,6 @@ interface IpcContract {
   'bot:run': (opts?: { prompt?: string; noteId?: string | null; allowEdits?: boolean }) => BotRun;
   'bot:cancel': () => boolean;
   'bot:openTerminal': (noteId: string | null) => BotRun;
-  'bot:importWorkspace': () => WorkspaceImport | { error: string };
   'book:export': (format: string, data?: { name?: string; html?: string; markdown?: string; dialogTitle?: string }) => BookExport;
   'vaults:list': () => VaultView[];
   'vaults:pickFolder': () => string | null;
@@ -288,9 +289,9 @@ type IpcResult<K extends IpcChannel> = Awaited<ReturnType<IpcContract[K]>>;
 type Invoker<K extends IpcChannel> = (...args: IpcArgs<K>) => Promise<IpcResult<K>>;
 
 type BotEvent =
-  | { type: 'start'; cwd: string; kind: string; focus?: string; imported?: WorkspaceImport | { error: string } | null; plan?: string }
+  | { type: 'start'; cwd: string; kind: string; focus?: string | null; plan?: string }
   | { type: 'out' | 'err'; text: string }
-  | { type: 'end'; ok: boolean; error?: string; code?: number | null; imported?: WorkspaceImport | { error: string } | null }
+  | { type: 'end'; ok: boolean; error?: string; code?: number | null }
   | ({ type: 'reloaded' } & VaultScan);
 
 interface MainEvents {
@@ -345,7 +346,7 @@ interface NotesApi {
     list: Invoker<'stickies:list'>; open: Invoker<'stickies:open'>; close: Invoker<'stickies:close'>; create: Invoker<'stickies:create'>;
     setColor: Invoker<'stickies:setColor'>; setOnTop: Invoker<'stickies:setOnTop'>; openInNotes: Invoker<'stickies:openInNotes'>;
   };
-  bot: { run: Invoker<'bot:run'>; cancel: Invoker<'bot:cancel'>; openTerminal: Invoker<'bot:openTerminal'>; importWorkspace: Invoker<'bot:importWorkspace'> };
+  bot: { run: Invoker<'bot:run'>; cancel: Invoker<'bot:cancel'>; openTerminal: Invoker<'bot:openTerminal'> };
   book: { export: Invoker<'book:export'> };
   vaults: {
     list: Invoker<'vaults:list'>; pickFolder: Invoker<'vaults:pickFolder'>; add: Invoker<'vaults:add'>; clone: Invoker<'vaults:clone'>;

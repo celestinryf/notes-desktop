@@ -13,6 +13,7 @@ const sizes = (name, fallback) => String(option(name, fallback)).split(',').filt
 const saveSizes = sizes('save', '1000,10000,50000');
 const scanSizes = sizes('scan', '500,2000,5000,20000');
 const readSizes = sizes('read', '1000,10000,50000');
+const moveSizes = sizes('move', '1000,10000,50000');
 const out = option('out', null);
 
 let written = 0;
@@ -113,6 +114,31 @@ async function benchScan(count) {
   report({ kind: 'scan', files: count, firstScanMs: first.ms, firstScanStallMs: first.stallMs, firstScanBytes: first.bytes, added: first.result.added, rescanMs: rescan.ms, rescanStallMs: rescan.stallMs, oneEditScanMs: targeted.ms, oneEditStallMs: targeted.stallMs, oneEditUpdated: targeted.result.updated, loadMs: load.ms, notesJsonBytes: fs.statSync(path.join(data, 'notes.json')).size });
 }
 
+async function benchMove(count) {
+  const dir = tmpDir('notes-bench-move-');
+  const ids = seedLibrary(dir, count);
+  const doc = JSON.parse(fs.readFileSync(path.join(dir, 'notes.json'), 'utf8'));
+  doc.folders = Array.from({ length: 20 }, (_, i) => ({ id: 'folder-' + i, name: 'Folder ' + i, parentId: null, createdAt: Date.now() }));
+  doc.notes.forEach((n, i) => { n.folderId = i % 3 ? 'folder-' + (i % 20) : null; });
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify(doc, null, 2));
+  const home = path.join(tmpDir('notes-bench-home-'), 'Notes');
+  gc();
+  const before = await measure(() => new Store(dir).load());
+  const store = before.result;
+  const move = await measure(() => store.moveIntoHome(home));
+  const saves = [];
+  for (let k = 0; k < 25; k++) {
+    const id = ids[Math.floor(random() * ids.length)];
+    saves.push(await measure(() => store.update(id, { body: store.get(id).body + '\nedit ' + k })));
+  }
+  store.flush();
+  gc();
+  const load = await measure(() => new Store(dir).load());
+  const again = load.result;
+  const scan = await measure(() => again.scanVault(again.homeVault().id));
+  report({ kind: 'move', notes: count, loadBeforeMs: before.ms, moveMs: move.ms, moveStallMs: move.stallMs, saveMedianMs: median(saves.map((x) => x.ms)), bytesPerSaveMedian: median(saves.map((x) => x.bytes)), loadAfterMs: load.ms, startScanMs: scan.ms, startScanStallMs: scan.stallMs, startScanChanged: scan.result.added + scan.result.updated + scan.result.removed, notesJsonBytes: fs.statSync(path.join(dir, 'notes.json')).size });
+}
+
 const RARE = 'zebracorn';
 const QUERIES = { common: 'the', rare: RARE, twoWords: 'people world', short: 'zq', none: 'qqqxyzzy' };
 
@@ -208,4 +234,5 @@ async function benchReads(count) {
   for (const n of saveSizes) await benchSaves(n);
   for (const n of scanSizes) await benchScan(n);
   for (const n of readSizes) await benchReads(n);
+  for (const n of moveSizes) await benchMove(n);
 })().catch((err) => { console.error(err); process.exitCode = 1; });
