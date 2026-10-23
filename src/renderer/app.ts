@@ -1924,6 +1924,26 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { openConvertMenu, closeConvertMenu, convertCurrent } = createConvertMenu({ api, flushSave, openFiles });
 
+  const WARM_DELAY_MS = 1500;
+  const WARM_IDLE_MS = 5000;
+  let warmUpStarted = false;
+  function warmWordCraftSoon() {
+    if (warmUpStarted || !useWordCraft()) return;
+    warmUpStarted = true;
+    setTimeout(() => requestIdleCallback(() => {
+      likelyWordNote().then((n) => { if (n) crafts.wordcraft.warm(n); }).catch(() => {});
+    }, { timeout: WARM_IDLE_MS }), WARM_DELAY_MS);
+  }
+
+  async function likelyWordNote() {
+    for (const id of [state.currentId, ...tabs.ids]) {
+      if (!id) continue;
+      const n = await api.notes.get(id).catch(() => null);
+      if (n && n.filePath && n.fileKind === 'docx' && !n.trashedAt) return n;
+    }
+    return api.notes.latestFile('docx');
+  }
+
   const documentDirty = () => pdfDirty() || docxDirty() || craftDirty();
   const documentBusy = () => pdfBusy() || docxDirty() || craftDirty();
   async function flushDocuments(opts: { commit?: boolean }) {
@@ -3075,6 +3095,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       shownBusy = true;
       try {
         await state.initDone;
+        warmWordCraftSoon();
         if (el.settingsDialog.open) return;
         if (state.current) {
           if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();

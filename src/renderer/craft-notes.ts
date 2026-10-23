@@ -22,6 +22,8 @@ type CraftNotesDeps = {
   checkCurrentFile: () => Promise<unknown>,
 };
 
+const WARM_LIMIT_MS = 20000;
+
 const baseName = (path: string) => {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1];
@@ -37,6 +39,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const frame = () => ui.frame();
     let fc: CraftFrame | null = null, note: CraftDoc | null = null, shownKey: string | null = null, seq = 0, down = false;
     let parkedKey: string | null = null, parkedNote: CraftDoc | null = null;
+    let warming: string | null = null, warmStarted = 0, warmTimer: ReturnType<typeof setTimeout> | undefined, warmOnly = false;
     const trace = (event: string, fields?: TraceFields) => craftTrace(event, Object.assign({ app: key }, fields));
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
@@ -49,13 +52,22 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           onDirty: (d) => { if (note && state.currentId === note.id) setSaved(d ? 'Edited' : 'Saved'); },
           onOpened: () => { frame().classList.remove('is-opening'); if (note && state.currentId === note.id) showBanner(''); },
           onOpenFailed: (err) => {
+            const quiet = warming !== null;
             drop();
-            showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
+            if (!quiet) showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
           },
           theme: 'dark',
           darkPage: true,
           trace,
+          onDrawn: () => { if (warming !== null && warming === shownKey) finishWarm(true); },
           onUnavailable: () => {
+            if (warmOnly) {
+              warmOnly = false;
+              trace('warm-gave-up');
+              drop();
+              fc = null;
+              return;
+            }
             down = true;
             drop();
             const n = state.current;
@@ -66,8 +78,58 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       }
       return fc;
     }
+    async function load(n: PublicNote, s: number, wanted: () => boolean) {
+      const asked = performance.now();
+      const bytes = await ui.bytes(n.id);
+      trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: H.msSince(asked) });
+      if (s !== seq || !wanted()) return;
+      if (!n.filePath) throw new Error('the note has no file');
+      note = { id: n.id, fileMtime: n.fileMtime, name: baseName(n.filePath) };
+      controller().open(note.name, bytes, note);
+    }
+    function setWarming(k: string | null) {
+      warming = k;
+      clearTimeout(warmTimer);
+      frame().classList.toggle('is-warming', k !== null);
+      frame().inert = k !== null;
+      if (k !== null) { warmStarted = performance.now(); warmTimer = setTimeout(() => finishWarm(false), WARM_LIMIT_MS); }
+    }
+    function finishWarm(drawn: boolean) {
+      if (warming === null) return;
+      trace('warm-done', { drawn, ms: H.msSince(warmStarted) });
+      setWarming(null);
+      clear();
+    }
+    async function warm(n: PublicNote) {
+      if (!usable() || warming !== null || shownKey !== null || note !== null || parkedKey !== null) return;
+      const k = n.id + ':' + n.fileMtime;
+      setWarming(k);
+      frame().classList.remove('hidden');
+      if (!frame().getClientRects().length) {
+        trace('warm-skipped', { id: n.id });
+        setWarming(null);
+        frame().classList.add('hidden');
+        return;
+      }
+      trace('warm', { id: n.id });
+      warmOnly = true;
+      shownKey = k;
+      const s = ++seq;
+      try {
+        await load(n, s, () => shownKey === k);
+      } catch (_) {
+        if (s === seq) drop();
+      }
+    }
     async function show(n: PublicNote) {
       const k = n.id + ':' + n.fileMtime;
+      warmOnly = false;
+      if (warming !== null) {
+        const used = warming === k;
+        trace(used ? 'warm-used' : 'warm-dropped', { id: n.id });
+        setWarming(null);
+        if (used && !(fc && fc.isConfirmed())) { frame().classList.add('is-opening'); showBanner('Opening in ' + ui.label + '…'); }
+      }
       frame().classList.remove('hidden');
       trace('show', { id: n.id, kept: shownKey === k, frame: !!fc });
       if (shownKey === k) return;
@@ -79,14 +141,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       frame().classList.add('is-opening');
       showBanner('Opening in ' + ui.label + '…');
       try {
-        const asked = performance.now();
-        const bytes = await ui.bytes(n.id);
-        trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: H.msSince(asked) });
-        if (s !== seq || !state.current || state.current.id !== n.id) return;
-        if (!n.filePath) throw new Error('the note has no file');
-        const name = baseName(n.filePath);
-        note = { id: n.id, fileMtime: n.fileMtime, name };
-        controller().open(name, bytes, note);
+        await load(n, s, () => !!state.current && state.current.id === n.id);
       } catch (err) {
         if (s !== seq) return;
         drop();
@@ -112,6 +167,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       frame().classList.add('hidden');
     }
     function clear() {
+      if (warming !== null) return;
       if (shownKey === null && note === null) { hide(); return; }
       trace('clear', { id: note ? note.id : null });
       const leaving = note, leavingKey = shownKey;
@@ -120,6 +176,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       hide();
     }
     function drop() {
+      if (warming !== null) setWarming(null);
       parkedKey = null;
       parkedNote = null;
       if (fc) fc.close();
@@ -168,8 +225,8 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       trace('flush-done', { ok, ms: H.msSince(started) });
       return ok;
     }
-    const forget = () => { shownKey = null; parkedKey = null; parkedNote = null; };
-    return { usable, show, clear, dirty, flush, forget };
+    const forget = () => { if (warming !== null) return; shownKey = null; parkedKey = null; parkedNote = null; };
+    return { usable, show, warm, clear, dirty, flush, forget };
   }
   const crafts = { wordcraft: craftViewer('wordcraft'), gridcraft: craftViewer('gridcraft') };
   const useWordCraft = () => crafts.wordcraft.usable();

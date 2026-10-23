@@ -156,6 +156,7 @@ interface IpcContract {
   'notes:list': (opts?: ListOpts) => PublicNote[];
   'notes:outline': (sort?: SortKey) => Record<string, OutlineRow[]>;
   'notes:get': (id: string) => PublicNote | null;
+  'notes:latestFile': (kind: FileKind) => PublicNote | null;
   'notes:create': (data?: NoteCreate) => PublicNote;
   'notes:update': (id: string, patch: NotePatch) => PublicNote | null;
   'notes:togglePin': (id: string) => PublicNote | null;
@@ -296,7 +297,7 @@ type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) =
 
 interface NotesApi {
   notes: {
-    list: Invoker<'notes:list'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; create: Invoker<'notes:create'>;
+    list: Invoker<'notes:list'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
     update: Invoker<'notes:update'>; togglePin: Invoker<'notes:togglePin'>; duplicate: Invoker<'notes:duplicate'>;
     splitIntoBook: Invoker<'notes:splitIntoBook'>; undoSplit: Invoker<'notes:undoSplit'>; trash: Invoker<'notes:trash'>;
     restore: Invoker<'notes:restore'>; destroy: Invoker<'notes:destroy'>; emptyTrash: Invoker<'notes:emptyTrash'>;

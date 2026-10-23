@@ -32,6 +32,7 @@ const notesApi = {
     list: invoke('notes:list'),
     outline: invoke('notes:outline'),
     get: invoke('notes:get'),
+    latestFile: invoke('notes:latestFile'),
     create: invoke('notes:create'),
     update: invoke('notes:update'),
     togglePin: invoke('notes:togglePin'),
