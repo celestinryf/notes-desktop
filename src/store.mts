@@ -981,7 +981,7 @@ class Store {
     if (changed && note.lock && isFileNote(note) && isLockPath(note.filePath)) {
       try { writeFileAtomic(note.filePath, lockFileText(note.lock, note.tags)); }
       catch (err) {
-        Object.assign(note, before, fileMoved ? { filePath: note.filePath, title: note.title } : {});
+        Object.assign(note, before, fileMoved ? { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId } : {});
         if (plainBefore !== undefined) this.plain.set(id, plainBefore);
         throw err;
       }
@@ -1697,7 +1697,8 @@ class Store {
     if (!explicit && body === null) return '';
     const wanted = H.safeFilename(explicit || H.deriveTitle({ title: '', body: body ?? '' }));
     const current = stem(path.basename(note.filePath));
-    if (explicit ? wanted !== current : !numberedName(current, wanted)) {
+    const wantedTaken = fs.existsSync(path.join(path.dirname(note.filePath), wanted + (path.extname(note.filePath) || '.md')));
+    if (!numberedName(current, wanted) || (explicit && current !== wanted && !wantedTaken)) {
       try { this._renameVaultFile(note, wanted); } catch (err) { if (explicit) throw err; }
     }
     return explicit ? stem(path.basename(note.filePath)) : '';

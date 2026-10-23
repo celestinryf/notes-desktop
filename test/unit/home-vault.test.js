@@ -221,3 +221,12 @@ test('review fixes: an .mdlock file in an ordinary vault is not a note', async (
   await store.scanVault(v.id);
   assert.deepEqual(store.notes.filter((n) => n.vaultId === v.id).map((n) => path.basename(n.filePath)), ['Real.md']);
 });
+
+test('re-sending a title that collides keeps the numbered name instead of moving the file each save', () => {
+  const { store, has } = homeStore();
+  store.create({ title: 'Plan', body: 'a' });
+  const b = store.create({ title: 'Plan', body: 'b' });
+  for (const body of ['b1', 'b2', 'b3']) store.update(b.id, { title: 'Plan', body });
+  assert.equal(path.basename(store.get(b.id).filePath), 'Plan 2.md');
+  assert.ok(!has('Plan 3.md'));
+});
