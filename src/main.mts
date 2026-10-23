@@ -56,6 +56,7 @@ function main() {
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
+    workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
   });
   store.onContentChange = () => git.noteChanged();
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
@@ -1281,18 +1282,30 @@ function main() {
     if (!note) return { ok: false, error: 'Note not found' };
     if (note.lock) return { ok: false, error: 'History is not shown for locked notes.' };
     if (!store.settings.gitEnabled) return { ok: false, error: 'History is off. Turn on "Keep every change in a git history in the data folder" in Settings › History.' };
-    const commits = await git.history(Math.min(200, Math.max(1, limit || 80)));
-    const versions: HistoryVersion[] = [];
-    let lastBody: string | null = null;
-    await git.eachNotesAt(commits.map((c) => c.hash), (i, text) => {
+    const max = Math.min(200, Math.max(1, limit || 80));
+    const found: HistoryVersion[] = [];
+    const home = store.homeVault();
+    if (home && note.filePath && store.isHome(note.vaultId)) {
+      const files = await git.fileHistory(path.relative(home.path, note.filePath).split(path.sep).join('/'), max);
+      let followed = true;
+      await git.eachFileAt(files, (i, text) => {
+        if (text === null || !followed) return;
+        const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+        if (i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
+        found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
+      });
+    }
+    const snapshots = await git.history(max, 'notes.json');
+    await git.eachNotesAt(snapshots.map((c) => c.hash), (i, text) => {
       if (!text) return;
       let snap: { notes?: Note[] };
       try { snap = JSON.parse(text); } catch (_) { return; }
       const n = (snap.notes || []).find((x) => x.id === id);
-      if (!n || typeof n.body !== 'string' || n.lock || n.body === lastBody) return;
-      lastBody = n.body;
-      versions.push({ hash: commits[i].hash, at: commits[i].at, title: n.title || '', body: n.body, chars: n.body.length });
+      if (!n || typeof n.body !== 'string' || n.lock) return;
+      found.push({ hash: snapshots[i].hash, at: snapshots[i].at, title: n.title || '', body: n.body, chars: n.body.length });
     });
+    found.sort((a, b) => b.at - a.at);
+    const versions = found.filter((v, i) => i === 0 || v.body !== found[i - 1].body).slice(0, max);
     return { ok: true, versions, current: note.body };
   });
 

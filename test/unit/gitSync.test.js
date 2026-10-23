@@ -99,3 +99,59 @@ test('pushes to a remote after committing and reports push failures', { skip: !g
   await sync.configure({ gitEnabled: true, gitRemote: '' });
   assert.throws(() => git(sync.dir, ['remote', 'get-url', 'origin']), 'remote removed when cleared');
 });
+
+test('with a notes folder, history commits its files instead of a copy of notes.json, and follows renames', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const tree = tmpDir('notes-git-tree-');
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"notes":[{"id":"a","body":"old"}]}');
+  let home = null;
+  const sync = new GitSync(dir, { debounceMs: 10, workTree: () => home, beforeSnapshot: () => { throw new Error('a tree commit never compacts the library'); } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  sync.beforeSnapshot = () => {};
+  assert.deepEqual(await sync.commit(), { ok: true });
+  sync.beforeSnapshot = () => { throw new Error('a tree commit never compacts the library'); };
+  home = tree;
+  fs.mkdirSync(path.join(tree, 'Folder'));
+  fs.mkdirSync(path.join(tree, '.trash'));
+  const lines = Array.from({ length: 8 }, (_, i) => 'line ' + i + ' of a note long enough for git to see the rename').join('\n') + '\n';
+  fs.writeFileSync(path.join(tree, 'Folder', 'Note.md'), 'first\n' + lines);
+  fs.writeFileSync(path.join(tree, '.trash', 'Gone.md'), 'binned\n');
+  fs.writeFileSync(path.join(tree, 'Write.md.tmp'), 'half written');
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.equal(git(sync.dir, ['ls-tree', '-r', '--name-only', 'HEAD']), 'Folder/Note.md', 'notes.json is gone from the tree; trash and temp files stay out');
+  assert.equal(fs.existsSync(path.join(sync.dir, 'notes.json')), false, 'the old snapshot copy is removed');
+  fs.renameSync(path.join(tree, 'Folder', 'Note.md'), path.join(tree, 'Renamed.md'));
+  fs.writeFileSync(path.join(tree, 'Renamed.md'), 'renamed\n' + lines);
+  assert.deepEqual(await sync.commit(), { ok: true });
+  const commits = await sync.fileHistory('Renamed.md', 10);
+  assert.deepEqual(commits.map((c) => c.path), ['Renamed.md', 'Folder/Note.md']);
+  const texts = [];
+  await sync.eachFileAt(commits, (i, text) => { texts[i] = text; });
+  assert.deepEqual(texts, ['renamed\n' + lines, 'first\n' + lines]);
+  assert.equal((await sync.history(10, 'notes.json')).length, 2, 'the snapshot commits stay readable');
+  assert.deepEqual(await sync.commit(), { ok: true, nothingToCommit: true });
+});
+
+test('history of the notes folder survives a nested repository, a stale lock and a case-only rename, and leaves other files out', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const tree = tmpDir('notes-git-tree2-');
+  const sync = new GitSync(dir, { debounceMs: 10, workTree: () => tree });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  for (const nested of ['proj', path.join('sub', 'p 2'), 'p[3]']) {
+    fs.mkdirSync(path.join(tree, nested), { recursive: true });
+    git(path.join(tree, nested), ['init', '-q']);
+    fs.writeFileSync(path.join(tree, nested, 'inside.md'), 'their repo\n');
+  }
+  fs.writeFileSync(path.join(tree, 'case.md'), 'case one\n');
+  fs.writeFileSync(path.join(tree, 'photo.png'), Buffer.alloc(64));
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.equal(git(sync.dir, ['ls-tree', '-r', '--name-only', 'HEAD']), 'case.md', 'the image and the nested repository stay out');
+  fs.writeFileSync(path.join(sync.gitDir, 'index.lock'), '');
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(path.join(sync.gitDir, 'index.lock'), old, old);
+  fs.renameSync(path.join(tree, 'case.md'), path.join(tree, 'Case.md'));
+  fs.writeFileSync(path.join(tree, 'Case.md'), 'case one\ncase two\n');
+  assert.deepEqual(await sync.commit(), { ok: true }, 'a stale index.lock does not block the commit');
+  const commits = await sync.fileHistory('Case.md', 10);
+  assert.equal(commits.length, 2, 'a case-only rename keeps the history');
+});
