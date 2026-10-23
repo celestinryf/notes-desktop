@@ -490,6 +490,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
     },
     selectionRange: currentRange,
     lastRoundTripExact: () => lastExact,
+    setFrontMatter: (text: string) => { front = text; },
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
     replaceRanges: (domRanges: Range[], text: string) => {
       const spans: { from: number, to: number }[] = [];

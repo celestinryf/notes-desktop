@@ -619,7 +619,12 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitFor('a rendered edit keeps the front matter', () => /^---\ntags: \[alpha\]\n---\n\nTagged body more\n?$/.test(fs.readFileSync(tagged, 'utf8')));
   await page.fill('#tagsInput', 'alpha, beta');
   await waitFor('a tag edit lands in the front matter', () => /^---\ntags: \[alpha, beta\]\n---\n\nTagged body more\n?$/.test(fs.readFileSync(tagged, 'utf8')));
+  await page.click('#richEditor p:has-text("Tagged body more")');
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  await waitFor('a body edit after a tag edit keeps the tag', () => /^---\ntags: \[alpha, beta\]\n---\n\nTagged body more!\n?$/.test(fs.readFileSync(tagged, 'utf8')));
   await useSourceMode(true);
+  assert.match(await page.inputValue('#bodyInput'), /^---\ntags: \[alpha, beta\]\n---/);
 
   await page.click('.note-row:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');

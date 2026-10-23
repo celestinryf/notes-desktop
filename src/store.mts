@@ -474,7 +474,7 @@ function isFileNote(note: Note | null): note is FileNote {
 }
 
 function tagsInFile(note: Note): note is FileNote {
-  return !!note.vaultId && note.fileKind === 'text' && !note.lock && FM.isMarkdownPath(note.filePath);
+  return !note.lock && FM.fileKeepsTags(note);
 }
 
 function syncFileTags(note: Note) {
@@ -883,7 +883,7 @@ class Store {
     if (typeof patch.title === 'string' && patch.title !== note.title) {
       if (note.vaultId && isFileNote(note) && note.fileKind === 'text') {
         try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
-        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; } throw err; }
+        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; syncFileTags(note); } throw err; }
       } else note.title = patch.title;
       changed = true;
     }

@@ -16,6 +16,10 @@ function isMarkdownPath(filePath: string | null | undefined) {
   return MARKDOWN_PATH.test(String(filePath || ''));
 }
 
+function fileKeepsTags(n: Pick<Note, 'vaultId' | 'fileKind' | 'filePath'>) {
+  return !!n.vaultId && n.fileKind === 'text' && isMarkdownPath(n.filePath);
+}
+
 function linesWithEnds(text: string) {
   const out: { line: string; end: string }[] = [];
   let at = 0;
@@ -171,4 +175,4 @@ function setNoteTags(text: string, wanted: readonly string[]) {
   return blockText(Object.assign({}, b, { inner })) + body;
 }
 
-export { isMarkdownPath, splitFrontMatter, frontMatterTags, inlineTags, noteTags, setNoteTags };
+export { isMarkdownPath, fileKeepsTags, splitFrontMatter, frontMatterTags, inlineTags, noteTags, setNoteTags };

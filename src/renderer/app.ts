@@ -1,4 +1,5 @@
 import * as H from '../shared/helpers.mts';
+import * as FM from '../shared/front-matter.mts';
 import * as NotesThemes from '../shared/themes.mts';
 import NotesIcons from './icons.js';
 import { NotesPalette } from './palette.ts';
@@ -1700,6 +1701,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     state.tagsEdited = false;
     el.bodyInput.value = note.body;
     const hasPending = applyPendingTo(note);
+    if (hasPending && FM.fileKeepsTags(note)) el.tagsInput.value = FM.noteTags(el.bodyInput.value).join(', ');
     const plainFile = isPlainTextFile(note);
     const markdown = !plainFile && !isViewerOnlyFile(note);
     let lossless = true;
@@ -1985,6 +1987,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       applyFreshFileBody(fresh);
       toast('Reloaded from disk: the file changed outside Notes.');
     }
+  }
+
+  function tagsIntoBody() {
+    if (!state.current || !FM.fileKeepsTags(state.current)) return false;
+    const next = FM.setNoteTags(src.value, H.parseTags(el.tagsInput.value));
+    if (next === src.value) return true;
+    src.value = next;
+    if (state.rich) state.rich.setFrontMatter(FM.splitFrontMatter(next).front);
+    return true;
   }
 
   function showSavedTags(patch: FieldsPatch, updated: PublicNote) {
@@ -3041,7 +3052,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
     el.titleInput.addEventListener('input', scheduleSave);
     el.titleInput.addEventListener('input', renderActiveTabTitle);
-    el.tagsInput.addEventListener('input', () => { state.tagsEdited = true; });
+    el.tagsInput.addEventListener('input', () => { if (!tagsIntoBody()) state.tagsEdited = true; });
     el.tagsInput.addEventListener('input', scheduleSave);
     el.bodyInput.addEventListener('input', scheduleSave);
     el.titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); focusBody(); } });
