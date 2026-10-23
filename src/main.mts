@@ -1287,9 +1287,11 @@ function main() {
     const home = store.homeVault();
     if (home && note.filePath && store.isHome(note.vaultId)) {
       const files = await git.fileHistory(path.relative(home.path, note.filePath).split(path.sep).join('/'), max);
+      let followed = true;
       await git.eachFileAt(files, (i, text) => {
-        if (text === null) return;
+        if (text === null || !followed) return;
         const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+        if (i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
         found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
       });
     }

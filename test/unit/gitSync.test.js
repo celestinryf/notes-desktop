@@ -131,3 +131,25 @@ test('with a notes folder, history commits its files instead of a copy of notes.
   assert.equal((await sync.history(10, 'notes.json')).length, 2, 'the snapshot commits stay readable');
   assert.deepEqual(await sync.commit(), { ok: true, nothingToCommit: true });
 });
+
+test('history of the notes folder survives a nested repository, a stale lock and a case-only rename, and leaves other files out', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const tree = tmpDir('notes-git-tree2-');
+  const sync = new GitSync(dir, { debounceMs: 10, workTree: () => tree });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  fs.mkdirSync(path.join(tree, 'proj'));
+  git(path.join(tree, 'proj'), ['init', '-q']);
+  fs.writeFileSync(path.join(tree, 'proj', 'inside.md'), 'their repo\n');
+  fs.writeFileSync(path.join(tree, 'case.md'), 'case one\n');
+  fs.writeFileSync(path.join(tree, 'photo.png'), Buffer.alloc(64));
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.equal(git(sync.dir, ['ls-tree', '-r', '--name-only', 'HEAD']), 'case.md', 'the image and the nested repository stay out');
+  fs.writeFileSync(path.join(sync.gitDir, 'index.lock'), '');
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(path.join(sync.gitDir, 'index.lock'), old, old);
+  fs.renameSync(path.join(tree, 'case.md'), path.join(tree, 'Case.md'));
+  fs.writeFileSync(path.join(tree, 'Case.md'), 'case one\ncase two\n');
+  assert.deepEqual(await sync.commit(), { ok: true }, 'a stale index.lock does not block the commit');
+  const commits = await sync.fileHistory('Case.md', 10);
+  assert.equal(commits.length, 2, 'a case-only rename keeps the history');
+});

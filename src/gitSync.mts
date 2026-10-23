@@ -4,7 +4,9 @@ import { execFile, spawn } from 'node:child_process';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
-const TREE_EXCLUDE = '.trash/\n.obsidian/\n*.tmp\n';
+const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
+const TREE_EXCLUDE = ['*', '!*/'].concat(NOTE_EXTS.map((ext) => '!*.' + ext), ['.trash/', '.obsidian/']).join('\n') + '\n';
+const STALE_LOCK_MS = 10000;
 
 type FileCommit = { hash: string; at: number; path: string };
 
@@ -94,23 +96,36 @@ class GitSync {
   }
 
   _inTree(tree: string, args: string[], timeoutMs?: number) {
-    return run(['-c', 'core.quotePath=false', '--git-dir', this.gitDir, '--work-tree', tree].concat(args), tree, timeoutMs);
+    return run(['-c', 'core.quotePath=false', '-c', 'core.autocrlf=false', '-c', 'core.excludesFile=' + this._treeExclude(), '--git-dir', this.gitDir, '--work-tree', tree].concat(args), tree, timeoutMs);
   }
 
-  _excludeTreeNoise() {
-    const file = path.join(this.gitDir, 'info', 'exclude');
+  _treeExclude() {
+    const file = path.join(this.dir, '.notes-tree-exclude');
     let have = '';
     try { have = fs.readFileSync(file, 'utf8'); } catch (_) {  }
-    if (have.includes(TREE_EXCLUDE)) return;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, have + (have && !have.endsWith('\n') ? '\n' : '') + TREE_EXCLUDE);
+    if (!have.startsWith(TREE_EXCLUDE)) fs.writeFileSync(file, TREE_EXCLUDE);
+    return file;
+  }
+
+  async _addTree(tree: string) {
+    const first = await this._inTree(tree, ['add', '-A'], 120000);
+    const nested = first.ok ? [] : Array.from(String(first.error).matchAll(/'([^'\n]+)\/' does not have a commit checked out/g), (m) => m[1]);
+    if (!nested.length) return first;
+    fs.appendFileSync(this._treeExclude(), nested.map((d) => '/' + d + '/').join('\n') + '\n');
+    return this._inTree(tree, ['add', '-A'], 120000);
+  }
+
+  _clearStaleLock() {
+    const lock = path.join(this.gitDir, 'index.lock');
+    try { if (this.now() - fs.statSync(lock).mtimeMs > STALE_LOCK_MS) fs.rmSync(lock, { force: true }); } catch (_) {  }
   }
 
   async _stage(): Promise<GitRun | null> {
+    this._clearStaleLock();
     const tree = this.workTree();
     if (tree) {
-      this._excludeTreeNoise();
-      return this._inTree(tree, ['add', '-A'], 120000);
+      await this._inTree(tree, ['rm', '--cached', '-q', '--ignore-unmatch', '--', 'notes.json']);
+      return this._addTree(tree);
     }
     if (!(await this.takeSnapshot())) return null;
     return run(['add', '-A', '--', 'notes.json'], this.dir);
@@ -220,7 +235,7 @@ class GitSync {
       if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
       let add: GitRun | null;
       try { add = await this._stage(); }
-      catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message }); return { ok: false, error: err.message }; }
+      catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
       if (!add) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
       if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
       const staged = await this._staged();
@@ -261,14 +276,22 @@ class GitSync {
     return eachBlob(hashes.map((h) => h + ':notes.json'), this.dir, 20000, visit);
   }
 
+  async _trackedPath(relPath: string) {
+    const r = await run(['-c', 'core.quotePath=false', 'ls-tree', '-r', '-z', '--name-only', 'HEAD'], this.dir, 60000);
+    if (!r.ok) return relPath;
+    const want = relPath.toLowerCase();
+    return r.stdout.split('\0').find((p) => p === relPath) || r.stdout.split('\0').find((p) => p.toLowerCase() === want) || relPath;
+  }
+
   async fileHistory(relPath: string, limit?: number): Promise<FileCommit[]> {
     if (!this.state.initialized) return [];
-    const r = await run(['-c', 'core.quotePath=false', 'log', '--follow', '--format=%x1e%H%x1f%ct', '--name-only', '-n', String(limit || 50), '--', relPath], this.dir);
+    const tracked = await this._trackedPath(relPath);
+    const r = await run(['-c', 'core.quotePath=false', 'log', '--follow', '--format=%x1e%H%x1f%ct', '--name-only', '-n', String(limit || 50), '--', tracked], this.dir, 60000);
     if (!r.ok) return [];
     return r.stdout.split('\x1e').map((chunk) => chunk.trim()).filter(Boolean).map((chunk) => {
       const [head, ...rest] = chunk.split('\n');
       const [hash, ts] = head.split('\x1f');
-      return { hash, at: parseInt(ts, 10) * 1000, path: rest.map((l) => l.trim()).find(Boolean) || relPath };
+      return { hash, at: parseInt(ts, 10) * 1000, path: rest.map((l) => l.trim()).find(Boolean) || tracked };
     });
   }
 
