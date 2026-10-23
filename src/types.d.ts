@@ -98,6 +98,21 @@ interface OutlineRow {
   id: string; title: string; folderId: string | null; pinned: boolean; locked: boolean; unlocked: boolean; sticky: boolean;
   fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; createdAt: number; updatedAt: number;
 }
+type IndexNotePayload = { id: string; title: string; body: string; tags: string[] };
+type IndexUpdate = { notes: readonly Note[]; dropped: readonly string[]; purge?: boolean } | null;
+type IndexRequest =
+  | { type: 'open'; file: string }
+  | { type: 'sync-start'; seq: number }
+  | { type: 'sync-part'; seq: number; notes: IndexNotePayload[] }
+  | { type: 'sync-end'; seq: number }
+  | { type: 'change'; seq: number; notes: IndexNotePayload[]; dropped: string[]; purge: boolean }
+  | { type: 'candidates'; seq: number; query: string }
+  | { type: 'incoming'; seq: number; id: string };
+type IndexReply =
+  | { type: 'synced'; seq: number; changed: number; removed: number; size: number }
+  | { type: 'answer'; seq: number; ids: string[] | null }
+  | { type: 'purged'; seq: number }
+  | { type: 'failed'; seq: number; error: string };
 interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; excerpt?: string }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }
 interface TagCount { tag: string; count: number }

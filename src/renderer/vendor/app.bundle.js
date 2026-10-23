@@ -194,6 +194,7 @@
     plainTextFromMarkdown: () => plainTextFromMarkdown,
     relativeTime: () => relativeTime,
     safeFilename: () => safeFilename,
+    searchHay: () => searchHay,
     snippet: () => snippet,
     sortNotes: () => sortNotes,
     speechChunks: () => speechChunks,
@@ -294,10 +295,13 @@
   function tokenize(query) {
     return String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
   }
+  function searchHay(note) {
+    return (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
+  }
   function matchesQuery(note, query) {
     const tokens = tokenize(query);
     if (!tokens.length) return true;
-    const hay = (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
+    const hay = searchHay(note);
     return tokens.every((t) => hay.indexOf(t) !== -1);
   }
   var titleOrder = new Intl.Collator(void 0, { sensitivity: "base" });
