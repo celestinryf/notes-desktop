@@ -61,7 +61,7 @@ function handle(msg: Record<string, unknown>) {
     return;
   }
   if (msg.type === 'candidates') { send({ type: 'answer', seq, ids: read(() => current().candidates(String(msg.query || ''))) }); return; }
-  if (msg.type === 'incoming') { send({ type: 'answer', seq, ids: read(() => current().incoming(String(msg.id || ''))) }); return; }
+  if (msg.type === 'incoming') { send({ type: 'answer', seq, ids: read(() => current().incoming(String(msg.id || ''), strings(msg.names))) }); return; }
 }
 
 process.parentPort.on('message', (e: { data: unknown }) => {

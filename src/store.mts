@@ -6,6 +6,7 @@ import { isObjectLike, isRecord } from './shared/helpers.mts';
 import * as Themes from './shared/themes.mts';
 import * as F from './files.mts';
 import * as L from './lock.mts';
+import { VaultLinker, nameHints } from './vault-links.mts';
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
@@ -1022,12 +1023,18 @@ class Store {
     if (!note) return null;
     const bodyOf = (n: Note) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
     const view = (n: Note) => ({ id: n.id, title: H.deriveTitle(this.publicNote(n)) || 'Untitled', trashed: !!n.trashedAt, locked: !!n.lock });
-    const outgoing = H.noteLinkIds(bodyOf(note)).filter((x) => x !== id).map((x) => {
+    const vault = note.vaultId && note.filePath ? this.getVault(note.vaultId) : null;
+    const linker = vault ? new VaultLinker(vault, this.notes) : null;
+    const linked = H.noteLinkIds(bodyOf(note)).filter((x) => x !== id);
+    const outgoing: RelatedItem[] = linked.map((x) => {
       const t = this.get(x);
       return t ? view(t) : { id: x, title: 'Deleted note', missing: true };
     });
+    if (linker) for (const t of linker.targets(note)) if (t.id !== id && !linked.includes(t.id.toLowerCase()) && !outgoing.some((o) => o.id === t.id)) outgoing.push(view(t));
     const needle = 'note://' + id.toLowerCase();
-    const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && (!linking || linking.has(n.id) || this.plain.has(n.id)) && bodyOf(n).toLowerCase().includes(needle)).map(view);
+    const hints = linking ? null : nameHints(note);
+    const linksHere = (n: Note, low: string) => low.includes(needle) || (!!linker && n.vaultId === note.vaultId && (!hints || hints.some((h) => low.includes(h))) && linker.linksTo(n, note));
+    const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && (!linking || linking.has(n.id) || this.plain.has(n.id)) && linksHere(n, bodyOf(n).toLowerCase())).map(view);
     const seen = new Set([id].concat(outgoing.map((x) => x.id), incoming.map((x) => x.id)));
     const tags = new Set(note.tags || []);
     const byTags = tags.size ? this.notes

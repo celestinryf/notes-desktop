@@ -117,6 +117,18 @@ function sampleOfficeNote(dir, kind) {
   return { id: 'n-' + kind, title: name, body: '', tags: [], folderId: null, filePath: file, fileKind: kind, fileMtime: fs.statSync(file).mtimeMs, createdAt: now, updatedAt: now + 1500 };
 }
 
+function sampleVault(dir) {
+  const root = path.join(dir, 'Garden vault');
+  const files = {
+    'Garden home.md': '# Garden home\n\nThe beds follow [[projects/Bed plan|the bed plan]]. New ideas go to [[Garden ideas]], and the [planting log](Planting%20log.md) tracks what went in.\n',
+    'Garden ideas.md': '# Garden ideas\n\nA small pond by the fence, and a bench under the pear tree. Back to [[Garden home]].\n',
+    'projects/Bed plan.md': '# Bed plan\n\nBeds first, then the gravel path. Start from [Garden home](../Garden%20home.md).\n',
+    'Planting log.md': '# Planting log\n\n- Garlic along the south bed\n- Tulips by the gate\n',
+  };
+  for (const [rel, text] of Object.entries(files)) { const file = path.join(root, rel); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); }
+  return { id: 'v-garden', name: 'Garden vault', path: root, remote: '', autoSync: false, syncMinutes: 5, createdAt: Date.now() };
+}
+
 function sampleFileNote(dir, kind) {
   const [name, content, fileKind] = SAMPLE_FILES[kind];
   const file = path.join(dir, name);
@@ -221,6 +233,7 @@ const SCENES = {
   'tree-pinned': { about: 'All notes as a folder tree: every pinned note first (one from a folder carries its name), and an open folder lists its own pinned notes first', pin: ['n-reading', 'n-retro', 'b2'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: openNote('Q4 planning') },
   'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
   'tree-pinned-folder': { about: 'A folder (Work) as a tree: its own pinned notes above its subfolders', pin: ['n-retro', 'n-1on1'], settings: { lastFolderId: 'f-work', treeExpanded: ['f-proj'] }, run: openNote('1:1 with Sam') },
+  'related-vault': { about: 'A vault note whose [[wikilinks]] and Markdown links show in the related panel', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Garden home')) },
   pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', pin: ['n-reading', 'n-retro', 'b2'], run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
   'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
   'settings-appearance': { about: 'Settings > Appearance: theme, the scheme swatches, the custom colour pickers', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await sleep(400); } },
@@ -267,6 +280,7 @@ async function shoot(theme, name, opts) {
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
   if (SCENES[name].office) data.notes.push(sampleOfficeNote(dataDir, SCENES[name].office));
+  if (SCENES[name].vault) data.vaults.push(sampleVault(dataDir));
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),

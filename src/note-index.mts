@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { StatementSync } from 'node:sqlite';
 import * as H from './shared/helpers.mts';
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const GRAM = 3;
 const LINK_PREFIX = 'note://';
 const LINK_TAIL_MAX = 128;
@@ -23,6 +23,9 @@ const SCHEMA = [
   'CREATE TABLE links (rid INTEGER NOT NULL, tail TEXT NOT NULL)',
   'CREATE INDEX links_tail ON links(tail)',
   'CREATE INDEX links_rid ON links(rid)',
+  'CREATE TABLE leaves (rid INTEGER NOT NULL, leaf TEXT NOT NULL)',
+  'CREATE INDEX leaves_leaf ON leaves(leaf)',
+  'CREATE INDEX leaves_rid ON leaves(rid)',
   'CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   'PRAGMA user_version = ' + INDEX_VERSION,
 ];
@@ -54,6 +57,18 @@ function linkTails(body: string) {
     if (kept) tails.add(kept);
   }
   return Array.from(tails);
+}
+
+function linkLeaves(body: string) {
+  const links = H.vaultLinks(body);
+  const leaves = new Set<string>();
+  for (const target of links.names.concat(links.paths)) {
+    const leaf = H.linkLeaf(target);
+    if (!leaf) continue;
+    leaves.add(leaf);
+    leaves.add(H.stemOf(leaf));
+  }
+  return Array.from(leaves);
 }
 
 function queryGrams(query: string) {
@@ -147,6 +162,9 @@ class NoteIndex {
       dropGrams: p('DELETE FROM grams WHERE rowid = ?'),
       addLink: p('INSERT INTO links (rid, tail) VALUES (?, ?)'),
       dropLinks: p('DELETE FROM links WHERE rid = ?'),
+      addLeaf: p('INSERT INTO leaves (rid, leaf) VALUES (?, ?)'),
+      dropLeaves: p('DELETE FROM leaves WHERE rid = ?'),
+      leafLinks: p('SELECT n.id AS id FROM leaves l JOIN notes n ON n.rid = l.rid WHERE l.leaf = ?'),
       match: p('SELECT n.id AS id FROM grams JOIN notes n ON n.rid = grams.rowid WHERE grams MATCH ?'),
       linksFrom: p('SELECT n.id AS id, l.tail AS tail FROM links l JOIN notes n ON n.rid = l.rid WHERE l.tail >= ? ORDER BY l.tail'),
       count: p('SELECT count(*) AS n FROM notes'),
@@ -180,6 +198,7 @@ class NoteIndex {
     if (rid !== null) {
       s.dropGrams.run(rid);
       s.dropLinks.run(rid);
+      s.dropLeaves.run(rid);
       s.setHash.run(hash, rid);
     } else {
       rid = Number(s.addNote.run(n.id, hash).lastInsertRowid);
@@ -187,6 +206,7 @@ class NoteIndex {
     }
     s.addGrams.run(rid, searchDoc(n));
     for (const tail of linkTails(n.body)) s.addLink.run(rid, tail);
+    for (const leaf of linkLeaves(n.body)) s.addLeaf.run(rid, leaf);
     return replaced ? 'replaced' : 'added';
   }
 
@@ -198,6 +218,7 @@ class NoteIndex {
     const s = this.statements;
     s.dropGrams.run(rid);
     s.dropLinks.run(rid);
+    s.dropLeaves.run(rid);
     s.dropNote.run(rid);
     this.count--;
   }
@@ -259,7 +280,7 @@ class NoteIndex {
     return Array.from(ids);
   }
 
-  incoming(id: string): string[] | null {
+  incoming(id: string, names: readonly string[] = []): string[] | null {
     const key = id.toLowerCase();
     if (!key || key.length > LINK_TAIL_MAX || key.includes('\u0000') || Array.from(key).some(isLoneSurrogate)) return null;
     const ids = new Set<string>();
@@ -269,6 +290,7 @@ class NoteIndex {
       const src = text(row, 'id');
       if (src !== null) ids.add(src);
     }
+    for (const name of names) for (const row of this.statements.leafLinks.all(name)) { const src = text(row, 'id'); if (src !== null) ids.add(src); }
     return Array.from(ids);
   }
 
@@ -288,5 +310,5 @@ class NoteIndex {
   }
 }
 
-export { NoteIndex, indexNoteOf, isCorruption, removeIndexFiles, queryGrams, linkTails, INDEX_VERSION };
+export { NoteIndex, indexNoteOf, isCorruption, removeIndexFiles, queryGrams, linkTails, linkLeaves, INDEX_VERSION };
 export type { IndexNote, IndexChange };

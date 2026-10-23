@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
 import { Store, isFileNote } from './store.mts';
 import { SearchIndex } from './search-index.mts';
+import { linkNamesOf } from './vault-links.mts';
 import { GitSync } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
@@ -484,7 +485,10 @@ function main() {
   handle('stickies:openInNotes', (_e, id) => { const w = showWindow(); if (rendererReady) w.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   handle('notes:tags', () => store.tags());
   handle('notes:counts', () => store.counts());
-  handle('notes:related', async (_e, id) => (store.get(id) ? store.related(id, undefined, await searchIndex.incoming(id)) : null));
+  handle('notes:related', async (_e, id) => {
+    const note = store.get(id);
+    return note ? store.related(id, undefined, await searchIndex.incoming(id, linkNamesOf(note))) : null;
+  });
   handle('folders:setBook', (_e, id, on) => store.setBook(id, on));
   handle('folders:reorderPages', (_e, id, ids) => store.reorderPages(id, ids));
 
