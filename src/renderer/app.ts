@@ -314,8 +314,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return res;
   }
 
+  let paletteRows: Promise<ListRow[]> | null = null;
+
   async function refresh(opts?: RefreshOpts) {
     opts = opts || {};
+    paletteRows = null;
     const listOpts: ListOpts = { query: state.query, sort: settingsNow().sort };
     if (state.view === 'trash') listOpts.trashed = true;
     else if (state.query) {  }
@@ -329,6 +332,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       state.view === 'folder' && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
       wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
     ]);
+    if ((listOpts.query || '') !== state.query) return refresh(opts);
     state.notes = notes;
     state.outline = outline;
     state.tree = tree;
@@ -2601,7 +2605,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   let palette: ReturnType<typeof NotesPalette.create> | null = null;
-  let paletteRows: Promise<ListRow[]> | null = null;
   function openPalette(query?: string) {
     if (!palette) palette = NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
     paletteRows = null;
@@ -2661,7 +2664,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const commandsOnly = /^\s*>/.test(query);
     let notes = null;
     if (!commandsOnly) {
-      if (!paletteRows) paletteRows = api.notes.rows({ sort: 'updated' });
+      if (!paletteRows) paletteRows = api.notes.rows({ sort: 'updated' }).catch((err) => { paletteRows = null; throw err; });
       const q = NotesPalette.queryOf(query);
       const [all, hitIds] = await Promise.all([paletteRows, q ? api.notes.searchIds(q) : Promise.resolve([])]);
       const hits = new Set(hitIds);
