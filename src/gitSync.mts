@@ -4,6 +4,9 @@ import { execFile, spawn } from 'node:child_process';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
+const TREE_EXCLUDE = '.trash/\n.obsidian/\n*.tmp\n';
+
+type FileCommit = { hash: string; at: number; path: string };
 
 type GitRun = { ok: boolean, code: string | number | null | undefined, stdout: string, stderr: string, error: string | null };
 
@@ -71,7 +74,9 @@ class GitSync {
   state: GitState;
   onChange: (state: GitState) => void;
   beforeSnapshot: () => void;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void }) {
+  workTree: () => string | null;
+  gitDir: string;
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -84,6 +89,36 @@ class GitSync {
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
     this.beforeSnapshot = opts.beforeSnapshot || (() => {});
+    this.workTree = opts.workTree || (() => null);
+    this.gitDir = path.join(this.dir, '.git');
+  }
+
+  _inTree(tree: string, args: string[], timeoutMs?: number) {
+    return run(['-c', 'core.quotePath=false', '--git-dir', this.gitDir, '--work-tree', tree].concat(args), tree, timeoutMs);
+  }
+
+  _excludeTreeNoise() {
+    const file = path.join(this.gitDir, 'info', 'exclude');
+    let have = '';
+    try { have = fs.readFileSync(file, 'utf8'); } catch (_) {  }
+    if (have.includes(TREE_EXCLUDE)) return;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, have + (have && !have.endsWith('\n') ? '\n' : '') + TREE_EXCLUDE);
+  }
+
+  async _stage(): Promise<GitRun | null> {
+    const tree = this.workTree();
+    if (tree) {
+      this._excludeTreeNoise();
+      return this._inTree(tree, ['add', '-A'], 120000);
+    }
+    if (!(await this.takeSnapshot())) return null;
+    return run(['add', '-A', '--', 'notes.json'], this.dir);
+  }
+
+  _staged() {
+    const tree = this.workTree();
+    return tree ? this._inTree(tree, ['diff', '--cached', '--quiet']) : run(['diff', '--cached', '--quiet'], this.dir);
   }
 
   status() {
@@ -183,15 +218,17 @@ class GitSync {
       if (prev) { try { await prev; } catch (_) {  } }
       if (!(await this.available())) return { ok: false, error: 'git unavailable' };
       if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
-      try { if (!(await this.takeSnapshot())) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; } }
+      let add: GitRun | null;
+      try { add = await this._stage(); }
       catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message }); return { ok: false, error: err.message }; }
-      const add = await run(['add', '-A', '--', 'notes.json'], this.dir);
+      if (!add) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
       if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
-      const staged = await run(['diff', '--cached', '--quiet'], this.dir);
+      const staged = await this._staged();
       if (staged.ok) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
       const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
       const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir);
       if (!r.ok) { this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
+      if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
       this._set({ lastError: null, pending: false });
       await this.refreshCounts();
       if (this.state.remote) await this.push();
@@ -209,9 +246,9 @@ class GitSync {
     return { ok: true };
   }
 
-  async history(limit?: number) {
+  async history(limit?: number, onlyPath?: string) {
     if (!this.state.initialized) return [];
-    const r = await run(['log', '--format=%H%x1f%ct%x1f%s', '-n', String(limit || 50)], this.dir);
+    const r = await run(['log', '--format=%H%x1f%ct%x1f%s', '-n', String(limit || 50)].concat(onlyPath ? ['--', onlyPath] : []), this.dir);
     if (!r.ok) return [];
     return r.stdout.split('\n').filter(Boolean).map((line) => {
       const [hash, ts, subject] = line.split('\x1f');
@@ -223,6 +260,23 @@ class GitSync {
     if (!hashes.length) return true;
     return eachBlob(hashes.map((h) => h + ':notes.json'), this.dir, 20000, visit);
   }
+
+  async fileHistory(relPath: string, limit?: number): Promise<FileCommit[]> {
+    if (!this.state.initialized) return [];
+    const r = await run(['-c', 'core.quotePath=false', 'log', '--follow', '--format=%x1e%H%x1f%ct', '--name-only', '-n', String(limit || 50), '--', relPath], this.dir);
+    if (!r.ok) return [];
+    return r.stdout.split('\x1e').map((chunk) => chunk.trim()).filter(Boolean).map((chunk) => {
+      const [head, ...rest] = chunk.split('\n');
+      const [hash, ts] = head.split('\x1f');
+      return { hash, at: parseInt(ts, 10) * 1000, path: rest.map((l) => l.trim()).find(Boolean) || relPath };
+    });
+  }
+
+  async eachFileAt(commits: readonly FileCommit[], visit: (index: number, text: string | null) => void) {
+    if (!commits.length) return true;
+    return eachBlob(commits.map((c) => c.hash + ':' + c.path), this.dir, 20000, visit);
+  }
 }
 
+export type { FileCommit };
 export { GitSync };
