@@ -2,7 +2,7 @@
 
 A notes app for Windows that opens from anywhere with **Ctrl+Alt+N**. It keeps your notes, Markdown files, Word documents, PDFs and code files in one place. Everything stays on your computer, and syncing goes through a git repository you own, not a cloud account.
 
-![Notes in the light theme: the folder tree, a note with a checklist and a table](docs/screenshots/notes-light.png)
+![Notes in the light theme with the Rose colour scheme: the folder tree, a note with a checklist and a table](docs/screenshots/notes-light.png)
 
 **Status:** in development. Notes runs on Windows 10 and 11, from source. Installers and a macOS version are planned.
 
@@ -69,7 +69,7 @@ npm start
 - Text size, a full-width or narrower writing column, always on top, and resizable panes.
 - Hide the sidebar (Ctrl+\\) or the note list (Ctrl+Shift+\\). A hidden sidebar slides in when the pointer reaches the left edge.
 
-![Notes in the dark theme](docs/screenshots/notes-dark.png)
+![Notes in the dark theme with the Paper colour scheme](docs/screenshots/notes-dark.png)
 
 ## Files it opens
 
@@ -92,7 +92,7 @@ Open a file with Ctrl+O, **Open file…** at the bottom left, or by dropping it 
 - **WordCraft and GridCraft (optional):** Notes can host two web apps built from Rust: [WordCraft](https://github.com/celestinryf/wordcraft), a full word processor for the Word family, and [GridCraft](https://github.com/celestinryf/gridcraft), a spreadsheet. Notes looks for their web builds in `%USERPROFILE%\wordcraft\dist\web` and `%USERPROFILE%\gridcraft\dist\web`, or in the folders named by `NOTES_APP_WORDCRAFT_DIR` and `NOTES_APP_GRIDCRAFT_DIR`.
 - **MarkItDown (optional):** with Microsoft's [MarkItDown](https://github.com/microsoft/markitdown) installed (`pip install "markitdown[all]"`), search also finds the text inside `.xlsx` and `.xls` files.
 
-![The command palette](docs/screenshots/command-palette.png)
+![The command palette, in the light theme with the Rose colour scheme](docs/screenshots/command-palette.png)
 
 ## Vaults and git sync
 
