@@ -1,4 +1,4 @@
-import { Editor, Extension, InputRule, Node as TiptapNode, mergeAttributes, nodeInputRule, nodePasteRule, type Attributes, type ChainedCommands, type FocusPosition, type Range as TextRange } from '@tiptap/core';
+import { Editor, Extension, InputRule, Node as TiptapNode, mergeAttributes, nodePasteRule, type Attributes, type ChainedCommands, type FocusPosition, type Range as TextRange } from '@tiptap/core';
 import type { MarkdownSerializerState } from '@tiptap/pm/markdown';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { EditorState, NodeSelection, TextSelection, Plugin, PluginKey } from '@tiptap/pm/state';
@@ -38,8 +38,12 @@ const PlainText = Text.extend({
   addStorage() {
     return {
       markdown: {
-        serialize(state: MarkdownSerializerState, node: PMNode) {
-          state.text(String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;'));
+        serialize(state: MarkdownSerializerState, node: PMNode, parent: PMNode, index: number) {
+          const text = String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;');
+          const next = parent.maybeChild(index + 1);
+          const beforeLink = !!next && next.type.name === 'wikiLink' && !next.attrs.embed && text.endsWith('!');
+          state.text(beforeLink ? text.slice(0, -1) : text);
+          if (beforeLink) state.write('\\!');
         },
         parse: {},
       },
@@ -157,12 +161,17 @@ const WIKI_LINK_PASTED = /(!?)\[\[([^[\]\n]+)\]\]/g;
 const wikiAttrs = (m: RegExpMatchArray) => ({ raw: m[2], embed: m[1] === '!' });
 const parsersWithWikiLinks = new WeakSet<MarkdownIt>();
 
+const insideLink = (state: StateInline) => 'linkLevel' in state && typeof state.linkLevel === 'number' && state.linkLevel > 0;
+
 function wikiLinkRule(state: StateInline, silent: boolean) {
+  if (silent || insideLink(state)) return false;
   const first = state.src.charCodeAt(state.pos);
   if (first !== 0x5b && first !== 0x21) return false;
   const m = WIKI_LINK_AT.exec(state.src.slice(state.pos, state.posMax));
-  if (!m) return false;
-  if (!silent) state.push('wikilink', '', 0).meta = wikiAttrs(m);
+  if (!m || state.src.charCodeAt(state.pos + m[0].length) === 0x28) return false;
+  const token = state.push('wikilink', '', 0);
+  token.meta = wikiAttrs(m);
+  token.content = m[0];
   state.pos += m[0].length;
   return true;
 }
@@ -171,6 +180,8 @@ function addWikiLinks(md: MarkdownIt) {
   if (parsersWithWikiLinks.has(md)) return;
   parsersWithWikiLinks.add(md);
   md.inline.ruler.before('link', 'wikilink', wikiLinkRule);
+  const asText = md.renderer.renderInlineAsText.bind(md.renderer);
+  md.renderer.renderInlineAsText = (tokens, options, env) => tokens.map((t) => (t.type === 'wikilink' ? t.content : asText([t], options, env))).join('');
   md.renderer.rules.wikilink = (tokens, idx) => {
     const meta: unknown = tokens[idx].meta;
     if (!isRecord(meta) || typeof meta.raw !== 'string') return '';
@@ -226,14 +237,14 @@ const WikiLink = TiptapNode.create({
         serialize(state: MarkdownSerializerState, node: PMNode) {
           const raw = String(node.attrs.raw);
           const inTable = 'inTable' in state && state.inTable === true;
-          state.write((node.attrs.embed ? '!' : '') + '[[' + (inTable ? raw.replace(/(^|[^\\])\|/g, '$1\\|') : raw) + ']]');
+          state.write((node.attrs.embed ? '!' : '') + '[[' + (inTable ? raw.replace(/(?<!\\)\|/g, '\\|') : raw) + ']]');
         },
         parse: { setup: addWikiLinks },
       },
     };
   },
   addInputRules() {
-    return [nodeInputRule({ find: WIKI_LINK_TYPED, type: this.type, getAttributes: wikiAttrs })];
+    return [new InputRule({ find: WIKI_LINK_TYPED, handler: ({ state, range, match }) => { state.tr.replaceWith(range.from, range.to, this.type.create(wikiAttrs(match))); } })];
   },
   addKeyboardShortcuts() {
     const edge = (forward: boolean, extend: boolean) => () => lineEdge(this.editor.view, forward, extend);
@@ -281,22 +292,28 @@ function wikiLinkStatus(resolve: WikiLinkResolver | undefined, requests: { reset
           },
         },
         view: (view) => {
+          let queued = false;
           const check = () => {
-            if (!resolve) return;
+            if (!resolve || view.isDestroyed) return;
             const names = wikiNames(view.state.doc);
             const key = names.join('\n');
             if (key === asked) return;
             asked = key;
-            if (!names.length) { view.dispatch(view.state.tr.setMeta(wikiStatusKey, { unresolved: new Set() }).setMeta('addToHistory', false)); return; }
+            if (!names.length) {
+              const status = wikiStatusKey.getState(view.state);
+              if (status && status.unresolved.size) view.dispatch(view.state.tr.setMeta(wikiStatusKey, { unresolved: new Set() }).setMeta('addToHistory', false));
+              return;
+            }
             resolve(names).then((ids) => {
               if (!ids || asked !== key || view.isDestroyed) return;
               const unresolved = new Set(names.filter((_, i) => !ids[i]));
               view.dispatch(view.state.tr.setMeta(wikiStatusKey, { unresolved }).setMeta('addToHistory', false));
             }).catch(() => {});
           };
-          requests.reset = () => { asked = null; check(); };
-          check();
-          return { update: check };
+          const soon = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; check(); }); };
+          requests.reset = () => { asked = null; soon(); };
+          soon();
+          return { update: soon };
         },
       })];
     },

@@ -89,7 +89,7 @@ class VaultLinker {
     const name = rel.split('/').pop() || rel;
     const stem = H.stemOf(name);
     const relStem = rel.slice(0, rel.length - name.length) + stem;
-    return [stem, relStem, rel].find((text) => this.resolveName(source, text.toLowerCase()) === target) || null;
+    return [stem, relStem, rel].find((text) => !/[[\]|#^]/.test(text) && this.resolveName(source, H.wikiLinkName(text)) === target) || null;
   }
 
   linksTo(source: Note, target: Note) {

@@ -358,7 +358,7 @@ function wikiLinkLabel(inner: string) {
   const [target, heading] = parts[0].split('#');
   const name = target.split('^')[0].trim().replace(WIKI_NOTE_EXT, '');
   const section = (heading || '').split('^')[0].trim();
-  return section ? (name ? name + ' > ' + section : section) : name || inner.trim();
+  return section ? (name ? name + ' > ' + section : section) : name || inner.trim() || '[[' + inner + ']]';
 }
 
 function vaultLinks(body: string) {

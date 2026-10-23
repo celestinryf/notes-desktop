@@ -552,7 +552,7 @@
     const [target, heading] = parts[0].split("#");
     const name = target.split("^")[0].trim().replace(WIKI_NOTE_EXT, "");
     const section = (heading || "").split("^")[0].trim();
-    return section ? name ? name + " > " + section : section : name || inner.trim();
+    return section ? name ? name + " > " + section : section : name || inner.trim() || "[[" + inner + "]]";
   }
   function vaultLinks(body) {
     const text = String(body || "").replace(/(```|~~~)[\s\S]*?(?:\1|$)/g, " ").replace(/`[^`\n]*`/g, " ");
@@ -2906,6 +2906,7 @@
         const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
         const scored = q ? notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
         items = scored.slice(0, 8).map((n) => ({ id: n.id, title: deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: relativeTime(n.updatedAt), note: n }));
+        prefetchWikiLinks(items);
         if (q) items.push({ id: "new", title: 'New note "' + truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
       }
       inline.trigger = t;
@@ -2966,10 +2967,12 @@
         if (i === inline.active) c.scrollIntoView({ block: "nearest" });
       });
     }
+    const wikiTexts = /* @__PURE__ */ new Map();
     function hideInlineMenu() {
       el.inlineMenu.classList.add("hidden");
       inline.trigger = null;
       inline.items = [];
+      wikiTexts.clear();
     }
     function inlineMenuKey(e) {
       if (e.isComposing || e.keyCode === 229) return false;
@@ -3016,9 +3019,9 @@
         return;
       }
       const typed = "[[" + t.query;
-      const insertLink = async (title, targetId) => {
+      const insertLink = async (title, targetId, known) => {
         const noteId = state.currentId;
-        const wiki = noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
+        const wiki = known !== void 0 ? known : noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
         if (state.currentId !== noteId) return false;
         const r = rich.selectionRange();
         const at = rich.textAt(range) === typed ? range : { from: r.to, to: r.to };
@@ -3040,7 +3043,28 @@
         toast('Created "' + truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
-      if (it.note) await insertLink(it.title, it.note.id);
+      if (it.note) await insertLink(it.title, it.note.id, it.wiki);
+    }
+    function prefetchWikiLinks(items) {
+      const noteId = state.currentId;
+      if (!noteId || !state.current || !state.current.vaultId) {
+        for (const it of items) it.wiki = null;
+        return;
+      }
+      for (const it of items) {
+        if (!it.note) continue;
+        const key = noteId + "\n" + it.note.id;
+        const known = wikiTexts.get(key);
+        if (known !== void 0) {
+          it.wiki = known;
+          continue;
+        }
+        api.notes.wikiLinkFor(noteId, it.note.id).then((wiki) => {
+          wikiTexts.set(key, wiki);
+          if (state.currentId === noteId) it.wiki = wiki;
+        }).catch(() => {
+        });
+      }
     }
     function syncTextViews(note) {
       const none = lockedNow() || isViewerOnlyFile3(note);

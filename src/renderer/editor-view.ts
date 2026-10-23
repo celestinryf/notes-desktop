@@ -93,7 +93,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
     { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
   ];
-  type InlineItem = { id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: ListRow, create?: string };
+  type InlineItem = { id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: ListRow, create?: string, wiki?: string | null };
   const inline: { trigger: InlineTrigger | null, items: InlineItem[], active: number, dismissedAt: string | null, notes: ListRow[] | null, seq: number } = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
 
   async function showInlineMenu(t: InlineTrigger | null) {
@@ -112,6 +112,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
       const scored = q ? notes.map((n) => ({ n, s: H.fuzzyScore(q, H.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
       items = scored.slice(0, 8).map((n) => ({ id: n.id, title: H.deriveTitle(n), icon: n.locked ? 'lock' : 'notebook-text', keys: H.relativeTime(n.updatedAt), note: n }));
+      prefetchWikiLinks(items);
       if (q) items.push({ id: 'new', title: 'New note "' + H.truncate(q, 40) + '"', icon: 'square-pen', keys: '', create: q });
     }
     inline.trigger = t;
@@ -160,10 +161,12 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     [...el.inlineMenu.children].forEach((c, i) => { c.classList.toggle('is-active', i === inline.active); c.setAttribute('aria-selected', String(i === inline.active)); if (i === inline.active) c.scrollIntoView({ block: 'nearest' }); });
   }
 
+  const wikiTexts = new Map<string, string | null>();
   function hideInlineMenu() {
     el.inlineMenu.classList.add('hidden');
     inline.trigger = null;
     inline.items = [];
+    wikiTexts.clear();
   }
 
   function inlineMenuKey(e: KeyboardEvent) {
@@ -201,9 +204,9 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       return;
     }
     const typed = '[[' + t.query;
-    const insertLink = async (title: string, targetId: string) => {
+    const insertLink = async (title: string, targetId: string, known?: string | null) => {
       const noteId = state.currentId;
-      const wiki = noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
+      const wiki = known !== undefined ? known : noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
       if (state.currentId !== noteId) return false;
       const r = rich.selectionRange();
       const at = rich.textAt(range) === typed ? range : { from: r.to, to: r.to };
@@ -220,7 +223,19 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       toast('Created "' + H.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
       return;
     }
-    if (it.note) await insertLink(it.title, it.note.id);
+    if (it.note) await insertLink(it.title, it.note.id, it.wiki);
+  }
+
+  function prefetchWikiLinks(items: InlineItem[]) {
+    const noteId = state.currentId;
+    if (!noteId || !state.current || !state.current.vaultId) { for (const it of items) it.wiki = null; return; }
+    for (const it of items) {
+      if (!it.note) continue;
+      const key = noteId + '\n' + it.note.id;
+      const known = wikiTexts.get(key);
+      if (known !== undefined) { it.wiki = known; continue; }
+      api.notes.wikiLinkFor(noteId, it.note.id).then((wiki) => { wikiTexts.set(key, wiki); if (state.currentId === noteId) it.wiki = wiki; }).catch(() => {});
+    }
   }
 
   function syncTextViews(note: PublicNote | null) {
