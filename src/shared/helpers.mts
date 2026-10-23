@@ -5,8 +5,55 @@ type FileSource = Partial<Pick<Note, 'filePath' | 'fileKind'>> | null | undefine
 type Sortable = Partial<Pick<Note, 'title' | 'body'>> & Pick<Note, 'pinned' | 'createdAt' | 'updatedAt'>;
 type PaneName = 'sidebarWidth' | 'listWidth';
 
-function firstLine(text?: string | null) {
+type FrontMatterBlock = { open: string; inner: string[]; close: string; trailing: string; nl: string; length: number };
+type TextLine = { line: string; end: string };
+
+const FENCE_LINE = /^---[ \t]*$/;
+const YAML_KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
+
+function looksLikeYaml(lines: readonly string[]) {
+  return lines.every((l) => !l.trim() || /^\s/.test(l) || /^#/.test(l) || /^-(\s|$)/.test(l) || YAML_KEY_LINE.test(l));
+}
+
+function readFrontMatter(text: string | null | undefined): FrontMatterBlock | null {
   const s = String(text || '');
+  if (!s.startsWith('---')) return null;
+  let at = 0;
+  const next = (): TextLine | null => {
+    if (at >= s.length) return null;
+    const nl = s.indexOf('\n', at);
+    const cr = nl > at && s[nl - 1] === '\r';
+    const item = nl === -1 ? { line: s.slice(at), end: '' } : { line: s.slice(at, cr ? nl - 1 : nl), end: cr ? '\r\n' : '\n' };
+    at = nl === -1 ? s.length : nl + 1;
+    return item;
+  };
+  const first = next();
+  if (!first || !FENCE_LINE.test(first.line) || !first.end) return null;
+  const inner: string[] = [];
+  let close: TextLine | null = null;
+  for (let l = next(); l; l = next()) {
+    if (FENCE_LINE.test(l.line)) { close = l; break; }
+    inner.push(l.line);
+  }
+  if (!close || !looksLikeYaml(inner)) return null;
+  let length = at;
+  let trailing = '';
+  for (let l = next(); l && !l.line.trim() && l.end; l = next()) { trailing += l.line + l.end; length = at; }
+  return { open: first.line + first.end, inner, close: close.line + close.end, trailing, nl: first.end, length };
+}
+
+function frontMatterText(b: FrontMatterBlock) {
+  return b.open + b.inner.map((l) => l + b.nl).join('') + b.close + b.trailing;
+}
+
+function splitFrontMatter(text: string | null | undefined) {
+  const s = String(text || '');
+  const b = readFrontMatter(s);
+  return b ? { front: s.slice(0, b.length), body: s.slice(b.length) } : { front: '', body: s };
+}
+
+function firstLine(text?: string | null) {
+  const s = splitFrontMatter(text).body;
   for (let start = 0; start <= s.length;) {
     const nl = s.indexOf('\n', start);
     const end = nl === -1 ? s.length : nl;
@@ -35,7 +82,7 @@ function deriveTitle(note: TitleSource) {
 
 function snippet(note: TitleSource, max?: number) {
   max = max || 100;
-  const body = String((note && note.body) || '').slice(0, Math.max(600, max * 8));
+  const body = splitFrontMatter(note && note.body).body.slice(0, Math.max(600, max * 8));
   const title = String((note && note.title) || '').trim();
   const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
@@ -132,15 +179,15 @@ function sortNotes<T extends Sortable>(notes: T[], sort: SortKey) {
   }).map((k) => k.n);
 }
 
-type RowView = Pick<PublicNote, 'id' | 'title' | 'body' | 'folderId' | 'pinned' | 'sticky' | 'fileKind' | 'filePath' | 'remindAt' | 'live' | 'createdAt' | 'updatedAt'> & Partial<Pick<PublicNote, 'locked' | 'unlocked'>>;
+type RowView = Pick<PublicNote, 'id' | 'title' | 'body' | 'folderId' | 'pinned' | 'sticky' | 'fileKind' | 'filePath' | 'remindAt' | 'live' | 'createdAt' | 'updatedAt'> & Partial<Pick<PublicNote, 'locked' | 'unlocked' | 'home'>>;
 
-function outlineRow(p: RowView): OutlineRow {
-  return { id: p.id, title: deriveTitle(p), folderId: p.folderId || null, pinned: !!p.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
+function outlineRow(p: RowView, home?: boolean): OutlineRow {
+  return { home: home ?? !!p.home, id: p.id, title: deriveTitle(p), folderId: p.folderId || null, pinned: !!p.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
     fileKind: p.fileKind || null, filePath: p.filePath || null, remindAt: p.remindAt || null, live: p.live || null, createdAt: p.createdAt, updatedAt: p.updatedAt };
 }
 
-function listRow(p: RowView & Pick<PublicNote, 'tags' | 'trashedAt'>, query?: string): ListRow {
-  const row: ListRow = Object.assign(outlineRow(p), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+function listRow(p: RowView & Pick<PublicNote, 'tags' | 'trashedAt'>, query?: string, home?: boolean): ListRow {
+  const row: ListRow = Object.assign(outlineRow(p, home), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
   if (query) row.excerpt = matchExcerpt(p, query);
   return row;
 }
@@ -531,7 +578,9 @@ const tenths = (n: number) => Math.round(n * 10) / 10;
 const traceClock = () => tenths(performance.timeOrigin + performance.now());
 const msSince = (start: number) => tenths(performance.now() - start);
 
+export type { FrontMatterBlock };
 export {
+  splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
   isObjectLike, isRecord, tenths, traceClock, msSince,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,

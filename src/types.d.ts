@@ -68,7 +68,7 @@ interface Note {
   updatedAt: number;
   trashedAt: number | null;
 }
-interface PublicNote extends Omit<Note, 'lock'> { locked: boolean; unlocked: boolean }
+interface PublicNote extends Omit<Note, 'lock'> { locked: boolean; unlocked: boolean; home: boolean }
 type FileNote = Note & { filePath: string };
 
 interface Folder {
@@ -87,7 +87,7 @@ interface FolderNode {
 }
 
 interface Vault {
-  id: string; name: string; path: string; remote: string; autoSync: boolean; syncMinutes: number; createdAt: number;
+  id: string; name: string; path: string; remote: string; autoSync: boolean; syncMinutes: number; createdAt: number; home: boolean;
 }
 
 interface ListOpts {
@@ -96,7 +96,7 @@ interface ListOpts {
 }
 interface OutlineRow {
   id: string; title: string; folderId: string | null; pinned: boolean; locked: boolean; unlocked: boolean; sticky: boolean;
-  fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; createdAt: number; updatedAt: number;
+  fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; createdAt: number; updatedAt: number; home: boolean;
 }
 type IndexNotePayload = { id: string; title: string; body: string; tags: string[] };
 type IndexUpdate = { notes: readonly Note[]; dropped: readonly string[]; purge?: boolean } | null;

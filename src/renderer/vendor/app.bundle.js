@@ -161,6 +161,7 @@
     UNTITLED: () => UNTITLED,
     WORD_EXT: () => WORD_EXT,
     WORD_TO_DOCX_EXT: () => WORD_TO_DOCX_EXT,
+    YAML_KEY_LINE: () => YAML_KEY_LINE,
     ZIP_DOC_EXT: () => ZIP_DOC_EXT,
     clampPane: () => clampPane,
     countWords: () => countWords,
@@ -170,6 +171,7 @@
     fileStamp: () => fileStamp,
     firstLine: () => firstLine,
     formatWhen: () => formatWhen,
+    frontMatterText: () => frontMatterText,
     fuzzyScore: () => fuzzyScore,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
@@ -193,6 +195,7 @@
     parseAccelerator: () => parseAccelerator,
     parseTags: () => parseTags,
     plainTextFromMarkdown: () => plainTextFromMarkdown,
+    readFrontMatter: () => readFrontMatter,
     relativeTime: () => relativeTime,
     safeFilename: () => safeFilename,
     searchHay: () => searchHay,
@@ -200,6 +203,7 @@
     sortNotes: () => sortNotes,
     speechChunks: () => speechChunks,
     splitAtHeadings: () => splitAtHeadings,
+    splitFrontMatter: () => splitFrontMatter,
     stemOf: () => stemOf,
     tenths: () => tenths,
     toggleTaskAt: () => toggleTaskAt,
@@ -212,8 +216,53 @@
     wikiLinkTarget: () => wikiLinkTarget
   });
   var UNTITLED = "Untitled";
-  function firstLine(text) {
+  var FENCE_LINE = /^---[ \t]*$/;
+  var YAML_KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
+  function looksLikeYaml(lines) {
+    return lines.every((l) => !l.trim() || /^\s/.test(l) || /^#/.test(l) || /^-(\s|$)/.test(l) || YAML_KEY_LINE.test(l));
+  }
+  function readFrontMatter(text) {
     const s = String(text || "");
+    if (!s.startsWith("---")) return null;
+    let at = 0;
+    const next = () => {
+      if (at >= s.length) return null;
+      const nl = s.indexOf("\n", at);
+      const cr = nl > at && s[nl - 1] === "\r";
+      const item = nl === -1 ? { line: s.slice(at), end: "" } : { line: s.slice(at, cr ? nl - 1 : nl), end: cr ? "\r\n" : "\n" };
+      at = nl === -1 ? s.length : nl + 1;
+      return item;
+    };
+    const first = next();
+    if (!first || !FENCE_LINE.test(first.line) || !first.end) return null;
+    const inner = [];
+    let close = null;
+    for (let l = next(); l; l = next()) {
+      if (FENCE_LINE.test(l.line)) {
+        close = l;
+        break;
+      }
+      inner.push(l.line);
+    }
+    if (!close || !looksLikeYaml(inner)) return null;
+    let length = at;
+    let trailing = "";
+    for (let l = next(); l && !l.line.trim() && l.end; l = next()) {
+      trailing += l.line + l.end;
+      length = at;
+    }
+    return { open: first.line + first.end, inner, close: close.line + close.end, trailing, nl: first.end, length };
+  }
+  function frontMatterText(b) {
+    return b.open + b.inner.map((l) => l + b.nl).join("") + b.close + b.trailing;
+  }
+  function splitFrontMatter(text) {
+    const s = String(text || "");
+    const b = readFrontMatter(s);
+    return b ? { front: s.slice(0, b.length), body: s.slice(b.length) } : { front: "", body: s };
+  }
+  function firstLine(text) {
+    const s = splitFrontMatter(text).body;
     for (let start = 0; start <= s.length; ) {
       const nl = s.indexOf("\n", start);
       const end = nl === -1 ? s.length : nl;
@@ -239,7 +288,7 @@
   }
   function snippet(note, max) {
     max = max || 100;
-    const body = String(note && note.body || "").slice(0, Math.max(600, max * 8));
+    const body = splitFrontMatter(note && note.body).body.slice(0, Math.max(600, max * 8));
     const title = String(note && note.title || "").trim();
     const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
@@ -324,8 +373,9 @@
       return cmp(a, b) || b.n.updatedAt - a.n.updatedAt;
     }).map((k) => k.n);
   }
-  function outlineRow(p) {
+  function outlineRow(p, home) {
     return {
+      home: home ?? !!p.home,
       id: p.id,
       title: deriveTitle(p),
       folderId: p.folderId || null,
@@ -341,8 +391,8 @@
       updatedAt: p.updatedAt
     };
   }
-  function listRow(p, query) {
-    const row = Object.assign(outlineRow(p), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+  function listRow(p, query, home) {
+    const row = Object.assign(outlineRow(p, home), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
     if (query) row.excerpt = matchExcerpt(p, query);
     return row;
   }
@@ -731,9 +781,6 @@
   var msSince = (start) => tenths(performance.now() - start);
 
   // src/shared/front-matter.mts
-  var OPEN_LINE = /^---[ \t]*$/;
-  var CLOSE_LINE = /^---[ \t]*$/;
-  var KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
   var TAG_KEYS = ["tags", "tag"];
   var RESERVED = /^(true|false|yes|no|on|off|null|~|y|n)$/i;
   var MARKDOWN_PATH = /\.(md|markdown|mdx)$/i;
@@ -743,55 +790,6 @@
   }
   function fileKeepsTags(n) {
     return !!n.vaultId && n.fileKind === "text" && isMarkdownPath(n.filePath);
-  }
-  function linesWithEnds(text) {
-    const out = [];
-    let at = 0;
-    while (at < text.length) {
-      const nl = text.indexOf("\n", at);
-      if (nl === -1) {
-        out.push({ line: text.slice(at), end: "" });
-        break;
-      }
-      const cr = nl > at && text[nl - 1] === "\r";
-      out.push({ line: text.slice(at, cr ? nl - 1 : nl), end: cr ? "\r\n" : "\n" });
-      at = nl + 1;
-    }
-    return out;
-  }
-  function looksLikeYaml(lines) {
-    return lines.every((l) => !l.trim() || /^\s/.test(l) || /^#/.test(l) || /^-(\s|$)/.test(l) || KEY_LINE.test(l));
-  }
-  function readBlock(text) {
-    const lines = linesWithEnds(String(text || ""));
-    if (!lines.length || !OPEN_LINE.test(lines[0].line) || !lines[0].end) return null;
-    let close = -1;
-    for (let i = 1; i < lines.length; i++) if (CLOSE_LINE.test(lines[i].line)) {
-      close = i;
-      break;
-    }
-    if (close === -1) return null;
-    const inner = lines.slice(1, close).map((l) => l.line);
-    if (!looksLikeYaml(inner)) return null;
-    let after = close + 1;
-    while (after < lines.length && !lines[after].line.trim() && lines[after].end) after++;
-    const whole = (l) => l.line + l.end;
-    return {
-      open: whole(lines[0]),
-      inner,
-      close: whole(lines[close]),
-      trailing: lines.slice(close + 1, after).map(whole).join(""),
-      nl: lines[0].end,
-      length: lines.slice(0, after).reduce((n, l) => n + l.line.length + l.end.length, 0)
-    };
-  }
-  function blockText(b) {
-    return b.open + b.inner.map((l) => l + b.nl).join("") + b.close + b.trailing;
-  }
-  function splitFrontMatter(text) {
-    const s = String(text || "");
-    const b = readBlock(s);
-    return b ? { front: s.slice(0, b.length), body: s.slice(b.length) } : { front: "", body: s };
   }
   function stripComment(value) {
     let quote = "";
@@ -845,7 +843,7 @@
   }
   function keyRange(inner, names) {
     for (let i = 0; i < inner.length; i++) {
-      const m = KEY_LINE.exec(inner[i]);
+      const m = YAML_KEY_LINE.exec(inner[i]);
       if (!m || !names.includes(unquote(m[1]).toLowerCase())) continue;
       let end = i + 1;
       for (let j = i + 1; j < inner.length; j++) {
@@ -873,7 +871,7 @@
     return rest.map((l) => /^\s*-\s*(.*)$/.exec(l)).filter((m) => !!m).map((m) => unquote(stripComment(m[1]))).filter(Boolean);
   }
   function frontMatterTags(text) {
-    const b = readBlock(String(text || ""));
+    const b = readFrontMatter(String(text || ""));
     if (!b) return [];
     const r = keyRange(b.inner, TAG_KEYS);
     return r ? parseTags(rangeValues(b.inner, r)) : [];
@@ -896,7 +894,7 @@
   function setNoteTags(text, wanted) {
     const s = String(text || "");
     const inline = new Set(inlineTags(s));
-    const b = readBlock(s);
+    const b = readFrontMatter(s);
     const range = b ? keyRange(b.inner, TAG_KEYS) : null;
     const spelled = /* @__PURE__ */ new Map();
     if (b && range) for (const v of rangeValues(b.inner, range)) {
@@ -908,7 +906,7 @@
     if (parseTags(keep).join(",") === current.join(",")) return s;
     const nl = b ? b.nl : s.includes("\r\n") ? "\r\n" : "\n";
     const flow = !!range && stripComment(range.inline).trim().startsWith("[");
-    const name = b && range ? (KEY_LINE.exec(b.inner[range.start]) || [])[1] || "tags" : "tags";
+    const name = b && range ? (YAML_KEY_LINE.exec(b.inner[range.start]) || [])[1] || "tags" : "tags";
     const lines = !keep.length ? [] : flow ? [name + ": [" + keep.map(yamlScalar).join(", ") + "]"] : [name + ":"].concat(keep.map((t) => "  - " + yamlScalar(t)));
     if (!b) return "---" + nl + lines.join(nl) + nl + "---" + nl + s;
     const inner = b.inner.slice();
@@ -916,7 +914,7 @@
     else inner.push(...lines);
     const body = s.slice(b.length);
     if (!inner.some((l) => l.trim())) return body;
-    return blockText(Object.assign({}, b, { inner })) + body;
+    return frontMatterText(Object.assign({}, b, { inner })) + body;
   }
 
   // src/shared/themes.mts
