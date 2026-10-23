@@ -1697,6 +1697,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader();
     el.titleInput.value = note.title;
     el.tagsInput.value = note.tags.join(', ');
+    state.tagsEdited = false;
     el.bodyInput.value = note.body;
     const hasPending = applyPendingTo(note);
     const plainFile = isPlainTextFile(note);
@@ -1986,8 +1987,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
+  function showSavedTags(patch: FieldsPatch, updated: PublicNote) {
+    if (patch.tags !== undefined && el.tagsInput.value === patch.tags) state.tagsEdited = false;
+    if (state.tagsEdited || document.activeElement === el.tagsInput) return;
+    if (H.parseTags(el.tagsInput.value).join(',') !== updated.tags.join(',')) el.tagsInput.value = updated.tags.join(', ');
+  }
+
   function applyFreshFileBody(fresh: PublicNote) {
     state.current = fresh;
+    showSavedTags({ title: fresh.title }, fresh);
     if (!state.dirty) state.pending.delete(fresh.id);
     src.reload(fresh.body);
     if (isViewerOnlyFile(fresh)) { showCode(fresh, true); renderFileRow(fresh); updateStatus(fresh); return; }
@@ -2049,7 +2057,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function currentPatch() {
-    const patch: FieldsPatch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+    const patch: FieldsPatch = { title: el.titleInput.value, body: el.bodyInput.value, tags: state.tagsEdited ? el.tagsInput.value : undefined };
     if (isViewerOnlyFile(state.current)) delete patch.body;
     if (lockedNow()) delete patch.body;
     return patch;
@@ -2126,7 +2134,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const p = state.pending.get(note.id);
     if (!p) return false;
     el.titleInput.value = p.title;
-    el.tagsInput.value = p.tags;
+    if (p.tags !== undefined) { el.tagsInput.value = p.tags; state.tagsEdited = true; }
     if (typeof p.body === 'string' && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body;
     return true;
   }
@@ -2172,6 +2180,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (book.id && patch.title !== undefined) { const t = el.bookTabs.querySelector('.book-tab[data-id="' + id + '"] .t'); if (t) t.textContent = H.truncate(H.deriveTitle(updated) || 'Untitled', 28); }
       if (updated.filePath && el.filePath.textContent !== updated.filePath) { el.filePath.textContent = updated.filePath; el.filePath.title = updated.filePath; }
       if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
+      showSavedTags(patch, updated);
     }
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx !== -1) {
@@ -3032,6 +3041,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
     el.titleInput.addEventListener('input', scheduleSave);
     el.titleInput.addEventListener('input', renderActiveTabTitle);
+    el.tagsInput.addEventListener('input', () => { state.tagsEdited = true; });
     el.tagsInput.addEventListener('input', scheduleSave);
     el.bodyInput.addEventListener('input', scheduleSave);
     el.titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); focusBody(); } });

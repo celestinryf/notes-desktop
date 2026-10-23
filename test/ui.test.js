@@ -604,6 +604,23 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   fs.writeFileSync(path.join(vaultDir, 'Work', 'External.md'), 'external\n');
   await waitFor('external file became a note', () => readNotes().notes.some((n) => n.title === 'External' && n.vaultId === vault.id), 15000);
 
+  const tagged = path.join(vaultDir, 'Tagged.md');
+  fs.writeFileSync(tagged, '---\ntags: [alpha]\n---\n\nTagged body\n');
+  await waitFor('front matter note appeared', () => readNotes().notes.some((n) => n.title === 'Tagged' && n.vaultId === vault.id), 15000);
+  await useSourceMode(false);
+  await page.click('.note-row:has-text("Tagged")');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Tagged');
+  assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true, 'a note with front matter opens rendered');
+  assert.equal(await page.inputValue('#tagsInput'), 'alpha');
+  assert.ok(!(await page.textContent('#richEditor')).includes('tags:'), 'the rendered view does not show the front matter');
+  await page.click('#richEditor p:has-text("Tagged body")');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' more');
+  await waitFor('a rendered edit keeps the front matter', () => /^---\ntags: \[alpha\]\n---\n\nTagged body more\n?$/.test(fs.readFileSync(tagged, 'utf8')));
+  await page.fill('#tagsInput', 'alpha, beta');
+  await waitFor('a tag edit lands in the front matter', () => /^---\ntags: \[alpha, beta\]\n---\n\nTagged body more\n?$/.test(fs.readFileSync(tagged, 'utf8')));
+  await useSourceMode(true);
+
   await page.click('.note-row:has-text("Groceries")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
   await sleep(600);
@@ -754,7 +771,7 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
   await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  const lossy = '---\ntitle: front matter\n---\n\nbody\n';
+  const lossy = '~~~\nfenced with tildes\n~~~\n\nbody\n';
   await page.fill('#bodyInput', lossy);
   await waitFor('lossy body saved', () => findNote('Gamma (copy)').body === lossy);
   const opened = app.waitForEvent('window', { timeout: 15000 });

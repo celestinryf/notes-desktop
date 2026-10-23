@@ -1482,6 +1482,7 @@
     info: null,
     systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
     dirty: false,
+    tagsEdited: false,
     saveTimer: null,
     savingFor: null,
     lastTypedAt: 0,
@@ -8524,6 +8525,7 @@
       if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader();
       el.titleInput.value = note.title;
       el.tagsInput.value = note.tags.join(", ");
+      state.tagsEdited = false;
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
       const plainFile = isPlainTextFile6(note);
@@ -8800,8 +8802,14 @@
         toast("Reloaded from disk: the file changed outside Notes.");
       }
     }
+    function showSavedTags(patch, updated) {
+      if (patch.tags !== void 0 && el.tagsInput.value === patch.tags) state.tagsEdited = false;
+      if (state.tagsEdited || document.activeElement === el.tagsInput) return;
+      if (parseTags(el.tagsInput.value).join(",") !== updated.tags.join(",")) el.tagsInput.value = updated.tags.join(", ");
+    }
     function applyFreshFileBody(fresh) {
       state.current = fresh;
+      showSavedTags({ title: fresh.title }, fresh);
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
       if (isViewerOnlyFile9(fresh)) {
@@ -8864,7 +8872,7 @@
       if (state.current) updateStatus(state.current);
     }
     function currentPatch() {
-      const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+      const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: state.tagsEdited ? el.tagsInput.value : void 0 };
       if (isViewerOnlyFile9(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
@@ -8952,7 +8960,10 @@
       const p = state.pending.get(note.id);
       if (!p) return false;
       el.titleInput.value = p.title;
-      el.tagsInput.value = p.tags;
+      if (p.tags !== void 0) {
+        el.tagsInput.value = p.tags;
+        state.tagsEdited = true;
+      }
       if (typeof p.body === "string" && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body;
       return true;
     }
@@ -9004,6 +9015,7 @@
           el.filePath.title = updated.filePath;
         }
         if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
+        showSavedTags(patch, updated);
       }
       const idx = state.notes.findIndex((n) => n.id === id);
       if (idx !== -1) {
@@ -10282,6 +10294,9 @@
       el.destroyBtn.addEventListener("click", destroyCurrent);
       el.titleInput.addEventListener("input", scheduleSave);
       el.titleInput.addEventListener("input", renderActiveTabTitle);
+      el.tagsInput.addEventListener("input", () => {
+        state.tagsEdited = true;
+      });
       el.tagsInput.addEventListener("input", scheduleSave);
       el.bodyInput.addEventListener("input", scheduleSave);
       el.titleInput.addEventListener("keydown", (e) => {
