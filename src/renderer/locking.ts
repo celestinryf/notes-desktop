@@ -116,7 +116,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
     renderStickyButton(updated);
     updateStatus(updated);
     const idx = state.notes.findIndex((n) => n.id === updated.id);
-    if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
+    if (idx !== -1) { state.notes[idx] = H.listRow(updated, state.query); refreshRow(updated); }
   }
 
   async function lockMenuAction(action: string) {

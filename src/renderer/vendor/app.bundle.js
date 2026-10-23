@@ -180,12 +180,15 @@
     isRecord: () => isRecord,
     isTableFile: () => isTableFile,
     isViewerOnlyFile: () => isViewerOnlyFile,
+    listRow: () => listRow,
     mailtoFor: () => mailtoFor,
     markdownToNote: () => markdownToNote,
+    matchExcerpt: () => matchExcerpt,
     matchesQuery: () => matchesQuery,
     msSince: () => msSince,
     noteLinkIds: () => noteLinkIds,
     noteToMarkdown: () => noteToMarkdown,
+    outlineRow: () => outlineRow,
     parseAccelerator: () => parseAccelerator,
     parseTags: () => parseTags,
     plainTextFromMarkdown: () => plainTextFromMarkdown,
@@ -203,10 +206,13 @@
   });
   var UNTITLED = "Untitled";
   function firstLine(text) {
-    const lines = String(text || "").split(/\r?\n/);
-    for (const line of lines) {
-      const t = line.replace(/^#+\s*/, "").trim();
+    const s = String(text || "");
+    for (let start = 0; start <= s.length; ) {
+      const nl = s.indexOf("\n", start);
+      const end = nl === -1 ? s.length : nl;
+      const t = s.slice(start, end).replace(/^#+\s*/, "").trim();
       if (t) return t;
+      start = end + 1;
     }
     return "";
   }
@@ -294,17 +300,81 @@
     const hay = (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
     return tokens.every((t) => hay.indexOf(t) !== -1);
   }
+  var titleOrder = new Intl.Collator(void 0, { sensitivity: "base" });
   var SORTS = {
-    updated: (a, b) => b.updatedAt - a.updatedAt,
-    created: (a, b) => b.createdAt - a.createdAt,
-    title: (a, b) => deriveTitle(a).localeCompare(deriveTitle(b), void 0, { sensitivity: "base" })
+    updated: (a, b) => b.n.updatedAt - a.n.updatedAt,
+    created: (a, b) => b.n.createdAt - a.n.createdAt,
+    title: (a, b) => titleOrder.compare(a.title, b.title)
   };
   function sortNotes(notes, sort) {
     const cmp = SORTS[sort] || SORTS.updated;
-    return notes.slice().sort((a, b) => {
-      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-      return cmp(a, b) || b.updatedAt - a.updatedAt;
-    });
+    const byTitle = cmp === SORTS.title;
+    return notes.map((n) => ({ n, title: byTitle ? deriveTitle(n) : "" })).sort((a, b) => {
+      if (!!a.n.pinned !== !!b.n.pinned) return a.n.pinned ? -1 : 1;
+      return cmp(a, b) || b.n.updatedAt - a.n.updatedAt;
+    }).map((k) => k.n);
+  }
+  function outlineRow(p) {
+    return {
+      id: p.id,
+      title: deriveTitle(p),
+      folderId: p.folderId || null,
+      pinned: !!p.pinned,
+      locked: !!p.locked,
+      unlocked: !!p.unlocked,
+      sticky: !!p.sticky,
+      fileKind: p.fileKind || null,
+      filePath: p.filePath || null,
+      remindAt: p.remindAt || null,
+      live: p.live || null,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt
+    };
+  }
+  function listRow(p, query) {
+    const row = Object.assign(outlineRow(p), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+    if (query) row.excerpt = matchExcerpt(p, query);
+    return row;
+  }
+  var EXCERPT_BEFORE = 30;
+  var EXCERPT_LENGTH = 80;
+  var collapseSpace = (s) => s.replace(/\s+/g, " ");
+  function firstMatch(low, words) {
+    let first = -1;
+    for (const w of words) {
+      const i = low.indexOf(w);
+      if (i !== -1 && (first === -1 || i < first)) first = i;
+    }
+    return first;
+  }
+  function clipAround(text, at, longer) {
+    const start = Math.max(0, at - EXCERPT_BEFORE);
+    let out = text.slice(start, start + EXCERPT_LENGTH);
+    if (start > 0) out = "\u2026" + out.replace(/^\S*\s/, "");
+    if (longer) out = out.replace(/\s\S*$/, "") + "\u2026";
+    return out;
+  }
+  function matchExcerpt(note, query) {
+    const raw = String(note && note.body || "");
+    const words = tokenize(query);
+    const noMatch = () => (note && note.tags || []).filter((t) => words.some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || snippet(note, EXCERPT_LENGTH);
+    const rawLow = raw.toLowerCase();
+    if (rawLow.length !== raw.length) {
+      const body = collapseSpace(raw);
+      const at = firstMatch(body.toLowerCase(), words);
+      return at === -1 ? noMatch() : clipAround(body, at, Math.max(0, at - EXCERPT_BEFORE) + EXCERPT_LENGTH < body.length);
+    }
+    const first = firstMatch(rawLow, words);
+    if (first === -1) return noMatch();
+    const head = collapseSpace(raw.slice(0, first));
+    const end = Math.max(0, head.length - EXCERPT_BEFORE) + EXCERPT_LENGTH;
+    let tail = "";
+    for (let grow = 2 * EXCERPT_LENGTH; ; grow *= 2) {
+      const stop = Math.min(raw.length, first + grow);
+      tail = collapseSpace(raw.slice(first, stop));
+      if (head.length + tail.length > end || stop === raw.length) break;
+    }
+    return clipAround(head + tail, head.length, head.length + tail.length > end);
   }
   var MODIFIERS = /* @__PURE__ */ new Set(["commandorcontrol", "cmdorctrl", "control", "ctrl", "alt", "option", "shift", "super", "meta", "command", "cmd", "altgr"]);
   var NAMED_KEYS = /* @__PURE__ */ new Set(["space", "tab", "backspace", "delete", "insert", "return", "enter", "up", "down", "left", "right", "home", "end", "pageup", "pagedown", "escape", "esc", "plus", "numadd", "numsub", "nummult", "numdiv", "numdec"]);
@@ -998,10 +1068,13 @@
       });
       return { open, close, isOpen: () => dialog.open };
     }
+    function queryOf(query) {
+      return String(query || "").replace(/^\s*>\s*/, "").trim();
+    }
     function rank(query, commands, notes) {
       const raw = String(query || "");
       const commandsOnly = /^\s*>/.test(raw);
-      const q = raw.replace(/^\s*>\s*/, "").trim();
+      const q = queryOf(raw);
       const scored = (arr, text) => arr.map((x) => ({ x, s: fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
       const cmds = scored(commands, (c) => c.title + (c.keywords ? " " + c.keywords : ""));
       if (commandsOnly || !notes) return cmds;
@@ -1013,7 +1086,7 @@
       const strong = cmds.length && fuzzyScore(q, cmds[0].title) >= 500;
       return strong ? [...cmds.slice(0, 10), ...noteHits] : [...noteHits, ...cmds.slice(0, 8)];
     }
-    return { create, rank };
+    return { create, rank, queryOf };
   })();
 
   // src/renderer/dom.ts
@@ -2756,7 +2829,7 @@
         items = SLASH.map((b) => ({ b, s: fuzzyScore(t.query, b.title + " " + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
         if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
       } else {
-        const known = !inline.notes || !inline.trigger || inline.trigger.kind !== "link" ? await api.notes.list({ sort: "updated" }) : inline.notes;
+        const known = !inline.notes || !inline.trigger || inline.trigger.kind !== "link" ? await api.notes.rows({ sort: "updated" }) : inline.notes;
         inline.notes = known;
         if (seq !== inline.seq) return;
         const q = t.query.trim();
@@ -3001,7 +3074,7 @@
       }
       state.linkRange = state.rich.selectionRange();
       el.linkNoteSelect.innerHTML = '<option value="">\u2014 pick a note \u2014</option>';
-      api.notes.list({ sort: "title" }).then((notes) => {
+      api.notes.rows({ sort: "title" }).then((notes) => {
         for (const n of notes) {
           if (n.id === state.currentId) continue;
           const o = document.createElement("option");
@@ -3301,7 +3374,7 @@
       updateStatus(updated);
       const idx = state.notes.findIndex((n) => n.id === updated.id);
       if (idx !== -1) {
-        state.notes[idx] = updated;
+        state.notes[idx] = listRow(updated, state.query);
         refreshRow(updated);
       }
     }
@@ -6767,8 +6840,10 @@
       toPeer({ type: "settings", settings: res.settings });
       return res;
     }
+    let paletteRows = null;
     async function refresh(opts) {
       opts = opts || {};
+      paletteRows = null;
       const listOpts = { query: state.query, sort: settingsNow().sort };
       if (state.view === "trash") listOpts.trashed = true;
       else if (state.query) {
@@ -6778,13 +6853,14 @@
       else if (state.view === "folder") listOpts.folderId = state.folderId;
       const wantTree = settingsNow().listMode === "tree" && !state.query && (state.view === "all" || state.view === "folder");
       const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
-        api.notes.list(listOpts),
+        api.notes.rows(listOpts),
         api.notes.counts(),
         api.notes.tags(),
         api.folders.tree(),
         state.view === "folder" && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
         wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null)
       ]);
+      if ((listOpts.query || "") !== state.query) return refresh(opts);
       state.notes = notes;
       state.outline = outline;
       state.tree = tree;
@@ -6941,19 +7017,8 @@
       const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "";
       const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
       const inTitle = !q || tokenize(q).some((t) => title.toLowerCase().includes(t));
-      const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + "</span>";
+      const why = inTitle || n.locked && !n.unlocked ? "" : '<span class="row-meta match">' + highlight(n.excerpt ?? matchExcerpt(n, q), q) + "</span>";
       return '<span class="row-name">' + highlight(title, q) + "</span>" + why + where + marks + fileMark + reminderMark(n) + pin;
-    }
-    function matchExcerpt(n, q) {
-      const body = String(n.body || "").replace(/\s+/g, " ");
-      const low = body.toLowerCase();
-      const at = tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-      if (at === void 0) return (n.tags || []).filter((t) => tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => "#" + t).join(" ") || snippet(n, 80);
-      const start = Math.max(0, at - 30);
-      let text = body.slice(start, start + 80);
-      if (start > 0) text = "\u2026" + text.replace(/^\S*\s/, "");
-      if (start + 80 < body.length) text = text.replace(/\s\S*$/, "") + "\u2026";
-      return text;
     }
     function whereMark(n) {
       if (treeModeActive() || state.view === "folder" && !state.query) return "";
@@ -8714,7 +8779,7 @@
           if (updated) {
             const idx = state.notes.findIndex((n) => n.id === id);
             if (idx !== -1) {
-              state.notes[idx] = updated;
+              state.notes[idx] = listRow(updated, state.query);
               refreshRow(updated);
             }
             toast('Saved earlier changes to "' + truncate(deriveTitle(updated), 30) + '"');
@@ -8794,7 +8859,7 @@
       const idx = state.notes.findIndex((n) => n.id === id);
       if (idx !== -1) {
         const prevTags = (state.notes[idx].tags || []).join(",");
-        state.notes[idx] = updated;
+        state.notes[idx] = listRow(updated, state.query);
         refreshRow(updated);
         if (settingsNow().sort === "updated" && idx !== 0) await refresh({ keepEditor: true });
         else if (updated.tags.join(",") !== prevTags) await refresh({ keepEditor: true });
@@ -9272,6 +9337,7 @@
     let palette = null;
     function openPalette(query) {
       if (!palette) palette = NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
+      paletteRows = null;
       closeMoreMenu();
       closeShareMenu();
       palette.open(query);
@@ -9332,7 +9398,13 @@
       const commandsOnly = /^\s*>/.test(query);
       let notes = null;
       if (!commandsOnly) {
-        const all = await api.notes.list({ sort: "updated" });
+        if (!paletteRows) paletteRows = api.notes.rows({ sort: "updated" }).catch((err) => {
+          paletteRows = null;
+          throw err;
+        });
+        const q = NotesPalette.queryOf(query);
+        const [all, hitIds] = await Promise.all([paletteRows, q ? api.notes.searchIds(q) : Promise.resolve([])]);
+        const hits = new Set(hitIds);
         const folders = new Map(flattenTree(state.tree).map((f) => [f.id, f.name]));
         notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
           id: "note-" + n.id,
@@ -9340,7 +9412,7 @@
           title: deriveTitle(n),
           icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
           hint: n.folderId && folders.get(n.folderId) || relativeTime(n.updatedAt),
-          matches: (q) => !n.locked && matchesQuery(n, q),
+          matches: () => !n.locked && hits.has(n.id),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));
       }

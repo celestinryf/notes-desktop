@@ -144,6 +144,7 @@
   });
 
   // src/shared/helpers.mts
+  var titleOrder = new Intl.Collator(void 0, { sensitivity: "base" });
   function isViewerOnlyFile(note) {
     return !!(note && note.filePath && note.fileKind !== "text");
   }

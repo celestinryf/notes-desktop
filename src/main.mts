@@ -373,6 +373,8 @@ function main() {
   const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
   ipcMain.on('app:trace', (_e, event: unknown, fields: unknown) => trace.fromPage(event, fields));
   handle('notes:list', (_e, opts) => store.list(opts).map((n) => store.publicNote(n)));
+  handle('notes:rows', (_e, opts) => store.rows(opts));
+  handle('notes:searchIds', (_e, query) => store.searchIds(typeof query === 'string' ? query : ''));
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
   handle('notes:latestFile', (_e, kind) => {

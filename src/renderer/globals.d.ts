@@ -29,7 +29,7 @@ interface RendererState {
   menuFolderId: string | null;
   editingFolder: FolderEdit | null;
   query: string;
-  notes: PublicNote[];
+  notes: ListRow[];
   currentId: string | null;
   current: PublicNote | null;
   sourceMode: boolean;

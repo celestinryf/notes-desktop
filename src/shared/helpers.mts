@@ -6,10 +6,13 @@ type Sortable = Partial<Pick<Note, 'title' | 'body'>> & Pick<Note, 'pinned' | 'c
 type PaneName = 'sidebarWidth' | 'listWidth';
 
 function firstLine(text?: string | null) {
-  const lines = String(text || '').split(/\r?\n/);
-  for (const line of lines) {
-    const t = line.replace(/^#+\s*/, '').trim();
+  const s = String(text || '');
+  for (let start = 0; start <= s.length;) {
+    const nl = s.indexOf('\n', start);
+    const end = nl === -1 ? s.length : nl;
+    const t = s.slice(start, end).replace(/^#+\s*/, '').trim();
     if (t) return t;
+    start = end + 1;
   }
   return '';
 }
@@ -108,18 +111,75 @@ function matchesQuery(note: Pick<Note, 'title' | 'body' | 'tags'>, query?: strin
   return tokens.every((t) => hay.indexOf(t) !== -1);
 }
 
-const SORTS: Record<SortKey, (a: Sortable, b: Sortable) => number> = {
-  updated: (a, b) => b.updatedAt - a.updatedAt,
-  created: (a, b) => b.createdAt - a.createdAt,
-  title: (a, b) => deriveTitle(a).localeCompare(deriveTitle(b), undefined, { sensitivity: 'base' }),
+type Keyed<T> = { n: T; title: string };
+const titleOrder = new Intl.Collator(undefined, { sensitivity: 'base' });
+const SORTS: Record<SortKey, (a: Keyed<Sortable>, b: Keyed<Sortable>) => number> = {
+  updated: (a, b) => b.n.updatedAt - a.n.updatedAt,
+  created: (a, b) => b.n.createdAt - a.n.createdAt,
+  title: (a, b) => titleOrder.compare(a.title, b.title),
 };
 
 function sortNotes<T extends Sortable>(notes: T[], sort: SortKey) {
   const cmp = SORTS[sort] || SORTS.updated;
-  return notes.slice().sort((a, b) => {
-    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-    return cmp(a, b) || (b.updatedAt - a.updatedAt);
-  });
+  const byTitle = cmp === SORTS.title;
+  return notes.map((n): Keyed<T> => ({ n, title: byTitle ? deriveTitle(n) : '' })).sort((a, b) => {
+    if (!!a.n.pinned !== !!b.n.pinned) return a.n.pinned ? -1 : 1;
+    return cmp(a, b) || (b.n.updatedAt - a.n.updatedAt);
+  }).map((k) => k.n);
+}
+
+type RowView = Pick<PublicNote, 'id' | 'title' | 'body' | 'folderId' | 'pinned' | 'sticky' | 'fileKind' | 'filePath' | 'remindAt' | 'live' | 'createdAt' | 'updatedAt'> & Partial<Pick<PublicNote, 'locked' | 'unlocked'>>;
+
+function outlineRow(p: RowView): OutlineRow {
+  return { id: p.id, title: deriveTitle(p), folderId: p.folderId || null, pinned: !!p.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
+    fileKind: p.fileKind || null, filePath: p.filePath || null, remindAt: p.remindAt || null, live: p.live || null, createdAt: p.createdAt, updatedAt: p.updatedAt };
+}
+
+function listRow(p: RowView & Pick<PublicNote, 'tags' | 'trashedAt'>, query?: string): ListRow {
+  const row: ListRow = Object.assign(outlineRow(p), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+  if (query) row.excerpt = matchExcerpt(p, query);
+  return row;
+}
+
+const EXCERPT_BEFORE = 30;
+const EXCERPT_LENGTH = 80;
+const collapseSpace = (s: string) => s.replace(/\s+/g, ' ');
+
+function firstMatch(low: string, words: string[]) {
+  let first = -1;
+  for (const w of words) { const i = low.indexOf(w); if (i !== -1 && (first === -1 || i < first)) first = i; }
+  return first;
+}
+
+function clipAround(text: string, at: number, longer: boolean) {
+  const start = Math.max(0, at - EXCERPT_BEFORE);
+  let out = text.slice(start, start + EXCERPT_LENGTH);
+  if (start > 0) out = '…' + out.replace(/^\S*\s/, '');
+  if (longer) out = out.replace(/\s\S*$/, '') + '…';
+  return out;
+}
+
+function matchExcerpt(note: TitleSource & { tags?: string[] }, query: string) {
+  const raw = String((note && note.body) || '');
+  const words = tokenize(query);
+  const noMatch = () => ((note && note.tags) || []).filter((t) => words.some((w) => t.toLowerCase().includes(w))).map((t) => '#' + t).join(' ') || snippet(note, EXCERPT_LENGTH);
+  const rawLow = raw.toLowerCase();
+  if (rawLow.length !== raw.length) {
+    const body = collapseSpace(raw);
+    const at = firstMatch(body.toLowerCase(), words);
+    return at === -1 ? noMatch() : clipAround(body, at, Math.max(0, at - EXCERPT_BEFORE) + EXCERPT_LENGTH < body.length);
+  }
+  const first = firstMatch(rawLow, words);
+  if (first === -1) return noMatch();
+  const head = collapseSpace(raw.slice(0, first));
+  const end = Math.max(0, head.length - EXCERPT_BEFORE) + EXCERPT_LENGTH;
+  let tail = '';
+  for (let grow = 2 * EXCERPT_LENGTH; ; grow *= 2) {
+    const stop = Math.min(raw.length, first + grow);
+    tail = collapseSpace(raw.slice(first, stop));
+    if (head.length + tail.length > end || stop === raw.length) break;
+  }
+  return clipAround(head + tail, head.length, head.length + tail.length > end);
 }
 
 const MODIFIERS = new Set(['commandorcontrol', 'cmdorctrl', 'control', 'ctrl', 'alt', 'option', 'shift', 'super', 'meta', 'command', 'cmd', 'altgr']);
@@ -423,7 +483,7 @@ export {
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
-  countWords, tokenize, matchesQuery, sortNotes, parseAccelerator, displayAccelerator,
+  countWords, tokenize, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
   plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds,
 };
