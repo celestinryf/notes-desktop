@@ -485,6 +485,8 @@ function main() {
   handle('stickies:openInNotes', (_e, id) => { const w = showWindow(); if (rendererReady) w.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   handle('notes:tags', () => store.tags());
   handle('notes:counts', () => store.counts());
+  handle('notes:resolveLinks', (_e, id, names) => (typeof id === 'string' && Array.isArray(names) ? store.resolveWikiLinks(id, names.filter((n): n is string => typeof n === 'string')) : []));
+  handle('notes:wikiLinkFor', (_e, sourceId, targetId) => (typeof sourceId === 'string' && typeof targetId === 'string' ? store.wikiLinkFor(sourceId, targetId) : null));
   handle('notes:related', async (_e, id) => {
     const note = store.get(id);
     return note ? store.related(id, undefined, await searchIndex.incoming(id, linkNamesOf(note))) : null;

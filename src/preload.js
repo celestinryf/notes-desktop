@@ -48,6 +48,8 @@ const notesApi = {
     tags: invoke('notes:tags'),
     counts: invoke('notes:counts'),
     related: invoke('notes:related'),
+    resolveLinks: invoke('notes:resolveLinks'),
+    wikiLinkFor: invoke('notes:wikiLinkFor'),
   },
   signature: {
     get: invoke('signature:get'),

@@ -83,6 +83,15 @@ class VaultLinker {
     return Array.from(out);
   }
 
+  linkText(source: Note, target: Note) {
+    if (!target.filePath || target.vaultId !== source.vaultId) return null;
+    const rel = path.relative(this.root, target.filePath).replace(/\\/g, '/');
+    const name = rel.split('/').pop() || rel;
+    const stem = H.stemOf(name);
+    const relStem = rel.slice(0, rel.length - name.length) + stem;
+    return [stem, relStem, rel].find((text) => this.resolveName(source, text.toLowerCase()) === target) || null;
+  }
+
   linksTo(source: Note, target: Note) {
     const links = linksOf(source);
     return links.names.some((name) => this.resolveName(source, name) === target) || links.paths.some((href) => this.resolvePath(source, href) === target);

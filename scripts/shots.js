@@ -120,7 +120,7 @@ function sampleOfficeNote(dir, kind) {
 function sampleVault(dir) {
   const root = path.join(dir, 'Garden vault');
   const files = {
-    'Garden home.md': '# Garden home\n\nThe beds follow [[projects/Bed plan|the bed plan]]. New ideas go to [[Garden ideas]], and the [planting log](Planting%20log.md) tracks what went in.\n',
+    'Garden home.md': '# Garden home\n\nThe beds follow [[projects/Bed plan|the bed plan]]. New ideas go to [[Garden ideas]], and the [planting log](Planting%20log.md) tracks what went in. The [[Compost]] note is still to write.\n',
     'Garden ideas.md': '# Garden ideas\n\nA small pond by the fence, and a bench under the pear tree. Back to [[Garden home]].\n',
     'projects/Bed plan.md': '# Bed plan\n\nBeds first, then the gravel path. Start from [Garden home](../Garden%20home.md).\n',
     'Planting log.md': '# Planting log\n\n- Garlic along the south bed\n- Tulips by the gate\n',
@@ -234,6 +234,7 @@ const SCENES = {
   'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
   'tree-pinned-folder': { about: 'A folder (Work) as a tree: its own pinned notes above its subfolders', pin: ['n-retro', 'n-1on1'], settings: { lastFolderId: 'f-work', treeExpanded: ['f-proj'] }, run: openNote('1:1 with Sam') },
   'related-vault': { about: 'A vault note whose [[wikilinks]] and Markdown links show in the related panel', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Garden home')) },
+  'wikilink-selected': { about: 'A wikilink selected in the rendered view (clicked, or reached with the arrow keys)', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Garden home'), async (page) => { await page.click('.rich-editor-content a.wikilink >> nth=1'); await sleep(400); }) },
   pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', pin: ['n-reading', 'n-retro', 'b2'], run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
   'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
   'settings-appearance': { about: 'Settings > Appearance: theme, the scheme swatches, the custom colour pickers', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await sleep(400); } },

@@ -52,6 +52,13 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     state.rich = window.NotesEditor.create(el.richEditor, {
       placeholder: 'Start writing. Type / for headings, lists and tables, or [[ to link a note.',
       imageBase: () => H.imageBaseFor(state.current),
+      resolveWikiLinks: async (names: string[]) => {
+        const id = state.currentId;
+        if (!id) return null;
+        const ids = await api.notes.resolveLinks(id, names);
+        return state.currentId === id ? ids : null;
+      },
+      onLinkAtCaret: (on: boolean) => showLinkHint(on),
       onTrigger: (t: InlineTrigger | null) => showInlineMenu(t),
       onTriggerKey: (e: KeyboardEvent) => inlineMenuKey(e),
       onUpdate: (md: string) => {
@@ -63,8 +70,11 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       },
     });
     el.richEditor.addEventListener('click', (e) => {
-      const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
-      if (a && (e.ctrlKey || e.metaKey)) { e.preventDefault(); followLink(a.getAttribute('href')); }
+      if (!(e.ctrlKey || e.metaKey) || !(e.target instanceof Element)) return;
+      const wiki = e.target.closest('a[data-wikilink]');
+      if (wiki) { e.preventDefault(); followWikiLink(wiki.getAttribute('data-wikilink') || ''); return; }
+      const a = e.target.closest('a[href]');
+      if (a) { e.preventDefault(); followLink(a.getAttribute('href')); }
     });
   }
 
@@ -190,22 +200,27 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       if (it.kind) rich.insertBlock(range, it.kind);
       return;
     }
-    if (it.create) {
+    const typed = '[[' + t.query;
+    const insertLink = async (title: string, targetId: string) => {
       const noteId = state.currentId;
+      const wiki = noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
+      if (state.currentId !== noteId) return false;
+      const r = rich.selectionRange();
+      const at = rich.textAt(range) === typed ? range : { from: r.to, to: r.to };
+      if (wiki) rich.insertWikiLinkAt(at, wiki); else rich.insertLinkAt(at, title, 'note://' + targetId);
+      return true;
+    };
+    if (it.create) {
       let created;
       try { created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null }); }
       catch (err) { toast('Could not create the note: ' + (err.message || err)); return; }
-      if (state.currentId !== noteId) return;
-      const typed = '[[' + t.query;
-      const at = rich.textAt(range) === typed ? range : null;
-      if (at) rich.insertLinkAt(at, it.create, 'note://' + created.id);
-      else { const r = rich.selectionRange(); rich.insertLinkAt({ from: r.to, to: r.to }, it.create, 'note://' + created.id); }
+      if (!(await insertLink(it.create, created.id))) return;
       inline.notes = null;
       refresh({ keepEditor: true });
       toast('Created "' + H.truncate(it.create, 40) + '". Ctrl+click the link to open it.');
       return;
     }
-    if (it.note) rich.insertLinkAt(range, it.title, 'note://' + it.note.id);
+    if (it.note) await insertLink(it.title, it.note.id);
   }
 
   function syncTextViews(note: PublicNote | null) {
@@ -275,6 +290,41 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     focusBody();
   }
 
+  const LINK_HINT = 'Alt+Enter opens the link';
+  function showLinkHint(on: boolean) {
+    if (on && (state.sourceMode || el.richEditor.classList.contains('hidden'))) return;
+    if (on) { el.statusCode.textContent = LINK_HINT; el.statusCode.classList.remove('hidden'); return; }
+    if (el.statusCode.textContent === LINK_HINT) { el.statusCode.textContent = ''; el.statusCode.classList.add('hidden'); }
+  }
+
+  async function followWikiLink(raw: string) {
+    const id = state.currentId;
+    if (!id) return;
+    const [target] = await api.notes.resolveLinks(id, [H.wikiLinkName(raw)]);
+    if (state.currentId !== id) return;
+    if (target) { await followLink('note://' + target); return; }
+    const name = H.wikiLinkTarget(raw).replace(/\.(md|markdown|mdx)$/i, '');
+    const message = 'No note named "' + H.wikiLinkLabel(raw) + '" in this vault.';
+    const folderId = state.current && state.current.vaultId ? state.current.folderId : null;
+    if (!folderId || !name || name.includes('/') || /\.[a-z0-9]{2,5}$/i.test(name)) { toast(message); return; }
+    toast(message, { label: 'Create note', run: () => createFromLink(name, folderId) });
+  }
+
+  async function createFromLink(name: string, folderId: string) {
+    let created;
+    try { created = await api.notes.create({ title: name, folderId }); }
+    catch (err) { toast('Could not create the note: ' + (err.message || err)); return; }
+    if (state.rich) state.rich.refreshWikiLinks();
+    await refresh({ keepEditor: true });
+    await followLink('note://' + created.id);
+  }
+
+  function openLinkAtCaret() {
+    const at = state.rich && !state.sourceMode ? state.rich.linkAtCaret() : null;
+    if (!at) { toast('Put the caret on a link to open it.'); return; }
+    if ('wiki' in at) followWikiLink(at.wiki); else followLink(at.href);
+  }
+
   async function followLink(href: string | null) {
     href = String(href || '');
     if (/^note:\/\//i.test(href)) {
@@ -308,5 +358,5 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
 
   function tableStatsNow() { return tableStats; }
 
-  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
+  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret };
 }

@@ -206,7 +206,10 @@
     tokenize: () => tokenize,
     traceClock: () => traceClock,
     truncate: () => truncate,
-    vaultLinks: () => vaultLinks
+    vaultLinks: () => vaultLinks,
+    wikiLinkLabel: () => wikiLinkLabel,
+    wikiLinkName: () => wikiLinkName,
+    wikiLinkTarget: () => wikiLinkTarget
   });
   var UNTITLED = "Untitled";
   function firstLine(text) {
@@ -534,12 +537,29 @@
     return out;
   }
   var URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+  var WIKI_ALIAS = /\\?\|/;
+  var WIKI_NOTE_EXT = /\.(md|markdown|mdx)$/i;
+  function wikiLinkTarget(inner) {
+    return inner.split(WIKI_ALIAS)[0].split(/[#^]/)[0].trim();
+  }
+  function wikiLinkName(inner) {
+    return wikiLinkTarget(inner).replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
+  }
+  function wikiLinkLabel(inner) {
+    const parts = inner.split(WIKI_ALIAS);
+    const alias = parts.slice(1).join("|").trim();
+    if (alias) return alias;
+    const [target, heading] = parts[0].split("#");
+    const name = target.split("^")[0].trim().replace(WIKI_NOTE_EXT, "");
+    const section = (heading || "").split("^")[0].trim();
+    return section ? name ? name + " > " + section : section : name || inner.trim();
+  }
   function vaultLinks(body) {
     const text = String(body || "").replace(/(```|~~~)[\s\S]*?(?:\1|$)/g, " ").replace(/`[^`\n]*`/g, " ");
     const names = /* @__PURE__ */ new Set();
     const paths = /* @__PURE__ */ new Set();
     for (const m of text.matchAll(/\[\[([^[\]\n]+?)\]\]/g)) {
-      const name = m[1].split(/\\?\|/)[0].split(/[#^]/)[0].trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
+      const name = wikiLinkName(m[1]);
       if (name) names.add(name);
     }
     for (const m of text.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)/g)) {
@@ -2815,6 +2835,13 @@
       state.rich = window.NotesEditor.create(el.richEditor, {
         placeholder: "Start writing. Type / for headings, lists and tables, or [[ to link a note.",
         imageBase: () => imageBaseFor(state.current),
+        resolveWikiLinks: async (names) => {
+          const id = state.currentId;
+          if (!id) return null;
+          const ids = await api.notes.resolveLinks(id, names);
+          return state.currentId === id ? ids : null;
+        },
+        onLinkAtCaret: (on) => showLinkHint(on),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),
         onUpdate: (md) => {
@@ -2826,8 +2853,15 @@
         }
       });
       el.richEditor.addEventListener("click", (e) => {
-        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
-        if (a && (e.ctrlKey || e.metaKey)) {
+        if (!(e.ctrlKey || e.metaKey) || !(e.target instanceof Element)) return;
+        const wiki = e.target.closest("a[data-wikilink]");
+        if (wiki) {
+          e.preventDefault();
+          followWikiLink(wiki.getAttribute("data-wikilink") || "");
+          return;
+        }
+        const a = e.target.closest("a[href]");
+        if (a) {
           e.preventDefault();
           followLink(a.getAttribute("href"));
         }
@@ -2981,8 +3015,18 @@
         if (it.kind) rich.insertBlock(range, it.kind);
         return;
       }
-      if (it.create) {
+      const typed = "[[" + t.query;
+      const insertLink = async (title, targetId) => {
         const noteId = state.currentId;
+        const wiki = noteId && state.current && state.current.vaultId ? await api.notes.wikiLinkFor(noteId, targetId) : null;
+        if (state.currentId !== noteId) return false;
+        const r = rich.selectionRange();
+        const at = rich.textAt(range) === typed ? range : { from: r.to, to: r.to };
+        if (wiki) rich.insertWikiLinkAt(at, wiki);
+        else rich.insertLinkAt(at, title, "note://" + targetId);
+        return true;
+      };
+      if (it.create) {
         let created;
         try {
           created = await api.notes.create({ title: it.create, folderId: state.current ? state.current.folderId || null : null });
@@ -2990,20 +3034,13 @@
           toast("Could not create the note: " + (err.message || err));
           return;
         }
-        if (state.currentId !== noteId) return;
-        const typed = "[[" + t.query;
-        const at = rich.textAt(range) === typed ? range : null;
-        if (at) rich.insertLinkAt(at, it.create, "note://" + created.id);
-        else {
-          const r = rich.selectionRange();
-          rich.insertLinkAt({ from: r.to, to: r.to }, it.create, "note://" + created.id);
-        }
+        if (!await insertLink(it.create, created.id)) return;
         inline.notes = null;
         refresh({ keepEditor: true });
         toast('Created "' + truncate(it.create, 40) + '". Ctrl+click the link to open it.');
         return;
       }
-      if (it.note) rich.insertLinkAt(range, it.title, "note://" + it.note.id);
+      if (it.note) await insertLink(it.title, it.note.id);
     }
     function syncTextViews(note) {
       const none = lockedNow() || isViewerOnlyFile3(note);
@@ -3081,6 +3118,58 @@
       if (!isTableFile(state.current)) updateSettings({ editorMode: next ? "source" : "rendered" });
       focusBody();
     }
+    const LINK_HINT = "Alt+Enter opens the link";
+    function showLinkHint(on) {
+      if (on && (state.sourceMode || el.richEditor.classList.contains("hidden"))) return;
+      if (on) {
+        el.statusCode.textContent = LINK_HINT;
+        el.statusCode.classList.remove("hidden");
+        return;
+      }
+      if (el.statusCode.textContent === LINK_HINT) {
+        el.statusCode.textContent = "";
+        el.statusCode.classList.add("hidden");
+      }
+    }
+    async function followWikiLink(raw) {
+      const id = state.currentId;
+      if (!id) return;
+      const [target] = await api.notes.resolveLinks(id, [wikiLinkName(raw)]);
+      if (state.currentId !== id) return;
+      if (target) {
+        await followLink("note://" + target);
+        return;
+      }
+      const name = wikiLinkTarget(raw).replace(/\.(md|markdown|mdx)$/i, "");
+      const message = 'No note named "' + wikiLinkLabel(raw) + '" in this vault.';
+      const folderId = state.current && state.current.vaultId ? state.current.folderId : null;
+      if (!folderId || !name || name.includes("/") || /\.[a-z0-9]{2,5}$/i.test(name)) {
+        toast(message);
+        return;
+      }
+      toast(message, { label: "Create note", run: () => createFromLink(name, folderId) });
+    }
+    async function createFromLink(name, folderId) {
+      let created;
+      try {
+        created = await api.notes.create({ title: name, folderId });
+      } catch (err) {
+        toast("Could not create the note: " + (err.message || err));
+        return;
+      }
+      if (state.rich) state.rich.refreshWikiLinks();
+      await refresh({ keepEditor: true });
+      await followLink("note://" + created.id);
+    }
+    function openLinkAtCaret() {
+      const at = state.rich && !state.sourceMode ? state.rich.linkAtCaret() : null;
+      if (!at) {
+        toast("Put the caret on a link to open it.");
+        return;
+      }
+      if ("wiki" in at) followWikiLink(at.wiki);
+      else followLink(at.href);
+    }
     async function followLink(href) {
       href = String(href || "");
       if (/^note:\/\//i.test(href)) {
@@ -3129,7 +3218,7 @@
     function tableStatsNow() {
       return tableStats;
     }
-    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog };
+    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret };
   }
 
   // src/renderer/vaults-panel.ts
@@ -8522,7 +8611,7 @@
     const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
     const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
-    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
@@ -9394,6 +9483,7 @@
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
+        cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
         cmd("find", "This note", "Find in this note", "search", "Ctrl+Shift+F", () => openFind(), noteOpen),
         cmd("image-size", "This note", "Image: actual size, or fitted to the pane", "zoom-in", "Enter on the picture", () => toggleImageSize(), !!(state.current && state.current.fileKind === "image"), "zoom 100% fit picture"),
         cmd("replace", "This note", "Find and replace", "replace", "Ctrl+H", () => {
@@ -9718,6 +9808,11 @@
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         startDictation();
+        return;
+      }
+      if (e.altKey && !ctrl && !e.shiftKey && e.key === "Enter" && !state.sourceMode && el.richEditor.contains(document.activeElement)) {
+        e.preventDefault();
+        openLinkAtCaret();
         return;
       }
       if (e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
