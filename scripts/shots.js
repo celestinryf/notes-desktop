@@ -11,12 +11,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 60 * 60 * 1000;
 
 function parseArgs(argv) {
-  const out = { scenes: null, themes: ['light', 'dark'], size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null, css: null, screen: false };
+  const out = { scenes: null, themes: ['light', 'dark'], schemes: {}, size: { width: 1280, height: 800 }, out: path.join(os.tmpdir(), 'shots-notes-app'), list: false, eval: null, css: null, screen: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(a + ' needs a value'); return v; };
     if (a === '--scene' || a === '--scenes') out.scenes = next().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--theme') { const t = next(); out.themes = t === 'both' ? ['light', 'dark'] : [t]; }
+    else if (a === '--scheme') out.schemes = parseSchemes(next());
     else if (a === '--size') { const m = /^(\d+)x(\d+)$/.exec(next()); if (!m) throw new Error('--size wants WIDTHxHEIGHT'); out.size = { width: +m[1], height: +m[2] }; }
     else if (a === '--out') out.out = path.resolve(next());
     else if (a === '--list') out.list = true;
@@ -27,6 +28,20 @@ function parseArgs(argv) {
   }
   for (const t of out.themes) if (t !== 'light' && t !== 'dark') throw new Error('--theme is light, dark or both');
   return out;
+}
+
+function parseSchemes(value) {
+  const { SCHEMES } = require('../src/shared/themes.mts');
+  const known = (id) => { if (!Object.hasOwn(SCHEMES, id)) throw new Error('Unknown colour scheme "' + id + '"; known: ' + Object.keys(SCHEMES).join(', ')); return id; };
+  if (!value.includes('=')) return { light: known(value), dark: known(value) };
+  const schemes = {};
+  for (const part of value.split(',')) {
+    const pair = part.split('=').map((s) => s.trim());
+    const [theme, id] = pair;
+    if (pair.length !== 2 || (theme !== 'light' && theme !== 'dark')) throw new Error('--scheme wants a scheme, or light=<scheme>,dark=<scheme>');
+    schemes[theme] = known(id);
+  }
+  return schemes;
 }
 
 async function sampleWordNote(dir) {
@@ -275,6 +290,7 @@ async function shoot(theme, name, opts) {
   const dataDir = tmpDir('notes-shots-');
   const data = seed(Date.now());
   data.settings.theme = theme;
+  if (opts.schemes[theme]) data.settings.colorScheme = opts.schemes[theme];
   Object.assign(data.settings, SCENES[name].settings || {});
   for (const id of SCENES[name].pin || []) data.notes.find((n) => n.id === id).pinned = true;
   data.settings.window = { width: opts.size.width, height: opts.size.height };
