@@ -301,7 +301,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const text = info.hotkeyRegistered ? info.hotkeyDisplay : 'hotkey unavailable';
     el.hotkeyHint.textContent = text;
     el.hotkeyHint2.textContent = text;
-    el.settingsInfo.textContent = (info.notesDir ? 'Notes: ' + info.notesDir + '   ' : '') + 'Data: ' + info.dataDir + (info.hotkeyFallback ? '   (preferred hotkey was taken; using ' + info.hotkeyDisplay + ')' : '');
+    el.settingsInfo.textContent = (info.notesDir ? 'Notes: ' + info.notesDir + ' · ' : info.filesError ? 'Your notes could not be moved into a folder: ' + info.filesError + ' · ' : '') + 'Data: ' + info.dataDir + (info.hotkeyFallback ? '   (preferred hotkey was taken; using ' + info.hotkeyDisplay + ')' : '');
     if (info.saveBlocked) toast('Your notes file could not be read (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once it is free.');
     else if (info.loadError && info.recoveredNotes) toast('Notes file was damaged; restored ' + info.recoveredNotes + (info.recoveredNotes === 1 ? ' note' : ' notes') + ' from the newest backup. The damaged file was kept beside it.');
     else if (info.loadError) toast('Notes file was damaged and no backup was found. The damaged file was kept beside notes.json.');
@@ -313,14 +313,16 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (GUEST || filesNoticeShown || !info) return;
     if (info.filesError) {
       filesNoticeShown = true;
-      toast('Your notes could not be moved into a folder of files (' + info.filesError + '). They are unchanged; Notes tries again when it next starts.');
+      toast('Your notes could not be moved into a folder: ' + info.filesError + '. Your notes are unchanged. Notes will try again the next time it starts.');
       return;
     }
     const moved = info.movedToFiles;
     if (!moved) return;
     filesNoticeShown = true;
-    const renamed = moved.renamed.length ? ' ' + moved.renamed.length + (moved.renamed.length === 1 ? ' name was' : ' names were') + ' changed to be a valid file name.' : '';
-    toast('Your notes are now Markdown files in ' + moved.notesDir + '.' + renamed, { label: 'Show folder', run: showNotesFolder });
+    const one = moved.renamed.length === 1 ? moved.renamed[0] : null;
+    const renamed = one ? ' The ' + one.kind + ' "' + one.from + '" is now "' + one.to + '", a name Windows allows.'
+      : moved.renamed.length ? ' ' + moved.renamed.length + ' names changed to ones Windows allows.' : '';
+    toast('Your notes are now Markdown files that other apps and AI tools can open, in ' + moved.notesDir + '.' + renamed, { label: 'Show folder', run: showNotesFolder });
   }
 
   function showNotesFolder() {
@@ -2668,7 +2670,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('open-file', 'Create', 'Open a file as a note…', 'folder-open', 'Ctrl+O', side('openFiles', () => openFiles()), true, 'markdown pdf word docx txt'),
       cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
       cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
-      cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'files explorer location markdown disk'),
+      cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'folder files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
@@ -3176,7 +3178,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
           if (reason === 'live') {
             if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
           } else if (!state.dirty && !state.inflight.has(fresh.id)) { applyFreshFileBody(fresh); if (reason === 'vault') toast('This note was updated from the vault.'); }
-          else toast('This note changed elsewhere while you were editing. Your text is kept; ' + (fresh.filePath ? 'use Reload to take the disk version.' : 'reopen the note to see the other version.'));
+          else toast('This note changed elsewhere while you were editing. Your text is kept; ' + (fresh.filePath && !fresh.home ? 'use Reload to take the disk version.' : 'reopen the note to see the other version.'));
         }
       }
       if (reason === 'recovered') toast('Your notes file is readable again; saving resumed.');

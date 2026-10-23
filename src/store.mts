@@ -182,7 +182,12 @@ function clearUnfinishedMove(dir: string, marker: string) {
     const full = path.resolve(dir, rel);
     return F.pathKey(full).startsWith(F.pathKey(dir) + '\\') ? full : null;
   };
-  for (const rel of Array.isArray(raw.files) ? raw.files : []) { const full = inside(rel); if (full) { try { fs.rmSync(full, { force: true }); } catch (_) {  } } }
+  for (const entry of Array.isArray(raw.files) ? raw.files : []) {
+    const full = isRecord(entry) ? inside(entry.rel) : null;
+    const at = isRecord(entry) && isFiniteNumber(entry.at) ? entry.at : null;
+    const mtime = full ? F.mtimeOf(full) : null;
+    if (full && at !== null && mtime !== null && Math.abs(mtime - at) < 2000) { try { fs.rmSync(full, { force: true }); } catch (_) {  } }
+  }
   const dirs = (Array.isArray(raw.dirs) ? raw.dirs : []).map(inside).filter((d): d is string => !!d).sort((a, b) => b.length - a.length);
   for (const d of dirs) { try { fs.rmdirSync(d); } catch (_) {  } }
   fs.rmSync(marker, { force: true });
@@ -1055,7 +1060,7 @@ class Store {
     try {
       this._commit(() => {
         note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now();
-        if (sealedPath) { note.filePath = sealedPath; note.fileMtime = F.mtimeOf(sealedPath); note.title = note.title.trim() ? stem(path.basename(sealedPath)) : ''; }
+        if (sealedPath) { note.filePath = sealedPath; note.fileMtime = F.mtimeOf(sealedPath); }
         return note;
       }, undefined, { notes: [note], dropped: [], purge: true });
     } catch (err) {
@@ -1109,7 +1114,7 @@ class Store {
     try {
       this._commit(() => {
         note.lock = null; note.body = text; note.updatedAt = this.now();
-        if (plainPath) { note.filePath = plainPath; note.fileMtime = F.mtimeOf(plainPath); note.title = note.title.trim() ? stem(path.basename(plainPath)) : ''; syncFileTags(note); }
+        if (plainPath) { note.filePath = plainPath; note.fileMtime = F.mtimeOf(plainPath); syncFileTags(note); }
         return note;
       }, undefined, { notes: [note], dropped: [] });
     } catch (err) {
@@ -1315,7 +1320,7 @@ class Store {
         const text = withTags(p.body, note.tags);
         writeFileAtomic(full, text);
         written.push(full);
-        Object.assign(p, { body: text, filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: note.vaultId, title: p.title.trim() ? stem(path.basename(full)) : '' });
+        Object.assign(p, { body: text, filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: note.vaultId, title: p.title.trim() ? p.title : '' });
         syncFileTags(p);
       }
       if (trashOriginal && note.vaultId) {
@@ -1402,12 +1407,13 @@ class Store {
     const linkTarget = new Map<string, string>();
     for (const [n, p] of plan) if (!n.lock && !n.trashedAt) linkTarget.set(n.id.toLowerCase(), p.full);
     let links = 0;
-    const relink = (body: string, fromDir: string) => body.replace(/\]\(note:\/\/([0-9a-f][0-9a-f-]{7,})\/?\)/gi, (whole, id: string) => {
-      const target = linkTarget.get(id.toLowerCase());
+    const relinkText = (text: string, fromDir: string) => text.replace(/(!?)(\[[^\]\n]*\])\(note:\/\/([0-9a-f][0-9a-f-]{7,})\/?\)/gi, (whole, bang: string, label: string, id: string) => {
+      const target = bang ? null : linkTarget.get(id.toLowerCase());
       if (!target) return whole;
       links++;
-      return '](' + path.relative(fromDir, target).split(path.sep).map((part) => encodeURIComponent(part).replace(/\(/g, '%28').replace(/\)/g, '%29')).join('/') + ')';
+      return label + '(' + path.relative(fromDir, target).split(path.sep).map((part) => encodeURIComponent(part).replace(/\(/g, '%28').replace(/\)/g, '%29')).join('/') + ')';
     });
+    const relink = (body: string, fromDir: string) => body.split(/((?:```|~~~)[\s\S]*?(?:```|~~~|$)|`[^`\n]*`)/).map((part, i) => (i % 2 ? part : relinkText(part, fromDir))).join('');
 
     const written: string[] = [];
     const made: string[] = [];
@@ -1419,7 +1425,7 @@ class Store {
     const texts = new Map<Note, string>();
     try {
       const rel = (p: string) => path.relative(vault.path, p);
-      fs.writeFileSync(marker, JSON.stringify({ files: Array.from(plan.values(), (p) => rel(p.full)), dirs: Array.from(dirOf.values(), rel).concat(notes.some((n) => n.trashedAt) ? [rel(bin)] : []) }));
+      fs.writeFileSync(marker, JSON.stringify({ files: Array.from(plan, ([n, p]) => ({ rel: rel(p.full), at: n.updatedAt })), dirs: Array.from(dirOf.values(), rel).concat(notes.some((n) => n.trashedAt) ? [rel(bin)] : []) }));
       for (const d of dirOf.values()) { fs.mkdirSync(d); made.push(d); }
       if (notes.some((n) => n.trashedAt) && !fs.existsSync(bin)) { fs.mkdirSync(bin); made.push(bin); }
       for (const [n, p] of plan) {
@@ -1448,14 +1454,12 @@ class Store {
         }
         for (const [n, p] of plan) {
           const text = texts.get(n) || '';
-          const named = stem(path.basename(p.full));
-          if (n.title.trim() && named !== n.title.trim()) renamed.push({ kind: 'note', from: n.title.trim(), to: named });
           n.filePath = p.full;
           n.fileKind = 'text';
           n.fileMtime = F.mtimeOf(p.full);
           n.vaultId = vault.id;
           n.body = n.lock ? '' : text;
-          n.title = n.title.trim() ? named : '';
+          if (!n.title.trim()) n.title = '';
           if (n.trashedAt) n.trashedFrom = p.origin;
           syncFileTags(n);
         }
@@ -1813,7 +1817,7 @@ class Store {
     writeFileAtomic(full, text);
     try {
       return this.create(Object.assign({}, data, {
-        title: title.trim() ? stem(path.basename(full)) : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
+        title: title.trim() ? title : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
         folderId: folder ? folder.id : null, filePath: full, fileKind: 'text' as const, fileMtime: F.mtimeOf(full), vaultId: home.id,
       }));
     } catch (err) {
@@ -1831,7 +1835,8 @@ class Store {
     if (!numberedName(current, wanted) || (explicit && current !== wanted && !wantedTaken)) {
       try { this._renameVaultFile(note, wanted); } catch (err) { if (explicit) throw err; }
     }
-    return explicit ? stem(path.basename(note.filePath)) : '';
+    const named = stem(path.basename(note.filePath));
+    return !explicit ? '' : numberedName(named, H.safeFilename(explicit)) ? title : named;
   }
 
   _adopt(note: Note, target: Folder | null) {
@@ -1852,7 +1857,7 @@ class Store {
     note.fileMtime = F.mtimeOf(full);
     note.vaultId = vault.id;
     note.folderId = target ? target.id : null;
-    note.title = home && !note.title.trim() ? '' : stem(path.basename(full));
+    note.title = home ? (note.title.trim() ? note.title : '') : stem(path.basename(full));
     syncFileTags(note);
     return full;
   }

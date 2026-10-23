@@ -59,6 +59,27 @@ function notesDirFor() {
   }
 }
 
+function plainFilesError(err: NodeJS.ErrnoException) {
+  const where = err.path ? ' (' + err.path + ')' : '';
+  if (err.code === 'EPERM' || err.code === 'EACCES') return 'Windows did not allow writing there' + where;
+  if (err.code === 'ENOSPC') return 'the disk is full';
+  if (err.code === 'EBUSY') return 'another program was using a file' + where;
+  if (err.code === 'ENAMETOOLONG') return 'a file path was too long' + where;
+  return String(err.message || err);
+}
+
+function backupBeforeFiles() {
+  const current = fs.readFileSync(path.join(DATA_DIR, 'notes.json'));
+  const earlier = fs.readdirSync(DATA_DIR).filter((name) => name.startsWith('before-files-')).sort().reverse()[0];
+  if (earlier) {
+    try { if (fs.readFileSync(path.join(DATA_DIR, earlier, 'notes.json')).equals(current)) return path.join(DATA_DIR, earlier); } catch (_) {  }
+  }
+  const backupDir = path.join(DATA_DIR, 'before-files-' + H.fileStamp(Date.now()));
+  fs.mkdirSync(backupDir, { recursive: true });
+  fs.writeFileSync(path.join(backupDir, 'notes.json'), current);
+  return backupDir;
+}
+
 function ensureNotesFolder(store: Store): FilesMove {
   if (store.saveBlocked || store.homeVault()) return { report: null, error: null };
   try {
@@ -66,15 +87,13 @@ function ensureNotesFolder(store: Store): FilesMove {
     const appNotes = store.notes.some((n) => !n.filePath && !n.vaultId) || store.folders.some((f) => !f.vaultId);
     if (!appNotes) { store.addHomeVault(dir); return { report: null, error: null }; }
     store.flush();
-    const backupDir = path.join(DATA_DIR, 'before-files-' + H.fileStamp(Date.now()));
-    fs.mkdirSync(backupDir, { recursive: true });
-    for (const name of ['notes.json', 'notes.journal']) { const from = path.join(DATA_DIR, name); if (fs.existsSync(from)) fs.copyFileSync(from, path.join(backupDir, name)); }
+    const backupDir = backupBeforeFiles();
     const report = Object.assign(store.moveIntoHome(dir), { backupDir, at: Date.now() });
     try { fs.writeFileSync(path.join(DATA_DIR, 'moved-to-files.json'), JSON.stringify(report, null, 2)); } catch (_) {  }
     return { report, error: null };
   } catch (err) {
     console.error('[files] moving notes into a folder failed:', err);
-    return { report: null, error: String(err.message || err) };
+    return { report: null, error: plainFilesError(err) };
   }
 }
 
@@ -930,7 +949,7 @@ function main() {
     if (!auth.ok) return { ok: false, error: auth.reason };
     let target;
     try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not find the folder to work in: ' + err.message }; }
-    const intro = 'You are working inside the user\'s notes folder. Each Markdown file is a note.';
+    const intro = 'You are working inside the user\'s notes folder. Each Markdown file is a note. Files ending in .mdlock are encrypted notes: never open or change them. Leave the .trash folder alone.';
     const focusLine = target.focus ? ' The user is currently looking at "' + target.focus + '".' : '';
     const fullPrompt = intro + focusLine + '\n\nTask: ' + prompt;
     const allowed = opts.allowEdits === false ? 'Read,Glob,Grep' : 'Read,Glob,Grep,Edit,Write,MultiEdit';

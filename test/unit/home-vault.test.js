@@ -37,8 +37,9 @@ test('an explicit title names the file, and a numbered name does not keep moving
   const a = store.create({ title: 'Plan', body: 'one' });
   const b = store.create({ title: 'Plan', body: 'two' });
   assert.equal(a.title, 'Plan');
-  assert.equal(b.title, 'Plan 2');
-  store.update(b.id, { body: 'two, edited', title: 'Plan 2' });
+  assert.equal(b.title, 'Plan', 'the title is kept; the file name is numbered');
+  assert.equal(path.basename(b.filePath), 'Plan 2.md');
+  store.update(b.id, { body: 'two, edited', title: 'Plan' });
   store.update(b.id, { body: 'two, edited again' });
   assert.equal(path.basename(store.get(b.id).filePath), 'Plan 2.md');
   store.update(a.id, { title: 'Trip' });

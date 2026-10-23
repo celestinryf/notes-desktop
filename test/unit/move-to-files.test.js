@@ -119,13 +119,41 @@ test('an unfinished move (crash before the save) is cleaned up and done again in
   const { store } = legacyLibrary();
   const dir = path.join(tmpDir('notes-move-crash-'), 'Notes');
   fs.mkdirSync(path.join(dir, 'Tennis Tennis'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'Tennis Tennis', 'TODO.md'), 'half written');
+  const at = Date.UTC(2026, 0, 2);
+  const half = path.join(dir, 'Tennis Tennis', 'TODO.md');
+  fs.writeFileSync(half, 'half written');
+  fs.utimesSync(half, new Date(at), new Date(at));
   fs.writeFileSync(path.join(dir, 'Mine.md'), 'a file the move did not write');
-  fs.writeFileSync(path.join(dir, MOVING_MARKER), JSON.stringify({ files: ['Tennis Tennis/TODO.md', '../outside.md'], dirs: ['Tennis Tennis'] }));
+  fs.writeFileSync(path.join(dir, 'Edited since.md'), 'listed, but changed after the crash');
+  fs.writeFileSync(path.join(dir, MOVING_MARKER), JSON.stringify({ files: [{ rel: 'Tennis Tennis/TODO.md', at }, { rel: 'Edited since.md', at }, { rel: '../outside.md', at }, 'The plan.md'], dirs: ['Tennis Tennis'] }));
   store.moveIntoHome(dir);
-  assert.ok(fs.existsSync(path.join(dir, 'Tennis Tennis', 'TODO.md')), 'written again, not as TODO 2');
+  assert.equal(fs.readFileSync(half, 'utf8'), '---\ntags:\n  - work\n---\n- one\n- see [the plan](../The%20plan.md)\n- and [rules](note://bbbbbbbb-0000-4000-8000-000000000002)\n', 'written again, not as TODO 2');
   assert.ok(!fs.existsSync(path.join(dir, 'Tennis Tennis 2')));
   assert.equal(fs.readFileSync(path.join(dir, 'Mine.md'), 'utf8'), 'a file the move did not write');
+  assert.equal(fs.readFileSync(path.join(dir, 'Edited since.md'), 'utf8'), 'listed, but changed after the crash', 'a listed file edited since is kept');
+});
+
+test('the move keeps titles Windows cannot hold as file names, and leaves links in code and images alone', () => {
+  const dataDir = tmpDir('notes-move-titles-');
+  const id = 'cccccccc-0000-4000-8000-000000000003';
+  const long = 'A title that goes on for far longer than eighty characters, so the file name has to be cut short: END';
+  const notes = [
+    { id, title: 'Plan: v2?', body: 'target', tags: [], folderId: null, createdAt: 1, updatedAt: 1 },
+    { id: 'dddddddd-0000-4000-8000-000000000004', title: long, body: 'Link [ok](note://' + id + '), code `[c](note://' + id + ')`, image ![i](note://' + id + ')\n```\n[f](note://' + id + ')\n```\n', tags: [], folderId: null, createdAt: 1, updatedAt: 1 },
+  ];
+  fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify({ schemaVersion: 2, settings: {}, folders: [], notes, vaults: [] }));
+  const store = new Store(dataDir).load();
+  const dir = path.join(tmpDir('notes-move-titleshome-'), 'Notes');
+  const report = store.moveIntoHome(dir);
+  assert.deepEqual(report.renamed, []);
+  assert.equal(store.get(id).title, 'Plan: v2?');
+  assert.equal(path.basename(store.get(id).filePath), 'Plan v2.md');
+  const other = store.get('dddddddd-0000-4000-8000-000000000004');
+  assert.equal(other.title, long);
+  assert.equal(other.body, 'Link [ok](Plan%20v2.md), code `[c](note://' + id + ')`, image ![i](note://' + id + ')\n```\n[f](note://' + id + ')\n```\n');
+  store.update(id, { title: 'Plan: v2?', body: 'target, edited' });
+  assert.equal(store.get(id).title, 'Plan: v2?', 'an edit keeps the title');
+  assert.equal(path.basename(store.get(id).filePath), 'Plan v2.md');
 });
 
 test('moving twice is refused, and new notes after the move are files', () => {
