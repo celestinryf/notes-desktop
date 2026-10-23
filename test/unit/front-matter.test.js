@@ -72,3 +72,10 @@ test('isMarkdownPath names the extensions tags are kept in', () => {
   for (const p of ['a.md', 'C:\\x\\b.MARKDOWN', 'c.mdx']) assert.equal(FM.isMarkdownPath(p), true, p);
   for (const p of ['a.txt', 'b.org', '', null]) assert.equal(FM.isMarkdownPath(p), false, String(p));
 });
+
+test('a derived title and a snippet skip the front matter', () => {
+  const H = require('../../src/shared/helpers.mts');
+  assert.equal(H.deriveTitle({ title: '', body: '---\ntags: [a]\n---\n\n# Real title\nbody text\n' }), 'Real title');
+  assert.equal(H.snippet({ title: 'T', body: '---\ntags: [a]\n---\nVisible words\n' }), 'Visible words');
+  assert.equal(H.deriveTitle({ title: '', body: '---\nA rule, not front matter\n---\n' }), '---');
+});

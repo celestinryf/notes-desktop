@@ -1,12 +1,6 @@
-import { parseTags } from './helpers.mts';
+import { parseTags, splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE as KEY_LINE } from './helpers.mts';
 
-type Split = { front: string; body: string };
-type Block = { open: string; inner: string[]; close: string; trailing: string; nl: string; length: number };
 type KeyRange = { start: number; end: number; inline: string };
-
-const OPEN_LINE = /^---[ \t]*$/;
-const CLOSE_LINE = /^---[ \t]*$/;
-const KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
 const TAG_KEYS = ['tags', 'tag'];
 const RESERVED = /^(true|false|yes|no|on|off|null|~|y|n)$/i;
 const MARKDOWN_PATH = /\.(md|markdown|mdx)$/i;
@@ -18,54 +12,6 @@ function isMarkdownPath(filePath: string | null | undefined) {
 
 function fileKeepsTags(n: Pick<Note, 'vaultId' | 'fileKind' | 'filePath'>) {
   return !!n.vaultId && n.fileKind === 'text' && isMarkdownPath(n.filePath);
-}
-
-function linesWithEnds(text: string) {
-  const out: { line: string; end: string }[] = [];
-  let at = 0;
-  while (at < text.length) {
-    const nl = text.indexOf('\n', at);
-    if (nl === -1) { out.push({ line: text.slice(at), end: '' }); break; }
-    const cr = nl > at && text[nl - 1] === '\r';
-    out.push({ line: text.slice(at, cr ? nl - 1 : nl), end: cr ? '\r\n' : '\n' });
-    at = nl + 1;
-  }
-  return out;
-}
-
-function looksLikeYaml(lines: readonly string[]) {
-  return lines.every((l) => !l.trim() || /^\s/.test(l) || /^#/.test(l) || /^-(\s|$)/.test(l) || KEY_LINE.test(l));
-}
-
-function readBlock(text: string): Block | null {
-  const lines = linesWithEnds(String(text || ''));
-  if (!lines.length || !OPEN_LINE.test(lines[0].line) || !lines[0].end) return null;
-  let close = -1;
-  for (let i = 1; i < lines.length; i++) if (CLOSE_LINE.test(lines[i].line)) { close = i; break; }
-  if (close === -1) return null;
-  const inner = lines.slice(1, close).map((l) => l.line);
-  if (!looksLikeYaml(inner)) return null;
-  let after = close + 1;
-  while (after < lines.length && !lines[after].line.trim() && lines[after].end) after++;
-  const whole = (l: { line: string; end: string }) => l.line + l.end;
-  return {
-    open: whole(lines[0]),
-    inner,
-    close: whole(lines[close]),
-    trailing: lines.slice(close + 1, after).map(whole).join(''),
-    nl: lines[0].end,
-    length: lines.slice(0, after).reduce((n, l) => n + l.line.length + l.end.length, 0),
-  };
-}
-
-function blockText(b: Block) {
-  return b.open + b.inner.map((l) => l + b.nl).join('') + b.close + b.trailing;
-}
-
-function splitFrontMatter(text: string): Split {
-  const s = String(text || '');
-  const b = readBlock(s);
-  return b ? { front: s.slice(0, b.length), body: s.slice(b.length) } : { front: '', body: s };
 }
 
 function stripComment(value: string) {
@@ -128,7 +74,7 @@ function rangeValues(inner: readonly string[], r: KeyRange) {
 }
 
 function frontMatterTags(text: string) {
-  const b = readBlock(String(text || ''));
+  const b = readFrontMatter(String(text || ''));
   if (!b) return [];
   const r = keyRange(b.inner, TAG_KEYS);
   return r ? parseTags(rangeValues(b.inner, r)) : [];
@@ -155,7 +101,7 @@ function yamlScalar(tag: string) {
 function setNoteTags(text: string, wanted: readonly string[]) {
   const s = String(text || '');
   const inline = new Set(inlineTags(s));
-  const b = readBlock(s);
+  const b = readFrontMatter(s);
   const range = b ? keyRange(b.inner, TAG_KEYS) : null;
   const spelled = new Map<string, string>();
   if (b && range) for (const v of rangeValues(b.inner, range)) { const t = parseTags(v)[0]; if (t && !spelled.has(t)) spelled.set(t, v.replace(/^#+/, '')); }
@@ -172,7 +118,7 @@ function setNoteTags(text: string, wanted: readonly string[]) {
   else inner.push(...lines);
   const body = s.slice(b.length);
   if (!inner.some((l) => l.trim())) return body;
-  return blockText(Object.assign({}, b, { inner })) + body;
+  return frontMatterText(Object.assign({}, b, { inner })) + body;
 }
 
 export { isMarkdownPath, fileKeepsTags, splitFrontMatter, frontMatterTags, inlineTags, noteTags, setNoteTags };

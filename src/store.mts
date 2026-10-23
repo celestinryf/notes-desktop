@@ -125,10 +125,41 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
     autoSync: raw.autoSync !== false,
     syncMinutes: Number.isFinite(Number(raw.syncMinutes)) ? Math.min(240, Math.max(1, Math.round(Number(raw.syncMinutes)))) : 5,
     createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
+    home: !!raw.home,
   };
 }
 
 const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
+const LOCK_EXT = 'mdlock';
+const isLockPath = (p: string | null | undefined) => F.extOf(String(p || '')) === LOCK_EXT;
+const scannedFile = (name: string) => VAULT_EXT.has(F.extOf(name)) || isLockPath(name);
+
+function lockFileText(lock: NoteLock, tags: readonly string[]) {
+  return JSON.stringify({ notesLock: 1, tags, lock }, null, 2) + '\n';
+}
+
+function readLockFile(text: string | null | undefined) {
+  const raw = parseLine(String(text || ''));
+  const lock = isRecord(raw) ? L.sanitizeLock(raw.lock) : null;
+  return isRecord(raw) && lock ? { lock, tags: H.parseTags(raw.tags || []) } : null;
+}
+
+function derivedStem(body: string) {
+  return H.safeFilename(H.deriveTitle({ title: '', body }));
+}
+
+function homeTitle(fileName: string, body: string) {
+  const s = stem(fileName);
+  return s === derivedStem(body) ? '' : s;
+}
+
+function moveFileSync(from: string, to: string) {
+  try { retryWhileBusy(() => fs.renameSync(from, to)); } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.copyFileSync(from, to);
+    retryWhileBusy(() => fs.rmSync(from));
+  }
+}
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
 
 function assertVaultDirName(name: string) {
@@ -305,7 +336,7 @@ async function readVaultTree(root: string, known: Map<string, Note>): Promise<Di
         const key = F.pathKey(full);
         dirs.push({ full, key, name: e.name, parentKey: dirKey });
         await walk(full, key);
-      } else if (e.isFile() && VAULT_EXT.has(F.extOf(e.name))) {
+      } else if (e.isFile() && scannedFile(e.name)) {
         found.push({ full, key: F.pathKey(full), name: e.name, dirKey });
       }
     }
@@ -314,7 +345,7 @@ async function readVaultTree(root: string, known: Map<string, Note>): Promise<Di
   return { dirs, files: await readFoundFiles(found, known), changed: null };
 }
 
-async function readVaultPaths(root: string, paths: readonly string[], known: Map<string, Note>, folderKeys: ReadonlyMap<string, Folder>): Promise<DiskView | null> {
+async function readVaultPaths(root: string, paths: readonly string[], known: Map<string, Note>, folderKeys: ReadonlySet<string>): Promise<DiskView | null> {
   const rootKey = F.pathKey(root);
   const found: FoundFile[] = [];
   const changed = new Set<string>();
@@ -335,7 +366,7 @@ async function readVaultPaths(root: string, paths: readonly string[], known: Map
       if (skippedDir(parts[parts.length - 1]) || folderKeys.has(key)) continue;
       return null;
     }
-    if (!st.isFile() || !VAULT_EXT.has(F.extOf(full))) continue;
+    if (!st.isFile() || !scannedFile(full)) continue;
     const dirKey = F.pathKey(path.dirname(full));
     if (!folderKeys.has(dirKey)) return null;
     changed.add(key);
@@ -485,8 +516,12 @@ function syncFileTags(note: Note) {
   return true;
 }
 
+function withTags(body: string, tags: readonly string[]) {
+  return FM.setNoteTags(body, H.parseTags(FM.noteTags(body).concat(tags)));
+}
+
 function vaultFileText(body: string, tags: readonly string[], filePath: string) {
-  return FM.isMarkdownPath(filePath) ? FM.setNoteTags(body, tags) : body;
+  return FM.isMarkdownPath(filePath) ? withTags(body, tags) : body;
 }
 
 class Store {
@@ -586,6 +621,7 @@ class Store {
     this.notes = notes.map((n) => sanitizeNote(n, now)).filter(isPresent);
     this.folders = folders.map((f) => sanitizeFolder(f, now)).filter(isPresent);
     this.vaults = vaults.map((v) => sanitizeVault(v, now)).filter(isPresent);
+    this.vaults.forEach((v, i) => { if (v.home && this.vaults.findIndex((x) => x.home) !== i) v.home = false; });
     const vaultIds = new Set(this.vaults.map((v) => v.id));
     for (const f of this.folders) if (f.vaultId && !vaultIds.has(f.vaultId)) { f.vaultId = null; f.dirPath = null; }
     for (const n of this.notes) if (n.vaultId && !vaultIds.has(n.vaultId)) n.vaultId = null;
@@ -813,7 +849,7 @@ class Store {
 
   rows(opts?: ListOpts, candidates?: ReadonlySet<string> | null) {
     const query = opts && opts.query;
-    return this.list(opts, candidates).map((n) => H.listRow(this._rowView(n), query));
+    return this.list(opts, candidates).map((n) => H.listRow(this._rowView(n), query, this.isHome(n.vaultId)));
   }
 
   _rowView(n: Note) {
@@ -828,8 +864,13 @@ class Store {
     return this.notes.find((n) => n.id === id) || null;
   }
 
-  create(data?: NoteInput) {
+  create(data?: NoteInput): Note {
     data = data || {};
+    if (!data.filePath && this.homeVault()) {
+      const folder = data.folderId ? this.getFolder(data.folderId) : null;
+      if (folder && folder.vaultId && !this.isHome(folder.vaultId) && !data.lock) return this.createVaultNote(folder.id, data);
+      if (!folder || this.isHome(folder.vaultId)) return this._createHomeNote(data, folder);
+    }
     const now = this.now();
     const note = noteFrom(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: now, updatedAt: now, trashedAt: null }), now);
     if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null;
@@ -855,10 +896,11 @@ class Store {
       patch = Object.assign({}, patch); delete patch.body;
     }
     let fileMoved = false;
-    if (patch.folderId !== undefined && note.vaultId && note.filePath && !patch.folderId && (note.folderId || null) !== null) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
+    const homeFile = isFileNote(note) && note.fileKind === 'text' && this.isHome(note.vaultId);
+    if (patch.folderId !== undefined && note.vaultId && note.filePath && !patch.folderId && (note.folderId || null) !== null && !homeFile) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
     if (patch.folderId && note.filePath && !note.vaultId) {
       const t = this.getFolder(patch.folderId);
-      if (t && t.vaultId) throw Object.assign(new Error('A linked file cannot be moved into a vault; copy its text into a new note there instead.'), { code: 'EVAULT' });
+      if (t && t.vaultId && !this.isHome(t.vaultId)) throw Object.assign(new Error('A linked file cannot be moved into a vault; copy its text into a new note there instead.'), { code: 'EVAULT' });
     }
     if (tagsInFile(note) && patch.tags !== undefined) {
       const wanted = H.parseTags(patch.tags);
@@ -880,7 +922,7 @@ class Store {
       note.fileMtime = F.writeTextInPlace(note.filePath, patch.body);
       fileWritten = true;
     }
-    if (typeof patch.title === 'string' && patch.title !== note.title) {
+    if (typeof patch.title === 'string' && patch.title !== note.title && !homeFile) {
       if (note.vaultId && isFileNote(note) && note.fileKind === 'text') {
         try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
         catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; syncFileTags(note); } throw err; }
@@ -889,27 +931,27 @@ class Store {
     }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
     if (syncFileTags(note)) changed = true;
+    if (homeFile && isFileNote(note)) {
+      const pathBefore = note.filePath;
+      let title: string;
+      try { title = this._homeRename(note, typeof patch.title === 'string' ? patch.title : note.title, note.lock ? null : note.body); }
+      catch (err) { if (fileWritten && typeof patch.body === 'string') { note.body = patch.body; syncFileTags(note); } throw err; }
+      if (note.filePath !== pathBefore) fileMoved = true;
+      if (title !== note.title) { note.title = title; changed = true; }
+    }
     if (patch.folderId !== undefined && note.vaultId && isFileNote(note)) {
       const fid = patch.folderId || null;
       if (fid !== (note.folderId || null)) {
-        if (!fid) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
+        if (!fid && !homeFile) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
         note.filePath = this._moveVaultFile(note, fid);
         note.folderId = fid; changed = true; fileMoved = true;
       }
       delete patch.folderId;
     } else if (patch.folderId && !note.filePath) {
       const target = this.getFolder(patch.folderId);
-      if (target && target.vaultId && note.lock) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
       if (target && target.vaultId && target.dirPath) {
-        fs.mkdirSync(target.dirPath, { recursive: true });
-        const name = uniqueName(target.dirPath, H.safeFilename(H.deriveTitle(note)), '.md');
-        const full = path.join(target.dirPath, name);
-        const text = vaultFileText(note.body, note.tags, full);
-        fs.writeFileSync(full, text, 'utf8');
-        note.body = text;
-        note.filePath = full; note.fileKind = 'text'; note.fileMtime = F.mtimeOf(full); note.vaultId = target.vaultId;
-        syncFileTags(note);
-        note.title = stem(name); note.folderId = target.id; changed = true; fileMoved = true;
+        this._adopt(note, target);
+        changed = true; fileMoved = true;
         delete patch.folderId;
       }
     }
@@ -926,16 +968,21 @@ class Store {
       const fid = patch.folderId && this.getFolder(patch.folderId) ? patch.folderId : null;
       if (fid !== (note.folderId || null)) { note.folderId = fid; changed = true; }
     }
+    if (changed && note.lock && isFileNote(note) && isLockPath(note.filePath)) {
+      writeFileAtomic(note.filePath, lockFileText(note.lock, note.tags));
+      note.fileMtime = F.mtimeOf(note.filePath);
+      fileWritten = true;
+    }
     if (changed) {
       note.updatedAt = this.now();
       try {
         this.save({ notes: [note] });
       } catch (err) {
         const keep = {};
-        if (fileWritten) Object.assign(keep, { body: note.body, tags: note.tags, fileMtime: note.fileMtime });
-        if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime, body: note.body, tags: note.tags });
+        if (fileWritten) Object.assign(keep, { body: note.body, tags: note.tags, fileMtime: note.fileMtime, lock: note.lock });
+        if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime, body: note.body, tags: note.tags, lock: note.lock });
         Object.assign(note, before, keep);
-        if (plainBefore !== undefined) this.plain.set(id, plainBefore);
+        if (plainBefore !== undefined && !fileWritten) this.plain.set(id, plainBefore);
         throw err;
       }
       this._contentChanged();
@@ -951,18 +998,34 @@ class Store {
     if (isPublicView(n)) return n;
     const { lock, ...rest } = n;
     const unlocked = !!lock && this.plain.has(n.id);
-    return Object.assign(rest, { locked: !!lock, unlocked }, lock ? { body: unlocked ? this.plain.get(n.id) ?? '' : '' } : {});
+    return Object.assign(rest, { locked: !!lock, unlocked, home: this.isHome(n.vaultId) }, lock ? { body: unlocked ? this.plain.get(n.id) ?? '' : '' } : {});
   }
 
   lockNote(id: string, password: string) {
     const note = this.get(id);
     if (!note) return null;
-    if (note.filePath || note.vaultId) throw Object.assign(new Error('A file-backed note cannot be locked: the file itself would stay readable.'), { code: 'EFILE' });
+    const homeText = isFileNote(note) && note.fileKind === 'text' && this.isHome(note.vaultId) && FM.isMarkdownPath(note.filePath);
+    if ((note.filePath || note.vaultId) && !homeText) throw Object.assign(new Error('A file-backed note cannot be locked: the file itself would stay readable.'), { code: 'EFILE' });
     if (!password || !String(password).length) throw Object.assign(new Error('Enter a password.'), { code: 'EPASS' });
     if (note.lock) throw Object.assign(new Error('This note is already locked.'), { code: 'ELOCKED' });
     const body = note.body;
     const { blob, key } = L.lock(body, password);
-    this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; }, undefined, { notes: [note], dropped: [], purge: true });
+    const plainPath = note.filePath;
+    const sealedPath = homeText && plainPath ? this._homeFile(path.dirname(plainPath), note.title, '', '.' + LOCK_EXT) : null;
+    if (sealedPath && plainPath) {
+      writeFileAtomic(sealedPath, lockFileText(blob, note.tags));
+      try { retryWhileBusy(() => fs.rmSync(plainPath)); } catch (err) { try { fs.rmSync(sealedPath); } catch (_) {  } throw err; }
+    }
+    try {
+      this._commit(() => {
+        note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now();
+        if (sealedPath) { note.filePath = sealedPath; note.fileMtime = F.mtimeOf(sealedPath); note.title = note.title.trim() ? stem(path.basename(sealedPath)) : ''; }
+        return note;
+      }, undefined, { notes: [note], dropped: [], purge: true });
+    } catch (err) {
+      if (sealedPath && plainPath) { try { writeFileAtomic(plainPath, body); fs.rmSync(sealedPath); } catch (_) {  } }
+      throw err;
+    }
     this._removeStaleJournals(0);
     this.plain.set(id, body);
     this.keys.set(id, key);
@@ -999,7 +1062,21 @@ class Store {
     if (!note || !note.lock) return this.publicNote(note);
     const r = L.unlock(note.lock, password);
     if (!r) throw Object.assign(new Error('Wrong password.'), { code: 'EPASS' });
-    this._commit(() => { note.lock = null; note.body = r.body; note.updatedAt = this.now(); return note; }, undefined, { notes: [note], dropped: [] });
+    const sealedPath = isFileNote(note) && isLockPath(note.filePath) ? note.filePath : null;
+    const text = sealedPath ? FM.setNoteTags(r.body, note.tags) : r.body;
+    const plainPath = sealedPath ? this._homeFile(path.dirname(sealedPath), note.title, r.body, '.md') : null;
+    if (plainPath) writeFileAtomic(plainPath, text);
+    try {
+      this._commit(() => {
+        note.lock = null; note.body = text; note.updatedAt = this.now();
+        if (plainPath) { note.filePath = plainPath; note.fileMtime = F.mtimeOf(plainPath); note.title = note.title.trim() ? stem(path.basename(plainPath)) : ''; syncFileTags(note); }
+        return note;
+      }, undefined, { notes: [note], dropped: [] });
+    } catch (err) {
+      if (plainPath) { try { fs.rmSync(plainPath); } catch (_) {  } }
+      throw err;
+    }
+    if (sealedPath) { try { retryWhileBusy(() => fs.rmSync(sealedPath)); } catch (_) {  } }
     this.relock(id);
     return this.publicNote(note);
   }
@@ -1141,6 +1218,7 @@ class Store {
       return this.publicNote(copy);
     }
     const folder = note.folderId ? this.getFolder(note.folderId) : null;
+    if (this.isHome(note.vaultId)) return this._createHomeNote({ title: H.deriveTitle(note) + ' (copy)', body: note.body, tags: note.tags, pinned: false }, folder);
     if (note.vaultId && folder && folder.vaultId && folder.dirPath) return this.createVaultNote(folder.id, { title: note.title + ' (copy)', body: note.body, tags: note.tags });
     return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
   }
@@ -1150,40 +1228,91 @@ class Store {
     const note = this.get(id);
     if (!note || note.trashedAt) throw new Error('Note not found');
     if (note.lock) throw new Error('This note is locked. Remove the lock to split it.');
-    if (note.filePath) throw new Error('This note is a file on disk; only notes kept in the app can be split.');
-    const plan = H.splitAtHeadings(note.body, H.deriveTitle(note));
+    const homeText = isFileNote(note) && note.fileKind === 'text' && this.isHome(note.vaultId) && FM.isMarkdownPath(note.filePath);
+    if (note.filePath && !homeText) throw new Error('This note is a file on disk; only notes kept in the app can be split.');
+    const plan = H.splitAtHeadings(homeText ? FM.splitFrontMatter(note.body).body : note.body, H.deriveTitle(note));
     if (plan.pages.length < 2) throw new Error('This note needs at least two headings (lines starting with #) to split.');
     if (plan.pages.length > MAX_BOOK_PAGES) throw new Error('This note would make more than ' + MAX_BOOK_PAGES + ' pages, the most a book holds.');
     const now = this.now();
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
-    const parentId = parent && !parent.vaultId ? parent.id : null;
+    const parentId = parent && (!parent.vaultId || (homeText && this.isHome(parent.vaultId))) ? parent.id : null;
     const folder = folderFrom({ name: String(opts.name || '').trim() || plan.name, parentId, createdAt: now, book: true }, now);
     const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
     const originalTrashed = !opts.keepOriginal;
-    return this._change({ notes: pages.concat([note]), folders: true }, () => {
-      this.folders.push(folder);
-      this.notes.unshift(...pages);
-      if (originalTrashed) { note.trashedAt = now; note.sticky = null; }
-      return { folder, pageIds: folder.pageOrder.slice(), originalTrashed };
-    });
+    const files = homeText && isFileNote(note) ? this._writeBookFiles(note, folder, pages, parent, originalTrashed) : null;
+    try {
+      return this._change({ notes: pages.concat([note]), folders: true }, () => {
+        this.folders.push(folder);
+        this.notes.unshift(...pages);
+        if (originalTrashed) {
+          note.trashedAt = now; note.sticky = null;
+          if (files && files.trashed) { note.trashedFrom = files.trashed.from; note.filePath = files.trashed.to; }
+        }
+        return { folder, pageIds: folder.pageOrder.slice(), originalTrashed };
+      });
+    } catch (err) {
+      if (files) files.undo();
+      throw err;
+    }
+  }
+
+  _writeBookFiles(note: FileNote, folder: Folder, pages: Note[], parent: Folder | null, trashOriginal: boolean) {
+    const parentDir = parent && parent.dirPath && this.isHome(parent.vaultId) ? parent.dirPath : this._homeDir(null);
+    assertVaultDirName(folder.name);
+    const dirName = uniqueName(parentDir, H.safeFilename(folder.name), '');
+    const dir = path.join(parentDir, dirName);
+    fs.mkdirSync(dir, { recursive: true });
+    const written: string[] = [];
+    let trashed: { from: string; to: string } | null = null;
+    const undo = () => {
+      for (const p of written) { try { fs.rmSync(p); } catch (_) {  } }
+      try { fs.rmdirSync(dir); } catch (_) {  }
+      if (trashed) { try { moveFileSync(trashed.to, trashed.from); } catch (_) {  } }
+    };
+    try {
+      for (const p of pages) {
+        const full = this._homeFile(dir, p.title, p.body, '.md');
+        const text = withTags(p.body, note.tags);
+        writeFileAtomic(full, text);
+        written.push(full);
+        Object.assign(p, { body: text, filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: note.vaultId, title: p.title.trim() ? stem(path.basename(full)) : '' });
+        syncFileTags(p);
+      }
+      if (trashOriginal && note.vaultId) {
+        const bin = this._vaultTrashDir(note.vaultId);
+        const to = path.join(bin, uniqueName(bin, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md'));
+        moveFileSync(note.filePath, to);
+        trashed = { from: note.filePath, to };
+      }
+    } catch (err) {
+      undo();
+      throw err;
+    }
+    Object.assign(folder, { name: dirName, vaultId: note.vaultId, dirPath: dir });
+    return { trashed, undo };
   }
 
   undoSplit(folderId: string, pageIds: string[], originalId: string | null) {
     const folder = typeof folderId === 'string' ? this.getFolder(folderId) : null;
-    if (!folder || !folder.book || folder.vaultId) throw new Error('That book is gone, so there is nothing to undo.');
+    if (!folder || !folder.book || (folder.vaultId && !this.isHome(folder.vaultId))) throw new Error('That book is gone, so there is nothing to undo.');
     const ids = new Set(Array.isArray(pageIds) ? pageIds.filter((x) => typeof x === 'string') : []);
     const pages = this.notes.filter((n) => ids.has(n.id) && n.folderId === folder.id);
-    if (pages.some((n) => n.lock || n.filePath)) throw new Error('A page of that book is locked or a file on disk, so the split cannot be undone.');
+    if (pages.some((n) => n.lock || (n.filePath && !this.isHome(n.vaultId)))) throw new Error('A page of that book is locked or a file on disk, so the split cannot be undone.');
     if (pages.some((n) => n.updatedAt !== n.createdAt)) throw new Error('A page was edited after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
     const orig = originalId != null ? this.get(originalId) : null;
     if (originalId != null && !orig) throw new Error('The original note was deleted, so the split cannot be undone.');
-    return this._change({ notes: orig ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
+    const origInBin = !!orig && this._inVaultTrash(orig);
+    if (orig && origInBin) this.restore(orig.id);
+    for (const p of pages) if (p.filePath) { try { retryWhileBusy(() => fs.rmSync(p.filePath || '')); } catch (_) {  } }
+    const result = this._change({ notes: orig ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
       this.notes = this.notes.filter((n) => !pages.includes(n));
       if (!this.notes.some((n) => n.folderId === folder.id) && !this.folders.some((f) => f.parentId === folder.id)) this.folders = this.folders.filter((f) => f !== folder);
       if (orig && orig.trashedAt) orig.trashedAt = null;
       return { restored: !!orig, removedIds: pages.map((n) => n.id) };
     });
+    if (folder.dirPath && !this.folders.includes(folder)) { try { fs.rmdirSync(folder.dirPath); } catch (_) {  } }
+    return result;
   }
 
   ensureFolder(name: string, parentId: null) {
@@ -1242,7 +1371,32 @@ class Store {
   }
 
   vaultRootFolder(vaultId: string) {
+    if (this.isHome(vaultId)) return null;
     return this.folders.find((f) => f.vaultId === vaultId && f.parentId === null) || null;
+  }
+
+  homeVault() {
+    return this.vaults.find((v) => v.home) || null;
+  }
+
+  isHome(vaultId: string | null | undefined) {
+    return !!vaultId && this.vaults.some((v) => v.home && v.id === vaultId);
+  }
+
+  _isVaultRoot(f: Folder) {
+    return !!f.vaultId && !f.parentId && !this.isHome(f.vaultId);
+  }
+
+  addHomeVault(dir: string) {
+    const existing = this.homeVault();
+    if (existing) return existing;
+    fs.mkdirSync(dir, { recursive: true });
+    const vault = sanitizeVault({ path: dir, name: 'Notes', home: true, autoSync: false, id: crypto.randomUUID(), createdAt: this.now() }, this.now());
+    if (!vault) throw new Error('The notes folder needs a path.');
+    const inside = (a: string, b: string) => (F.pathKey(a) + path.sep).startsWith(F.pathKey(b) + path.sep);
+    const overlap = this.vaults.find((v) => inside(vault.path, v.path) || inside(v.path, vault.path));
+    if (overlap) throw Object.assign(new Error('The notes folder overlaps the vault "' + overlap.name + '".'), { code: 'EOVERLAP' });
+    return this._change({ vaults: true }, () => { this.vaults.push(vault); return vault; });
   }
 
   folderDir(folderId: string) {
@@ -1280,7 +1434,7 @@ class Store {
 
   removeVault(id: string) {
     const v = this.getVault(id);
-    if (!v) return false;
+    if (!v || v.home) return false;
     const gone = this.notes.filter((n) => n.vaultId === id).map((n) => n.id);
     return this._commit(() => {
       this.notes = this.notes.filter((n) => n.vaultId !== id);
@@ -1300,10 +1454,10 @@ class Store {
     const known = this._notesByPathKey();
     const revision = this.revision;
     let disk: DiskView | null = null;
-    if (opts.paths && opts.paths.length <= SCAN_TARGETED_MAX && this.vaultRootFolder(id)) {
+    if (opts.paths && opts.paths.length <= SCAN_TARGETED_MAX && (this.vaultRootFolder(id) || this.isHome(id))) {
       const root = await fs.promises.stat(vault.path).catch(() => null);
       if (!root || !root.isDirectory()) return { added: 0, updated: 0, removed: 0, unavailable: true };
-      disk = await readVaultPaths(vault.path, opts.paths, known, this._vaultFoldersByKey(id));
+      disk = await readVaultPaths(vault.path, opts.paths, known, this._vaultDirKeys(id));
     }
     if (!disk) disk = await readVaultTree(vault.path, known);
     if (!disk) return { added: 0, updated: 0, removed: 0, unavailable: true };
@@ -1320,32 +1474,44 @@ class Store {
     return byKey;
   }
 
+  _vaultDirKeys(id: string) {
+    const keys = new Set(this._vaultFoldersByKey(id).keys());
+    const v = this.getVault(id);
+    if (v) keys.add(F.pathKey(v.path));
+    return keys;
+  }
+
   _applyScan(vault: Vault, disk: DiskView, readAtRevision: number, allowRemovals: boolean, change: ScanChange, remember: (n: Note) => void): VaultScan {
     const id = vault.id;
+    const home = this.isHome(id);
     const now = this.now();
     const byKey = this._notesByPathKey();
     const candidates = disk.changed ? Array.from(disk.changed, (k) => byKey.get(k)).filter((n): n is Note => !!n) : this.notes;
     const folderByKey = this._vaultFoldersByKey(id);
-    let root = this.vaultRootFolder(id);
-    if (!root) {
+    let root = home ? null : this.vaultRootFolder(id);
+    if (!home && !root) {
       root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
       this.folders.push(root);
       change.folders = true;
     }
-    folderByKey.set(F.pathKey(vault.path), root);
-    const seenFolders = new Set([root.id]);
+    const rootKey = F.pathKey(vault.path);
+    if (root) folderByKey.set(rootKey, root);
+    const placeOf = (key: string): Folder | null | undefined => (key === rootKey ? root : folderByKey.get(key));
+    const titleOf = (fileName: string, body: string) => (home ? homeTitle(fileName, body) : stem(fileName));
+    const seenFolders = new Set<string>(root ? [root.id] : []);
     for (const d of disk.dirs) {
-      const parent = folderByKey.get(d.parentKey);
-      if (!parent) continue;
+      const parent = placeOf(d.parentKey);
+      if (parent === undefined) continue;
+      const parentId = parent ? parent.id : null;
       let sub = folderByKey.get(d.key);
       if (!sub) {
         if (this.revision !== readAtRevision && !fs.existsSync(d.full)) continue;
-        sub = { id: crypto.randomUUID(), name: d.name, parentId: parent.id, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
+        sub = { id: crypto.randomUUID(), name: d.name, parentId, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
         this.folders.push(sub);
         folderByKey.set(d.key, sub);
         change.folders = true;
-      } else if (sub.parentId !== parent.id || sub.name !== d.name) {
-        sub.parentId = parent.id;
+      } else if (sub.parentId !== parentId || sub.name !== d.name) {
+        sub.parentId = parentId;
         sub.name = d.name;
         change.folders = true;
       }
@@ -1362,7 +1528,7 @@ class Store {
       if (!orphans) {
         orphans = new Map();
         for (const n of candidates) {
-          if (!n.filePath || !missing(n)) continue;
+          if (!n.filePath || n.lock || !missing(n)) continue;
           const same = orphans.get(n.body);
           if (same) same.push(n); else orphans.set(n.body, [n]);
         }
@@ -1371,8 +1537,10 @@ class Store {
       return same ? same.shift() : undefined;
     };
     for (const file of disk.files) {
-      const folder = folderByKey.get(file.dirKey);
-      if (!folder) continue;
+      const folder = placeOf(file.dirKey);
+      if (folder === undefined) continue;
+      const folderId = folder ? folder.id : null;
+      const locked = isLockPath(file.full);
       const note = byKey.get(file.key);
       if (note) {
         const mtimeNow = note.fileMtime !== file.mtime ? F.mtimeOf(file.full) : note.fileMtime;
@@ -1380,17 +1548,25 @@ class Store {
           const read = note.fileKind !== 'text' ? { text: note.body, mtime: mtimeNow }
             : file.text !== undefined && mtimeNow === file.mtime ? { text: file.text, mtime: file.mtime }
             : readVaultText(file.full, mtimeNow);
-          if (read.text === null) { seenNotes.add(note.id); continue; }
-          if (read.text !== note.body || note.fileKind !== 'text') updated++;
+          const sealed = locked ? readLockFile(read.text) : null;
+          if (read.text === null || (locked && !sealed)) { seenNotes.add(note.id); continue; }
           remember(note);
-          note.body = read.text;
+          if (sealed) {
+            if (JSON.stringify(sealed.lock) !== JSON.stringify(note.lock)) { updated++; this.relock(note.id); }
+            note.lock = sealed.lock;
+            note.tags = sealed.tags;
+            note.body = '';
+          } else {
+            if (read.text !== note.body || note.fileKind !== 'text') updated++;
+            note.body = read.text;
+          }
           note.fileMtime = read.mtime;
           syncFileTags(note);
           touched.add(note);
         }
-        if (note.folderId !== folder.id || note.vaultId !== id || note.trashedAt) {
+        if (note.folderId !== folderId || note.vaultId !== id || note.trashedAt) {
           remember(note);
-          note.folderId = folder.id;
+          note.folderId = folderId;
           note.vaultId = id;
           note.trashedAt = null;
           touched.add(note);
@@ -1401,12 +1577,14 @@ class Store {
       if (this.revision !== readAtRevision && !fs.existsSync(file.full)) continue;
       const read = file.text !== undefined ? { text: file.text, mtime: file.mtime } : readVaultText(file.full, file.mtime);
       if (read.text === null) continue;
-      const orphan = orphanFor(read.text);
+      const sealed = locked ? readLockFile(read.text) : null;
+      if (locked && !sealed) continue;
+      const orphan = sealed ? undefined : orphanFor(read.text);
       if (orphan) {
         remember(orphan);
         orphan.filePath = file.full;
-        orphan.title = stem(file.name);
-        orphan.folderId = folder.id;
+        orphan.title = titleOf(file.name, orphan.body);
+        orphan.folderId = folderId;
         orphan.fileMtime = read.mtime;
         touched.add(orphan);
         byKey.set(file.key, orphan);
@@ -1414,7 +1592,9 @@ class Store {
         updated++;
         continue;
       }
-      const created = noteFrom({ id: crypto.randomUUID(), title: stem(file.name), body: read.text, tags: FM.isMarkdownPath(file.full) ? FM.noteTags(read.text) : [], folderId: folder.id, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
+      const body = sealed ? '' : read.text;
+      const tags = sealed ? sealed.tags : FM.isMarkdownPath(file.full) ? FM.noteTags(read.text) : [];
+      const created = noteFrom({ id: crypto.randomUUID(), title: titleOf(file.name, body), body, lock: sealed ? sealed.lock : null, tags, folderId, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
       fresh.push(created);
       byKey.set(file.key, created);
       seenNotes.add(created.id);
@@ -1425,7 +1605,11 @@ class Store {
       if (gone.size) { this.notes = this.notes.filter((n) => !gone.has(n.id)); change.dropped = Array.from(gone); removed = gone.size; }
       if (!disk.changed) {
         const goneFolders = new Set(this.folders.filter((f) => f.vaultId === id && !seenFolders.has(f.id) && !(f.dirPath && fs.existsSync(f.dirPath))).map((f) => f.id));
-        if (goneFolders.size) { this.folders = this.folders.filter((f) => !goneFolders.has(f.id)); change.folders = true; }
+        if (goneFolders.size) {
+          this.folders = this.folders.filter((f) => !goneFolders.has(f.id));
+          for (const n of this.notes) if (n.folderId && goneFolders.has(n.folderId)) { remember(n); n.folderId = null; touched.add(n); }
+          change.folders = true;
+        }
       }
     }
     if (fresh.length) this.notes = fresh.slice().reverse().concat(this.notes);
@@ -1433,10 +1617,11 @@ class Store {
     return disk.changed ? { added, updated, removed } : { added, updated, removed, notes: seenNotes.size, folders: seenFolders.size };
   }
 
-  createVaultNote(folderId: string, data?: NoteInput) {
+  createVaultNote(folderId: string, data?: NoteInput): Note {
     const folder = this.getFolder(folderId);
     if (!folder || !folder.vaultId || !folder.dirPath) throw new Error('Not a vault folder');
     data = data || {};
+    if (this.isHome(folder.vaultId)) return this._createHomeNote(data, folder);
     fs.mkdirSync(folder.dirPath, { recursive: true });
     const base = H.safeFilename(String(data.title || '').trim() || 'Untitled');
     const name = uniqueName(folder.dirPath, base, '.md');
@@ -1449,6 +1634,74 @@ class Store {
     });
   }
 
+  _homeDir(folder: Folder | null) {
+    const home = this.homeVault();
+    if (!home) throw new Error('There is no notes folder.');
+    return folder && folder.dirPath ? folder.dirPath : home.path;
+  }
+
+  _homeFile(dir: string, title: string, body: string, ext: string) {
+    fs.mkdirSync(dir, { recursive: true });
+    const fallback = ext === '.' + LOCK_EXT ? 'Locked note' : H.deriveTitle({ title: '', body });
+    return path.join(dir, uniqueName(dir, H.safeFilename(title.trim() || fallback), ext));
+  }
+
+  _createHomeNote(data: NoteInput, folder: Folder | null): Note {
+    const home = this.homeVault();
+    if (!home) throw new Error('There is no notes folder.');
+    const lock = L.sanitizeLock(data.lock);
+    const title = String(data.title || '');
+    const body = lock ? '' : String(data.body || '');
+    const tags = H.parseTags(data.tags || []);
+    const full = this._homeFile(this._homeDir(folder), title, body, lock ? '.' + LOCK_EXT : '.md');
+    const text = lock ? lockFileText(lock, tags) : withTags(body, tags);
+    writeFileAtomic(full, text);
+    try {
+      return this.create(Object.assign({}, data, {
+        title: title.trim() ? stem(path.basename(full)) : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
+        folderId: folder ? folder.id : null, filePath: full, fileKind: 'text' as const, fileMtime: F.mtimeOf(full), vaultId: home.id,
+      }));
+    } catch (err) {
+      try { fs.rmSync(full); } catch (_) {  }
+      throw err;
+    }
+  }
+
+  _homeRename(note: FileNote, title: string, body: string | null) {
+    const explicit = title.trim();
+    if (!explicit && body === null) return '';
+    const wanted = H.safeFilename(explicit || H.deriveTitle({ title: '', body: body ?? '' }));
+    const current = stem(path.basename(note.filePath));
+    const numbered = current.startsWith(wanted + ' ') && /^\d+$/.test(current.slice(wanted.length + 1));
+    if (wanted !== current && !numbered) {
+      try { this._renameVaultFile(note, wanted); } catch (err) { if (explicit) throw err; }
+    }
+    return explicit ? stem(path.basename(note.filePath)) : '';
+  }
+
+  _adopt(note: Note, target: Folder | null) {
+    const home = target ? this.isHome(target.vaultId) : true;
+    const vault = target && target.vaultId ? this.getVault(target.vaultId) : this.homeVault();
+    if (!vault) throw new Error('There is no notes folder.');
+    if (note.lock && !home) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
+    const dir = target && target.dirPath ? target.dirPath : this._homeDir(null);
+    if (!home) fs.mkdirSync(dir, { recursive: true });
+    const full = home
+      ? this._homeFile(dir, note.title, note.lock ? '' : note.body, note.lock ? '.' + LOCK_EXT : '.md')
+      : path.join(dir, uniqueName(dir, H.safeFilename(H.deriveTitle(note)), '.md'));
+    const text = note.lock ? lockFileText(note.lock, note.tags) : vaultFileText(note.body, note.tags, full);
+    writeFileAtomic(full, text);
+    note.body = note.lock ? '' : text;
+    note.filePath = full;
+    note.fileKind = 'text';
+    note.fileMtime = F.mtimeOf(full);
+    note.vaultId = vault.id;
+    note.folderId = target ? target.id : null;
+    note.title = home && !note.title.trim() ? '' : stem(path.basename(full));
+    syncFileTags(note);
+    return full;
+  }
+
   _renameVaultFile(note: FileNote, title: string) {
     const dir = path.dirname(note.filePath);
     const ext = path.extname(note.filePath) || '.md';
@@ -1456,7 +1709,7 @@ class Store {
     if (base === stem(path.basename(note.filePath))) return note.title;
     const name = base.toLowerCase() === stem(path.basename(note.filePath)).toLowerCase() ? base + ext : uniqueName(dir, base, ext);
     const next = path.join(dir, name);
-    fs.renameSync(note.filePath, next);
+    retryWhileBusy(() => fs.renameSync(note.filePath, next));
     note.filePath = next;
     return stem(name);
   }
@@ -1469,14 +1722,22 @@ class Store {
     return dir;
   }
 
-  _moveVaultFile(note: FileNote, targetFolderId: string) {
-    const target = this.getFolder(targetFolderId);
-    if (!target || target.vaultId !== note.vaultId || !target.dirPath) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
-    fs.mkdirSync(target.dirPath, { recursive: true });
-    const name = uniqueName(target.dirPath, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md');
-    const next = path.join(target.dirPath, name);
+  _moveVaultFile(note: FileNote, targetFolderId: string | null) {
+    const target = targetFolderId ? this.getFolder(targetFolderId) : null;
+    const fromHome = this.isHome(note.vaultId);
+    const dir = target ? target.dirPath : fromHome ? this._homeDir(null) : null;
+    const crossing = !!target && target.vaultId !== note.vaultId;
+    if (!dir || (target && !target.vaultId) || (crossing && !fromHome)) throw Object.assign(new Error('A vault note can only move within its vault.'), { code: 'EVAULT' });
+    if (crossing && note.lock) throw Object.assign(new Error('A locked note cannot move into a vault: it would be written to disk in clear. Remove the lock first.'), { code: 'ELOCKED' });
+    fs.mkdirSync(dir, { recursive: true });
+    const name = uniqueName(dir, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md');
+    const next = path.join(dir, name);
     if (F.pathKey(next) === F.pathKey(note.filePath)) return note.filePath;
-    fs.renameSync(note.filePath, next);
+    moveFileSync(note.filePath, next);
+    if (crossing && target) {
+      note.vaultId = target.vaultId;
+      note.title = stem(name);
+    }
     return next;
   }
 
@@ -1516,6 +1777,7 @@ class Store {
       note.filePath = next;
       const folder = this.folders.find((f) => f.vaultId === note.vaultId && f.dirPath && F.pathKey(f.dirPath) === F.pathKey(dir));
       if (folder) note.folderId = folder.id;
+      else if (this.isHome(note.vaultId) && F.pathKey(dir) === F.pathKey(this._homeDir(null))) note.folderId = null;
       delete note.trashedFrom;
       try {
         return this._change({ notes: [note] }, () => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
@@ -1723,7 +1985,7 @@ class Store {
     for (const [k, list] of by) {
       const f = k ? this.getFolder(k) : null;
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
-      out[k] = ordered.map((n) => H.outlineRow(this._rowView(n)));
+      out[k] = ordered.map((n) => H.outlineRow(this._rowView(n), this.isHome(n.vaultId)));
     }
     return out;
   }
@@ -1748,7 +2010,7 @@ class Store {
         const children = build(f.id, depth + 1);
         const count = direct.get(f.id) || 0;
         const total = count + children.reduce((s, c) => s + c.total, 0);
-        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, total, children, vaultId: f.vaultId || null, isVaultRoot: !!(f.vaultId && !f.parentId), book: !!f.book };
+        return { id: f.id, name: f.name, parentId: f.parentId, depth, count, total, children, vaultId: this.isHome(f.vaultId) ? null : f.vaultId || null, isVaultRoot: this._isVaultRoot(f), book: !!f.book };
       });
     return build(null, 0);
   }
@@ -1758,12 +2020,15 @@ class Store {
     const parentId = data.parentId && this.getFolder(data.parentId) ? data.parentId : null;
     const folder = folderFrom({ name: data.name, parentId }, this.now());
     const parent = parentId ? this.getFolder(parentId) : null;
-    if (parent && parent.vaultId && parent.dirPath) {
+    const home = this.homeVault();
+    const parentDir = parent ? (parent.vaultId && parent.dirPath ? parent.dirPath : null) : home ? home.path : null;
+    const parentVault = parent ? parent.vaultId : home ? home.id : null;
+    if (parentDir && parentVault) {
       assertVaultDirName(folder.name);
-      const dirName = uniqueName(parent.dirPath, H.safeFilename(folder.name), '');
+      const dirName = uniqueName(parentDir, H.safeFilename(folder.name), '');
       folder.name = dirName;
-      folder.vaultId = parent.vaultId;
-      folder.dirPath = path.join(parent.dirPath, dirName);
+      folder.vaultId = parentVault;
+      folder.dirPath = path.join(parentDir, dirName);
       fs.mkdirSync(folder.dirPath, { recursive: true });
     }
     return this._change({ folders: true }, () => { this.folders.push(folder); return folder; });
@@ -1776,7 +2041,7 @@ class Store {
     if (next === f.name) return f;
     let moved: Note[] = [];
     let vaultRenamed = false;
-    if (f.vaultId && f.dirPath && f.parentId) {
+    if (f.vaultId && f.dirPath && !this._isVaultRoot(f)) {
       const parentDir = path.dirname(f.dirPath);
       assertVaultDirName(next);
       const wanted = H.safeFilename(next);
@@ -1785,7 +2050,7 @@ class Store {
       fs.renameSync(f.dirPath, newDir);
       moved = this._retargetVaultPaths(f.dirPath, newDir);
       f.dirPath = newDir;
-    } else if (f.vaultId && !f.parentId) {
+    } else if (this._isVaultRoot(f) && f.vaultId) {
       const v = this.getVault(f.vaultId);
       if (v) { v.name = next; vaultRenamed = true; }
     }
@@ -1821,11 +2086,13 @@ class Store {
     let moved: Note[] = [];
     if (f.vaultId) {
       const target = parentId ? this.getFolder(parentId) : null;
-      if (!f.parentId) return { error: 'A vault root stays at the top level. Remove the vault in Settings instead.' };
-      if (!target || target.vaultId !== f.vaultId || !target.dirPath || !f.dirPath) return { error: 'A vault folder can only move within its vault.' };
-      const newDir = path.join(target.dirPath, uniqueName(target.dirPath, path.basename(f.dirPath), ''));
-      fs.renameSync(f.dirPath, newDir);
-      moved = this._retargetVaultPaths(f.dirPath, newDir);
+      if (this._isVaultRoot(f)) return { error: 'A vault root stays at the top level. Remove the vault in Settings instead.' };
+      const targetDir = target ? target.dirPath : this.isHome(f.vaultId) ? this._homeDir(null) : null;
+      const from = f.dirPath;
+      if (!targetDir || !from || (target && target.vaultId !== f.vaultId)) return { error: 'A vault folder can only move within its vault.' };
+      const newDir = path.join(targetDir, uniqueName(targetDir, path.basename(from), ''));
+      retryWhileBusy(() => fs.renameSync(from, newDir));
+      moved = this._retargetVaultPaths(from, newDir);
       f.dirPath = newDir;
       f.name = path.basename(newDir);
     } else if (parentId && this.getFolder(parentId)?.vaultId) {
@@ -1839,7 +2106,7 @@ class Store {
     const f = this.getFolder(id);
     if (!f) return null;
     const parent = f.parentId || null;
-    if (f.vaultId && !parent) return { error: 'Remove a vault in Settings; its files stay on disk.' };
+    if (this._isVaultRoot(f)) return { error: 'Remove a vault in Settings; its files stay on disk.' };
     if (f.vaultId && f.dirPath) {
       const parentDir = path.dirname(f.dirPath);
       const byKey = this._notesByPathKey();
