@@ -102,8 +102,8 @@ class SearchIndex {
     return typeof query === 'string' && query.trim() ? this._ask({ type: 'candidates', query }) : Promise.resolve(null);
   }
 
-  incoming(id: unknown) {
-    return typeof id === 'string' && id ? this._ask({ type: 'incoming', id }) : Promise.resolve(null);
+  incoming(id: unknown, names: readonly string[]) {
+    return typeof id === 'string' && id ? this._ask({ type: 'incoming', id, names: names.slice() }) : Promise.resolve(null);
   }
 
   _sync() {
@@ -127,7 +127,7 @@ class SearchIndex {
     if (this.waiting.size) this.log.push({ at: this.posted, ids });
   }
 
-  _ask(msg: { type: 'candidates'; query: string } | { type: 'incoming'; id: string }): Promise<Set<string> | null> {
+  _ask(msg: { type: 'candidates'; query: string } | { type: 'incoming'; id: string; names: string[] }): Promise<Set<string> | null> {
     if (!this.ready) return Promise.resolve(null);
     const seq = ++this.seq;
     return new Promise((resolve) => {

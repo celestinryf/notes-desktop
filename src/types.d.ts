@@ -107,7 +107,7 @@ type IndexRequest =
   | { type: 'sync-end'; seq: number }
   | { type: 'change'; seq: number; notes: IndexNotePayload[]; dropped: string[]; purge: boolean }
   | { type: 'candidates'; seq: number; query: string }
-  | { type: 'incoming'; seq: number; id: string };
+  | { type: 'incoming'; seq: number; id: string; names: string[] };
 type IndexReply =
   | { type: 'synced'; seq: number; changed: number; removed: number; size: number }
   | { type: 'answer'; seq: number; ids: string[] | null }

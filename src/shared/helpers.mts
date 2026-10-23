@@ -339,6 +339,36 @@ function noteLinkIds(body: string) {
   return out;
 }
 
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+function vaultLinks(body: string) {
+  const text = String(body || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+  const names = new Set<string>();
+  const paths = new Set<string>();
+  for (const m of text.matchAll(/\[\[([^[\]\n]+?)\]\]/g)) {
+    const name = m[1].split('|')[0].split('#')[0].trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').toLowerCase();
+    if (name) names.add(name);
+  }
+  for (const m of text.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)/g)) {
+    const raw = m[1].replace(/^<|>$/g, '');
+    if (URL_SCHEME.test(raw)) continue;
+    let href = raw.split('#')[0].split('?')[0];
+    try { href = decodeURIComponent(href); } catch (_) {  }
+    if (href) paths.add(href.replace(/\\/g, '/'));
+  }
+  return { names: Array.from(names), paths: Array.from(paths) };
+}
+
+function linkLeaf(target: string) {
+  const leaf = target.split('/').pop() || '';
+  return leaf.toLowerCase();
+}
+
+function stemOf(name: string) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
 function safeFilename(name: string) {
   let s = Array.from(String(name || UNTITLED).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim()).slice(0, 80).join('').replace(/[. ]+$/, '');
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) s = 'note-' + s;
@@ -489,5 +519,5 @@ export {
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
-  plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds,
+  plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds, vaultLinks, linkLeaf, stemOf,
 };
