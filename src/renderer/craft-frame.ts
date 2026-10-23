@@ -3,9 +3,9 @@ import { tenths } from '../shared/helpers.mts';
 export const NotesCraftFrame = (function () {
   const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-  function create<Context>({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, trace }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
+  function create<Context>({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, onDrawn, trace }: { frame: HTMLIFrameElement, origin: string, url: string, readyMs?: number, theme?: string, darkPage?: boolean,
     onSave: (name: string, bytes: Uint8Array, context: Context) => Promise<{ ok: boolean, own: boolean }>, onDirty?: (dirty: boolean) => void,
-    onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void, trace?: (event: string, fields?: TraceFields) => void }) {
+    onOpened?: () => void, onOpenFailed?: (error: string) => void, onUnavailable?: () => void, onDrawn?: () => void, trace?: (event: string, fields?: TraceFields) => void }) {
     const mark = trace || (() => {});
     const numbers = (m: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.flatMap((k) => { const v = m[k]; return typeof v === 'number' ? [[k, tenths(v)]] : []; }));
     let ready = false;
@@ -49,6 +49,7 @@ export const NotesCraftFrame = (function () {
         else if (onOpenFailed) onOpenFailed(String(m.error || 'the app could not open it'));
       } else if (m.type === 'drawn') {
         mark('drawn', numbers(m, ['ms', 'frames', 'frameMs', 'renderMs', 'layoutMs']));
+        if (onDrawn) onDrawn();
       } else if (m.type === 'dirty') {
         dirty = !!m.dirty;
         if (onDirty) onDirty(dirty || unsaved);
@@ -147,7 +148,7 @@ export const NotesCraftFrame = (function () {
       queued = null;
     }
 
-    return { open, park, resume, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
+    return { open, park, resume, isConfirmed: () => confirmed, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
   }
 
   return { create };

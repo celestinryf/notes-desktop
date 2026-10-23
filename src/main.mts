@@ -375,6 +375,12 @@ function main() {
   handle('notes:list', (_e, opts) => store.list(opts).map((n) => store.publicNote(n)));
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
+  handle('notes:latestFile', (_e, kind) => {
+    if (kind !== 'docx' && kind !== 'sheet') return null;
+    let latest = null;
+    for (const n of store.notes) if (!n.trashedAt && n.filePath && n.fileKind === kind && (!latest || n.updatedAt > latest.updatedAt)) latest = n;
+    return latest ? store.publicNote(latest) : null;
+  });
   handle('notes:create', (_e, data) => {
     data = Object.assign({}, data || {});
     for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) Reflect.deleteProperty(data, k);

@@ -5221,7 +5221,7 @@
   // src/renderer/craft-frame.ts
   var NotesCraftFrame = /* @__PURE__ */ (function() {
     const isRecord2 = (value) => typeof value === "object" && value !== null;
-    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, trace }) {
+    function create({ frame, origin, url, readyMs, theme, darkPage, onSave, onDirty, onOpened, onOpenFailed, onUnavailable, onDrawn, trace }) {
       const mark = trace || (() => {
       });
       const numbers = (m, keys) => Object.fromEntries(keys.flatMap((k) => {
@@ -5272,6 +5272,7 @@
           } else if (onOpenFailed) onOpenFailed(String(m.error || "the app could not open it"));
         } else if (m.type === "drawn") {
           mark("drawn", numbers(m, ["ms", "frames", "frameMs", "renderMs", "layoutMs"]));
+          if (onDrawn) onDrawn();
         } else if (m.type === "dirty") {
           dirty = !!m.dirty;
           if (onDirty) onDirty(dirty || unsaved);
@@ -5376,7 +5377,7 @@
         unsaved = false;
         queued = null;
       }
-      return { open, park, resume, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
+      return { open, park, resume, isConfirmed: () => confirmed, requestSave, isDirty: () => !!current && ready && (dirty || unsaved), close };
     }
     return { create };
   })();
@@ -5388,6 +5389,7 @@
   }
 
   // src/renderer/craft-notes.ts
+  var WARM_LIMIT_MS = 2e4;
   var baseName = (path) => {
     const parts = path.split(/[\\/]/);
     return parts[parts.length - 1];
@@ -5402,6 +5404,7 @@
       const frame = () => ui.frame();
       let fc = null, note = null, shownKey = null, seq = 0, down = false;
       let parkedKey = null, parkedNote = null;
+      let warming = null, warmStarted = 0, warmTimer;
       const trace = (event, fields) => craftTrace(event, Object.assign({ app: key }, fields));
       const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
       function controller() {
@@ -5419,12 +5422,16 @@
               if (note && state.currentId === note.id) showBanner("");
             },
             onOpenFailed: (err) => {
+              const quiet = warming !== null;
               drop();
-              showBanner(ui.label + " could not open this " + ui.what + ": " + err + '. Use "Open with\u2026" to open it in ' + ui.openWith + ".");
+              if (!quiet) showBanner(ui.label + " could not open this " + ui.what + ": " + err + '. Use "Open with\u2026" to open it in ' + ui.openWith + ".");
             },
             theme: "dark",
             darkPage: true,
             trace,
+            onDrawn: () => {
+              if (warming !== null && warming === shownKey) finishWarm(true);
+            },
             onUnavailable: () => {
               down = true;
               drop();
@@ -5436,8 +5443,56 @@
         }
         return fc;
       }
+      async function load(n, s, wanted) {
+        const asked = performance.now();
+        const bytes = await ui.bytes(n.id);
+        trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: msSince(asked) });
+        if (s !== seq || !wanted()) return;
+        if (!n.filePath) throw new Error("the note has no file");
+        note = { id: n.id, fileMtime: n.fileMtime, name: baseName(n.filePath) };
+        controller().open(note.name, bytes, note);
+      }
+      function setWarming(k) {
+        warming = k;
+        clearTimeout(warmTimer);
+        frame().classList.toggle("is-warming", k !== null);
+        frame().inert = k !== null;
+        if (k !== null) {
+          warmStarted = performance.now();
+          warmTimer = setTimeout(() => finishWarm(false), WARM_LIMIT_MS);
+        }
+      }
+      function finishWarm(drawn) {
+        if (warming === null) return;
+        trace("warm-done", { drawn, ms: msSince(warmStarted) });
+        setWarming(null);
+        clear();
+      }
+      async function warm(n) {
+        if (!usable() || warming !== null || shownKey !== null || note !== null || parkedKey !== null) return;
+        const k = n.id + ":" + n.fileMtime;
+        setWarming(k);
+        trace("warm", { id: n.id });
+        frame().classList.remove("hidden");
+        shownKey = k;
+        const s = ++seq;
+        try {
+          await load(n, s, () => shownKey === k);
+        } catch (_) {
+          if (s === seq) drop();
+        }
+      }
       async function show(n) {
         const k = n.id + ":" + n.fileMtime;
+        if (warming !== null) {
+          const used = warming === k;
+          trace(used ? "warm-used" : "warm-dropped", { id: n.id });
+          setWarming(null);
+          if (used && !(fc && fc.isConfirmed())) {
+            frame().classList.add("is-opening");
+            showBanner("Opening in " + ui.label + "\u2026");
+          }
+        }
         frame().classList.remove("hidden");
         trace("show", { id: n.id, kept: shownKey === k, frame: !!fc });
         if (shownKey === k) return;
@@ -5453,14 +5508,7 @@
         frame().classList.add("is-opening");
         showBanner("Opening in " + ui.label + "\u2026");
         try {
-          const asked = performance.now();
-          const bytes = await ui.bytes(n.id);
-          trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: msSince(asked) });
-          if (s !== seq || !state.current || state.current.id !== n.id) return;
-          if (!n.filePath) throw new Error("the note has no file");
-          const name = baseName(n.filePath);
-          note = { id: n.id, fileMtime: n.fileMtime, name };
-          controller().open(name, bytes, note);
+          await load(n, s, () => !!state.current && state.current.id === n.id);
         } catch (err) {
           if (s !== seq) return;
           drop();
@@ -5486,6 +5534,7 @@
         frame().classList.add("hidden");
       }
       function clear() {
+        if (warming !== null) return;
         if (shownKey === null && note === null) {
           hide();
           return;
@@ -5503,6 +5552,7 @@
         hide();
       }
       function drop() {
+        if (warming !== null) setWarming(null);
         parkedKey = null;
         parkedNote = null;
         if (fc) fc.close();
@@ -5559,7 +5609,7 @@
         parkedKey = null;
         parkedNote = null;
       };
-      return { usable, show, clear, dirty, flush, forget };
+      return { usable, show, warm, clear, dirty, flush, forget };
     }
     const crafts = { wordcraft: craftViewer("wordcraft"), gridcraft: craftViewer("gridcraft") };
     const useWordCraft = () => crafts.wordcraft.usable();
@@ -8439,6 +8489,27 @@
       }
     }
     const { openConvertMenu, closeConvertMenu, convertCurrent } = createConvertMenu({ api, flushSave, openFiles });
+    const WARM_DELAY_MS = 1500;
+    const WARM_IDLE_MS = 5e3;
+    let warmUpStarted = false;
+    function warmWordCraftSoon() {
+      if (warmUpStarted || !useWordCraft()) return;
+      warmUpStarted = true;
+      setTimeout(() => requestIdleCallback(() => {
+        likelyWordNote().then((n) => {
+          if (n) crafts.wordcraft.warm(n);
+        }).catch(() => {
+        });
+      }, { timeout: WARM_IDLE_MS }), WARM_DELAY_MS);
+    }
+    async function likelyWordNote() {
+      for (const id of [state.currentId, ...tabs.ids]) {
+        if (!id) continue;
+        const n = await api.notes.get(id);
+        if (n && n.filePath && n.fileKind === "docx" && !n.trashedAt) return n;
+      }
+      return api.notes.latestFile("docx");
+    }
     const documentDirty = () => pdfDirty() || docxDirty() || craftDirty();
     const documentBusy = () => pdfBusy() || docxDirty() || craftDirty();
     async function flushDocuments(opts) {
@@ -10080,6 +10151,7 @@
         shownBusy = true;
         try {
           await state.initDone;
+          warmWordCraftSoon();
           if (el.settingsDialog.open) return;
           if (state.current) {
             if (state.current.title || state.current.body) focusBody();
