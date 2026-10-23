@@ -184,3 +184,40 @@ test('duplicating a note gives a titled copy, and a linked file can sit in a fol
   assert.equal(store.get(linked.id).folderId, f.id);
   assert.equal(store.get(linked.id).filePath, outside, 'the linked file stays where it is');
 });
+
+test('review fixes: an outside edit blocks undoing a split; an explicit retitle to a shorter name works; names read back as before', async () => {
+  const { store, dir, has, home } = homeStore();
+  const n = store.create({ title: 'Book', body: '# Book\n## One\nfirst\n## Two\nsecond\n' });
+  const r = store.splitIntoBook(n.id, {});
+  const page = store.get(r.pageIds[0]);
+  fs.writeFileSync(page.filePath, 'edited elsewhere\n');
+  fs.utimesSync(page.filePath, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  assert.throws(() => store.undoSplit(r.folder.id, r.pageIds, n.id), /edited outside Notes/);
+  assert.ok(fs.existsSync(page.filePath), 'the edited page stays');
+
+  const report = store.create({ title: 'Report 2024', body: 'x' });
+  store.update(report.id, { title: 'Report' });
+  assert.ok(has('Report.md') && !has('Report 2024.md'));
+
+  store.create({ body: 'Same first line' });
+  const second = store.create({ body: 'Same first line' });
+  const sealed = store.create({ body: 'hidden' });
+  store.lockNote(sealed.id, 'pw');
+  const again = new Store(store.dir).load();
+  await again.scanVault(home.id);
+  assert.equal(again.get(second.id).title, '');
+  assert.equal(again.get(sealed.id).title, '');
+  assert.equal(path.basename(again.get(second.id).filePath), 'Same first line 2.md');
+  assert.equal(again.addVault({ path: tmpDir('notes-home-plain-'), home: true }).home, false, 'the page cannot make a second home vault');
+  assert.equal(again.homeVault().id, home.id);
+});
+
+test('review fixes: an .mdlock file in an ordinary vault is not a note', async () => {
+  const { store } = homeStore();
+  const other = tmpDir('notes-home-plainvault-');
+  fs.writeFileSync(path.join(other, 'Stray.mdlock'), JSON.stringify({ notesLock: 1, tags: [], lock: { v: 1, kdf: 'scrypt', N: 16384, salt: 'AA==', iv: 'AA==', tag: 'AA==', ct: 'AA==' } }));
+  fs.writeFileSync(path.join(other, 'Real.md'), 'real');
+  const v = store.addVault({ path: other });
+  await store.scanVault(v.id);
+  assert.deepEqual(store.notes.filter((n) => n.vaultId === v.id).map((n) => path.basename(n.filePath)), ['Real.md']);
+});

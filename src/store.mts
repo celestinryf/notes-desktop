@@ -131,6 +131,7 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
 
 const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
 const LOCK_EXT = 'mdlock';
+const LOCKED_NAME = 'Locked note';
 const isLockPath = (p: string | null | undefined) => F.extOf(String(p || '')) === LOCK_EXT;
 const scannedFile = (name: string) => VAULT_EXT.has(F.extOf(name)) || isLockPath(name);
 
@@ -148,16 +149,20 @@ function derivedStem(body: string) {
   return H.safeFilename(H.deriveTitle({ title: '', body }));
 }
 
-function homeTitle(fileName: string, body: string) {
+function numberedName(name: string, base: string) {
+  return name === base || (name.startsWith(base + ' ') && /^\d+$/.test(name.slice(base.length + 1)));
+}
+
+function homeTitle(fileName: string, body: string, locked: boolean) {
   const s = stem(fileName);
-  return s === derivedStem(body) ? '' : s;
+  return numberedName(s, locked ? LOCKED_NAME : derivedStem(body)) ? '' : s;
 }
 
 function moveFileSync(from: string, to: string) {
   try { retryWhileBusy(() => fs.renameSync(from, to)); } catch (err) {
     if (err.code !== 'EXDEV') throw err;
     fs.copyFileSync(from, to);
-    retryWhileBusy(() => fs.rmSync(from));
+    try { retryWhileBusy(() => fs.rmSync(from)); } catch (rmErr) { try { fs.rmSync(to, { force: true }); } catch (_) {  } throw rmErr; }
   }
 }
 const VAULT_SKIP_DIRS = new Set(['.git', '.trash', '.obsidian', 'node_modules', '.vscode', '.idea']);
@@ -201,8 +206,13 @@ function replaceFile(tmp: string, target: string) {
 
 function writeFileAtomic(file: string, text: string) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, text, 'utf8');
-  replaceFile(tmp, file);
+  try {
+    fs.writeFileSync(tmp, text, 'utf8');
+    replaceFile(tmp, file);
+  } catch (err) {
+    try { fs.rmSync(tmp, { force: true }); } catch (_) {  }
+    throw err;
+  }
 }
 
 function readWithRetry(file: string): { text: string | null; error: Error | null } {
@@ -969,7 +979,12 @@ class Store {
       if (fid !== (note.folderId || null)) { note.folderId = fid; changed = true; }
     }
     if (changed && note.lock && isFileNote(note) && isLockPath(note.filePath)) {
-      writeFileAtomic(note.filePath, lockFileText(note.lock, note.tags));
+      try { writeFileAtomic(note.filePath, lockFileText(note.lock, note.tags)); }
+      catch (err) {
+        Object.assign(note, before, fileMoved ? { filePath: note.filePath, title: note.title } : {});
+        if (plainBefore !== undefined) this.plain.set(id, plainBefore);
+        throw err;
+      }
       note.fileMtime = F.mtimeOf(note.filePath);
       fileWritten = true;
     }
@@ -1065,7 +1080,11 @@ class Store {
     const sealedPath = isFileNote(note) && isLockPath(note.filePath) ? note.filePath : null;
     const text = sealedPath ? FM.setNoteTags(r.body, note.tags) : r.body;
     const plainPath = sealedPath ? this._homeFile(path.dirname(sealedPath), note.title, r.body, '.md') : null;
-    if (plainPath) writeFileAtomic(plainPath, text);
+    const sealed = note.lock;
+    if (plainPath && sealedPath) {
+      writeFileAtomic(plainPath, text);
+      try { retryWhileBusy(() => fs.rmSync(sealedPath)); } catch (err) { try { fs.rmSync(plainPath); } catch (_) {  } throw err; }
+    }
     try {
       this._commit(() => {
         note.lock = null; note.body = text; note.updatedAt = this.now();
@@ -1073,10 +1092,9 @@ class Store {
         return note;
       }, undefined, { notes: [note], dropped: [] });
     } catch (err) {
-      if (plainPath) { try { fs.rmSync(plainPath); } catch (_) {  } }
+      if (plainPath && sealedPath) { try { writeFileAtomic(sealedPath, lockFileText(sealed, note.tags)); fs.rmSync(plainPath); } catch (_) {  } }
       throw err;
     }
-    if (sealedPath) { try { retryWhileBusy(() => fs.rmSync(sealedPath)); } catch (_) {  } }
     this.relock(id);
     return this.publicNote(note);
   }
@@ -1302,16 +1320,22 @@ class Store {
     if (pages.some((n) => n.updatedAt !== n.createdAt)) throw new Error('A page was edited after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
     const orig = originalId != null ? this.get(originalId) : null;
     if (originalId != null && !orig) throw new Error('The original note was deleted, so the split cannot be undone.');
+    const changedOnDisk = (n: Note) => {
+      if (!n.filePath) return false;
+      if (F.mtimeOf(n.filePath) === n.fileMtime) return false;
+      try { return F.readText(n.filePath).body !== n.body; } catch (_) { return true; }
+    };
+    if (pages.some(changedOnDisk)) throw new Error('A page was edited outside Notes after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
     const origInBin = !!orig && this._inVaultTrash(orig);
-    if (orig && origInBin) this.restore(orig.id);
-    for (const p of pages) if (p.filePath) { try { retryWhileBusy(() => fs.rmSync(p.filePath || '')); } catch (_) {  } }
-    const result = this._change({ notes: orig ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
+    const result = this._change({ notes: orig && !origInBin ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
       this.notes = this.notes.filter((n) => !pages.includes(n));
       if (!this.notes.some((n) => n.folderId === folder.id) && !this.folders.some((f) => f.parentId === folder.id)) this.folders = this.folders.filter((f) => f !== folder);
-      if (orig && orig.trashedAt) orig.trashedAt = null;
+      if (orig && orig.trashedAt && !origInBin) orig.trashedAt = null;
       return { restored: !!orig, removedIds: pages.map((n) => n.id) };
     });
+    for (const p of pages) if (p.filePath) { const file = p.filePath; try { retryWhileBusy(() => fs.rmSync(file)); } catch (_) {  } }
     if (folder.dirPath && !this.folders.includes(folder)) { try { fs.rmdirSync(folder.dirPath); } catch (_) {  } }
+    if (orig && origInBin) this.restore(orig.id);
     return result;
   }
 
@@ -1405,7 +1429,7 @@ class Store {
   }
 
   addVault(data: { path: string; name?: string; remote?: string }) {
-    const vault = sanitizeVault(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: this.now() }), this.now());
+    const vault = sanitizeVault(Object.assign({}, data, { id: crypto.randomUUID(), createdAt: this.now(), home: false }), this.now());
     if (!vault) throw new Error('A vault needs a folder path.');
     if (!fs.existsSync(vault.path) || !fs.statSync(vault.path).isDirectory()) throw Object.assign(new Error('Folder not found: ' + vault.path), { code: 'ENOENT' });
     const dup = this.vaults.find((v) => F.pathKey(v.path) === F.pathKey(vault.path));
@@ -1424,7 +1448,7 @@ class Store {
     const v = this.getVault(id);
     if (!v) return null;
     return this._change({ vaults: true, folders: true }, () => {
-      const next = sanitizeVault(Object.assign({}, v, patch || {}, { id: v.id, path: v.path, createdAt: v.createdAt }), this.now());
+      const next = sanitizeVault(Object.assign({}, v, patch || {}, { id: v.id, path: v.path, createdAt: v.createdAt, home: v.home }), this.now());
       Object.assign(v, next);
       const root = this.vaultRootFolder(id);
       if (root && patch && patch.name) root.name = v.name;
@@ -1497,7 +1521,7 @@ class Store {
     const rootKey = F.pathKey(vault.path);
     if (root) folderByKey.set(rootKey, root);
     const placeOf = (key: string): Folder | null | undefined => (key === rootKey ? root : folderByKey.get(key));
-    const titleOf = (fileName: string, body: string) => (home ? homeTitle(fileName, body) : stem(fileName));
+    const titleOf = (fileName: string, body: string, locked: boolean) => (home ? homeTitle(fileName, body, locked) : stem(fileName));
     const seenFolders = new Set<string>(root ? [root.id] : []);
     for (const d of disk.dirs) {
       const parent = placeOf(d.parentKey);
@@ -1541,6 +1565,7 @@ class Store {
       if (folder === undefined) continue;
       const folderId = folder ? folder.id : null;
       const locked = isLockPath(file.full);
+      if (locked && !home) continue;
       const note = byKey.get(file.key);
       if (note) {
         const mtimeNow = note.fileMtime !== file.mtime ? F.mtimeOf(file.full) : note.fileMtime;
@@ -1583,7 +1608,7 @@ class Store {
       if (orphan) {
         remember(orphan);
         orphan.filePath = file.full;
-        orphan.title = titleOf(file.name, orphan.body);
+        orphan.title = titleOf(file.name, orphan.body, false);
         orphan.folderId = folderId;
         orphan.fileMtime = read.mtime;
         touched.add(orphan);
@@ -1594,7 +1619,7 @@ class Store {
       }
       const body = sealed ? '' : read.text;
       const tags = sealed ? sealed.tags : FM.isMarkdownPath(file.full) ? FM.noteTags(read.text) : [];
-      const created = noteFrom({ id: crypto.randomUUID(), title: titleOf(file.name, body), body, lock: sealed ? sealed.lock : null, tags, folderId, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
+      const created = noteFrom({ id: crypto.randomUUID(), title: titleOf(file.name, body, !!sealed), body, lock: sealed ? sealed.lock : null, tags, folderId, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
       fresh.push(created);
       byKey.set(file.key, created);
       seenNotes.add(created.id);
@@ -1642,7 +1667,7 @@ class Store {
 
   _homeFile(dir: string, title: string, body: string, ext: string) {
     fs.mkdirSync(dir, { recursive: true });
-    const fallback = ext === '.' + LOCK_EXT ? 'Locked note' : H.deriveTitle({ title: '', body });
+    const fallback = ext === '.' + LOCK_EXT ? LOCKED_NAME : H.deriveTitle({ title: '', body });
     return path.join(dir, uniqueName(dir, H.safeFilename(title.trim() || fallback), ext));
   }
 
@@ -1672,8 +1697,7 @@ class Store {
     if (!explicit && body === null) return '';
     const wanted = H.safeFilename(explicit || H.deriveTitle({ title: '', body: body ?? '' }));
     const current = stem(path.basename(note.filePath));
-    const numbered = current.startsWith(wanted + ' ') && /^\d+$/.test(current.slice(wanted.length + 1));
-    if (wanted !== current && !numbered) {
+    if (explicit ? wanted !== current : !numberedName(current, wanted)) {
       try { this._renameVaultFile(note, wanted); } catch (err) { if (explicit) throw err; }
     }
     return explicit ? stem(path.basename(note.filePath)) : '';
