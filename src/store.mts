@@ -6,7 +6,7 @@ import { isObjectLike, isRecord } from './shared/helpers.mts';
 import * as Themes from './shared/themes.mts';
 import * as F from './files.mts';
 import * as L from './lock.mts';
-import { VaultLinker, linkNamesOf } from './vault-links.mts';
+import { VaultLinker, nameHints } from './vault-links.mts';
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 10;
@@ -1032,8 +1032,8 @@ class Store {
     });
     if (linker) for (const t of linker.targets(note)) if (t.id !== id && !linked.includes(t.id.toLowerCase()) && !outgoing.some((o) => o.id === t.id)) outgoing.push(view(t));
     const needle = 'note://' + id.toLowerCase();
-    const hints = Array.from(new Set(linkNamesOf(note).map((name) => H.stemOf(name)).flatMap((stem) => [stem, encodeURI(stem).toLowerCase()])));
-    const linksHere = (n: Note, low: string) => low.includes(needle) || (!!linker && n.vaultId === note.vaultId && hints.some((h) => low.includes(h)) && linker.linksTo(n, note));
+    const hints = linking ? null : nameHints(note);
+    const linksHere = (n: Note, low: string) => low.includes(needle) || (!!linker && n.vaultId === note.vaultId && (!hints || hints.some((h) => low.includes(h))) && linker.linksTo(n, note));
     const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && (!linking || linking.has(n.id) || this.plain.has(n.id)) && linksHere(n, bodyOf(n).toLowerCase())).map(view);
     const seen = new Set([id].concat(outgoing.map((x) => x.id), incoming.map((x) => x.id)));
     const tags = new Set(note.tags || []);

@@ -20,8 +20,19 @@ function memberOf(note: Note, root: string): Member | null {
   return member;
 }
 
+type Links = ReturnType<typeof H.vaultLinks>;
+const parsed = new WeakMap<Note, { body: string; links: Links }>();
+
+function linksOf(note: Note) {
+  const hit = parsed.get(note);
+  if (hit && hit.body === note.body) return hit.links;
+  const links = H.vaultLinks(note.body);
+  parsed.set(note, { body: note.body, links });
+  return links;
+}
+
 const endsAt = (rel: string, name: string) => rel === name || rel.endsWith('/' + name);
-const byPath = (a: Member, b: Member) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+const ENCODABLE_RUN = /[^\s!-\/:-@\[-`{-~]+/g;
 
 class VaultLinker {
   root: string;
@@ -51,7 +62,10 @@ class VaultLinker {
     if (found.length < 2) return found.length ? found[0].note : null;
     const from = memberOf(source, this.root);
     const here = from ? from.dir : null;
-    return found.slice().sort((a, b) => (Number(b.dir === here) - Number(a.dir === here)) || (a.rel.length - b.rel.length) || byPath(a, b))[0].note;
+    const better = (a: Member, b: Member) => (a.dir === here) !== (b.dir === here) ? a.dir === here : a.rel.length !== b.rel.length ? a.rel.length < b.rel.length : a.rel < b.rel;
+    let best = found[0];
+    for (const m of found) if (better(m, best)) best = m;
+    return best.note;
   }
 
   resolvePath(source: Note, href: string): Note | null {
@@ -62,16 +76,16 @@ class VaultLinker {
   }
 
   targets(source: Note) {
-    const links = H.vaultLinks(source.body);
-    const out: Note[] = [];
-    const add = (n: Note | null) => { if (n && !out.includes(n)) out.push(n); };
-    for (const name of links.names) add(this.resolveName(source, name));
-    for (const href of links.paths) add(this.resolvePath(source, href));
-    return out;
+    const links = linksOf(source);
+    const out = new Set<Note>();
+    for (const name of links.names) { const n = this.resolveName(source, name); if (n) out.add(n); }
+    for (const href of links.paths) { const n = this.resolvePath(source, href); if (n) out.add(n); }
+    return Array.from(out);
   }
 
   linksTo(source: Note, target: Note) {
-    return this.targets(source).includes(target);
+    const links = linksOf(source);
+    return links.names.some((name) => this.resolveName(source, name) === target) || links.paths.some((href) => this.resolvePath(source, href) === target);
   }
 }
 
@@ -81,4 +95,12 @@ function linkNamesOf(note: Note) {
   return Array.from(new Set([name, H.stemOf(name)]));
 }
 
-export { VaultLinker, linkNamesOf };
+function nameHints(note: Note) {
+  const names = linkNamesOf(note);
+  if (!names.length) return null;
+  const runs = H.stemOf(names[0]).match(ENCODABLE_RUN) || [];
+  const longest = runs.reduce((a, b) => (b.length > a.length ? b : a), '');
+  return longest ? Array.from(new Set([longest, encodeURIComponent(longest).toLowerCase()])) : null;
+}
+
+export { VaultLinker, linkNamesOf, nameHints };

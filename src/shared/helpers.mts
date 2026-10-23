@@ -342,11 +342,11 @@ function noteLinkIds(body: string) {
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 function vaultLinks(body: string) {
-  const text = String(body || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+  const text = String(body || '').replace(/(```|~~~)[\s\S]*?(?:\1|$)/g, ' ').replace(/`[^`\n]*`/g, ' ');
   const names = new Set<string>();
   const paths = new Set<string>();
   for (const m of text.matchAll(/\[\[([^[\]\n]+?)\]\]/g)) {
-    const name = m[1].split('|')[0].split('#')[0].trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').toLowerCase();
+    const name = m[1].split(/\\?\|/)[0].split(/[#^]/)[0].trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').toLowerCase();
     if (name) names.add(name);
   }
   for (const m of text.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)/g)) {
