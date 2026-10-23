@@ -104,10 +104,14 @@ function tokenize(query?: string) {
   return String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
 }
 
+function searchHay(note: Pick<Note, 'title' | 'body' | 'tags'>) {
+  return (String(note.title || '') + '\n' + String(note.body || '') + '\n' + (note.tags || []).join(' ')).toLowerCase();
+}
+
 function matchesQuery(note: Pick<Note, 'title' | 'body' | 'tags'>, query?: string) {
   const tokens = tokenize(query);
   if (!tokens.length) return true;
-  const hay = (String(note.title || '') + '\n' + String(note.body || '') + '\n' + (note.tags || []).join(' ')).toLowerCase();
+  const hay = searchHay(note);
   return tokens.every((t) => hay.indexOf(t) !== -1);
 }
 
@@ -483,7 +487,7 @@ export {
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
-  countWords, tokenize, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
+  countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
   plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds,
 };

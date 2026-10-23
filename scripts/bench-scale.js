@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
 const { Store } = require('../src/store.mts');
+const { NoteIndex, indexNoteOf } = require('../src/note-index.mts');
 const { tmpDir } = require('../test/helpers/tmp');
 
 const args = process.argv.slice(2);
@@ -188,6 +189,18 @@ async function benchReads(count) {
   row.relatedIncoming = rel.result.incoming.length;
   row.outlineTitleMs = (await medianOf(() => ipcCopy(store.noteOutline('title')), 3)).ms;
   row.listTitleMs = (await medianOf(() => ipcCopy(store.rows({ sort: 'title' })), 3)).ms;
+  const indexFile = path.join(tmpDir('notes-bench-index-'), 'search-index.sqlite');
+  const built = await measure(() => { const index = new NoteIndex(indexFile); index.sync(store.notes.map(indexNoteOf)); return index; });
+  const index = built.result;
+  row.indexBuildMs = built.ms;
+  row.indexMB = round(fs.statSync(indexFile).size / 1e6);
+  for (const [name, query] of Object.entries(QUERIES)) {
+    const m = await medianOf(() => { const c = index.candidates(query); const hits = store.rows({ query }, c && new Set(c)); ipcCopy(hits); return hits.length; });
+    row['indexed_' + name + 'Ms'] = m.ms;
+  }
+  row.indexedRelatedMs = (await medianOf(() => store.related(hub, undefined, new Set(index.incoming(hub) || [])))).ms;
+  row.indexResyncMs = (await measure(() => index.sync(store.notes.map(indexNoteOf)))).ms;
+  index.close();
   report(row);
 }
 

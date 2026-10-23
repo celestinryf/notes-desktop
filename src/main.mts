@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
 import { Store, isFileNote } from './store.mts';
+import { SearchIndex } from './search-index.mts';
 import { GitSync } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
@@ -56,6 +57,9 @@ function main() {
     beforeSnapshot: () => { store.flush(); },
   });
   store.onContentChange = () => git.noteChanged();
+  const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
+  store.onIndexChange = (update) => searchIndex.changed(update);
+  searchIndex.onReady = (info) => trace.write('search-index-ready', info);
   let win: BrowserWindow | null = null;
   let tray: Tray | null = null;
   let quitting = false;
@@ -372,9 +376,9 @@ function main() {
 
   const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
   ipcMain.on('app:trace', (_e, event: unknown, fields: unknown) => trace.fromPage(event, fields));
-  handle('notes:list', (_e, opts) => store.list(opts).map((n) => store.publicNote(n)));
-  handle('notes:rows', (_e, opts) => store.rows(opts));
-  handle('notes:searchIds', (_e, query) => store.searchIds(typeof query === 'string' ? query : ''));
+  handle('notes:list', async (_e, opts) => store.list(opts, await searchIndex.candidates(opts && opts.query)).map((n) => store.publicNote(n)));
+  handle('notes:rows', async (_e, opts) => store.rows(opts, await searchIndex.candidates(opts && opts.query)));
+  handle('notes:searchIds', async (_e, query) => { const q = typeof query === 'string' ? query : ''; return store.searchIds(q, await searchIndex.candidates(q)); });
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
   handle('notes:latestFile', (_e, kind) => {
@@ -480,7 +484,7 @@ function main() {
   handle('stickies:openInNotes', (_e, id) => { const w = showWindow(); if (rendererReady) w.webContents.send('app:open-note', id); else pendingOpenNote = id; return true; });
   handle('notes:tags', () => store.tags());
   handle('notes:counts', () => store.counts());
-  handle('notes:related', (_e, id) => store.related(id));
+  handle('notes:related', async (_e, id) => (store.get(id) ? store.related(id, undefined, await searchIndex.incoming(id)) : null));
   handle('folders:setBook', (_e, id, on) => store.setBook(id, on));
   handle('folders:reorderPages', (_e, id, ids) => store.reorderPages(id, ids));
 
@@ -1383,9 +1387,9 @@ function main() {
     rendererFlushed
       .then(() => Promise.race([Promise.all([git.flush(), vaults.flushAll()].concat(Array.from(live.sessions.keys()).map((id) => live.flush(id)))), new Promise((r) => setTimeout(r, 8000))]))
       .catch(() => {})
-      .finally(() => { flushStore(); reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server?.close(); } catch (_) {  } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
+      .finally(() => { flushStore(); searchIndex.stop(); reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server?.close(); } catch (_) {  } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); writeRuntime({ visible: false, exiting: true }); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); searchIndex.stop(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => {  });
   app.on('activate', showWindow);
 
@@ -1408,6 +1412,7 @@ function main() {
     step('login item', applyLoginItem);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
+    if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());
     step('stickies', () => stickies.restoreAll());
     step('reminders', () => reminders.start());
     live.restore().catch((err) => console.error('[live] restore failed', err));

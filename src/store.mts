@@ -488,6 +488,7 @@ class Store {
   loadError: Error | null;
   onFileText: ((id: string) => void) | null;
   onContentChange: (() => void) | null;
+  onIndexChange: ((update: IndexUpdate) => void) | null;
   saveBlocked: boolean | undefined;
   recoveredFromBackup: boolean | undefined;
   backupSuspended: boolean | undefined;
@@ -516,6 +517,7 @@ class Store {
     this.loadError = null;
     this.onFileText = null;
     this.onContentChange = null;
+    this.onIndexChange = null;
     this.journalId = null;
     this.journalReady = false;
     this.journalBytes = 0;
@@ -749,7 +751,7 @@ class Store {
     while (files.length > MAX_BACKUPS) { const oldest = files.shift(); if (!oldest) break; try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) { break; } }
   }
 
-  list(opts?: ListOpts) {
+  list(opts?: ListOpts, candidates?: ReadonlySet<string> | null) {
     opts = opts || {};
     const trashed = !!opts.trashed;
     let out = this.notes.filter((n) => !!n.trashedAt === trashed);
@@ -766,7 +768,7 @@ class Store {
       }
     }
     if (opts.reminders) out = out.filter((n) => n.remindAt);
-    if (opts.query) out = out.filter((n) => H.matchesQuery(n, opts.query));
+    if (opts.query) out = out.filter((n) => (!candidates || candidates.has(n.id)) && H.matchesQuery(n, opts.query));
     if (opts.reminders) return out.slice().sort((a, b) => (a.remindAt || 0) - (b.remindAt || 0));
     if (opts.folderId && !opts.recursive && !opts.query && !trashed) {
       const f = this.getFolder(opts.folderId);
@@ -775,17 +777,17 @@ class Store {
     return H.sortNotes(out, opts.sort || this.settings.sort);
   }
 
-  rows(opts?: ListOpts) {
+  rows(opts?: ListOpts, candidates?: ReadonlySet<string> | null) {
     const query = opts && opts.query;
-    return this.list(opts).map((n) => H.listRow(this._rowView(n), query));
+    return this.list(opts, candidates).map((n) => H.listRow(this._rowView(n), query));
   }
 
   _rowView(n: Note) {
     return n.lock ? this.publicNote(n) : n;
   }
 
-  searchIds(query: string) {
-    return this.notes.filter((n) => !n.trashedAt && H.matchesQuery(n, query)).map((n) => n.id);
+  searchIds(query: string, candidates?: ReadonlySet<string> | null) {
+    return this.notes.filter((n) => !n.trashedAt && (!candidates || candidates.has(n.id)) && H.matchesQuery(n, query)).map((n) => n.id);
   }
 
   get(id: string) {
@@ -892,6 +894,7 @@ class Store {
         throw err;
       }
       this._contentChanged();
+      this._indexChanged({ notes: [note], dropped: [] });
     }
     return note;
   }
@@ -914,7 +917,7 @@ class Store {
     if (note.lock) throw Object.assign(new Error('This note is already locked.'), { code: 'ELOCKED' });
     const body = note.body;
     const { blob, key } = L.lock(body, password);
-    this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; });
+    this._commit(() => { note.lock = blob; note.body = ''; note.sticky = null; note.updatedAt = this.now(); return note; }, undefined, { notes: [note], dropped: [], purge: true });
     this._removeStaleJournals(0);
     this.plain.set(id, body);
     this.keys.set(id, key);
@@ -951,7 +954,7 @@ class Store {
     if (!note || !note.lock) return this.publicNote(note);
     const r = L.unlock(note.lock, password);
     if (!r) throw Object.assign(new Error('Wrong password.'), { code: 'EPASS' });
-    this._commit(() => { note.lock = null; note.body = r.body; note.updatedAt = this.now(); return note; });
+    this._commit(() => { note.lock = null; note.body = r.body; note.updatedAt = this.now(); return note; }, undefined, { notes: [note], dropped: [] });
     this.relock(id);
     return this.publicNote(note);
   }
@@ -1014,7 +1017,7 @@ class Store {
     return this._change({ folders: true }, () => { f.pageOrder = next; return f; });
   }
 
-  related(id: string, limit?: number) {
+  related(id: string, limit?: number, linking?: ReadonlySet<string> | null) {
     const note = this.get(id);
     if (!note) return null;
     const bodyOf = (n: Note) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
@@ -1024,7 +1027,7 @@ class Store {
       return t ? view(t) : { id: x, title: 'Deleted note', missing: true };
     });
     const needle = 'note://' + id.toLowerCase();
-    const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && bodyOf(n).toLowerCase().includes(needle)).map(view);
+    const incoming = this.notes.filter((n) => n.id !== id && !n.trashedAt && (!linking || linking.has(n.id) || this.plain.has(n.id)) && bodyOf(n).toLowerCase().includes(needle)).map(view);
     const seen = new Set([id].concat(outgoing.map((x) => x.id), incoming.map((x) => x.id)));
     const tags = new Set(note.tags || []);
     const byTags = tags.size ? this.notes
@@ -1117,15 +1120,15 @@ class Store {
     return found || this.createFolder({ name, parentId: parentId || null });
   }
 
-  _commit<T>(mutate: () => T, change?: Change): T {
-    return this._guarded({ notes: this.notes, folders: true, vaults: true, settings: true }, mutate, change);
+  _commit<T>(mutate: () => T, change?: Change, indexed?: IndexUpdate): T {
+    return this._guarded({ notes: this.notes, folders: true, vaults: true, settings: true }, mutate, change, indexed);
   }
 
   _change<T>(change: Change, mutate: () => T): T {
     return this._guarded({ notes: change.notes || [], folders: !!change.folders, vaults: !!change.vaults, settings: !!change.settings }, mutate, change);
   }
 
-  _guarded<T>(scope: RollbackScope, mutate: (remember: (n: Note) => void) => T, change: Change | undefined): T {
+  _guarded<T>(scope: RollbackScope, mutate: (remember: (n: Note) => void) => T, change: Change | undefined, indexed?: IndexUpdate): T {
     const notes = this.notes.slice();
     const noteCopies = new Map<Note, Note>(scope.notes.map((n) => [n, copyNote(n)]));
     const remember = (n: Note) => { if (!noteCopies.has(n)) noteCopies.set(n, copyNote(n)); };
@@ -1145,11 +1148,16 @@ class Store {
       throw err;
     }
     if (!change || touchesContent(change)) this._contentChanged();
+    this._indexChanged(indexed !== undefined ? indexed : change ? { notes: change.notes || [], dropped: change.dropped || [] } : null);
     return result;
   }
 
   _contentChanged() {
     if (this.onContentChange) this.onContentChange();
+  }
+
+  _indexChanged(update: IndexUpdate) {
+    if (this.onIndexChange) this.onIndexChange(update);
   }
 
   _keyOf(id: string): Buffer {
@@ -1202,6 +1210,7 @@ class Store {
   removeVault(id: string) {
     const v = this.getVault(id);
     if (!v) return false;
+    const gone = this.notes.filter((n) => n.vaultId === id).map((n) => n.id);
     return this._commit(() => {
       this.notes = this.notes.filter((n) => n.vaultId !== id);
       this.folders = this.folders.filter((f) => f.vaultId !== id);
@@ -1209,7 +1218,7 @@ class Store {
       this.settings.expandedFolders = this.settings.expandedFolders.filter((fid) => this.folders.some((f) => f.id === fid));
       this.settings.treeExpanded = this.settings.treeExpanded.filter((fid) => this.folders.some((f) => f.id === fid));
       return true;
-    });
+    }, undefined, { notes: [], dropped: gone, purge: true });
   }
 
   async scanVault(id: string, opts?: { allowRemovals?: boolean; paths?: readonly string[] }) {
@@ -1463,7 +1472,7 @@ class Store {
     this.relock(id);
     const note = this.notes[idx];
     if (this._inVaultTrash(note)) fs.rmSync(note.filePath);
-    const destroyed = this._commit(() => { this.notes.splice(idx, 1); return true; });
+    const destroyed = this._commit(() => { this.notes.splice(idx, 1); return true; }, undefined, { notes: [], dropped: [id], purge: true });
     this._removeStaleJournals(0);
     return destroyed;
   }
@@ -1473,7 +1482,8 @@ class Store {
     if (!this.notes.some((n) => n.trashedAt)) return 0;
     for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) {  } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
-    const emptied = this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; });
+    const gone = this.notes.filter((n) => n.trashedAt).map((n) => n.id);
+    const emptied = this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; }, undefined, { notes: [], dropped: gone, purge: true });
     this._removeStaleJournals(0);
     return emptied;
   }
@@ -1781,7 +1791,7 @@ class Store {
       this.settings.expandedFolders = this.settings.expandedFolders.filter((x) => x !== id);
       this.settings.treeExpanded = this.settings.treeExpanded.filter((x) => x !== id);
       return { movedNotes, movedFolders, parentId: parent };
-    });
+    }, undefined, { notes: [], dropped: [] });
   }
 
   getSettings() {
