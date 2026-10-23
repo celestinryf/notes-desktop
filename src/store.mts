@@ -1023,8 +1023,7 @@ class Store {
     if (!note) return null;
     const bodyOf = (n: Note) => (n.lock ? (this.plain.get(n.id) || '') : n.body);
     const view = (n: Note) => ({ id: n.id, title: H.deriveTitle(this.publicNote(n)) || 'Untitled', trashed: !!n.trashedAt, locked: !!n.lock });
-    const vault = note.vaultId && note.filePath ? this.getVault(note.vaultId) : null;
-    const linker = vault ? new VaultLinker(vault, this.notes) : null;
+    const linker = this._linkerFor(note);
     const linked = H.noteLinkIds(bodyOf(note)).filter((x) => x !== id);
     const outgoing: RelatedItem[] = linked.map((x) => {
       const t = this.get(x);
@@ -1044,6 +1043,27 @@ class Store {
       .slice(0, limit || 5)
       .map(({ n, shared }) => Object.assign(view(n), { sharedTags: shared })) : [];
     return { outgoing, incoming, byTags };
+  }
+
+  _linkerFor(note: Note) {
+    const vault = note.vaultId && note.filePath ? this.getVault(note.vaultId) : null;
+    return vault ? new VaultLinker(vault, this.notes) : null;
+  }
+
+  resolveWikiLinks(id: string, names: readonly string[]) {
+    const note = this.get(id);
+    const linker = note ? this._linkerFor(note) : null;
+    return names.map((name) => {
+      const target = note && linker ? linker.resolveName(note, name) : null;
+      return target ? target.id : null;
+    });
+  }
+
+  wikiLinkFor(sourceId: string, targetId: string) {
+    const source = this.get(sourceId);
+    const target = this.get(targetId);
+    const linker = source ? this._linkerFor(source) : null;
+    return source && target && linker ? linker.linkText(source, target) : null;
   }
 
   setLive(id: string, live: Live | null) {

@@ -340,13 +340,33 @@ function noteLinkIds(body: string) {
 }
 
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const WIKI_ALIAS = /\\?\|/;
+const WIKI_NOTE_EXT = /\.(md|markdown|mdx)$/i;
+
+function wikiLinkTarget(inner: string) {
+  return inner.split(WIKI_ALIAS)[0].split(/[#^]/)[0].trim();
+}
+
+function wikiLinkName(inner: string) {
+  return wikiLinkTarget(inner).replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').toLowerCase();
+}
+
+function wikiLinkLabel(inner: string) {
+  const parts = inner.split(WIKI_ALIAS);
+  const alias = parts.slice(1).join('|').trim();
+  if (alias) return alias;
+  const [target, heading] = parts[0].split('#');
+  const name = target.split('^')[0].trim().replace(WIKI_NOTE_EXT, '');
+  const section = (heading || '').split('^')[0].trim();
+  return section ? (name ? name + ' > ' + section : section) : name || inner.trim() || '[[' + inner + ']]';
+}
 
 function vaultLinks(body: string) {
   const text = String(body || '').replace(/(```|~~~)[\s\S]*?(?:\1|$)/g, ' ').replace(/`[^`\n]*`/g, ' ');
   const names = new Set<string>();
   const paths = new Set<string>();
   for (const m of text.matchAll(/\[\[([^[\]\n]+?)\]\]/g)) {
-    const name = m[1].split(/\\?\|/)[0].split(/[#^]/)[0].trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+/, '').toLowerCase();
+    const name = wikiLinkName(m[1]);
     if (name) names.add(name);
   }
   for (const m of text.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)/g)) {
@@ -519,5 +539,5 @@ export {
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
-  plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds, vaultLinks, linkLeaf, stemOf,
+  plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds, vaultLinks, linkLeaf, stemOf, wikiLinkTarget, wikiLinkName, wikiLinkLabel,
 };
