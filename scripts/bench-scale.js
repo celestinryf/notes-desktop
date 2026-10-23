@@ -11,6 +11,7 @@ const option = (name, fallback) => { const i = args.indexOf('--' + name); return
 const sizes = (name, fallback) => String(option(name, fallback)).split(',').filter(Boolean).map(Number);
 const saveSizes = sizes('save', '1000,10000,50000');
 const scanSizes = sizes('scan', '500,2000,5000,20000');
+const readSizes = sizes('read', '1000,10000,50000');
 const out = option('out', null);
 
 let written = 0;
@@ -111,7 +112,87 @@ async function benchScan(count) {
   report({ kind: 'scan', files: count, firstScanMs: first.ms, firstScanStallMs: first.stallMs, firstScanBytes: first.bytes, added: first.result.added, rescanMs: rescan.ms, rescanStallMs: rescan.stallMs, oneEditScanMs: targeted.ms, oneEditStallMs: targeted.stallMs, oneEditUpdated: targeted.result.updated, loadMs: load.ms, notesJsonBytes: fs.statSync(path.join(data, 'notes.json')).size });
 }
 
+const RARE = 'zebracorn';
+const QUERIES = { common: 'the', rare: RARE, twoWords: 'people world', short: 'zq', none: 'qqqxyzzy' };
+
+function seedRichLibrary(dir, count) {
+  const now = Date.now();
+  const folders = [];
+  const areas = Math.max(1, Math.round(count / 500));
+  for (let a = 0; a < areas; a++) {
+    const area = { id: crypto.randomUUID(), name: 'Area ' + a, parentId: null, createdAt: now };
+    folders.push(area);
+    for (let t = 0; t < 10; t++) folders.push({ id: crypto.randomUUID(), name: 'Topic ' + a + '.' + t, parentId: area.id, createdAt: now });
+  }
+  const ids = Array.from({ length: count }, () => crypto.randomUUID());
+  const hub = ids[5];
+  const notes = ids.map((id, i) => {
+    let body = noteBody(i);
+    if (i % 5000 === 17) body += '\nA ' + RARE + ' was here.\n';
+    if (i % 10 === 0) body += '\nSee [this one](note://' + ids[(i * 7919) % count] + ').\n';
+    if (i % 50 === 1) body += '\nBack to [the hub](note://' + hub + ').\n';
+    const tags = [];
+    if (i % 7 === 0) tags.push('work');
+    if (i % 11 === 0) tags.push('idea');
+    if (i % 13 === 0) tags.push('tag-' + (i % 40));
+    return { id, title: i % 2 ? 'Title ' + word() + ' ' + i : '', body, tags, folderId: i % 5 ? folders[i % folders.length].id : null, pinned: i % 997 === 0, createdAt: now - i * 1000, updatedAt: now - i * 1000, trashedAt: i % 101 === 0 ? now : null };
+  });
+  fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({ schemaVersion: 1, settings: { gitEnabled: false }, folders, vaults: [], notes }, null, 2));
+  return { ids, hub };
+}
+
+const v8 = require('v8');
+function ipcCopy(value) {
+  const buf = v8.serialize(value);
+  v8.deserialize(buf);
+  return buf.length;
+}
+
+async function medianOf(fn, runs) {
+  const times = [];
+  let last;
+  for (let i = 0; i < (runs || 5); i++) { const m = await measure(fn); times.push(m.ms); last = m.result; }
+  return { ms: median(times), result: last };
+}
+
+async function benchReads(count) {
+  const dir = tmpDir('notes-bench-read-');
+  const { hub } = seedRichLibrary(dir, count);
+  gc();
+  const load = await measure(() => new Store(dir).load());
+  const store = load.result;
+  const row = { kind: 'read', notes: count, loadMs: load.ms };
+  const parts = {
+    list: () => ipcCopy(store.rows()),
+    counts: () => ipcCopy(store.counts()),
+    tags: () => ipcCopy(store.tags()),
+    tree: () => ipcCopy(store.folderTree()),
+    outline: () => ipcCopy(store.noteOutline()),
+  };
+  let refreshMs = 0;
+  for (const [name, fn] of Object.entries(parts)) {
+    const m = await medianOf(fn);
+    row[name + 'Ms'] = m.ms;
+    row[name + 'Bytes'] = m.result;
+    refreshMs += m.ms;
+  }
+  row.refreshMs = round(refreshMs);
+  for (const [name, query] of Object.entries(QUERIES)) {
+    const m = await medianOf(() => { const hits = store.rows({ query }); ipcCopy(hits); return hits.length; });
+    row['search_' + name + 'Ms'] = m.ms;
+    row['search_' + name + 'Hits'] = m.result;
+    row['palette_' + name + 'Ms'] = (await medianOf(() => ipcCopy(store.searchIds(query)))).ms;
+  }
+  const rel = await medianOf(() => store.related(hub));
+  row.relatedMs = rel.ms;
+  row.relatedIncoming = rel.result.incoming.length;
+  row.outlineTitleMs = (await medianOf(() => ipcCopy(store.noteOutline('title')), 3)).ms;
+  row.listTitleMs = (await medianOf(() => ipcCopy(store.rows({ sort: 'title' })), 3)).ms;
+  report(row);
+}
+
 (async () => {
   for (const n of saveSizes) await benchSaves(n);
   for (const n of scanSizes) await benchScan(n);
+  for (const n of readSizes) await benchReads(n);
 })().catch((err) => { console.error(err); process.exitCode = 1; });

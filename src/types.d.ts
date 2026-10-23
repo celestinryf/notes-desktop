@@ -98,6 +98,7 @@ interface OutlineRow {
   id: string; title: string; folderId: string | null; pinned: boolean; locked: boolean; unlocked: boolean; sticky: boolean;
   fileKind: FileKind | null; filePath: string | null; remindAt: number | null; live: Live | null; createdAt: number; updatedAt: number;
 }
+interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; excerpt?: string }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }
 interface TagCount { tag: string; count: number }
 interface NoteCreate { title?: string; body?: string; tags?: string[] | string; folderId?: string | null; pinned?: boolean; remindAt?: number | null }
@@ -154,6 +155,8 @@ type Ok<T = {}> = ({ ok: true } & T) | { ok: false; error?: string; canceled?: b
 
 interface IpcContract {
   'notes:list': (opts?: ListOpts) => PublicNote[];
+  'notes:rows': (opts?: ListOpts) => ListRow[];
+  'notes:searchIds': (query: string) => string[];
   'notes:outline': (sort?: SortKey) => Record<string, OutlineRow[]>;
   'notes:get': (id: string) => PublicNote | null;
   'notes:latestFile': (kind: FileKind) => PublicNote | null;
@@ -297,7 +300,7 @@ type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) =
 
 interface NotesApi {
   notes: {
-    list: Invoker<'notes:list'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
+    list: Invoker<'notes:list'>; rows: Invoker<'notes:rows'>; searchIds: Invoker<'notes:searchIds'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
     update: Invoker<'notes:update'>; togglePin: Invoker<'notes:togglePin'>; duplicate: Invoker<'notes:duplicate'>;
     splitIntoBook: Invoker<'notes:splitIntoBook'>; undoSplit: Invoker<'notes:undoSplit'>; trash: Invoker<'notes:trash'>;
     restore: Invoker<'notes:restore'>; destroy: Invoker<'notes:destroy'>; emptyTrash: Invoker<'notes:emptyTrash'>;

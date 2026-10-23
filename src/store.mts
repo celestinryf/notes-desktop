@@ -775,6 +775,19 @@ class Store {
     return H.sortNotes(out, opts.sort || this.settings.sort);
   }
 
+  rows(opts?: ListOpts) {
+    const query = opts && opts.query;
+    return this.list(opts).map((n) => H.listRow(this._rowView(n), query));
+  }
+
+  _rowView(n: Note) {
+    return n.lock ? this.publicNote(n) : n;
+  }
+
+  searchIds(query: string) {
+    return this.notes.filter((n) => !n.trashedAt && H.matchesQuery(n, query)).map((n) => n.id);
+  }
+
   get(id: string) {
     return this.notes.find((n) => n.id === id) || null;
   }
@@ -1628,11 +1641,7 @@ class Store {
     for (const [k, list] of by) {
       const f = k ? this.getFolder(k) : null;
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
-      out[k] = ordered.map((n) => {
-        const p = this.publicNote(n);
-        return { id: n.id, title: H.deriveTitle(p), folderId: n.folderId || null, pinned: !!n.pinned, locked: !!p.locked, unlocked: !!p.unlocked, sticky: !!p.sticky,
-          fileKind: n.fileKind || null, filePath: n.filePath || null, remindAt: p.remindAt || null, live: p.live || null, createdAt: n.createdAt, updatedAt: n.updatedAt };
-      });
+      out[k] = ordered.map((n) => H.outlineRow(this._rowView(n)));
     }
     return out;
   }

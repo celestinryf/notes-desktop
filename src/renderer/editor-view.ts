@@ -83,8 +83,8 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
     { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
   ];
-  type InlineItem = { id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: PublicNote, create?: string };
-  const inline: { trigger: InlineTrigger | null, items: InlineItem[], active: number, dismissedAt: string | null, notes: PublicNote[] | null, seq: number } = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
+  type InlineItem = { id: string, title: string, icon: string, keys: string, kind?: string, words?: string, note?: ListRow, create?: string };
+  const inline: { trigger: InlineTrigger | null, items: InlineItem[], active: number, dismissedAt: string | null, notes: ListRow[] | null, seq: number } = { trigger: null, items: [], active: 0, dismissedAt: null, notes: null, seq: 0 };
 
   async function showInlineMenu(t: InlineTrigger | null) {
     const seq = ++inline.seq;
@@ -95,7 +95,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       items = SLASH.map((b) => ({ b, s: H.fuzzyScore(t.query, b.title + ' ' + b.words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => Object.assign({ id: x.b.kind }, x.b));
       if (!t.query) items = SLASH.map((b) => Object.assign({ id: b.kind }, b));
     } else {
-      const known = !inline.notes || !inline.trigger || inline.trigger.kind !== 'link' ? await api.notes.list({ sort: 'updated' }) : inline.notes;
+      const known = !inline.notes || !inline.trigger || inline.trigger.kind !== 'link' ? await api.notes.rows({ sort: 'updated' }) : inline.notes;
       inline.notes = known;
       if (seq !== inline.seq) return;
       const q = t.query.trim();
@@ -295,7 +295,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (!existing && !state.rich.hasSelection()) { toast('Select the text to link first'); return; }
     state.linkRange = state.rich.selectionRange();
     el.linkNoteSelect.innerHTML = '<option value="">— pick a note —</option>';
-    api.notes.list({ sort: 'title' }).then((notes) => {
+    api.notes.rows({ sort: 'title' }).then((notes) => {
       for (const n of notes) { if (n.id === state.currentId) continue; const o = document.createElement('option'); o.value = 'note://' + n.id; o.textContent = H.truncate(H.deriveTitle(n), 60); el.linkNoteSelect.append(o); }
       if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
     });

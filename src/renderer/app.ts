@@ -39,7 +39,7 @@ type OpenFocus = 'title' | 'body';
 type OpenOpts = { newTab?: boolean; focus?: OpenFocus | null };
 type RefreshOpts = { keepEditor?: boolean };
 type RowSource = Pick<OutlineRow, 'id' | 'title' | 'folderId' | 'pinned' | 'locked' | 'unlocked' | 'fileKind' | 'filePath' | 'remindAt' | 'live'>
-  & { sticky: Sticky | boolean | null; trashedAt?: number | null; body?: string; tags?: string[] };
+  & { sticky: Sticky | boolean | null; trashedAt?: number | null; body?: string; tags?: string[]; excerpt?: string };
 type SettingValue = Settings[keyof Settings];
 type PeerMessage =
   | { type: 'hello' | 'changed' | 'focus' | 'close' }
@@ -325,7 +325,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
     const wantTree = settingsNow().listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
     const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
-      api.notes.list(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
+      api.notes.rows(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
       wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
     ]);
@@ -479,20 +479,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
       + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? ' (' + n.live.role + ')' : '') + '">' + I('radio') + '</span>' : '');
     const inTitle = !q || H.tokenize(q).some((t) => title.toLowerCase().includes(t));
-    const why = inTitle || (n.locked && !n.unlocked) ? '' : '<span class="row-meta match">' + highlight(matchExcerpt(n, q), q) + '</span>';
+    const why = inTitle || (n.locked && !n.unlocked) ? '' : '<span class="row-meta match">' + highlight(n.excerpt ?? H.matchExcerpt(n, q), q) + '</span>';
     return '<span class="row-name">' + highlight(title, q) + '</span>' + why + where + marks + fileMark + reminderMark(n) + pin;
-  }
-
-  function matchExcerpt(n: RowSource, q: string) {
-    const body = String(n.body || '').replace(/\s+/g, ' ');
-    const low = body.toLowerCase();
-    const at = H.tokenize(q).map((t) => low.indexOf(t)).filter((i) => i !== -1).sort((a, b) => a - b)[0];
-    if (at === undefined) return (n.tags || []).filter((t) => H.tokenize(q).some((w) => t.toLowerCase().includes(w))).map((t) => '#' + t).join(' ') || H.snippet(n, 80);
-    const start = Math.max(0, at - 30);
-    let text = body.slice(start, start + 80);
-    if (start > 0) text = '…' + text.replace(/^\S*\s/, '');
-    if (start + 80 < body.length) text = text.replace(/\s\S*$/, '') + '…';
-    return text;
   }
 
   function whereMark(n: RowSource) {
@@ -539,7 +527,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     await refresh(refreshOpts);
   }
 
-  async function scopeListToNote(note: PublicNote | null) {
+  async function scopeListToNote(note: Pick<PublicNote, 'trashedAt' | 'folderId'> | null) {
     if (!note || state.query) return;
     if (note.trashedAt) { if (state.view !== 'trash') await setView('trash', null, { keepEditor: true }); return; }
     if (note.folderId) { if (!(state.view === 'folder' && state.folderId === note.folderId)) await setView('folder', note.folderId, { keepEditor: true }); return; }
@@ -1798,7 +1786,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (where === 'body') focusBody();
   }
 
-  function updateStatus(note: PublicNote) {
+  function updateStatus(note: Pick<PublicNote, 'trashedAt' | 'updatedAt'>) {
     const body = el.bodyInput.value;
     const stats = tableStatsNow();
     if (stats && tableShown()) {
@@ -2113,7 +2101,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         if (state.pending.get(id) === patch) state.pending.delete(id);
         if (updated) {
           const idx = state.notes.findIndex((n) => n.id === id);
-          if (idx !== -1) { state.notes[idx] = updated; refreshRow(updated); }
+          if (idx !== -1) { state.notes[idx] = H.listRow(updated, state.query); refreshRow(updated); }
           toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
         }
       } catch (err) {
@@ -2184,7 +2172,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const idx = state.notes.findIndex((n) => n.id === id);
     if (idx !== -1) {
       const prevTags = (state.notes[idx].tags || []).join(',');
-      state.notes[idx] = updated;
+      state.notes[idx] = H.listRow(updated, state.query);
       refreshRow(updated);
       if (settingsNow().sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
       else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
@@ -2613,8 +2601,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   let palette: ReturnType<typeof NotesPalette.create> | null = null;
+  let paletteRows: Promise<ListRow[]> | null = null;
   function openPalette(query?: string) {
     if (!palette) palette = NotesPalette.create({ dialog: el.palette, input: el.paletteInput, list: el.paletteList, source: paletteItems });
+    paletteRows = null;
     closeMoreMenu(); closeShareMenu();
     palette.open(query);
   }
@@ -2671,12 +2661,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const commandsOnly = /^\s*>/.test(query);
     let notes = null;
     if (!commandsOnly) {
-      const all = await api.notes.list({ sort: 'updated' });
+      if (!paletteRows) paletteRows = api.notes.rows({ sort: 'updated' });
+      const q = NotesPalette.queryOf(query);
+      const [all, hitIds] = await Promise.all([paletteRows, q ? api.notes.searchIds(q) : Promise.resolve([])]);
+      const hits = new Set(hitIds);
       const folders = new Map(flattenTree(state.tree).map((f) => [f.id, f.name]));
       notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
         id: 'note-' + n.id, group: 'Notes', title: H.deriveTitle(n), icon: n.filePath ? 'file-text' : n.locked ? 'lock' : n.pinned ? 'star' : 'notebook-text',
         hint: (n.folderId && folders.get(n.folderId)) || H.relativeTime(n.updatedAt),
-        matches: (q: string) => !n.locked && H.matchesQuery(n, q),
+        matches: () => !n.locked && hits.has(n.id),
         run: (opts: { newTab?: boolean }) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody()),
       }));
     }

@@ -144,10 +144,14 @@ export const NotesPalette = (function () {
     return { open, close, isOpen: () => dialog.open };
   }
 
+  function queryOf(query: string) {
+    return String(query || '').replace(/^\s*>\s*/, '').trim();
+  }
+
   function rank(query: string, commands: PaletteCommand[], notes: PaletteNote[] | null): PaletteItem[] {
     const raw = String(query || '');
     const commandsOnly = /^\s*>/.test(raw);
-    const q = raw.replace(/^\s*>\s*/, '').trim();
+    const q = queryOf(raw);
     const scored = <T>(arr: T[], text: (x: T) => string) => arr.map((x) => ({ x, s: H.fuzzyScore(q, text(x)) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).map((r) => r.x);
     const cmds = scored(commands, (c) => c.title + (c.keywords ? ' ' + c.keywords : ''));
     if (commandsOnly || !notes) return cmds;
@@ -160,5 +164,5 @@ export const NotesPalette = (function () {
     return strong ? [...cmds.slice(0, 10), ...noteHits] : [...noteHits, ...cmds.slice(0, 8)];
   }
 
-  return { create, rank };
+  return { create, rank, queryOf };
 })();

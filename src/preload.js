@@ -30,6 +30,8 @@ const isOurPage = window.top === window || (location.protocol === 'file:' && /\/
 const notesApi = {
   notes: {
     list: invoke('notes:list'),
+    rows: invoke('notes:rows'),
+    searchIds: invoke('notes:searchIds'),
     outline: invoke('notes:outline'),
     get: invoke('notes:get'),
     latestFile: invoke('notes:latestFile'),
