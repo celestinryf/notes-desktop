@@ -137,9 +137,11 @@ test('history of the notes folder survives a nested repository, a stale lock and
   const tree = tmpDir('notes-git-tree2-');
   const sync = new GitSync(dir, { debounceMs: 10, workTree: () => tree });
   await sync.configure({ gitEnabled: true, gitRemote: '' });
-  fs.mkdirSync(path.join(tree, 'proj'));
-  git(path.join(tree, 'proj'), ['init', '-q']);
-  fs.writeFileSync(path.join(tree, 'proj', 'inside.md'), 'their repo\n');
+  for (const nested of ['proj', path.join('sub', 'p 2'), 'p[3]']) {
+    fs.mkdirSync(path.join(tree, nested), { recursive: true });
+    git(path.join(tree, nested), ['init', '-q']);
+    fs.writeFileSync(path.join(tree, nested, 'inside.md'), 'their repo\n');
+  }
   fs.writeFileSync(path.join(tree, 'case.md'), 'case one\n');
   fs.writeFileSync(path.join(tree, 'photo.png'), Buffer.alloc(64));
   assert.deepEqual(await sync.commit(), { ok: true });

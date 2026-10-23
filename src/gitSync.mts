@@ -108,16 +108,19 @@ class GitSync {
   }
 
   async _addTree(tree: string) {
-    const first = await this._inTree(tree, ['add', '-A'], 120000);
-    const nested = first.ok ? [] : Array.from(String(first.error).matchAll(/'([^'\n]+)\/' does not have a commit checked out/g), (m) => m[1]);
-    if (!nested.length) return first;
-    fs.appendFileSync(this._treeExclude(), nested.map((d) => '/' + d + '/').join('\n') + '\n');
-    return this._inTree(tree, ['add', '-A'], 120000);
+    for (let pass = 0; ; pass++) {
+      const added = await this._inTree(tree, ['add', '-A'], 120000);
+      const file = this._treeExclude();
+      const have = fs.readFileSync(file, 'utf8');
+      const fresh = added.ok ? [] : Array.from(String(added.error).matchAll(/'([^'\n]+)\/' does not have a commit checked out/g), (m) => '/' + m[1].replace(/[\\*?[\]!#]/g, '\\$&') + '/').filter((line) => !have.split('\n').includes(line));
+      if (!fresh.length || pass >= 50) return added;
+      fs.appendFileSync(file, fresh.join('\n') + '\n');
+    }
   }
 
   _clearStaleLock() {
     const lock = path.join(this.gitDir, 'index.lock');
-    try { if (this.now() - fs.statSync(lock).mtimeMs > STALE_LOCK_MS) fs.rmSync(lock, { force: true }); } catch (_) {  }
+    try { if (Date.now() - fs.statSync(lock).mtimeMs > STALE_LOCK_MS) fs.rmSync(lock, { force: true }); } catch (_) {  }
   }
 
   async _stage(): Promise<GitRun | null> {
