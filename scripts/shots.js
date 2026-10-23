@@ -36,8 +36,9 @@ function parseSchemes(value) {
   if (!value.includes('=')) return { light: known(value), dark: known(value) };
   const schemes = {};
   for (const part of value.split(',')) {
-    const [theme, id] = part.split('=').map((s) => s.trim());
-    if (theme !== 'light' && theme !== 'dark') throw new Error('--scheme wants a scheme, or light=<scheme>,dark=<scheme>');
+    const pair = part.split('=').map((s) => s.trim());
+    const [theme, id] = pair;
+    if (pair.length !== 2 || (theme !== 'light' && theme !== 'dark')) throw new Error('--scheme wants a scheme, or light=<scheme>,dark=<scheme>');
     schemes[theme] = known(id);
   }
   return schemes;
