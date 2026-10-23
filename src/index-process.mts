@@ -1,4 +1,4 @@
-import { NoteIndex, removeIndexFiles } from './note-index.mts';
+import { NoteIndex, isCorruption, removeIndexFiles } from './note-index.mts';
 import type { IndexNote } from './note-index.mts';
 import { isRecord } from './shared/helpers.mts';
 
@@ -30,6 +30,13 @@ function current() {
   return index || open();
 }
 
+function read(ask: () => string[] | null) {
+  try { return ask(); } catch (err) {
+    if (isCorruption(err)) throw err;
+    return null;
+  }
+}
+
 function handle(msg: Record<string, unknown>) {
   const seq = typeof msg.seq === 'number' ? msg.seq : 0;
   if (msg.type === 'open') { file = String(msg.file || ''); open(); return; }
@@ -42,18 +49,19 @@ function handle(msg: Record<string, unknown>) {
   if (msg.type === 'sync-end') {
     if (!syncing || syncing.seq !== seq) return;
     const removed = current().removeUnseen(syncing.seen);
-    if (removed) current().purge();
+    current().purgeIfPending();
     send({ type: 'synced', seq, changed: syncing.changed, removed, size: current().size() });
     syncing = null;
     return;
   }
   if (msg.type === 'change') {
-    current().apply({ notes: indexNotes(msg.notes), dropped: strings(msg.dropped) });
-    if (msg.purge === true) { current().purge(); send({ type: 'purged', seq }); }
+    current().apply({ notes: indexNotes(msg.notes), dropped: strings(msg.dropped) }, msg.purge === true);
+    current().purgeIfPending();
+    if (msg.purge === true) send({ type: 'purged', seq });
     return;
   }
-  if (msg.type === 'candidates') { send({ type: 'answer', seq, ids: current().candidates(String(msg.query || '')) }); return; }
-  if (msg.type === 'incoming') { send({ type: 'answer', seq, ids: current().incoming(String(msg.id || '')) }); return; }
+  if (msg.type === 'candidates') { send({ type: 'answer', seq, ids: read(() => current().candidates(String(msg.query || ''))) }); return; }
+  if (msg.type === 'incoming') { send({ type: 'answer', seq, ids: read(() => current().incoming(String(msg.id || ''))) }); return; }
 }
 
 process.parentPort.on('message', (e: { data: unknown }) => {

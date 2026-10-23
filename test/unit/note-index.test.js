@@ -19,8 +19,8 @@ function indexFor(store) {
   index.sync(store.notes.map(indexNoteOf));
   store.onIndexChange = (update) => {
     if (update === null) { index.sync(store.notes.map(indexNoteOf)); return; }
-    index.apply({ notes: update.notes.map(indexNoteOf), dropped: update.dropped.slice() });
-    if (update.purge) index.purge();
+    index.apply({ notes: update.notes.map(indexNoteOf), dropped: update.dropped.slice() }, !!update.purge);
+    index.purgeIfPending();
   };
   return index;
 }

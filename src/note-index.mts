@@ -9,6 +9,8 @@ const GRAM = 3;
 const LINK_PREFIX = 'note://';
 const LINK_TAIL_MAX = 128;
 const MAX_CANDIDATE_SHARE = 0.25;
+const CORRUPTION_CODES = [11, 26];
+const PURGE_PENDING = 'purge-pending';
 
 type IndexNote = Pick<Note, 'id' | 'title' | 'body' | 'tags'>;
 type IndexChange = { notes: IndexNote[]; dropped: string[] };
@@ -21,6 +23,7 @@ const SCHEMA = [
   'CREATE TABLE links (rid INTEGER NOT NULL, tail TEXT NOT NULL)',
   'CREATE INDEX links_tail ON links(tail)',
   'CREATE INDEX links_rid ON links(rid)',
+  'CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   'PRAGMA user_version = ' + INDEX_VERSION,
 ];
 
@@ -62,6 +65,10 @@ function queryGrams(query: string) {
     for (let i = 0; i + GRAM <= points.length; i++) grams.add(points.slice(i, i + GRAM).join(''));
   }
   return Array.from(grams);
+}
+
+function isCorruption(err: unknown) {
+  return err instanceof Error && 'errcode' in err && typeof err.errcode === 'number' && CORRUPTION_CODES.includes(err.errcode & 0xff);
 }
 
 const ftsString = (s: string) => '"' + s.replace(/"/g, '""') + '"';
@@ -144,6 +151,9 @@ class NoteIndex {
       linksFrom: p('SELECT n.id AS id, l.tail AS tail FROM links l JOIN notes n ON n.rid = l.rid WHERE l.tail >= ? ORDER BY l.tail'),
       count: p('SELECT count(*) AS n FROM notes'),
       notesWith: p('SELECT doc FROM temp.vocab WHERE term = ?'),
+      setMeta: p('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)'),
+      getMeta: p('SELECT value FROM meta WHERE key = ?'),
+      clearMeta: p('DELETE FROM meta WHERE key = ?'),
     };
   }
 
@@ -165,7 +175,8 @@ class NoteIndex {
     const hash = contentHash(n);
     const row = s.noteById.get(n.id);
     let rid = integer(row, 'rid');
-    if (rid !== null && text(row, 'hash') === hash) return false;
+    if (rid !== null && text(row, 'hash') === hash) return null;
+    const replaced = rid !== null;
     if (rid !== null) {
       s.dropGrams.run(rid);
       s.dropLinks.run(rid);
@@ -176,7 +187,11 @@ class NoteIndex {
     }
     s.addGrams.run(rid, searchDoc(n));
     for (const tail of linkTails(n.body)) s.addLink.run(rid, tail);
-    return true;
+    return replaced ? 'replaced' : 'added';
+  }
+
+  _markPurge() {
+    this.statements.setMeta.run(PURGE_PENDING, '1');
   }
 
   _drop(rid: number) {
@@ -195,12 +210,15 @@ class NoteIndex {
 
   syncPart(notes: readonly IndexNote[], seen: Set<string>) {
     return this._transaction(() => {
-      let changed = 0;
+      let changed = 0, replaced = 0;
       for (const n of notes) {
         if (seen.has(n.id)) continue;
         seen.add(n.id);
-        if (this._upsert(n)) changed++;
+        const done = this._upsert(n);
+        if (done) changed++;
+        if (done === 'replaced') replaced++;
       }
+      if (replaced) this._markPurge();
       return changed;
     });
   }
@@ -212,17 +230,19 @@ class NoteIndex {
         const id = text(row, 'id'), rid = integer(row, 'rid');
         if (id !== null && rid !== null && !seen.has(id)) { this._drop(rid); removed++; }
       }
+      if (removed) this._markPurge();
       return removed;
     });
   }
 
-  apply(change: IndexChange) {
+  apply(change: IndexChange, purge?: boolean) {
     this._transaction(() => {
       for (const n of change.notes) this._upsert(n);
       for (const id of change.dropped) {
         const rid = integer(this.statements.noteById.get(id), 'rid');
         if (rid !== null) this._drop(rid);
       }
+      if (purge) this._markPurge();
     });
   }
 
@@ -252,8 +272,11 @@ class NoteIndex {
     return Array.from(ids);
   }
 
-  purge() {
+  purgeIfPending() {
+    if (text(this.statements.getMeta.get(PURGE_PENDING), 'value') === null) return false;
     this.db.exec("INSERT INTO grams(grams) VALUES('optimize')");
+    this.statements.clearMeta.run(PURGE_PENDING);
+    return true;
   }
 
   size() {
@@ -265,5 +288,5 @@ class NoteIndex {
   }
 }
 
-export { NoteIndex, indexNoteOf, removeIndexFiles, queryGrams, linkTails, INDEX_VERSION };
+export { NoteIndex, indexNoteOf, isCorruption, removeIndexFiles, queryGrams, linkTails, INDEX_VERSION };
 export type { IndexNote, IndexChange };

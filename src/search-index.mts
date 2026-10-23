@@ -84,21 +84,26 @@ class SearchIndex {
 
   changed(update: IndexUpdate) {
     if (!this.child) return;
-    if (update === null) { this._remember(null); this._sync(); return; }
-    const ids = update.notes.map((n) => n.id).concat(update.dropped);
-    if (!ids.length) return;
-    this._remember(ids);
-    const seq = ++this.seq;
-    if (update.purge) this.busy.add(seq);
-    this._post({ type: 'change', seq, notes: update.notes.map(indexNoteOf), dropped: update.dropped.slice(), purge: !!update.purge });
+    try {
+      if (update === null) { this._remember(null); this._sync(); return; }
+      const ids = update.notes.map((n) => n.id).concat(update.dropped);
+      if (!ids.length) return;
+      this._remember(ids);
+      const seq = ++this.seq;
+      if (update.purge) this.busy.add(seq);
+      this._post({ type: 'change', seq, notes: update.notes.map(indexNoteOf), dropped: update.dropped.slice(), purge: !!update.purge });
+    } catch (err) {
+      console.error('[search-index] could not send a change', err);
+      try { this._remember(null); this._sync(); } catch (_) { this.stop(); }
+    }
   }
 
-  candidates(query: string | undefined) {
-    return query && query.trim() ? this._ask({ type: 'candidates', query }) : Promise.resolve(null);
+  candidates(query: unknown) {
+    return typeof query === 'string' && query.trim() ? this._ask({ type: 'candidates', query }) : Promise.resolve(null);
   }
 
-  incoming(id: string) {
-    return this._ask({ type: 'incoming', id });
+  incoming(id: unknown) {
+    return typeof id === 'string' && id ? this._ask({ type: 'incoming', id }) : Promise.resolve(null);
   }
 
   _sync() {
@@ -162,7 +167,7 @@ class SearchIndex {
       return;
     }
     console.error('[search-index] ' + msg.error);
-    this._answer(msg.seq, null);
+    this._answerAll();
     this.busy.clear();
     if (++this.failures > MAX_FAILURES) { this.stop(); return; }
     this._sync();
