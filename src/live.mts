@@ -75,7 +75,7 @@ class LiveShare {
     const note = this.store.get(noteId);
     if (!note || note.trashedAt) throw new Error('Note not found');
     if (note.lock) throw new Error('A locked note cannot be shared live.');
-    if (note.filePath) throw new Error('A file-backed note cannot be shared live; copy it into a plain note first.');
+    if (note.filePath && !this.store.isHome(note.vaultId)) throw new Error('A file-backed note cannot be shared live; copy it into a plain note first.');
     if (this.sessions.has(noteId)) return Promise.resolve(this.statusOf(noteId));
     const pending = this.hosting.get(noteId);
     if (pending) return pending;
@@ -145,7 +145,7 @@ class LiveShare {
     }
     if (req.method === 'POST' && !parts[2]) {
       if (!/^application\/json/i.test(String(req.headers['content-type'] || ''))) { res.statusCode = 415; res.end('send application/json'); return; }
-      if (note.lock || note.filePath) { res.statusCode = 410; res.end('gone'); this.stop(noteId); return; }
+      if (note.lock || (note.filePath && !this.store.isHome(note.vaultId))) { res.statusCode = 410; res.end('gone'); this.stop(noteId); return; }
       let data;
       try { data = await readJson(req, MAX_BODY); } catch (err) { res.statusCode = 400; res.end(String(err.message)); return; }
       const patch: { title?: string, body?: string } = {};

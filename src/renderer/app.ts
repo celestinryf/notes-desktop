@@ -39,7 +39,7 @@ import { craftTrace } from './craft-trace.ts';
 type OpenFocus = 'title' | 'body';
 type OpenOpts = { newTab?: boolean; focus?: OpenFocus | null };
 type RefreshOpts = { keepEditor?: boolean };
-type RowSource = Pick<OutlineRow, 'id' | 'title' | 'folderId' | 'pinned' | 'locked' | 'unlocked' | 'fileKind' | 'filePath' | 'remindAt' | 'live'>
+type RowSource = Pick<OutlineRow, 'id' | 'title' | 'folderId' | 'pinned' | 'locked' | 'unlocked' | 'fileKind' | 'filePath' | 'remindAt' | 'live' | 'home'>
   & { sticky: Sticky | boolean | null; trashedAt?: number | null; body?: string; tags?: string[]; excerpt?: string };
 type SettingValue = Settings[keyof Settings];
 type PeerMessage =
@@ -301,10 +301,31 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const text = info.hotkeyRegistered ? info.hotkeyDisplay : 'hotkey unavailable';
     el.hotkeyHint.textContent = text;
     el.hotkeyHint2.textContent = text;
-    el.settingsInfo.textContent = 'Data: ' + info.dataDir + (info.hotkeyFallback ? '   (preferred hotkey was taken; using ' + info.hotkeyDisplay + ')' : '');
+    el.settingsInfo.textContent = (info.notesDir ? 'Notes: ' + info.notesDir + '   ' : '') + 'Data: ' + info.dataDir + (info.hotkeyFallback ? '   (preferred hotkey was taken; using ' + info.hotkeyDisplay + ')' : '');
     if (info.saveBlocked) toast('Your notes file could not be read (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once it is free.');
     else if (info.loadError && info.recoveredNotes) toast('Notes file was damaged; restored ' + info.recoveredNotes + (info.recoveredNotes === 1 ? ' note' : ' notes') + ' from the newest backup. The damaged file was kept beside it.');
     else if (info.loadError) toast('Notes file was damaged and no backup was found. The damaged file was kept beside notes.json.');
+  }
+
+  let filesNoticeShown = false;
+  function noticeFilesMove() {
+    const info = state.info;
+    if (GUEST || filesNoticeShown || !info) return;
+    if (info.filesError) {
+      filesNoticeShown = true;
+      toast('Your notes could not be moved into a folder of files (' + info.filesError + '). They are unchanged; Notes tries again when it next starts.');
+      return;
+    }
+    const moved = info.movedToFiles;
+    if (!moved) return;
+    filesNoticeShown = true;
+    const renamed = moved.renamed.length ? ' ' + moved.renamed.length + (moved.renamed.length === 1 ? ' name was' : ' names were') + ' changed to be a valid file name.' : '';
+    toast('Your notes are now Markdown files in ' + moved.notesDir + '.' + renamed, { label: 'Show folder', run: showNotesFolder });
+  }
+
+  function showNotesFolder() {
+    const id = state.info && state.info.homeVaultId;
+    if (id) api.vaults.openFolder(id);
   }
 
   async function updateSettings(patch: SettingsPatch) {
@@ -478,7 +499,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   function rowInner(n: RowSource, q: string, where = whereMark(n)) {
     const title = n.body === undefined ? n.title : H.deriveTitle(n);
-    const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
+    const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
     const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '';
     const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
       + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
@@ -1707,7 +1728,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     let lossless = true;
     if (state.rich) {
       lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : '');
-      if (markdown && note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+      if (markdown && note.filePath && !note.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
     }
     state.currentLossless = lossless;
     state.lossyOverride = null;
@@ -1716,7 +1737,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (markdown && !lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
-      toast(note.filePath
+      toast(note.filePath && !note.home
         ? 'Opened as source: the rendered view would reformat this file. Ctrl+E switches anyway.'
         : 'Opened as Markdown source: the rendered view would change some of this note’s formatting.');
     }
@@ -1741,7 +1762,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
-    el.lockBtn.classList.toggle('hidden', inTrash || !!note.filePath || !!note.vaultId);
+    el.lockBtn.classList.toggle('hidden', inTrash || ((!!note.filePath || !!note.vaultId) && !note.home));
     el.attachBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.recordBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.historyBtn.classList.toggle('hidden', inTrash);
@@ -1878,7 +1899,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function renderFileRow(note: PublicNote | null) {
-    const isFile = !!(note && note.filePath);
+    const isFile = !!(note && note.filePath && !note.home);
     el.fileRow.classList.toggle('hidden', !isFile);
     el.fileBanner.classList.add('hidden');
     if (!(isFile && note.fileKind === 'docx')) clearDocx();
@@ -2013,7 +2034,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (H.isTableFile(fresh) && tableShown()) renderTable(fresh);
     if (state.rich && !isPlainTextFile(fresh)) {
       let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
-      if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+      if (fresh.filePath && !fresh.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
       if (!lossless && !state.sourceMode && state.lossyOverride !== fresh.id) {
         applyEditorMode(true);
@@ -2647,6 +2668,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('open-file', 'Create', 'Open a file as a note…', 'folder-open', 'Ctrl+O', side('openFiles', () => openFiles()), true, 'markdown pdf word docx txt'),
       cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
       cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
+      cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
@@ -2691,7 +2713,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       const hits = new Set(hitIds);
       const folders = new Map(flattenTree(state.tree).map((f) => [f.id, f.name]));
       notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
-        id: 'note-' + n.id, group: 'Notes', title: H.deriveTitle(n), icon: n.filePath ? 'file-text' : n.locked ? 'lock' : n.pinned ? 'star' : 'notebook-text',
+        id: 'note-' + n.id, group: 'Notes', title: H.deriveTitle(n), icon: n.filePath && !n.home ? 'file-text' : n.locked ? 'lock' : n.pinned ? 'star' : 'notebook-text',
         hint: (n.folderId && folders.get(n.folderId)) || H.relativeTime(n.updatedAt),
         matches: () => !n.locked && hits.has(n.id),
         run: (opts: { newTab?: boolean }) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody()),
@@ -3119,6 +3141,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       try {
         await state.initDone;
         warmWordCraftSoon();
+        noticeFilesMove();
         if (el.settingsDialog.open) return;
         if (state.current) {
           if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();

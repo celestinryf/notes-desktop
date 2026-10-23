@@ -103,12 +103,12 @@ A vault is a folder of Markdown and text files that Notes shows as notes, in the
 
 For a vault that is a git repository with a remote, Notes syncs the way obsidian-git does. It commits 8 seconds after the last change, pulls with rebase, and pushes. It also syncs every few minutes (5 by default), and when Notes quits if a change is still waiting. Notes never resolves a conflict for you: the sync stops, your commit stays, and the vault's status says what happened. The folder keeps working in Obsidian or any other editor.
 
-Notes' own notes (the ones not in a vault) have their history in a local git repository. Settings › History can push it to a remote you choose, as a backup.
+Notes' own notes have their history in a local git repository that tracks the notes folder. Settings › History can push it to a remote you choose, as a backup.
 
 ## Claude Code panel
 
 Ctrl+Shift+A opens a panel that runs [Claude Code](https://github.com/anthropics/claude-code) on your notes and shows its output as it works.
-- **Where it runs:** for a vault note, Claude Code works in the vault folder; for a file, in the file's folder. For Notes' own notes it works in a folder of Markdown copies, and its edits are read back into the notes.
+- **Where it runs:** for one of Notes' own notes, or with no note open, Claude Code works in the notes folder; for a vault note, in the vault folder; for a file, in the file's folder. Its edits are the files themselves, so they show up as soon as it finishes.
 - **What it may do:** with "Allow edits" off, a panel run can only read. "Open terminal" starts an ordinary interactive Claude Code session in the same folder, which that switch does not limit.
 - **What it needs:** the `claude` command on your PATH, signed in with a Claude account. Notes refuses to run it when it is set up to bill API credits.
 
@@ -160,16 +160,18 @@ Notes has no account and sends nothing anywhere on its own. It uses the network 
 - images in a note that point to a web address;
 - the Claude Code panel, which runs your own `claude` command.
 
-Everything else is in `%APPDATA%\notes-app\` (the tray's "Open data folder" opens it):
+Your notes are Markdown files in the notes folder, `Documents\Notes` (or `Notes 2` and so on if that name is taken by something else). Each folder in Notes is a folder on disk, a note's tags are in its front matter, and a locked note is an encrypted `.mdlock` file with no readable text in it. Any editor or AI tool can read and change these files while Notes is open; Notes picks up the changes. "Show the notes folder" in the command palette opens it.
+
+The rest is in `%APPDATA%\notes-app\` (the tray's "Open data folder" opens it):
 
 | Path | What it holds |
 |---|---|
-| `notes.json` | Notes' own notes, folders and settings. Written to a temporary file first, then renamed into place |
-| `notes.journal` | The changes saved since `notes.json` was last written, one line each. Notes folds them into `notes.json` when the journal grows, ten minutes after the last fold, before each history commit, and when it quits |
+| `notes.json` | Settings, and what Notes remembers about each note on this computer: where its file is, pins, stickies, reminders, open tabs, and a copy of its text so Notes starts quickly. The files are the real notes; this is rebuilt from them |
+| `notes.journal` | The changes saved since `notes.json` was last written, one line each. Notes folds them into `notes.json` when the journal grows, ten minutes after the last fold, and when it quits |
 | `backups\` | A copy of `notes.json` at most every 10 minutes; the newest 10 are kept |
 | `history\` | The git repository behind Earlier versions |
 | `attachments\` | Attached files and voice memos |
-| `workspace\` | The Markdown copies the Claude Code panel works in |
+| `before-files-<date>\` | A copy of `notes.json` from before Notes moved your notes into the notes folder, kept in case you need to go back |
 
 Files you open and vault files stay where they are; Notes only remembers where they are. Settings › Your data exports every note as JSON and imports Markdown files.
 

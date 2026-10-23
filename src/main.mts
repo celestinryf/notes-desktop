@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
-import { Store, isFileNote } from './store.mts';
+import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitSync } from './gitSync.mts';
@@ -19,7 +19,6 @@ import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
 import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } from './files.mts';
-import * as workspace from './workspace.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -48,10 +47,42 @@ if (!app.requestSingleInstanceLock()) {
   main();
 }
 
+function notesDirFor() {
+  const override = process.env.NOTES_APP_NOTES_DIR || (process.env.NOTES_APP_DATA_DIR ? path.join(DATA_DIR, 'Notes') : '');
+  if (override) return override;
+  const base = path.join(app.getPath('documents'), 'Notes');
+  for (let i = 1; ; i++) {
+    const candidate = i === 1 ? base : base + ' ' + i;
+    let entries: string[] | null = null;
+    try { entries = fs.readdirSync(candidate); } catch (_) {  }
+    if (!entries || !entries.length || entries.includes(MOVING_MARKER)) return candidate;
+  }
+}
+
+function ensureNotesFolder(store: Store): FilesMove {
+  if (store.saveBlocked || store.homeVault()) return { report: null, error: null };
+  try {
+    const dir = notesDirFor();
+    const appNotes = store.notes.some((n) => !n.filePath && !n.vaultId) || store.folders.some((f) => !f.vaultId);
+    if (!appNotes) { store.addHomeVault(dir); return { report: null, error: null }; }
+    store.flush();
+    const backupDir = path.join(DATA_DIR, 'before-files-' + H.fileStamp(Date.now()));
+    fs.mkdirSync(backupDir, { recursive: true });
+    for (const name of ['notes.json', 'notes.journal']) { const from = path.join(DATA_DIR, name); if (fs.existsSync(from)) fs.copyFileSync(from, path.join(backupDir, name)); }
+    const report = Object.assign(store.moveIntoHome(dir), { backupDir, at: Date.now() });
+    try { fs.writeFileSync(path.join(DATA_DIR, 'moved-to-files.json'), JSON.stringify(report, null, 2)); } catch (_) {  }
+    return { report, error: null };
+  } catch (err) {
+    console.error('[files] moving notes into a folder failed:', err);
+    return { report: null, error: String(err.message || err) };
+  }
+}
+
 function main() {
   const trace = createCraftTrace(DATA_DIR, process.env.NOTES_APP_CRAFT_TRACE === '1');
   trace.write('app-start', { uptimeMs: Math.round(process.uptime() * 1000), hidden: START_HIDDEN, version: app.getVersion() });
   const store = new Store(DATA_DIR).load();
+  let filesMove = ensureNotesFolder(store);
   const git = new GitSync(DATA_DIR, {
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
@@ -231,6 +262,7 @@ function main() {
     try { store.load(); } catch (_) { return; }
     if (!store.saveBlocked) {
       reloadedSinceStart = true;
+      filesMove = ensureNotesFolder(store);
       applyTheme();
       registerHotkey(store.settings.hotkey);
       if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!store.settings.alwaysOnTop);
@@ -373,6 +405,10 @@ function main() {
       drySpeech: process.env.NOTES_APP_DRY_SPEECH === '1',
       recoveredNotes: store.recoveredFromBackup ? store.notes.length : null,
       craftTrace: trace.enabled,
+      notesDir: (store.homeVault() || { path: null }).path,
+      homeVaultId: (store.homeVault() || { id: null }).id,
+      movedToFiles: filesMove.report,
+      filesError: filesMove.error,
     };
   }
 
@@ -392,8 +428,7 @@ function main() {
   handle('notes:create', (_e, data) => {
     data = Object.assign({}, data || {});
     for (const k of ['filePath', 'fileKind', 'fileMtime', 'vaultId', 'lock', 'live', 'sticky', 'trashedFrom', 'id']) Reflect.deleteProperty(data, k);
-    const folder = data.folderId ? store.getFolder(data.folderId) : null;
-    const note = folder && folder.vaultId ? store.createVaultNote(folder.id, data) : store.create(data);
+    const note = store.create(data);
     if (note.vaultId) vaults.noteChanged(note.vaultId);
     return store.publicNote(note);
   });
@@ -404,7 +439,7 @@ function main() {
     return store.publicNote(note);
   });
 
-  handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); forgetWorkspaceCopy(id); live.stop(id); stickies.close(id, { forget: true }); return n; });
+  handle('lock:set', (_e, id, password) => { const n = store.lockNote(id, password); live.stop(id); stickies.close(id, { forget: true }); return n; });
   handle('lock:unlock', (_e, id, password) => store.unlockNote(id, password));
   handle('lock:relock', (_e, id) => { store.relock(id); return store.publicNote(store.get(id)); });
   handle('lock:remove', (_e, id, password) => store.removeLock(id, password));
@@ -449,18 +484,17 @@ function main() {
   });
   handle('notes:splitIntoBook', (_e, id, opts) => {
     const r = store.splitIntoBook(id, opts);
-    if (r.originalTrashed) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
+    if (r.originalTrashed) { live.stop(id); stickies.close(id); }
     return r;
   });
   handle('notes:undoSplit', (_e, folderId, pageIds, originalId) => {
     const r = store.undoSplit(folderId, pageIds, originalId);
-    for (const id of r.removedIds) { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); }
+    for (const id of r.removedIds) { live.stop(id); stickies.close(id); }
     return r;
   });
-  handle('notes:trash', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); const n = store.trash(id); stickies.close(id); return store.publicNote(n); });
+  handle('notes:trash', (_e, id) => { live.stop(id); const n = store.trash(id); stickies.close(id); return store.publicNote(n); });
   handle('notes:restore', (_e, id) => store.publicNote(store.restore(id)));
-  handle('notes:destroy', (_e, id) => { live.stop(id); forgetWorkspaceCopy(id); stickies.close(id); return store.destroy(id); });
-  function forgetWorkspaceCopy(id: string) { try { workspace.forgetNote(path.join(DATA_DIR, 'workspace'), id); } catch (_) {  } }
+  handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
   handle('notes:emptyTrash', () => store.emptyTrash());
 
   const stickyView = (n: Note) => ({ id: n.id, title: H.deriveTitle(n), sticky: n.sticky, open: stickies.isOpen(n.id) });
@@ -795,7 +829,7 @@ function main() {
   });
 
   const vaultView = (v: Vault) => Object.assign({}, v, { status: vaults.statusOf(v.id), rootFolderId: (store.vaultRootFolder(v.id) || {}).id || null });
-  handle('vaults:list', () => store.vaults.map(vaultView));
+  handle('vaults:list', () => store.vaults.filter((v) => !v.home).map(vaultView));
   handle('vaults:pickFolder', async () => {
     const { canceled, filePaths } = await openDialog({ title: 'Choose a folder to use as a vault', properties: ['openDirectory', 'createDirectory'] });
     return canceled || !filePaths.length ? null : filePaths[0];
@@ -836,7 +870,6 @@ function main() {
   handle('vaults:status', async (_e, id) => vaults.refreshRepoStatus(id));
   handle('vaults:openFolder', (_e, id) => { const v = store.getVault(id); return v ? shell.openPath(v.path) : 'No vault'; });
 
-  const WORKSPACE_DIR = path.join(DATA_DIR, 'workspace');
   let botChild: ChildProcess | null = null;
   let botStarting = false;
 
@@ -844,17 +877,13 @@ function main() {
     return claudeBin.resolveClaude({ override: process.env.NOTES_APP_CLAUDE_BIN || null });
   }
 
-  function botCwdFor(noteId?: string | null) {
+  function botCwdFor(noteId?: string | null): { cwd: string; kind: 'vault' | 'file'; focus: string | null; vaultId: string | null } {
     const note = noteId ? store.get(noteId) : null;
-    if (note && note.vaultId && note.filePath) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath) }; }
-    if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath) };
-    const refreshed = workspace.refreshWorkspace(store, WORKSPACE_DIR);
-    if (!refreshed.manifest) throw new Error('the earlier workspace could not be read back (' + refreshed.imported.error + '); fix or remove ' + WORKSPACE_DIR + ' first');
-    const { imported, manifest } = refreshed;
-    for (const nid of imported.updatedIds || []) live.noteChanged(nid);
-    if (imported && (imported.updated || imported.created || imported.conflicts)) fanReloaded({ reason: 'bot' });
-    const entry = note ? manifest.files.find((f) => f.id === note.id) : null;
-    return { cwd: WORKSPACE_DIR, kind: 'workspace', focus: entry ? entry.rel : null, imported };
+    if (note && note.vaultId && note.filePath) { const v = store.getVault(note.vaultId); if (v) return { cwd: v.path, kind: 'vault', focus: path.relative(v.path, note.filePath), vaultId: v.id }; }
+    if (note && note.filePath) return { cwd: path.dirname(note.filePath), kind: 'file', focus: path.basename(note.filePath), vaultId: null };
+    const home = store.homeVault();
+    if (!home) throw new Error('the notes folder is not set up' + (filesMove.error ? ': ' + filesMove.error : ''));
+    return { cwd: home.path, kind: 'vault', focus: null, vaultId: home.id };
   }
 
   function cleanEnv() {
@@ -900,16 +929,14 @@ function main() {
     try { auth = await ensureSubscription(spec); } finally { botStarting = false; }
     if (!auth.ok) return { ok: false, error: auth.reason };
     let target;
-    try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not prepare the workspace: ' + err.message }; }
-    const intro = target.kind === 'workspace'
-      ? 'You are working inside a folder of Markdown notes exported from a notes app. Each .md file is one note; folders mirror the app\'s folders. Edit files in place; create new .md files for new notes; do not create other file types.'
-      : 'You are working inside the user\'s notes folder. Each Markdown file is a note.';
+    try { target = botCwdFor(opts.noteId); } catch (err) { return { ok: false, error: 'Could not find the folder to work in: ' + err.message }; }
+    const intro = 'You are working inside the user\'s notes folder. Each Markdown file is a note.';
     const focusLine = target.focus ? ' The user is currently looking at "' + target.focus + '".' : '';
     const fullPrompt = intro + focusLine + '\n\nTask: ' + prompt;
     const allowed = opts.allowEdits === false ? 'Read,Glob,Grep' : 'Read,Glob,Grep,Edit,Write,MultiEdit';
     const args = ['-p', fullPrompt, '--output-format', 'text', '--permission-mode', 'dontAsk', '--allowedTools', allowed];
     const launch = claudeBin.launchSpec(spec, args);
-    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, imported: target.imported, plan: auth.plan });
+    botSend('start', { cwd: target.cwd, kind: target.kind, focus: target.focus, plan: auth.plan });
     let child;
     try {
       child = spawn(launch.file, launch.args, { cwd: target.cwd, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign(cleanEnv(), { CLAUDE_CODE_NONINTERACTIVE: '1' }, launch.env) });
@@ -924,17 +951,15 @@ function main() {
     child.stdout.on('data', (d) => { const t = outDec.write(d); if (t) botSend('out', { text: t }); });
     child.stderr.on('data', (d) => { const t = errDec.write(d); if (t) botSend('err', { text: t }); });
     child.on('error', (err) => end({ ok: false, error: 'Could not start "' + launch.file + '": ' + err.message }));
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       if (ended) return;
-      let imported: workspace.ImportResult | { error: string } | null = null;
-      if (target.kind === 'workspace') {
-        try { imported = workspace.importNotes(store, WORKSPACE_DIR); for (const nid of imported.updatedIds || []) live.noteChanged(nid); } catch (err) { imported = { error: err.message }; }
-      } else if (target.kind === 'vault') {
-        const note = opts.noteId ? store.get(opts.noteId) : null;
-        if (note && note.vaultId) { store.scanVault(note.vaultId).then((r) => { if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); }).catch(() => {}); vaults.noteChanged(note.vaultId); }
+      const vaultId = target.vaultId;
+      if (vaultId) {
+        try { const r = await store.scanVault(vaultId); if (r && (r.added || r.updated || r.removed)) botSend('reloaded', r); } catch (_) {  }
+        vaults.noteChanged(vaultId);
       }
       if (store.settings.gitEnabled) git.noteChanged();
-      end({ ok: code === 0, code, imported });
+      end({ ok: code === 0, code });
       fanReloaded({ reason: 'bot' });
     });
     return { ok: true, cwd: target.cwd, kind: target.kind };
@@ -967,12 +992,6 @@ function main() {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
-  handle('bot:importWorkspace', () => {
-    if (botChild) return { error: 'A run is in progress; its edits are imported when it finishes.' };
-    const r = workspace.importNotes(store, WORKSPACE_DIR);
-    fanReloaded({ reason: 'bot' });
-    return r;
   });
 
   handle('folders:tree', () => store.folderTree());

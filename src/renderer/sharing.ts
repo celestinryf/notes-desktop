@@ -24,7 +24,7 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
     const n = state.current;
     if (!n) return;
     el.shareReveal.classList.toggle('hidden', !n.filePath);
-    el.shareLiveHost.classList.toggle('hidden', !!n.live || !!n.locked || !!n.filePath);
+    el.shareLiveHost.classList.toggle('hidden', !!n.live || !!n.locked || (!!n.filePath && !n.home));
     el.shareLiveStop.classList.toggle('hidden', !n.live);
   }
 

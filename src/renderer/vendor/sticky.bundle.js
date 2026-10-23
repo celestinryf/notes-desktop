@@ -212,7 +212,7 @@
         const lossless = state.rich.setMarkdown(note.body);
         const viewerOnly = isViewerOnlyFile(note);
         const plain = isPlainTextFile(note);
-        const exactEnough = lossless && (!note.filePath || state.rich.lastRoundTripExact());
+        const exactEnough = lossless && (!note.filePath || note.home || state.rich.lastRoundTripExact());
         setReadOnly(viewerOnly || plain || !exactEnough, viewerOnly ? "Read-only file. Open in Notes to view it." : plain ? "Plain-text file. Edit it in Notes (\u2197)." : "Has formatting this sticky cannot show. Edit it in Notes (\u2197).");
       }
     }

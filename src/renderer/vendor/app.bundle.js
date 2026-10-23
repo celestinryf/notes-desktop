@@ -2440,7 +2440,6 @@
     wrap("live", ["host", "join", "stop"]);
     wrap("vaults", ["add", "clone", "update", "remove", "sync", "scan", "initRepo"]);
     wrap("agentFiles", ["link"]);
-    wrap("bot", ["importWorkspace"]);
     wrap("app", ["importMarkdown"]);
     return out;
   }
@@ -2529,7 +2528,7 @@
       const n = state.current;
       if (!n) return;
       el.shareReveal.classList.toggle("hidden", !n.filePath);
-      el.shareLiveHost.classList.toggle("hidden", !!n.live || !!n.locked || !!n.filePath);
+      el.shareLiveHost.classList.toggle("hidden", !!n.live || !!n.locked || !!n.filePath && !n.home);
       el.shareLiveStop.classList.toggle("hidden", !n.live);
     }
     function openShareMenu() {
@@ -2657,9 +2656,9 @@
     }
     function describeBotScope() {
       const n = state.current;
-      let text = "Scope: all plain notes (exported to a workspace folder for the run)";
-      if (n && n.vaultId) text = "Scope: this note\u2019s vault folder";
-      else if (n && n.filePath) text = "Scope: the folder containing this file";
+      let text = "Scope: your notes folder";
+      if (n && n.vaultId && !n.home) text = "Scope: this note\u2019s vault folder";
+      else if (n && n.filePath && !n.home) text = "Scope: the folder containing this file";
       el.botScope.textContent = text;
       el.botScope.title = text;
     }
@@ -2676,15 +2675,12 @@
         return;
       }
       const prompt = el.botPrompt.value.trim();
-      await flushSave();
-      el.botOutput.textContent = "";
       if (!prompt) {
-        const r = await api.bot.importWorkspace();
-        botAppend(!("updated" in r) || r.error ? "Import failed: " + r.error + "\n" : "Pulled in workspace edits. " + importSummary(r) + "\n" + (r.details || []).map((d) => "  " + d).join("\n") + (r.details && r.details.length ? "\n" : ""), r.error ? "bot-err" : "bot-meta");
-        await refresh({ keepEditor: true });
         el.botPrompt.focus();
         return;
       }
+      await flushSave();
+      el.botOutput.textContent = "";
       const res = await api.bot.run({ prompt, noteId: state.currentId, allowEdits: el.botAllowEdits.checked });
       if (!res.ok) {
         botAppend(res.error + "\n", "bot-err");
@@ -2698,7 +2694,6 @@
         el.botRunBtn.textContent = "Stop";
         botAppend("Claude Code, on your Claude " + (ev.plan ? ev.plan.charAt(0).toUpperCase() + ev.plan.slice(1) + " " : "") + "subscription (no API credits)\n", "bot-meta");
         botAppend("Working in " + ev.cwd + (ev.focus ? "  (looking at " + ev.focus + ")" : "") + "\n", "bot-meta");
-        if (ev.imported && "updated" in ev.imported && (ev.imported.updated || ev.imported.created || ev.imported.conflicts)) botAppend("Pulled in earlier workspace edits first. " + importSummary(ev.imported) + "\n", "bot-meta");
       } else if (ev.type === "out") {
         botAppend(ev.text);
       } else if (ev.type === "err") {
@@ -2708,12 +2703,7 @@
         el.botPanel.classList.remove("is-running");
         el.botRunBtn.textContent = "Run";
         if (ev.error) botAppend("\n" + ev.error + "\n", "bot-err");
-        else {
-          const imp = ev.imported;
-          const summary = imp && "updated" in imp && !imp.error ? " " + importSummary(imp) : "";
-          botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + "." + summary + "\n", "bot-meta");
-          if (imp && "conflicts" in imp && imp.conflicts) botAppend((imp.details || []).filter((d) => d.startsWith("conflict")).map((d) => "  " + d).join("\n") + "\n", "bot-err");
-        }
+        else botAppend("\nDone" + (ev.code === 0 ? "" : " (exit code " + ev.code + ")") + ".\n", "bot-meta");
         refresh({ keepEditor: true }).then(async () => {
           if (state.currentId && !state.dirty) {
             const wanted = state.currentId;
@@ -2728,9 +2718,6 @@
         refresh({ keepEditor: true });
       }
     }
-    function importSummary(imp) {
-      return "Notes updated: " + imp.updated + ", created: " + imp.created + (imp.conflicts ? ", conflicts: " + imp.conflicts : "") + (imp.missing ? ", files removed by the agent (notes kept): " + imp.missing : "") + ".";
-    }
     async function openBotTerminal() {
       await flushSave();
       const res = await api.bot.openTerminal(state.currentId);
@@ -2738,7 +2725,7 @@
         toast("Could not open a terminal: " + res.error);
         return;
       }
-      toast("Claude Code opened in a terminal at " + res.cwd + (res.kind === "workspace" ? ". Its edits are pulled in on the next Run, or press Run with an empty prompt." : ""));
+      toast("Claude Code opened in a terminal at " + res.cwd);
     }
     return { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal };
   }
@@ -3320,7 +3307,7 @@
       const rich = state.rich;
       if (!next && rich && state.currentId && !isPlainTextFile4(state.current)) {
         state.currentLossless = rich.setMarkdown(el.bodyInput.value);
-        if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
+        if (state.current && state.current.filePath && !state.current.home && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
         if (state.currentLossless === false) {
           state.lossyOverride = state.currentId;
           toast("Heads up: editing this note in the rendered view will rewrite formatting it cannot show.");
@@ -3625,7 +3612,7 @@
     }
     function onLockButton() {
       const note = state.current;
-      if (!note || note.trashedAt || note.filePath) return;
+      if (!note || note.trashedAt || note.filePath && !note.home) return;
       if (!note.locked) {
         openLockDialog("set");
         return;
@@ -3970,7 +3957,7 @@
       src.value = v.body;
       if (state.rich) {
         let lossless = state.rich.setMarkdown(v.body);
-        if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+        if (note.filePath && !note.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
         state.currentLossless = lossless;
         state.lossyOverride = null;
         if (!lossless && !state.sourceMode) applyEditorMode(true);
@@ -7165,10 +7152,29 @@
       const text = info.hotkeyRegistered ? info.hotkeyDisplay : "hotkey unavailable";
       el.hotkeyHint.textContent = text;
       el.hotkeyHint2.textContent = text;
-      el.settingsInfo.textContent = "Data: " + info.dataDir + (info.hotkeyFallback ? "   (preferred hotkey was taken; using " + info.hotkeyDisplay + ")" : "");
+      el.settingsInfo.textContent = (info.notesDir ? "Notes: " + info.notesDir + "   " : "") + "Data: " + info.dataDir + (info.hotkeyFallback ? "   (preferred hotkey was taken; using " + info.hotkeyDisplay + ")" : "");
       if (info.saveBlocked) toast("Your notes file could not be read (it may be locked by another program). Saving is paused so nothing is overwritten; restart Notes once it is free.");
       else if (info.loadError && info.recoveredNotes) toast("Notes file was damaged; restored " + info.recoveredNotes + (info.recoveredNotes === 1 ? " note" : " notes") + " from the newest backup. The damaged file was kept beside it.");
       else if (info.loadError) toast("Notes file was damaged and no backup was found. The damaged file was kept beside notes.json.");
+    }
+    let filesNoticeShown = false;
+    function noticeFilesMove() {
+      const info = state.info;
+      if (GUEST || filesNoticeShown || !info) return;
+      if (info.filesError) {
+        filesNoticeShown = true;
+        toast("Your notes could not be moved into a folder of files (" + info.filesError + "). They are unchanged; Notes tries again when it next starts.");
+        return;
+      }
+      const moved = info.movedToFiles;
+      if (!moved) return;
+      filesNoticeShown = true;
+      const renamed = moved.renamed.length ? " " + moved.renamed.length + (moved.renamed.length === 1 ? " name was" : " names were") + " changed to be a valid file name." : "";
+      toast("Your notes are now Markdown files in " + moved.notesDir + "." + renamed, { label: "Show folder", run: showNotesFolder });
+    }
+    function showNotesFolder() {
+      const id = state.info && state.info.homeVaultId;
+      if (id) api.vaults.openFolder(id);
     }
     async function updateSettings(patch) {
       const res = await api.settings.set(patch);
@@ -7350,7 +7356,7 @@
     }
     function rowInner(n, q, where = whereMark(n)) {
       const title = n.body === void 0 ? n.title : deriveTitle(n);
-      const fileMark = n.filePath ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
+      const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "";
       const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
       const inTitle = !q || tokenize(q).some((t) => title.toLowerCase().includes(t));
@@ -8721,7 +8727,7 @@
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
-        if (markdown && note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+        if (markdown && note.filePath && !note.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       }
       state.currentLossless = lossless;
       state.lossyOverride = null;
@@ -8730,7 +8736,7 @@
       if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
       if (markdown && !lossless && state.lossyToastFor !== note.id) {
         state.lossyToastFor = note.id;
-        toast(note.filePath ? "Opened as source: the rendered view would reformat this file. Ctrl+E switches anyway." : "Opened as Markdown source: the rendered view would change some of this note\u2019s formatting.");
+        toast(note.filePath && !note.home ? "Opened as source: the rendered view would reformat this file. Ctrl+E switches anyway." : "Opened as Markdown source: the rendered view would change some of this note\u2019s formatting.");
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
@@ -8755,7 +8761,7 @@
       if (bot.open) describeBotScope();
       el.pinBtn.classList.toggle("hidden", inTrash);
       el.deleteBtn.classList.toggle("hidden", inTrash);
-      el.lockBtn.classList.toggle("hidden", inTrash || !!note.filePath || !!note.vaultId);
+      el.lockBtn.classList.toggle("hidden", inTrash || (!!note.filePath || !!note.vaultId) && !note.home);
       el.attachBtn.classList.toggle("hidden", inTrash || fileReadOnly);
       el.recordBtn.classList.toggle("hidden", inTrash || fileReadOnly);
       el.historyBtn.classList.toggle("hidden", inTrash);
@@ -8867,7 +8873,7 @@
       return window.NotesCode ? window.NotesCode.languageFor(extOf(note.filePath)).name : "Plain text";
     }
     function renderFileRow(note) {
-      const isFile = !!(note && note.filePath);
+      const isFile = !!(note && note.filePath && !note.home);
       el.fileRow.classList.toggle("hidden", !isFile);
       el.fileBanner.classList.add("hidden");
       if (!(isFile && note.fileKind === "docx")) clearDocx();
@@ -9017,7 +9023,7 @@
       if (isTableFile(fresh) && tableShown()) renderTable(fresh);
       if (state.rich && !isPlainTextFile6(fresh)) {
         let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
-        if (fresh.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+        if (fresh.filePath && !fresh.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
         state.currentLossless = lossless;
         if (!lossless && !state.sourceMode && state.lossyOverride !== fresh.id) {
           applyEditorMode(true);
@@ -9713,6 +9719,7 @@
         cmd("open-file", "Create", "Open a file as a note\u2026", "folder-open", "Ctrl+O", side("openFiles", () => openFiles()), true, "markdown pdf word docx txt"),
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
+        cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
@@ -9768,7 +9775,7 @@
           id: "note-" + n.id,
           group: "Notes",
           title: deriveTitle(n),
-          icon: n.filePath ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
+          icon: n.filePath && !n.home ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
           hint: n.folderId && folders.get(n.folderId) || relativeTime(n.updatedAt),
           matches: () => !n.locked && hits.has(n.id),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
@@ -10606,6 +10613,7 @@
         try {
           await state.initDone;
           warmWordCraftSoon();
+          noticeFilesMove();
           if (el.settingsDialog.open) return;
           if (state.current) {
             if (state.current.title || state.current.body) focusBody();

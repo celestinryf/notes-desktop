@@ -16,10 +16,18 @@ const notesFile = path.join(dataDir, 'notes.json');
 const journalFile = path.join(dataDir, 'notes.journal');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readNotes = () => { const d = readLibrary(dataDir); if (!d) throw new Error('notes.json could not be read'); return d; };
-const savedText = () => [notesFile, journalFile].filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8')).join('\n');
-const setSavesReadOnly = (on) => { for (const f of [notesFile, journalFile]) { try { fs.chmodSync(f, on ? 0o444 : 0o666); } catch (_) {  } } };
+const filesUnder = (dir) => { try { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesUnder(path.join(dir, e.name)) : [path.join(dir, e.name)])); } catch (_) { return []; } };
+const savedText = () => [notesFile, journalFile].concat(filesUnder(path.join(dataDir, 'Notes'))).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+let readOnlyNoteFiles = [];
+const setSavesReadOnly = (on, noteFiles) => {
+  if (noteFiles) readOnlyNoteFiles = noteFiles;
+  for (const f of [notesFile, journalFile].concat(readOnlyNoteFiles)) { try { fs.chmodSync(f, on ? 0o444 : 0o666); } catch (_) {  } }
+};
+const homeVaultId = () => (readNotes().vaults.find((v) => v.home) || {}).id;
+const isLinkedFile = (n) => !!n.filePath && !n.vaultId;
+const homeNoteFile = (title) => findNote(title).filePath;
 const findNote = (title) => readNotes().notes.find((n) => n.title === title);
-const historyAt = (rev) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':notes.json'], { encoding: 'utf8' }); } catch (_) { return ''; } };
+const historyAt = (rev, file) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':' + file], { encoding: 'utf8' }); } catch (_) { return ''; } };
 
 async function waitFor(label, fn, timeout = 6000) {
   const start = Date.now();
@@ -416,13 +424,15 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   await page.fill('#bodyInput', 'before lock');
   await waitFor('baseline saved', () => findNote('Gamma (copy)').body === 'before lock');
   const alphaBefore = findNote('Alpha').body;
-  setSavesReadOnly(true);
+  const gammaFile = homeNoteFile('Gamma (copy)');
+  setSavesReadOnly(true, [gammaFile, homeNoteFile('Alpha')]);
   try {
     await page.fill('#bodyInput', 'typed while locked');
     await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await page.click('.note-row:has-text("Alpha")');
     await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
     assert.equal(findNote('Gamma (copy)').body, 'before lock', 'nothing reached disk while locked');
+    assert.equal(fs.readFileSync(gammaFile, 'utf8'), 'before lock', 'the note file is unchanged too');
     await page.fill('#bodyInput', 'alpha edited while locked');
     await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await page.click('.note-row:has-text("Gamma (copy)")');
@@ -435,6 +445,7 @@ test('an edit that cannot be saved survives switching notes and lands once the d
     assert.equal(await page.inputValue('#bodyInput'), 'typed while locked');
   } finally {
     setSavesReadOnly(false);
+    readOnlyNoteFiles = [];
   }
   await waitFor('both pending edits landed after unlock', () => findNote('Gamma (copy)').body === 'typed while locked' && findNote('Alpha').body === 'alpha edited while locked', 15000);
   await waitForDom(() => document.getElementById('statusSaved').textContent === 'Saved');
@@ -495,7 +506,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 
   await useSourceMode(true);
   await page.keyboard.press('Control+o');
-  await waitFor('two file notes linked', () => readNotes().notes.filter((n) => n.filePath).length === 2);
+  await waitFor('two file notes linked', () => readNotes().notes.filter(isLinkedFile).length === 2);
   const mdNote = readNotes().notes.find((n) => n.filePath && n.filePath.endsWith('External note.md'));
   assert.equal(mdNote.title, 'External note.md');
   assert.equal(mdNote.body, '# From disk\n\nline one\n');
@@ -562,7 +573,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
     for (const id of ids) await window.notesApi.notes.destroy(id);
     await window.notesApi.folders.delete(folderId);
   }, { ids: agentNoteIds, folderId: agentFolder.id });
-  await waitFor('agent links removed', () => !readNotes().notes.some((n) => n.filePath) && !readNotes().folders.some((f) => f.name === 'Agent files'));
+  await waitFor('agent links removed', () => !readNotes().notes.some(isLinkedFile) && !readNotes().folders.some((f) => f.name === 'Agent files'));
   assert.ok(fs.readFileSync(path.join(os.homedir(), '.claude', 'CLAUDE.md'), 'utf8').includes('# Global instructions'), 'the real file was never modified');
   await page.click('.nav-item[data-view="all"]');
   await waitForDom(() => document.querySelectorAll('.note-row').length >= 2);
@@ -584,8 +595,9 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
   await page.click('#vaultAddFolderBtn');
-  await waitFor('vault recorded', () => readNotes().vaults && readNotes().vaults.length === 1);
-  const vault = readNotes().vaults[0];
+  const addedVaults = () => readNotes().vaults.filter((v) => !v.home);
+  await waitFor('vault recorded', () => addedVaults().length === 1);
+  const vault = addedVaults()[0];
   await waitFor('vault notes mirrored', () => readNotes().notes.filter((n) => n.vaultId === vault.id).length === 2);
   await waitForDom(() => !document.getElementById('settingsDialog').open);
   await page.waitForSelector('.folder-row .vault-badge', { timeout: 8000 });
@@ -649,7 +661,7 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitForDom(() => /plain folder/i.test(document.getElementById('toast').textContent));
 
   await page.click('.vault-item button:has-text("Remove")');
-  await waitFor('vault removed', () => readNotes().vaults.length === 0 && !readNotes().notes.some((n) => n.vaultId));
+  await waitFor('vault removed', () => addedVaults().length === 0 && !readNotes().notes.some((n) => n.vaultId === vault.id));
   assert.ok(fs.existsSync(path.join(vaultDir, 'Hello.md')) && fs.existsSync(path.join(vaultDir, 'Work', 'Plan.md')), 'files untouched');
   await waitForDom(() => !document.getElementById('settingsDialog').open).catch(() => {});
   await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); });
@@ -658,7 +670,7 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
 });
 
-test('bot: runs Claude Code over an exported workspace, streams output, and pulls the edits back in', { timeout: 60000 }, async () => {
+test('bot: runs Claude Code in the notes folder, streams output, and its edits come back through the files', { timeout: 60000 }, async () => {
   await page.click('.note-row:has-text("Gamma (copy)")');
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
@@ -666,7 +678,7 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'bot target body');
   await page.keyboard.press('Control+Shift+a');
   await page.waitForSelector('#botPanel:not(.hidden)');
-  assert.match(await page.textContent('#botScope'), /plain notes/);
+  assert.match(await page.textContent('#botScope'), /your notes folder/);
   await app.evaluate(() => { process.env.FAKE_CLAUDE_AUTH = 'apiKey'; });
   await page.fill('#botPrompt', 'Append a bullet to the current note');
   await page.keyboard.press('Control+Enter');
@@ -686,21 +698,20 @@ test('bot: runs Claude Code over an exported workspace, streams output, and pull
   const ps = fs.readFileSync(term.script, 'utf8');
   for (const v of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']) assert.match(ps, new RegExp('Remove-Item -LiteralPath Env:' + v + ' '));
   assert.ok(ps.indexOf('Remove-Item') < ps.indexOf('& $notes'), 'variables are cleared before Claude Code starts');
-  assert.match(out, /fake claude: cwd=.*workspace/);
-  assert.match(out, /edited .*Gamma \(copy\)\.md/);
-  assert.match(out, /Notes updated: 1, created: 1/);
-  await waitFor('agent edit imported', () => findNote('Gamma (copy)').body === 'bot target body\n- added by the bot\n');
-  await waitFor('agent-created note imported', () => findNote('Bot created this'));
+  assert.equal(term.cwd, path.join(dataDir, 'Notes'), 'the terminal opens in the notes folder');
+  assert.match(out, /fake claude: cwd=.*Notes/);
+  assert.match(out, /edited Gamma \(copy\)\.md/);
+  const gammaFile = homeNoteFile('Gamma (copy)');
+  assert.equal(path.dirname(gammaFile), path.join(dataDir, 'Notes'));
+  await waitFor('agent edit read from the file', () => findNote('Gamma (copy)').body === 'bot target body\n- added by the bot\n');
+  const botFile = path.join(dataDir, 'Notes', 'Bot created this.md');
+  await waitFor('agent-created file became a note', () => readNotes().notes.find((n) => n.filePath === botFile));
   await waitForDom(() => document.getElementById('bodyInput').value.includes('added by the bot'));
-  const wsFile = path.join(dataDir, 'workspace', 'Gamma (copy).md');
-  assert.ok(fs.existsSync(wsFile), 'workspace export exists');
-  fs.writeFileSync(wsFile, 'bot target body\n- added by the bot\n- typed in a terminal\n', 'utf8');
-  await page.fill('#botPrompt', '');
-  await page.click('#botRunBtn');
-  await waitForDomWithin(10000, () => /Pulled in workspace edits/.test(document.getElementById('botOutput').textContent));
-  await waitFor('terminal edit imported', () => /typed in a terminal/.test(findNote('Gamma (copy)').body));
-  await waitForDom(() => document.getElementById('bodyInput').value.includes('typed in a terminal'));
-  await page.evaluate((id) => window.notesApi.notes.destroy(id), findNote('Bot created this').id);
+  fs.writeFileSync(gammaFile, 'bot target body\n- added by the bot\n- typed in a terminal\n', 'utf8');
+  await waitFor('terminal edit read from the file', () => /typed in a terminal/.test(findNote('Gamma (copy)').body), 15000);
+  await waitForDomWithin(15000, () => document.getElementById('bodyInput').value.includes('typed in a terminal'));
+  const botNote = readNotes().notes.find((n) => n.filePath === botFile);
+  await page.evaluate(async (id) => { await window.notesApi.notes.trash(id); await window.notesApi.notes.destroy(id); }, botNote.id);
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
   await page.keyboard.press('Control+Shift+a');
@@ -803,7 +814,7 @@ test('undo after switching notes does nothing; typing with the find bar open doe
   await page.fill('#bodyInput', 'gamma text');
   await waitFor('gamma saved', () => findNote('Gamma (copy)').body === 'gamma text');
   await useSourceMode(false);
-  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && !n.filePath);
+  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && n.vaultId === homeVaultId());
   await page.click('.note-row[data-id="' + other.id + '"]');
   await waitForDom((id) => !!document.querySelector('.note-row.is-active[data-id="' + id + '"]'), other.id);
   const before = await page.evaluate(() => document.getElementById('bodyInput').value);
@@ -994,7 +1005,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.fill('#lockPassword2', 'pw-one');
   await page.click('#lockSubmitBtn');
   await waitFor('locked on disk', () => { const n = findNote('Gamma (copy)'); return n.lock && n.lock.ct && n.body === ''; });
-  assert.ok(!savedText().includes('flamingo'), 'no plaintext in notes.json or its journal');
+  assert.ok(!savedText().includes('flamingo'), 'no plaintext in notes.json, its journal, or any file in the notes folder');
   await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Unlocked');
   assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 4242-flamingo', 'still readable right after locking');
   await page.fill('#bodyInput', 'the launch code is 9999-pelican');
@@ -1169,7 +1180,7 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   await useSourceMode(true);
   await page.fill('#bodyInput', 'version one');
   await waitFor('v1 saved', () => findNote('Gamma (copy)').body === 'version one');
-  await waitFor('v1 in the history', () => historyAt('HEAD').includes('"body": "version one"'), 15000);
+  await waitFor('v1 in the history', () => historyAt('HEAD', 'Gamma (copy).md') === 'version one', 15000);
   await page.fill('#bodyInput', 'version two');
   await waitFor('v2 saved', () => findNote('Gamma (copy)').body === 'version two');
   await sleep(1200);
@@ -1220,7 +1231,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await clickTool('#recordBtn');
   await waitFor('recording saved', () => fs.existsSync(path.join(dataDir, 'attachments')) && fs.readdirSync(path.join(dataDir, 'attachments')).some((f) => /^Recording .*\.webm$/.test(f) && fs.statSync(path.join(dataDir, 'attachments', f)).size > 0), 15000);
   await waitFor('memo linked', () => /🎙 Voice memo \d\d:\d\d\]\(attachment:\/\/Recording/.test(findNote('Gamma (copy)').body));
-  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && !n.filePath && !n.locked);
+  const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && n.vaultId === homeVaultId() && !n.lock);
   await useSourceMode(true);
   await page.fill('#bodyInput', 'see also');
   await waitFor('saved2', () => findNote('Gamma (copy)').body === 'see also');
@@ -1427,7 +1438,7 @@ test('git history: edits are committed to a repo in the data folder', async () =
   await page.fill('#bodyInput', 'committed text ' + Date.now());
   await waitFor('new commit after an edit', () => count() > before, 10000);
   const tracked = execFileSync('git', ['-C', repoDir, 'ls-files'], { encoding: 'utf8' }).trim().split('\n').sort();
-  assert.deepEqual(tracked, ['notes.json'], 'only notes.json is tracked');
+  assert.ok(tracked.includes('Gamma (copy).md') && !tracked.includes('notes.json'), 'the notes folder\'s files are tracked, not notes.json: ' + tracked.join(', '));
   assert.equal(fs.existsSync(path.join(dataDir, '.git')), false, 'the data folder itself is not a repo');
 
   await page.keyboard.press('Control+,');
@@ -1649,7 +1660,8 @@ test('export note, export all, and import through stubbed dialogs', async () => 
   await page.click('#importBtn');
   await waitForDom(() => document.getElementById('titleInput').value === 'Imported note');
   const imported = findNote('Imported note');
-  assert.equal(imported.body, 'hello from disk');
+  assert.equal(imported.body, '---\ntags:\n  - inbox\n---\nhello from disk');
+  assert.equal(fs.readFileSync(imported.filePath, 'utf8'), imported.body, 'the imported note is a file with its tags in front matter');
   assert.deepEqual(imported.tags, ['inbox']);
 });
 

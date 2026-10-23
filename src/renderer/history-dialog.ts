@@ -69,7 +69,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     src.value = v.body;
     if (state.rich) {
       let lossless = state.rich.setMarkdown(v.body);
-      if (note.filePath && lossless && !state.rich.lastRoundTripExact()) lossless = false;
+      if (note.filePath && !note.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
       state.currentLossless = lossless;
       state.lossyOverride = null;
       if (!lossless && !state.sourceMode) applyEditorMode(true);

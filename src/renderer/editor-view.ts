@@ -294,7 +294,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     const rich = state.rich;
     if (!next && rich && state.currentId && !isPlainTextFile(state.current)) {
       state.currentLossless = rich.setMarkdown(el.bodyInput.value);
-      if (state.current && state.current.filePath && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
+      if (state.current && state.current.filePath && !state.current.home && state.currentLossless && !rich.lastRoundTripExact()) state.currentLossless = false;
       if (state.currentLossless === false) {
         state.lossyOverride = state.currentId;
         toast('Heads up: editing this note in the rendered view will rewrite formatting it cannot show.');
