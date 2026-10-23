@@ -18,7 +18,7 @@ interface Window {
 }
 
 type FolderEdit = { mode: 'create'; parentId: string | null; book: boolean } | { mode: 'rename'; id: string };
-interface FieldsPatch { title: string; body?: string; tags: string }
+interface FieldsPatch { title: string; body?: string; tags?: string }
 
 interface RendererState {
   view: 'all' | 'pinned' | 'trash' | 'tag' | 'folder' | 'reminders';
@@ -38,6 +38,7 @@ interface RendererState {
   info: AppInfo | null;
   systemDark: boolean;
   dirty: boolean;
+  tagsEdited: boolean;
   saveTimer: ReturnType<typeof setTimeout> | null;
   savingFor: string | null;
   lastTypedAt: number;

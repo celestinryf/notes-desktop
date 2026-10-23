@@ -6,9 +6,11 @@ import { isObjectLike, isRecord } from './shared/helpers.mts';
 import * as Themes from './shared/themes.mts';
 import * as F from './files.mts';
 import * as L from './lock.mts';
+import * as FM from './shared/front-matter.mts';
 import { VaultLinker, nameHints } from './vault-links.mts';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const TAGS_IN_FILES_VERSION = 2;
 const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 const JOURNAL_MIN_BYTES = 1024 * 1024;
@@ -471,6 +473,22 @@ function isFileNote(note: Note | null): note is FileNote {
   return !!(note && note.filePath);
 }
 
+function tagsInFile(note: Note): note is FileNote {
+  return !note.lock && FM.fileKeepsTags(note);
+}
+
+function syncFileTags(note: Note) {
+  if (!tagsInFile(note)) return false;
+  const tags = FM.noteTags(note.body);
+  if (tags.join(',') === note.tags.join(',')) return false;
+  note.tags = tags;
+  return true;
+}
+
+function vaultFileText(body: string, tags: readonly string[], filePath: string) {
+  return FM.isMarkdownPath(filePath) ? FM.setNoteTags(body, tags) : body;
+}
+
 class Store {
   dir: string;
   file: string;
@@ -576,10 +594,25 @@ class Store {
     const ids = new Set(this.folders.map((f) => f.id));
     this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
     this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
-    if (this.recoveredFromBackup && !this.saveBlocked) {
+    const version = isFiniteNumber(doc.schemaVersion) ? doc.schemaVersion : 1;
+    const upgrade = raw !== null && !this.saveBlocked && version < SCHEMA_VERSION;
+    if (upgrade && version < TAGS_IN_FILES_VERSION) this._moveVaultTagsIntoFiles();
+    if ((this.recoveredFromBackup || upgrade) && !this.saveBlocked) {
       try { this.save(); } catch (_) {  }
     }
     return this;
+  }
+
+  _moveVaultTagsIntoFiles() {
+    for (const n of this.notes) {
+      if (!tagsInFile(n)) continue;
+      let disk: { body: string; mtime: number };
+      try { disk = F.readText(n.filePath); } catch (_) { continue; }
+      const text = FM.setNoteTags(disk.body, H.parseTags(FM.noteTags(disk.body).concat(n.tags)));
+      try { n.fileMtime = text === disk.body ? disk.mtime : F.writeTextInPlace(n.filePath, text); } catch (_) { continue; }
+      n.body = text;
+      n.tags = FM.noteTags(text);
+    }
   }
 
   _repairFolderGraph() {
@@ -827,6 +860,13 @@ class Store {
       const t = this.getFolder(patch.folderId);
       if (t && t.vaultId) throw Object.assign(new Error('A linked file cannot be moved into a vault; copy its text into a new note there instead.'), { code: 'EVAULT' });
     }
+    if (tagsInFile(note) && patch.tags !== undefined) {
+      const wanted = H.parseTags(patch.tags);
+      const next = Object.assign({}, patch);
+      delete next.tags;
+      if (wanted.join(',') !== note.tags.join(',')) next.body = FM.setNoteTags(typeof patch.body === 'string' ? patch.body : note.body, wanted);
+      patch = next;
+    }
     if (typeof patch.body === 'string' && patch.body !== note.body && note.filePath) {
       if (note.fileKind !== 'text') throw Object.assign(new Error('This file type is read-only here.'), { code: 'EREADONLY' });
       if (!patch.force && note.fileMtime !== null) {
@@ -843,11 +883,12 @@ class Store {
     if (typeof patch.title === 'string' && patch.title !== note.title) {
       if (note.vaultId && isFileNote(note) && note.fileKind === 'text') {
         try { note.title = this._renameVaultFile(note, patch.title); fileMoved = true; }
-        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; } throw err; }
+        catch (err) { if (typeof patch.body === 'string' && fileWritten) { note.body = patch.body; syncFileTags(note); } throw err; }
       } else note.title = patch.title;
       changed = true;
     }
     if (typeof patch.body === 'string' && patch.body !== note.body) { note.body = patch.body; changed = true; }
+    if (syncFileTags(note)) changed = true;
     if (patch.folderId !== undefined && note.vaultId && isFileNote(note)) {
       const fid = patch.folderId || null;
       if (fid !== (note.folderId || null)) {
@@ -863,13 +904,16 @@ class Store {
         fs.mkdirSync(target.dirPath, { recursive: true });
         const name = uniqueName(target.dirPath, H.safeFilename(H.deriveTitle(note)), '.md');
         const full = path.join(target.dirPath, name);
-        fs.writeFileSync(full, note.body, 'utf8');
+        const text = vaultFileText(note.body, note.tags, full);
+        fs.writeFileSync(full, text, 'utf8');
+        note.body = text;
         note.filePath = full; note.fileKind = 'text'; note.fileMtime = F.mtimeOf(full); note.vaultId = target.vaultId;
+        syncFileTags(note);
         note.title = stem(name); note.folderId = target.id; changed = true; fileMoved = true;
         delete patch.folderId;
       }
     }
-    if (patch.tags !== undefined) {
+    if (patch.tags !== undefined && !tagsInFile(note)) {
       const tags = H.parseTags(patch.tags);
       if (tags.join(',') !== note.tags.join(',')) { note.tags = tags; changed = true; }
     }
@@ -888,8 +932,8 @@ class Store {
         this.save({ notes: [note] });
       } catch (err) {
         const keep = {};
-        if (fileWritten) Object.assign(keep, { body: note.body, fileMtime: note.fileMtime });
-        if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime });
+        if (fileWritten) Object.assign(keep, { body: note.body, tags: note.tags, fileMtime: note.fileMtime });
+        if (fileMoved) Object.assign(keep, { filePath: note.filePath, title: note.title, folderId: note.folderId, vaultId: note.vaultId, fileKind: note.fileKind, fileMtime: note.fileMtime, body: note.body, tags: note.tags });
         Object.assign(note, before, keep);
         if (plainBefore !== undefined) this.plain.set(id, plainBefore);
         throw err;
@@ -1341,6 +1385,7 @@ class Store {
           remember(note);
           note.body = read.text;
           note.fileMtime = read.mtime;
+          syncFileTags(note);
           touched.add(note);
         }
         if (note.folderId !== folder.id || note.vaultId !== id || note.trashedAt) {
@@ -1369,7 +1414,7 @@ class Store {
         updated++;
         continue;
       }
-      const created = noteFrom({ id: crypto.randomUUID(), title: stem(file.name), body: read.text, tags: [], folderId: folder.id, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
+      const created = noteFrom({ id: crypto.randomUUID(), title: stem(file.name), body: read.text, tags: FM.isMarkdownPath(file.full) ? FM.noteTags(read.text) : [], folderId: folder.id, filePath: file.full, fileKind: 'text', fileMtime: read.mtime, vaultId: id, createdAt: now, updatedAt: now, trashedAt: null }, now);
       fresh.push(created);
       byKey.set(file.key, created);
       seenNotes.add(created.id);
@@ -1396,10 +1441,10 @@ class Store {
     const base = H.safeFilename(String(data.title || '').trim() || 'Untitled');
     const name = uniqueName(folder.dirPath, base, '.md');
     const full = path.join(folder.dirPath, name);
-    const body = String(data.body || '');
+    const body = vaultFileText(String(data.body || ''), H.parseTags(data.tags || []), full);
     fs.writeFileSync(full, body, 'utf8');
     return this.create({
-      title: stem(name), body, tags: data.tags || [], folderId: folder.id,
+      title: stem(name), body, tags: FM.noteTags(body), folderId: folder.id,
       filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: folder.vaultId, pinned: !!data.pinned,
     });
   }
@@ -1622,7 +1667,7 @@ class Store {
       if (typeof read.body === 'string') body = read.body;
     }
     const changed = rekind || body !== note.body || kind !== 'text';
-    this._change({ notes: [note] }, () => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; });
+    this._change({ notes: [note] }, () => { note.body = body; note.fileMtime = mtime; note.fileKind = kind; syncFileTags(note); });
     return { changed, missing: false };
   }
 

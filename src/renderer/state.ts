@@ -23,6 +23,7 @@ export const state: RendererState = {
   info: null,
   systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
   dirty: false,
+  tagsEdited: false,
   saveTimer: null,
   savingFor: null,
   lastTypedAt: 0,

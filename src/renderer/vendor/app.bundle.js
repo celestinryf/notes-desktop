@@ -730,6 +730,195 @@
   var traceClock = () => tenths(performance.timeOrigin + performance.now());
   var msSince = (start) => tenths(performance.now() - start);
 
+  // src/shared/front-matter.mts
+  var OPEN_LINE = /^---[ \t]*$/;
+  var CLOSE_LINE = /^---[ \t]*$/;
+  var KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
+  var TAG_KEYS = ["tags", "tag"];
+  var RESERVED = /^(true|false|yes|no|on|off|null|~|y|n)$/i;
+  var MARKDOWN_PATH = /\.(md|markdown|mdx)$/i;
+  var INLINE_TAG = /(^|\s)#([\p{L}\p{N}_\-/]+)/gu;
+  function isMarkdownPath(filePath) {
+    return MARKDOWN_PATH.test(String(filePath || ""));
+  }
+  function fileKeepsTags(n) {
+    return !!n.vaultId && n.fileKind === "text" && isMarkdownPath(n.filePath);
+  }
+  function linesWithEnds(text) {
+    const out = [];
+    let at = 0;
+    while (at < text.length) {
+      const nl = text.indexOf("\n", at);
+      if (nl === -1) {
+        out.push({ line: text.slice(at), end: "" });
+        break;
+      }
+      const cr = nl > at && text[nl - 1] === "\r";
+      out.push({ line: text.slice(at, cr ? nl - 1 : nl), end: cr ? "\r\n" : "\n" });
+      at = nl + 1;
+    }
+    return out;
+  }
+  function looksLikeYaml(lines) {
+    return lines.every((l) => !l.trim() || /^\s/.test(l) || /^#/.test(l) || /^-(\s|$)/.test(l) || KEY_LINE.test(l));
+  }
+  function readBlock(text) {
+    const lines = linesWithEnds(String(text || ""));
+    if (!lines.length || !OPEN_LINE.test(lines[0].line) || !lines[0].end) return null;
+    let close = -1;
+    for (let i = 1; i < lines.length; i++) if (CLOSE_LINE.test(lines[i].line)) {
+      close = i;
+      break;
+    }
+    if (close === -1) return null;
+    const inner = lines.slice(1, close).map((l) => l.line);
+    if (!looksLikeYaml(inner)) return null;
+    let after = close + 1;
+    while (after < lines.length && !lines[after].line.trim() && lines[after].end) after++;
+    const whole = (l) => l.line + l.end;
+    return {
+      open: whole(lines[0]),
+      inner,
+      close: whole(lines[close]),
+      trailing: lines.slice(close + 1, after).map(whole).join(""),
+      nl: lines[0].end,
+      length: lines.slice(0, after).reduce((n, l) => n + l.line.length + l.end.length, 0)
+    };
+  }
+  function blockText(b) {
+    return b.open + b.inner.map((l) => l + b.nl).join("") + b.close + b.trailing;
+  }
+  function splitFrontMatter(text) {
+    const s = String(text || "");
+    const b = readBlock(s);
+    return b ? { front: s.slice(0, b.length), body: s.slice(b.length) } : { front: "", body: s };
+  }
+  function stripComment(value) {
+    let quote = "";
+    for (let i = 0; i < value.length; i++) {
+      const c = value[i];
+      if (quote) {
+        if (c === quote) quote = "";
+        continue;
+      }
+      if (c === '"' || c === "'") quote = c;
+      else if (c === "#" && (i === 0 || /\s/.test(value[i - 1]))) return value.slice(0, i);
+    }
+    return value;
+  }
+  function unquote(raw) {
+    const s = raw.trim();
+    if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
+      try {
+        const v = JSON.parse(s);
+        return typeof v === "string" ? v : s.slice(1, -1);
+      } catch (_) {
+        return s.slice(1, -1);
+      }
+    }
+    if (s.length >= 2 && s[0] === "'" && s[s.length - 1] === "'") return s.slice(1, -1).replace(/''/g, "'");
+    return s;
+  }
+  function splitFlow(inside) {
+    const out = [];
+    let quote = "", cur = "";
+    for (const c of inside) {
+      if (quote) {
+        cur += c;
+        if (c === quote) quote = "";
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        quote = c;
+        cur += c;
+        continue;
+      }
+      if (c === ",") {
+        out.push(cur);
+        cur = "";
+        continue;
+      }
+      cur += c;
+    }
+    out.push(cur);
+    return out.map(unquote).filter(Boolean);
+  }
+  function keyRange(inner, names) {
+    for (let i = 0; i < inner.length; i++) {
+      const m = KEY_LINE.exec(inner[i]);
+      if (!m || !names.includes(unquote(m[1]).toLowerCase())) continue;
+      let end = i + 1;
+      for (let j = i + 1; j < inner.length; j++) {
+        const l = inner[j];
+        if (!l.trim()) continue;
+        if (/^\s/.test(l) || /^-(\s|$)/.test(l)) {
+          end = j + 1;
+          continue;
+        }
+        break;
+      }
+      return { start: i, end, inline: m[2] || "" };
+    }
+    return null;
+  }
+  function rangeValues(inner, r) {
+    const inline = stripComment(r.inline).trim();
+    const rest = inner.slice(r.start + 1, r.end);
+    if (inline.startsWith("[")) {
+      const joined = [inline].concat(rest.map((l) => stripComment(l).trim())).join(" ");
+      const close = joined.lastIndexOf("]");
+      return splitFlow(joined.slice(1, close === -1 ? joined.length : close));
+    }
+    if (inline) return unquote(inline).split(/[,\s]+/).filter(Boolean);
+    return rest.map((l) => /^\s*-\s*(.*)$/.exec(l)).filter((m) => !!m).map((m) => unquote(stripComment(m[1]))).filter(Boolean);
+  }
+  function frontMatterTags(text) {
+    const b = readBlock(String(text || ""));
+    if (!b) return [];
+    const r = keyRange(b.inner, TAG_KEYS);
+    return r ? parseTags(rangeValues(b.inner, r)) : [];
+  }
+  function inlineTags(text) {
+    const body = splitFrontMatter(text).body.replace(/(```|~~~)[\s\S]*?(?:\1|$)/g, " ").replace(/`[^`\n]*`/g, " ");
+    const out = [];
+    for (const m of body.matchAll(INLINE_TAG)) {
+      const tag = m[2].replace(/[/-]+$/, "");
+      if (tag && !/^[\d/_-]+$/.test(tag)) out.push(tag);
+    }
+    return parseTags(out);
+  }
+  function noteTags(text) {
+    return parseTags(frontMatterTags(text).concat(inlineTags(text)));
+  }
+  function yamlScalar(tag) {
+    return /^[\p{L}\p{N}_][\p{L}\p{N}_\-/.]*$/u.test(tag) && !RESERVED.test(tag) && !/^[\d.]+$/.test(tag) ? tag : JSON.stringify(tag);
+  }
+  function setNoteTags(text, wanted) {
+    const s = String(text || "");
+    const inline = new Set(inlineTags(s));
+    const b = readBlock(s);
+    const range = b ? keyRange(b.inner, TAG_KEYS) : null;
+    const spelled = /* @__PURE__ */ new Map();
+    if (b && range) for (const v of rangeValues(b.inner, range)) {
+      const t = parseTags(v)[0];
+      if (t && !spelled.has(t)) spelled.set(t, v.replace(/^#+/, ""));
+    }
+    const keep = parseTags(wanted).filter((t) => !inline.has(t)).map((t) => spelled.get(t) || t);
+    const current = b && range ? parseTags(rangeValues(b.inner, range)) : [];
+    if (parseTags(keep).join(",") === current.join(",")) return s;
+    const nl = b ? b.nl : s.includes("\r\n") ? "\r\n" : "\n";
+    const flow = !!range && stripComment(range.inline).trim().startsWith("[");
+    const name = b && range ? (KEY_LINE.exec(b.inner[range.start]) || [])[1] || "tags" : "tags";
+    const lines = !keep.length ? [] : flow ? [name + ": [" + keep.map(yamlScalar).join(", ") + "]"] : [name + ":"].concat(keep.map((t) => "  - " + yamlScalar(t)));
+    if (!b) return "---" + nl + lines.join(nl) + nl + "---" + nl + s;
+    const inner = b.inner.slice();
+    if (range) inner.splice(range.start, range.end - range.start, ...lines);
+    else inner.push(...lines);
+    const body = s.slice(b.length);
+    if (!inner.some((l) => l.trim())) return body;
+    return blockText(Object.assign({}, b, { inner })) + body;
+  }
+
   // src/shared/themes.mts
   var themes_exports = {};
   __export(themes_exports, {
@@ -1482,6 +1671,7 @@
     info: null,
     systemDark: window.matchMedia("(prefers-color-scheme: dark)").matches,
     dirty: false,
+    tagsEdited: false,
     saveTimer: null,
     savingFor: null,
     lastTypedAt: 0,
@@ -8524,8 +8714,10 @@
       if (readerOpen() && (bookOf(note) || {}).id !== reader.bookId) closeReader();
       el.titleInput.value = note.title;
       el.tagsInput.value = note.tags.join(", ");
+      state.tagsEdited = false;
       el.bodyInput.value = note.body;
       const hasPending = applyPendingTo(note);
+      if (hasPending && fileKeepsTags(note)) el.tagsInput.value = noteTags(el.bodyInput.value).join(", ");
       const plainFile = isPlainTextFile6(note);
       const markdown = !plainFile && !isViewerOnlyFile9(note);
       let lossless = true;
@@ -8800,8 +8992,22 @@
         toast("Reloaded from disk: the file changed outside Notes.");
       }
     }
+    function tagsIntoBody() {
+      if (!state.current || !fileKeepsTags(state.current)) return false;
+      const next = setNoteTags(src.value, parseTags(el.tagsInput.value));
+      if (next === src.value) return true;
+      src.value = next;
+      if (state.rich) state.rich.setFrontMatter(splitFrontMatter(next).front);
+      return true;
+    }
+    function showSavedTags(patch, updated) {
+      if (patch.tags !== void 0 && el.tagsInput.value === patch.tags) state.tagsEdited = false;
+      if (state.tagsEdited || document.activeElement === el.tagsInput) return;
+      if (parseTags(el.tagsInput.value).join(",") !== updated.tags.join(",")) el.tagsInput.value = updated.tags.join(", ");
+    }
     function applyFreshFileBody(fresh) {
       state.current = fresh;
+      showSavedTags({ title: fresh.title }, fresh);
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
       if (isViewerOnlyFile9(fresh)) {
@@ -8864,7 +9070,7 @@
       if (state.current) updateStatus(state.current);
     }
     function currentPatch() {
-      const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: el.tagsInput.value };
+      const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: state.tagsEdited ? el.tagsInput.value : void 0 };
       if (isViewerOnlyFile9(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
@@ -8952,7 +9158,10 @@
       const p = state.pending.get(note.id);
       if (!p) return false;
       el.titleInput.value = p.title;
-      el.tagsInput.value = p.tags;
+      if (p.tags !== void 0) {
+        el.tagsInput.value = p.tags;
+        state.tagsEdited = true;
+      }
       if (typeof p.body === "string" && !(note.locked && !note.unlocked)) el.bodyInput.value = p.body;
       return true;
     }
@@ -9004,6 +9213,7 @@
           el.filePath.title = updated.filePath;
         }
         if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
+        showSavedTags(patch, updated);
       }
       const idx = state.notes.findIndex((n) => n.id === id);
       if (idx !== -1) {
@@ -10282,6 +10492,9 @@
       el.destroyBtn.addEventListener("click", destroyCurrent);
       el.titleInput.addEventListener("input", scheduleSave);
       el.titleInput.addEventListener("input", renderActiveTabTitle);
+      el.tagsInput.addEventListener("input", () => {
+        if (!tagsIntoBody()) state.tagsEdited = true;
+      });
       el.tagsInput.addEventListener("input", scheduleSave);
       el.bodyInput.addEventListener("input", scheduleSave);
       el.titleInput.addEventListener("keydown", (e) => {

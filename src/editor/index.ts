@@ -6,6 +6,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type MarkdownIt from 'markdown-it';
 import type { StateInline } from 'markdown-it';
 import { isRecord, wikiLinkLabel, wikiLinkName } from '../shared/helpers.mts';
+import { splitFrontMatter } from '../shared/front-matter.mts';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
@@ -434,8 +435,9 @@ export function create(element: HTMLElement, options: EditorOptions) {
     onUpdate: () => { if (!suppress && options.onUpdate) options.onUpdate(getMarkdown()); },
   });
 
+  let front = '';
   function getMarkdown() {
-    return editor.storage.markdown.getMarkdown();
+    return front + editor.storage.markdown.getMarkdown();
   }
 
   function liveRange() {
@@ -455,10 +457,12 @@ export function create(element: HTMLElement, options: EditorOptions) {
   let lastExact = true;
   function setMarkdown(md: string, opts?: { keepSelection?: boolean }) {
     const keepSelection = !!(opts && opts.keepSelection);
+    const parts = splitFrontMatter(md || '');
+    front = parts.front;
     suppress = true;
     try {
       const prev = editor.state.selection;
-      editor.commands.setContent(md || '', false);
+      editor.commands.setContent(parts.body, false);
       const doc = editor.state.doc;
       const clamp = (p: number) => Math.max(0, Math.min(p, doc.content.size));
       let selection;
@@ -466,9 +470,9 @@ export function create(element: HTMLElement, options: EditorOptions) {
       editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins, selection }));
     } finally { suppress = false; }
     wikiRequests.reset();
-    const out = getMarkdown();
-    lastExact = String(md || '').replace(/[ \t]+$/gm, '').trimEnd() === out.replace(/[ \t]+$/gm, '').trimEnd();
-    return fingerprint(out) === fingerprint(md);
+    const out = editor.storage.markdown.getMarkdown();
+    lastExact = parts.body.replace(/[ \t]+$/gm, '').trimEnd() === out.replace(/[ \t]+$/gm, '').trimEnd();
+    return fingerprint(out) === fingerprint(parts.body);
   }
 
   return {
@@ -486,6 +490,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
     },
     selectionRange: currentRange,
     lastRoundTripExact: () => lastExact,
+    setFrontMatter: (text: string) => { front = text; },
     activeLink: () => (editor.getAttributes('link') || {}).href || '',
     replaceRanges: (domRanges: Range[], text: string) => {
       const spans: { from: number, to: number }[] = [];
