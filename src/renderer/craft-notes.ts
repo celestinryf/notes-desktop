@@ -39,7 +39,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const frame = () => ui.frame();
     let fc: CraftFrame | null = null, note: CraftDoc | null = null, shownKey: string | null = null, seq = 0, down = false;
     let parkedKey: string | null = null, parkedNote: CraftDoc | null = null;
-    let warming: string | null = null, warmStarted = 0, warmTimer: ReturnType<typeof setTimeout> | undefined;
+    let warming: string | null = null, warmStarted = 0, warmTimer: ReturnType<typeof setTimeout> | undefined, warmOnly = false;
     const trace = (event: string, fields?: TraceFields) => craftTrace(event, Object.assign({ app: key }, fields));
     const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
     function controller() {
@@ -61,6 +61,13 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           trace,
           onDrawn: () => { if (warming !== null && warming === shownKey) finishWarm(true); },
           onUnavailable: () => {
+            if (warmOnly) {
+              warmOnly = false;
+              trace('warm-gave-up');
+              drop();
+              fc = null;
+              return;
+            }
             down = true;
             drop();
             const n = state.current;
@@ -97,8 +104,15 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       if (!usable() || warming !== null || shownKey !== null || note !== null || parkedKey !== null) return;
       const k = n.id + ':' + n.fileMtime;
       setWarming(k);
-      trace('warm', { id: n.id });
       frame().classList.remove('hidden');
+      if (!frame().getClientRects().length) {
+        trace('warm-skipped', { id: n.id });
+        setWarming(null);
+        frame().classList.add('hidden');
+        return;
+      }
+      trace('warm', { id: n.id });
+      warmOnly = true;
       shownKey = k;
       const s = ++seq;
       try {
@@ -109,6 +123,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     }
     async function show(n: PublicNote) {
       const k = n.id + ':' + n.fileMtime;
+      warmOnly = false;
       if (warming !== null) {
         const used = warming === k;
         trace(used ? 'warm-used' : 'warm-dropped', { id: n.id });
@@ -210,7 +225,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       trace('flush-done', { ok, ms: H.msSince(started) });
       return ok;
     }
-    const forget = () => { shownKey = null; parkedKey = null; parkedNote = null; };
+    const forget = () => { if (warming !== null) return; shownKey = null; parkedKey = null; parkedNote = null; };
     return { usable, show, warm, clear, dirty, flush, forget };
   }
   const crafts = { wordcraft: craftViewer('wordcraft'), gridcraft: craftViewer('gridcraft') };

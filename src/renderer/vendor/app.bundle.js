@@ -5404,7 +5404,7 @@
       const frame = () => ui.frame();
       let fc = null, note = null, shownKey = null, seq = 0, down = false;
       let parkedKey = null, parkedNote = null;
-      let warming = null, warmStarted = 0, warmTimer;
+      let warming = null, warmStarted = 0, warmTimer, warmOnly = false;
       const trace = (event, fields) => craftTrace(event, Object.assign({ app: key }, fields));
       const usable = () => !!(state.info && state.info.crafts && state.info.crafts[key]) && !GUEST && !down;
       function controller() {
@@ -5433,6 +5433,13 @@
               if (warming !== null && warming === shownKey) finishWarm(true);
             },
             onUnavailable: () => {
+              if (warmOnly) {
+                warmOnly = false;
+                trace("warm-gave-up");
+                drop();
+                fc = null;
+                return;
+              }
               down = true;
               drop();
               const n = state.current;
@@ -5472,8 +5479,15 @@
         if (!usable() || warming !== null || shownKey !== null || note !== null || parkedKey !== null) return;
         const k = n.id + ":" + n.fileMtime;
         setWarming(k);
-        trace("warm", { id: n.id });
         frame().classList.remove("hidden");
+        if (!frame().getClientRects().length) {
+          trace("warm-skipped", { id: n.id });
+          setWarming(null);
+          frame().classList.add("hidden");
+          return;
+        }
+        trace("warm", { id: n.id });
+        warmOnly = true;
         shownKey = k;
         const s = ++seq;
         try {
@@ -5484,6 +5498,7 @@
       }
       async function show(n) {
         const k = n.id + ":" + n.fileMtime;
+        warmOnly = false;
         if (warming !== null) {
           const used = warming === k;
           trace(used ? "warm-used" : "warm-dropped", { id: n.id });
@@ -5605,6 +5620,7 @@
         return ok;
       }
       const forget = () => {
+        if (warming !== null) return;
         shownKey = null;
         parkedKey = null;
         parkedNote = null;
@@ -8505,7 +8521,7 @@
     async function likelyWordNote() {
       for (const id of [state.currentId, ...tabs.ids]) {
         if (!id) continue;
-        const n = await api.notes.get(id);
+        const n = await api.notes.get(id).catch(() => null);
         if (n && n.filePath && n.fileKind === "docx" && !n.trashedAt) return n;
       }
       return api.notes.latestFile("docx");

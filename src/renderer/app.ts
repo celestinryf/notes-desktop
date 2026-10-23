@@ -1938,7 +1938,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   async function likelyWordNote() {
     for (const id of [state.currentId, ...tabs.ids]) {
       if (!id) continue;
-      const n = await api.notes.get(id);
+      const n = await api.notes.get(id).catch(() => null);
       if (n && n.filePath && n.fileKind === 'docx' && !n.trashedAt) return n;
     }
     return api.notes.latestFile('docx');
