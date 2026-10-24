@@ -151,6 +151,7 @@
   function isPlainTextFile(note) {
     return !!(note && note.filePath && note.fileKind === "text" && !/\.(md|markdown|mdx)$/i.test(note.filePath));
   }
+  var MAX_TEXT_BYTES = 4 * 1024 * 1024;
   var OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
   var ZIP_DOC_EXT = /* @__PURE__ */ new Set([...OOXML_EXT, "odt", "xlsx", "xlsm", "xlsb", "ods", "epub", "zip"]);
 

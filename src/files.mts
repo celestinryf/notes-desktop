@@ -8,9 +8,8 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
   'xml', 'html', 'htm', 'svg', 'css', 'scss', 'less', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs',
   'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'swift', 'php', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd', 'sql',
   'lua', 'luau', 'r', 'm', 'pl', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
-const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 
-import { extOf, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
+import { extOf, MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
 import * as markitdown from './markitdown.mts';
 import { runWorker } from './run-worker.mts';
 

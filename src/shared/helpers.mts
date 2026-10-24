@@ -460,6 +460,7 @@ function isNonMarkdownFile(note: FileSource) {
   return isPlainTextFile(note) || isViewerOnlyFile(note);
 }
 
+const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 const WORD_EXT = new Set(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt']);
 const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']);
 const WORD_TO_DOCX_EXT = new Set(['doc', 'dot', 'rtf', 'odt']);
@@ -584,7 +585,7 @@ export {
   isObjectLike, isRecord, tenths, traceClock, msSince,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
-  WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
+  MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
