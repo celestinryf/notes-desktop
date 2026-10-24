@@ -154,6 +154,7 @@
     EDITOR_MIN: () => EDITOR_MIN,
     IMAGE_EXT: () => IMAGE_EXT,
     IMAGE_MIME: () => IMAGE_MIME,
+    MAX_TEXT_BYTES: () => MAX_TEXT_BYTES,
     OOXML_EXT: () => OOXML_EXT,
     PANE_LIMITS: () => PANE_LIMITS,
     SHEET_EXT: () => SHEET_EXT,
@@ -651,6 +652,7 @@
   function isNonMarkdownFile(note) {
     return isPlainTextFile(note) || isViewerOnlyFile(note);
   }
+  var MAX_TEXT_BYTES = 4 * 1024 * 1024;
   var WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
   var OOXML_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm"]);
   var WORD_TO_DOCX_EXT = /* @__PURE__ */ new Set(["doc", "dot", "rtf", "odt"]);

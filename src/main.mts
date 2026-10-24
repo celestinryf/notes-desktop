@@ -107,6 +107,7 @@ function main() {
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
     workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
+    linkedFiles: () => store.textFilesOutsideHome(),
   });
   store.onContentChange = () => git.noteChanged();
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
@@ -1323,16 +1324,15 @@ function main() {
     const max = Math.min(200, Math.max(1, limit || 80));
     const found: HistoryVersion[] = [];
     const home = store.homeVault();
-    if (home && note.filePath && store.isHome(note.vaultId)) {
-      const files = await git.fileHistory(path.relative(home.path, note.filePath).split(path.sep).join('/'), max);
-      let followed = true;
-      await git.eachFileAt(files, (i, text) => {
-        if (text === null || !followed) return;
-        const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-        if (i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
-        found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
-      });
-    }
+    const homeRel = home && isFileNote(note) && store.isHome(note.vaultId) ? path.relative(home.path, note.filePath).split(path.sep).join('/') : null;
+    const files = homeRel ? await git.fileHistory(homeRel, max) : store.isTextOutsideHome(note) ? await git.linkedHistory(note.id, max) : [];
+    let followed = true;
+    await git.eachFileAt(files, (i, text) => {
+      if (text === null || !followed) return;
+      const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+      if (homeRel && i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
+      found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
+    });
     const snapshots = await git.history(max, 'notes.json');
     await git.eachNotesAt(snapshots.map((c) => c.hash), (i, text) => {
       if (!text) return;
