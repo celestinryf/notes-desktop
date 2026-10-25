@@ -126,7 +126,7 @@ function tableLines(rows: string[][], aligns: Align[], style: TableStyle | null)
     out.splice(1, 0, line(widths.map((w, i) => dashes(w, aligns[i]))));
     return out;
   }
-  const line = (cells: string[]) => (padded ? '| ' + cells.join(' | ') + ' |' : '|' + cells.join('|') + '|');
+  const line = (cells: string[]) => (padded ? '| ' + cells.join(' | ') + ' |' : '|' + cells.map((c) => (c.endsWith('\\') ? c + ' ' : c)).join('|') + '|');
   const delimiter = keep && style ? style.delimiter : line(aligns.map((a) => dashes(3, a)));
   const out = rows.map(line);
   out.splice(1, 0, delimiter);
