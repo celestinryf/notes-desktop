@@ -18,6 +18,7 @@ import { quickPick } from './remind-times.ts';
 import { withPeerNotice } from './peer-notice.ts';
 import { createLiveShare } from './live-share.ts';
 import { createSharing } from './sharing.ts';
+import { createNoteList } from './note-list.tsx';
 import { createStickyButton } from './sticky-button.ts';
 import { createBotPanel } from './bot-panel.ts';
 import { createCodeEditor, src } from './code-editor.ts';
@@ -423,7 +424,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function renderList() {
     const q = state.query;
     const tree = treeModeActive();
-    el.noteList.innerHTML = '';
     const empty = tree ? !treeHasContent() : !state.notes.length;
     el.noteList.classList.toggle('hidden', tree || empty);
     el.noteTree.classList.toggle('hidden', !tree || empty);
@@ -445,31 +445,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         } else el.listTitle.append(document.createTextNode(p.name));
       });
     } else el.listTitle.textContent = titles[state.view];
+    if (tree || empty) noteList.render([], null);
     if (tree) { renderNoteTree(); return; }
-    const viewingBook = state.view === 'folder' && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
-    const frag = document.createDocumentFragment();
-    state.notes.forEach((n, i) => {
-      const li = document.createElement('li');
-      li.className = 'note-row' + (n.id === state.currentId ? ' is-active' : '');
-      li.dataset.id = n.id;
-      li.setAttribute('role', 'option');
-      li.title = H.deriveTitle(n);
-      li.innerHTML = rowInner(n, q);
-      if (viewingBook && !q) { const no = document.createElement('span'); no.className = 'page-no'; no.textContent = 'p. ' + (i + 1); li.prepend(no); }
-      li.addEventListener('click', (e) => openNote(n.id, { newTab: e.ctrlKey || e.metaKey }));
-      li.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); openNote(n.id, { newTab: true }); } });
-      if (!n.trashedAt) {
-        li.draggable = true;
-        li.addEventListener('dragstart', (e) => {
-          if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', n.id); e.dataTransfer.effectAllowed = 'move'; }
-          li.classList.add('is-dragging');
-          toPeer({ type: 'drag', id: n.id });
-        });
-        li.addEventListener('dragend', () => { li.classList.remove('is-dragging'); toPeer({ type: 'drag', id: null }); });
-      }
-      frag.append(li);
-    });
-    el.noteList.append(frag);
+    if (empty) return;
+    listPageNumbers = state.view === 'folder' && !q && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
+    noteList.render(state.notes, state.currentId);
   }
 
   function treeHasContent() {
@@ -506,9 +486,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
       + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
       + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? ' (' + n.live.role + ')' : '') + '">' + I('radio') + '</span>' : '');
-    const inTitle = !q || H.tokenize(q).some((t) => title.toLowerCase().includes(t));
-    const why = inTitle || (n.locked && !n.unlocked) ? '' : '<span class="row-meta match">' + highlight(n.excerpt ?? H.matchExcerpt(n, q), q) + '</span>';
+    const why = rowHasExcerpt(n, q) ? '<span class="row-meta match">' + highlight(n.excerpt ?? H.matchExcerpt(n, q), q) + '</span>' : '';
     return '<span class="row-name">' + highlight(title, q) + '</span>' + why + where + marks + fileMark + reminderMark(n) + pin;
+  }
+
+  function rowHasExcerpt(n: RowSource, q: string) {
+    if (!q || (n.locked && !n.unlocked)) return false;
+    const title = (n.body === undefined ? n.title : H.deriveTitle(n)).toLowerCase();
+    return !H.tokenize(q).some((t) => title.includes(t));
   }
 
   function whereMark(n: RowSource) {
@@ -537,12 +522,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
       for (const row of el.noteTree.querySelectorAll<HTMLElement>('.tree-note[data-id="' + note.id + '"]')) { row.innerHTML = treeNoteInner(note, row.dataset.key === AWAY_KEY + note.id); row.title = title; }
     }
-    const li = el.noteList.querySelector<HTMLElement>('.note-row[data-id="' + note.id + '"]');
-    if (!li) return;
-    const pageNo = li.querySelector('.page-no');
-    li.innerHTML = rowInner(note, state.query);
-    li.title = H.deriveTitle(note);
-    if (pageNo) li.prepend(pageNo);
+    noteList.replace(note);
   }
 
   async function setView(view: RendererState['view'], arg: string | null = null, refreshOpts?: RefreshOpts) {
@@ -1796,7 +1776,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function markActiveRow(id: string | null) {
-    el.noteList.querySelectorAll<HTMLElement>('.note-row').forEach((r) => setRowActive(r, !!id && r.dataset.id === id));
+    noteList.setActive(id);
     const chosen = activeTreeRow(el.noteTree, id);
     el.noteTree.querySelectorAll<HTMLElement>('.note-row').forEach((r) => setRowActive(r, r === chosen));
   }
@@ -1848,6 +1828,16 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
 
   const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
+  let listPageNumbers = false;
+  const noteList = createNoteList<RowSource>(el.noteList, {
+    html: (n, i) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + '</span>' : '') + rowInner(n, state.query),
+    title: (n) => H.deriveTitle(n),
+    tall: (n) => rowHasExcerpt(n, state.query),
+    draggable: (n) => !n.trashedAt,
+    open: (id, newTab) => { openNote(id, { newTab }); },
+    dragStart: (id, e) => { if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; } toPeer({ type: 'drag', id }); },
+    dragEnd: () => toPeer({ type: 'drag', id: null }),
+  });
 
   const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
 

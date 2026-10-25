@@ -8,7 +8,8 @@
       "dom",
       "dom.iterable"
     ],
-    "types": []
+    "types": [],
+    "jsx": "react-jsx"
   },
   "include": [
     "src/types.d.ts",
@@ -19,6 +20,7 @@
     "src/docx-view/index.ts",
     "src/pdf-view/index.ts",
     "src/renderer/*.ts",
+    "src/renderer/*.tsx",
     "src/shared/*.mts"
   ]
 }
