@@ -247,6 +247,7 @@ const SCENES = {
   slash: { about: 'The "/" block menu in a note', run: steps(openNote('Ideas for the garden'), typeAtEnd('/', true)) },
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
+  'table-aligned': { about: 'A table with left, right and centred columns, and a picture alone in a cell, rendered', bodies: { 'n-groceries': 'Times on the ridge loop this month.\n\n| Day     | Distance | Time  | Note        |\n| :------ | -------: | ----: | :---------: |\n| Monday  |   6.2 km | 41:10 |    easy     |\n| Friday  |  11.8 km | 79:45 | ![ridge](ridge.png) |\n| Sunday  |   8.0 km | 52:03 |   windy     |' }, run: openNote('Groceries') },
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
   'tree-pinned': { about: 'All notes as a folder tree: every pinned note first (one from a folder carries its name), and an open folder lists its own pinned notes first', pin: ['n-reading', 'n-retro', 'b2'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: openNote('Q4 planning') },
   'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
@@ -297,6 +298,7 @@ async function shoot(theme, name, opts) {
   Object.assign(data.settings, SCENES[name].settings || {});
   for (const id of SCENES[name].pin || []) data.notes.find((n) => n.id === id).pinned = true;
   for (const id of SCENES[name].keepOut || []) data.notes.find((n) => n.id === id).keepOutOfHistory = true;
+  for (const [id, body] of Object.entries(SCENES[name].bodies || {})) data.notes.find((n) => n.id === id).body = body;
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));

@@ -14,10 +14,8 @@ import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
-import Table from '@tiptap/extension-table';
+import { NotesTable, NotesTableCell, NotesTableHeader } from './tables.ts';
 import TableRow from '@tiptap/extension-table-row';
-import TableHeader from '@tiptap/extension-table-header';
-import TableCell from '@tiptap/extension-table-cell';
 import { Markdown } from 'tiptap-markdown';
 
 function fingerprint(md: string | null | undefined) {
@@ -417,10 +415,10 @@ export function create(element: HTMLElement, options: EditorOptions) {
       DashCheckbox,
       Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, protocols: ['note', 'attachment'], HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
       pictures(options.imageBase),
-      Table.configure({ resizable: false }),
+      NotesTable.configure({ resizable: false }),
       TableRow,
-      TableHeader,
-      TableCell,
+      NotesTableHeader,
+      NotesTableCell,
       Placeholder.configure({ placeholder: options.placeholder || 'Start writing…' }),
       Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: false, transformCopiedText: true }),
       NotesKeys,
