@@ -12,6 +12,8 @@ function buildRenderer({ write }) {
     bundle: true,
     format: 'iife',
     target: 'chrome120',
+    jsx: 'automatic',
+    define: { 'process.env.NODE_ENV': '"production"' },
     outdir: OUT_DIR,
     entryNames: '[name].bundle',
     logLevel: 'silent',
