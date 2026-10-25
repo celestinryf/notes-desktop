@@ -1541,6 +1541,14 @@ class Store {
     return !!vaultId && this.vaults.some((v) => v.home && v.id === vaultId);
   }
 
+  isTextOutsideHome(note: Note | null): note is FileNote {
+    return isFileNote(note) && note.fileKind === 'text' && !note.lock && !this.isHome(note.vaultId);
+  }
+
+  textFilesOutsideHome() {
+    return this.notes.flatMap((n) => (this.isTextOutsideHome(n) ? [{ id: n.id, filePath: n.filePath }] : []));
+  }
+
   _isVaultRoot(f: Folder) {
     return !!f.vaultId && !f.parentId && !this.isHome(f.vaultId);
   }

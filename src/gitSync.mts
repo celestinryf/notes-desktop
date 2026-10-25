@@ -1,22 +1,51 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
+import { MAX_TEXT_BYTES, isRecord } from './shared/helpers.mts';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
+const LINKED_DIR = '.linked';
 const TREE_EXCLUDE = ['*', '!*/'].concat(NOTE_EXTS.map((ext) => '!*.' + ext), ['.trash/', '.obsidian/']).join('\n') + '\n';
 const STALE_LOCK_MS = 10000;
+const COMMIT_TIMEOUT_MS = 10 * 60 * 1000;
+const HASH_BATCH = 500;
+const RACY_MS = 3000;
+const STAT_TIMEOUT_MS = 5000;
+const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/;
+const PLAIN_NAME = /^[^\u0000-\u001f/\\:*?"<>|]{1,200}$/;
+const NAME_GIT_REFUSES = /^(\.+|\.git|git~\d+|(con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(\..*)?)$|[. ]$/i;
 
 type FileCommit = { hash: string; at: number; path: string };
+type LinkedFile = { id: string; filePath: string };
+type SeenFile = { mtimeMs: number; size: number; hash: string };
 
 type GitRun = { ok: boolean, code: string | number | null | undefined, stdout: string, stderr: string, error: string | null };
 
-function run(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
+function run(args: string[], cwd: string, timeoutMs?: number, input?: string): Promise<GitRun> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
     });
+    if (input !== undefined && child.stdin) { child.stdin.on('error', () => {}); child.stdin.end(input); }
+  });
+}
+
+const linkedDir = (id: string) => LINKED_DIR + '/' + id.slice(0, 2).toLowerCase() + '/' + id + '/';
+
+function linkedPath(file: LinkedFile) {
+  const name = path.basename(file.filePath);
+  return linkedDir(file.id) + (PLAIN_NAME.test(name) && !NAME_GIT_REFUSES.test(name) ? name : 'file');
+}
+
+function lookAt(filePath: string): Promise<fs.Stats | 'gone' | 'unsure'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('unsure'), STAT_TIMEOUT_MS);
+    fs.promises.stat(filePath).then(
+      (s) => { clearTimeout(timer); resolve(s.isFile() && s.size <= MAX_TEXT_BYTES ? s : 'gone'); },
+      (err: unknown) => { clearTimeout(timer); resolve(isRecord(err) && (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? 'gone' : 'unsure'); },
+    );
   });
 }
 
@@ -77,8 +106,11 @@ class GitSync {
   onChange: (state: GitState) => void;
   beforeSnapshot: () => void;
   workTree: () => string | null;
+  linkedFiles: () => LinkedFile[];
+  linkedSeen: Map<string, SeenFile>;
+  linkedError: string | null;
   gitDir: string;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[] }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -92,6 +124,9 @@ class GitSync {
     this.onChange = opts.onChange || (() => {});
     this.beforeSnapshot = opts.beforeSnapshot || (() => {});
     this.workTree = opts.workTree || (() => null);
+    this.linkedFiles = opts.linkedFiles || (() => []);
+    this.linkedSeen = new Map();
+    this.linkedError = null;
     this.gitDir = path.join(this.dir, '.git');
   }
 
@@ -109,7 +144,7 @@ class GitSync {
 
   async _addTree(tree: string) {
     for (let pass = 0; ; pass++) {
-      const added = await this._inTree(tree, ['add', '-A'], 120000);
+      const added = await this._inTree(tree, ['add', '-A', '--', '.', ':(exclude)' + LINKED_DIR], 120000);
       const file = this._treeExclude();
       const have = fs.readFileSync(file, 'utf8');
       const fresh = added.ok ? [] : Array.from(String(added.error).matchAll(/'([^'\n]+)\/' does not have a commit checked out/g), (m) => '/' + m[1].replace(/[\\*?[\]!#]/g, '\\$&') + '/').filter((line) => !have.split('\n').includes(line));
@@ -128,10 +163,73 @@ class GitSync {
     const tree = this.workTree();
     if (tree) {
       await this._inTree(tree, ['rm', '--cached', '-q', '--ignore-unmatch', '--', 'notes.json']);
-      return this._addTree(tree);
+      const added = await this._addTree(tree);
+      if (!added.ok) return added;
+      const linked = await this._stageLinked();
+      this.linkedError = linked.ok ? null : linked.error || 'git could not stage them';
+      if (!linked.ok) {
+        this.linkedSeen.clear();
+        await run(['reset', '-q', 'HEAD', '--', LINKED_DIR], this.dir);
+      }
+      return added;
     }
     if (!(await this.takeSnapshot())) return null;
     return run(['add', '-A', '--', 'notes.json'], this.dir);
+  }
+
+  async _stageLinked(): Promise<GitRun> {
+    const listed = await run(['ls-files', '-s', '-z', '--', LINKED_DIR], this.dir, 60000);
+    if (!listed.ok) return listed;
+    const staged = new Map<string, string>();
+    for (const record of listed.stdout.split('\0')) {
+      const m = /^\d+ ([0-9a-f]{40,64}) \d\t([\s\S]+)$/.exec(record);
+      if (m) staged.set(m[2], m[1]);
+    }
+    const wanted = this.linkedFiles().filter((f) => SAFE_ID.test(f.id) && !/[\u0000-\u001f]/.test(f.filePath));
+    const looks = await Promise.all(wanted.map((f) => lookAt(f.filePath)));
+    const present = wanted.flatMap((file, i) => { const stat = looks[i]; return typeof stat === 'object' ? [{ file, stat }] : []; });
+    const unsure = wanted.filter((_, i) => looks[i] === 'unsure');
+    const keep = new Set(present.map((p) => p.file.filePath).concat(unsure.map((f) => f.filePath)));
+    for (const filePath of this.linkedSeen.keys()) if (!keep.has(filePath)) this.linkedSeen.delete(filePath);
+    const hashes = present.map(({ file, stat }) => {
+      const seen = this.linkedSeen.get(file.filePath);
+      return seen && seen.mtimeMs === stat.mtimeMs && seen.size === stat.size ? seen.hash : null;
+    });
+    const stale = present.flatMap((_, i) => (hashes[i] ? [] : [i]));
+    const fresh = await this._hashFiles(stale.map((i) => present[i].file.filePath));
+    const settled = Date.now() - RACY_MS;
+    stale.forEach((at, k) => {
+      const { file, stat } = present[at];
+      const hash = fresh[k] || null;
+      hashes[at] = hash;
+      if (hash && stat.mtimeMs < settled) this.linkedSeen.set(file.filePath, { mtimeMs: stat.mtimeMs, size: stat.size, hash });
+      else this.linkedSeen.delete(file.filePath);
+    });
+    const wantedPaths = new Map(present.flatMap((p, i) => { const hash = hashes[i]; return hash ? [[linkedPath(p.file), hash] as const] : []; }));
+    for (const file of present.filter((_, i) => !hashes[i]).map((p) => p.file).concat(unsure)) {
+      const was = staged.get(linkedPath(file));
+      if (was) wantedPaths.set(linkedPath(file), was);
+    }
+    const changes = Array.from(wantedPaths).filter(([p, hash]) => staged.get(p) !== hash).map(([p, hash]) => '100644 ' + hash + '\t' + p + '\0')
+      .concat(Array.from(staged.keys()).filter((p) => !wantedPaths.has(p)).map((p) => '0 ' + '0'.repeat(40) + '\t' + p + '\0'));
+    if (!changes.length) return { ok: true, code: 0, stdout: '', stderr: '', error: null };
+    return run(['update-index', '-z', '--index-info'], this.dir, 120000, changes.join(''));
+  }
+
+  async _hashFiles(paths: string[]): Promise<(string | null)[]> {
+    const hashes: (string | null)[] = [];
+    while (hashes.length < paths.length) {
+      const batch = paths.slice(hashes.length, hashes.length + HASH_BATCH);
+      const r = await run(['hash-object', '-w', '--no-filters', '--stdin-paths'], this.dir, 120000, batch.join('\n') + '\n');
+      const got = r.stdout.split(/\r?\n/).filter((line) => /^[0-9a-f]{40,64}$/.test(line)).slice(0, batch.length);
+      hashes.push(...got);
+      if (got.length < batch.length) hashes.push(...new Array<null>(r.ok ? batch.length - got.length : 1).fill(null));
+    }
+    return hashes;
+  }
+
+  _linkedNotice() {
+    return this.linkedError ? 'Files outside the notes folder were not saved to history: ' + this.linkedError : null;
   }
 
   _staged() {
@@ -242,12 +340,12 @@ class GitSync {
       if (!add) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
       if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
       const staged = await this._staged();
-      if (staged.ok) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
+      if (staged.ok) { this._set(Object.assign({ pending: false }, this.linkedError ? { lastError: this._linkedNotice() } : {})); return { ok: true, nothingToCommit: true }; }
       const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
-      const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir);
-      if (!r.ok) { this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
+      const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
+      if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
       if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
-      this._set({ lastError: null, pending: false });
+      this._set({ lastError: this._linkedNotice(), pending: false });
       await this.refreshCounts();
       if (this.state.remote) await this.push();
       return { ok: true };
@@ -286,16 +384,24 @@ class GitSync {
     return r.stdout.split('\0').find((p) => p === relPath) || r.stdout.split('\0').find((p) => p.toLowerCase() === want) || relPath;
   }
 
-  async fileHistory(relPath: string, limit?: number): Promise<FileCommit[]> {
-    if (!this.state.initialized) return [];
-    const tracked = await this._trackedPath(relPath);
-    const r = await run(['-c', 'core.quotePath=false', 'log', '--follow', '--format=%x1e%H%x1f%ct', '--name-only', '-n', String(limit || 50), '--', tracked], this.dir, 60000);
+  async _fileLog(logArgs: string[], pathspec: string, limit?: number): Promise<FileCommit[]> {
+    const r = await run(['-c', 'core.quotePath=false', 'log'].concat(logArgs, ['--format=%x1e%H%x1f%ct', '--name-only', '-n', String(limit || 50), '--', pathspec]), this.dir, 60000);
     if (!r.ok) return [];
     return r.stdout.split('\x1e').map((chunk) => chunk.trim()).filter(Boolean).map((chunk) => {
       const [head, ...rest] = chunk.split('\n');
       const [hash, ts] = head.split('\x1f');
-      return { hash, at: parseInt(ts, 10) * 1000, path: rest.map((l) => l.trim()).find(Boolean) || tracked };
+      return { hash, at: parseInt(ts, 10) * 1000, path: rest.map((l) => l.trim()).find(Boolean) || pathspec };
     });
+  }
+
+  async fileHistory(relPath: string, limit?: number): Promise<FileCommit[]> {
+    if (!this.state.initialized) return [];
+    return this._fileLog(['--follow'], await this._trackedPath(relPath), limit);
+  }
+
+  async linkedHistory(id: string, limit?: number): Promise<FileCommit[]> {
+    if (!this.state.initialized || !SAFE_ID.test(id)) return [];
+    return this._fileLog(['--no-renames', '--diff-filter=AM'], linkedDir(id), limit);
   }
 
   async eachFileAt(commits: readonly FileCommit[], visit: (index: number, text: string | null) => void) {
@@ -304,5 +410,5 @@ class GitSync {
   }
 }
 
-export type { FileCommit };
+export type { FileCommit, LinkedFile };
 export { GitSync };
