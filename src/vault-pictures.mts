@@ -63,7 +63,7 @@ class VaultPictures {
 
   _pick(list: Picture[], here: string, names: readonly string[]) {
     return names.map((name) => {
-      const wanted = name.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+      const wanted = name.replace(/\\/g, '/').replace(/^(\.?\/)+/, '').toLowerCase();
       const leaf = wanted.split('/').pop() || '';
       if (!isPicture(leaf)) return null;
       const found = list.filter((p) => p.leaf === leaf && (!wanted.includes('/') || p.rel.toLowerCase() === wanted || p.rel.toLowerCase().endsWith('/' + wanted)));

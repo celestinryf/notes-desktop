@@ -213,7 +213,7 @@ function lineEdge(view: EditorView, forward: boolean, extend: boolean) {
 type PictureLookup = (name: string) => Promise<string | null>;
 
 function pictureName(raw: string) {
-  const target = raw.split(/(?<!\\)\|/)[0].replace(/\\\|/g, '|').trim();
+  const target = raw.split(/\\?\|/)[0].trim().replace(/^(\.\/)+/, '');
   return /\.[^./\\]+$/.test(target) && IMAGE_EXT.has(extOf(target)) ? target : null;
 }
 
