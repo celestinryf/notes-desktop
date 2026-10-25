@@ -212,7 +212,12 @@ function lineEdge(view: EditorView, forward: boolean, extend: boolean) {
 
 type PictureLookup = (name: string) => Promise<string | null>;
 
-const isPictureEmbed = (node: PMNode) => node.attrs.embed === true && IMAGE_EXT.has(extOf(wikiLinkName(String(node.attrs.raw))));
+function pictureName(raw: string) {
+  const target = raw.split(/(?<!\\)\|/)[0].replace(/\\\|/g, '|').trim();
+  return /\.[^./\\]+$/.test(target) && IMAGE_EXT.has(extOf(target)) ? target : null;
+}
+
+const isPictureEmbed = (node: PMNode) => node.attrs.embed === true && pictureName(String(node.attrs.raw)) !== null;
 
 const wikiLinkAttrs = (raw: string, embed: boolean) => ({ class: 'wikilink', 'data-wikilink': raw, 'data-embed': embed ? '' : null, title: 'Open "' + wikiLinkLabel(raw) + '" (Ctrl+click or Alt+Enter)' });
 
@@ -223,8 +228,7 @@ function wikiLinkElement(raw: string, embed: boolean) {
   return a;
 }
 
-function pictureEmbed(raw: string, picture: PictureLookup) {
-  const name = wikiLinkName(raw);
+function pictureEmbed(raw: string, name: string, picture: PictureLookup) {
   const alias = raw.includes('|') ? raw.slice(raw.lastIndexOf('|') + 1).trim() : '';
   const size = /^(\d+)(?:x(\d+))?$/.exec(alias);
   const holder = document.createElement('span');
@@ -236,13 +240,14 @@ function pictureEmbed(raw: string, picture: PictureLookup) {
   img.setAttribute('data-embed', '');
   if (size) { img.width = Number(size[1]); if (size[2]) img.height = Number(size[2]); }
   holder.append(img);
-  picture(name).then((src) => {
-    if (src) { img.src = src; return; }
-    const missing = wikiLinkElement(raw, true);
-    missing.classList.add('is-unresolved');
-    missing.title = 'No picture named "' + name + '" in this vault';
-    holder.replaceChildren(missing);
-  });
+  const missing = (title: string) => {
+    const link = wikiLinkElement(raw, true);
+    link.classList.add('is-unresolved');
+    link.title = title;
+    holder.replaceChildren(link);
+  };
+  img.addEventListener('error', () => missing('Could not show the picture "' + name + '"'));
+  picture(name).then((src) => { if (src) img.src = src; else missing('No picture named "' + name + '" in this vault'); });
   return holder;
 }
 
@@ -272,7 +277,8 @@ const WikiLink = TiptapNode.create<{ picture: PictureLookup | null }>({
     const picture = this.options.picture;
     return ({ node }) => {
       const raw = String(node.attrs.raw);
-      return { dom: picture && isPictureEmbed(node) ? pictureEmbed(raw, picture) : wikiLinkElement(raw, node.attrs.embed === true) };
+      const name = node.attrs.embed === true ? pictureName(raw) : null;
+      return { dom: picture && name ? pictureEmbed(raw, name, picture) : wikiLinkElement(raw, node.attrs.embed === true) };
     };
   },
   addStorage() {
@@ -368,8 +374,9 @@ export type LinkAtCaret = { wiki: string } | { href: string } | null;
 
 function caretLink(state: EditorState): LinkAtCaret {
   const sel = state.selection;
-  if (sel instanceof NodeSelection && sel.node.type.name === 'wikiLink') return { wiki: String(sel.node.attrs.raw) };
-  for (const n of [sel.$from.nodeAfter, sel.$from.nodeBefore]) if (n && n.type.name === 'wikiLink') return { wiki: String(n.attrs.raw) };
+  const followable = (n: PMNode | null | undefined): n is PMNode => !!n && n.type.name === 'wikiLink' && !isPictureEmbed(n);
+  if (sel instanceof NodeSelection && followable(sel.node)) return { wiki: String(sel.node.attrs.raw) };
+  for (const n of [sel.$from.nodeAfter, sel.$from.nodeBefore]) if (followable(n)) return { wiki: String(n.attrs.raw) };
   const link = sel.$from.marks().find((m) => m.type.name === 'link');
   return link && link.attrs.href ? { href: String(link.attrs.href) } : null;
 }
@@ -460,6 +467,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
         return rel ? resolveImageSrc(rel, options.imageBase ? options.imageBase() : null) || null : null;
       }, () => null);
       pictureCache.set(name, hit);
+      hit.then((src) => { if (!src) pictureCache.delete(name); });
     }
     return hit;
   } : null;

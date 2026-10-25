@@ -6,8 +6,9 @@ type Picture = { rel: string; dir: string; leaf: string };
 
 const MAX_PICTURES = 20000;
 const FRESH_MS = 30000;
+const RELIST_ON_MISS_MS = 2000;
 const skipped = (name: string) => name.startsWith('.') || name === 'node_modules';
-const isPicture = (name: string) => IMAGE_EXT.has(extOf(name));
+const isPicture = (name: string) => /\.[^.]+$/.test(name) && IMAGE_EXT.has(extOf(name));
 const urlPath = (rel: string) => rel.split('/').map(encodeURIComponent).join('/');
 
 async function listPictures(root: string) {
@@ -38,10 +39,10 @@ class VaultPictures {
     this.now = now || Date.now;
   }
 
-  _pictures(root: string) {
+  _pictures(root: string, maxAge: number) {
     const key = path.resolve(root).toLowerCase();
     const have = this.lists.get(key);
-    if (have && this.now() - have.at < FRESH_MS) return have.list;
+    if (have && this.now() - have.at < maxAge) return have.list;
     const list = listPictures(root);
     this.lists.set(key, { at: this.now(), list });
     return list;
@@ -55,8 +56,12 @@ class VaultPictures {
         return isPicture(leaf) && fs.existsSync(path.join(fromDir, leaf)) ? urlPath(leaf) : null;
       });
     }
-    const list = await this._pictures(root);
     const here = path.relative(root, fromDir).split(path.sep).join('/') || '.';
+    const found = this._pick(await this._pictures(root, FRESH_MS), here, names);
+    return found.includes(null) ? this._pick(await this._pictures(root, RELIST_ON_MISS_MS), here, names) : found;
+  }
+
+  _pick(list: Picture[], here: string, names: readonly string[]) {
     return names.map((name) => {
       const wanted = name.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
       const leaf = wanted.split('/').pop() || '';
