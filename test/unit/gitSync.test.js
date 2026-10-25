@@ -155,3 +155,63 @@ test('history of the notes folder survives a nested repository, a stale lock and
   const commits = await sync.fileHistory('Case.md', 10);
   assert.equal(commits.length, 2, 'a case-only rename keeps the history');
 });
+
+test('files outside the notes folder keep their history by id at .linked, and a problem with them never blocks the notes folder', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const tree = tmpDir('notes-git-tree3-');
+  const outside = tmpDir('notes-git-outside-');
+  const at = (id, leaf) => '.linked/' + id.slice(0, 2) + '/' + id + '/' + leaf;
+  const files = () => git(dir + '/history', ['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', 'HEAD']).split('\n').filter(Boolean).sort();
+  const versions = async (sync, id) => { const commits = await sync.linkedHistory(id, 10); const texts = []; await sync.eachFileAt(commits, (i, text) => { texts[i] = text; }); return texts; };
+  const A = 'a1111111-aaaa-4aaa-8aaa-111111111111', B = 'b2222222-bbbb-4bbb-8bbb-222222222222', G = 'c3333333-cccc-4ccc-8ccc-333333333333';
+  fs.writeFileSync(path.join(tree, 'Home.md'), 'home one\n');
+  const agents = path.join(outside, 'AGENTS.md'), memory = path.join(outside, 'memory.md'), big = path.join(outside, 'big.log');
+  fs.writeFileSync(agents, '\uFEFFagents one\r\n');
+  fs.writeFileSync(memory, 'memory one\n');
+  fs.writeFileSync(big, Buffer.alloc(4 * 1024 * 1024 + 1, 0x61));
+  let linked = [{ id: A, filePath: agents }, { id: B, filePath: memory }, { id: 'd4444444', filePath: big }, { id: '../escape', filePath: agents }];
+  const sync = new GitSync(dir, { debounceMs: 10, workTree: () => tree, linkedFiles: () => linked });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.deepEqual(files(), [at(A, 'AGENTS.md'), at(B, 'memory.md'), 'Home.md'], 'readable files by id and name; over 4 MB and unsafe ids stay out');
+  assert.deepEqual(await sync.commit(), { ok: true, nothingToCommit: true });
+
+  fs.writeFileSync(agents, '\uFEFFagents two\r\n');
+  assert.deepEqual(await sync.commit(), { ok: true }, 'an edit made outside Notes is a new version');
+  const renamed = path.join(outside, 'AGENTS renamed.md');
+  fs.renameSync(agents, renamed);
+  fs.writeFileSync(renamed, 'agents three\n');
+  fs.unlinkSync(memory);
+  linked = [{ id: A, filePath: renamed }, { id: B, filePath: memory }];
+  fs.mkdirSync(path.join(tree, '.linked'));
+  fs.writeFileSync(path.join(tree, '.linked', 'own.md'), 'a real folder of that name\n');
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.deepEqual(files(), [at(A, 'AGENTS renamed.md'), 'Home.md'], 'a missing file leaves the tree; a real .linked folder stays out');
+  assert.deepEqual(await versions(sync, A), ['agents three\n', '\uFEFFagents two\r\n', '\uFEFFagents one\r\n'], 'history follows the id across a rename, byte for byte');
+  assert.deepEqual(await versions(sync, B), ['memory one\n'], 'a removed file keeps its versions');
+
+  const stage = sync._stageLinked;
+  sync._stageLinked = async () => ({ ok: false, code: 1, stdout: '', stderr: 'boom', error: 'boom' });
+  fs.writeFileSync(path.join(tree, 'Home.md'), 'home two\n');
+  assert.deepEqual(await sync.commit(), { ok: true }, 'the notes folder still commits');
+  assert.deepEqual(files(), [at(A, 'AGENTS renamed.md'), 'Home.md'], 'linked files keep their last good state');
+  assert.match(sync.status().lastError || '', /outside the notes folder.*boom/);
+  sync._stageLinked = stage;
+
+  const realStat = fs.promises.stat;
+  fs.promises.stat = (p, ...rest) => (p === renamed ? Promise.reject(Object.assign(new Error('busy'), { code: 'EBUSY' })) : realStat.call(fs.promises, p, ...rest));
+  fs.writeFileSync(path.join(tree, 'Home.md'), 'home busy\n');
+  try { assert.deepEqual(await sync.commit(), { ok: true }); } finally { fs.promises.stat = realStat; }
+  assert.deepEqual(files(), [at(A, 'AGENTS renamed.md'), 'Home.md'], 'a file that cannot be read for now keeps its last version');
+
+  fs.writeFileSync(path.join(outside, '.git'), 'gitdir: elsewhere\n');
+  linked = [{ id: G, filePath: path.join(outside, '.git') }];
+  fs.writeFileSync(path.join(tree, 'Home.md'), 'home three\n');
+  assert.deepEqual(await sync.commit(), { ok: true });
+  assert.equal(sync.status().lastError, null, 'the error clears once linked files stage again');
+  assert.deepEqual(files(), [at(G, 'file'), 'Home.md'], 'a name git refuses is kept under a plain leaf; unlinked files leave');
+  assert.equal((await sync.fileHistory('Home.md', 10)).length, 4, 'the notes folder history is untouched');
+  const hashed = await sync._hashFiles([renamed, path.join(outside, 'nope.md'), path.join(outside, '.git')]);
+  assert.equal(hashed[1], null, 'a file that cannot be read costs its own slot');
+  assert.match(hashed[0] + hashed[2], /^[0-9a-f]{80}$/, 'the rest of the batch is still hashed');
+});

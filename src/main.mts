@@ -5,6 +5,7 @@ import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitSync } from './gitSync.mts';
+import type { FileCommit } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
 import { drawIconBitmap } from './icon.mts';
@@ -1325,14 +1326,17 @@ function main() {
     const found: HistoryVersion[] = [];
     const home = store.homeVault();
     const homeRel = home && isFileNote(note) && store.isHome(note.vaultId) ? path.relative(home.path, note.filePath).split(path.sep).join('/') : null;
-    const files = homeRel ? await git.fileHistory(homeRel, max) : store.isTextOutsideHome(note) ? await git.linkedHistory(note.id, max) : [];
-    let followed = true;
-    await git.eachFileAt(files, (i, text) => {
-      if (text === null || !followed) return;
-      const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-      if (homeRel && i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
-      found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
-    });
+    const addVersions = async (files: FileCommit[], followsRenames: boolean) => {
+      let followed = true;
+      await git.eachFileAt(files, (i, text) => {
+        if (text === null || !followed) return;
+        const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+        if (followsRenames && i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
+        found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
+      });
+    };
+    if (homeRel) await addVersions(await git.fileHistory(homeRel, max), true);
+    if (isFileNote(note) && note.fileKind === 'text') await addVersions(await git.linkedHistory(note.id, max), false);
     const snapshots = await git.history(max, 'notes.json');
     await git.eachNotesAt(snapshots.map((c) => c.hash), (i, text) => {
       if (!text) return;

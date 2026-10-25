@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
-import { MAX_TEXT_BYTES } from './shared/helpers.mts';
+import { MAX_TEXT_BYTES, isRecord } from './shared/helpers.mts';
 
 const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
@@ -12,6 +12,7 @@ const STALE_LOCK_MS = 10000;
 const COMMIT_TIMEOUT_MS = 10 * 60 * 1000;
 const HASH_BATCH = 500;
 const RACY_MS = 3000;
+const STAT_TIMEOUT_MS = 5000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const PLAIN_NAME = /^[^\u0000-\u001f/\\:*?"<>|]{1,200}$/;
 const NAME_GIT_REFUSES = /^(\.+|\.git|git~\d+|(con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(\..*)?)$|[. ]$/i;
@@ -36,6 +37,16 @@ const linkedDir = (id: string) => LINKED_DIR + '/' + id.slice(0, 2).toLowerCase(
 function linkedPath(file: LinkedFile) {
   const name = path.basename(file.filePath);
   return linkedDir(file.id) + (PLAIN_NAME.test(name) && !NAME_GIT_REFUSES.test(name) ? name : 'file');
+}
+
+function lookAt(filePath: string): Promise<fs.Stats | 'gone' | 'unsure'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('unsure'), STAT_TIMEOUT_MS);
+    fs.promises.stat(filePath).then(
+      (s) => { clearTimeout(timer); resolve(s.isFile() && s.size <= MAX_TEXT_BYTES ? s : 'gone'); },
+      (err: unknown) => { clearTimeout(timer); resolve(isRecord(err) && (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? 'gone' : 'unsure'); },
+    );
+  });
 }
 
 function eachBlob(specs: string[], cwd: string, timeoutMs: number, visit: (index: number, text: string | null) => void): Promise<boolean> {
@@ -175,9 +186,10 @@ class GitSync {
       if (m) staged.set(m[2], m[1]);
     }
     const wanted = this.linkedFiles().filter((f) => SAFE_ID.test(f.id) && !/[\u0000-\u001f]/.test(f.filePath));
-    const stats = await Promise.all(wanted.map((f) => fs.promises.stat(f.filePath).then((s) => (s.isFile() && s.size <= MAX_TEXT_BYTES ? s : null), () => null)));
-    const present = wanted.flatMap((file, i) => { const stat = stats[i]; return stat ? [{ file, stat }] : []; });
-    const keep = new Set(present.map((p) => p.file.filePath));
+    const looks = await Promise.all(wanted.map((f) => lookAt(f.filePath)));
+    const present = wanted.flatMap((file, i) => { const stat = looks[i]; return typeof stat === 'object' ? [{ file, stat }] : []; });
+    const unsure = wanted.filter((_, i) => looks[i] === 'unsure');
+    const keep = new Set(present.map((p) => p.file.filePath).concat(unsure.map((f) => f.filePath)));
     for (const filePath of this.linkedSeen.keys()) if (!keep.has(filePath)) this.linkedSeen.delete(filePath);
     const hashes = present.map(({ file, stat }) => {
       const seen = this.linkedSeen.get(file.filePath);
@@ -194,6 +206,10 @@ class GitSync {
       else this.linkedSeen.delete(file.filePath);
     });
     const wantedPaths = new Map(present.flatMap((p, i) => { const hash = hashes[i]; return hash ? [[linkedPath(p.file), hash] as const] : []; }));
+    for (const file of present.filter((_, i) => !hashes[i]).map((p) => p.file).concat(unsure)) {
+      const was = staged.get(linkedPath(file));
+      if (was) wantedPaths.set(linkedPath(file), was);
+    }
     const changes = Array.from(wantedPaths).filter(([p, hash]) => staged.get(p) !== hash).map(([p, hash]) => '100644 ' + hash + '\t' + p + '\0')
       .concat(Array.from(staged.keys()).filter((p) => !wantedPaths.has(p)).map((p) => '0 ' + '0'.repeat(40) + '\t' + p + '\0'));
     if (!changes.length) return { ok: true, code: 0, stdout: '', stderr: '', error: null };
