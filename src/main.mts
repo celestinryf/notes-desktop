@@ -5,6 +5,7 @@ import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitSync } from './gitSync.mts';
+import { VaultPictures } from './vault-pictures.mts';
 import type { FileCommit } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
@@ -544,6 +545,13 @@ function main() {
   handle('notes:tags', () => store.tags());
   handle('notes:counts', () => store.counts());
   handle('notes:resolveLinks', (_e, id, names) => (typeof id === 'string' && Array.isArray(names) ? store.resolveWikiLinks(id, names.filter((n): n is string => typeof n === 'string')) : []));
+  const pictures = new VaultPictures();
+  handle('notes:resolvePictures', async (_e, id, names) => {
+    const note = typeof id === 'string' ? store.get(id) : null;
+    if (!isFileNote(note) || !Array.isArray(names)) return [];
+    const vault = note.vaultId ? store.getVault(note.vaultId) : null;
+    return pictures.resolve(vault ? vault.path : null, note.filePath, names.filter((n): n is string => typeof n === 'string').slice(0, 500));
+  });
   handle('notes:wikiLinkFor', (_e, sourceId, targetId) => (typeof sourceId === 'string' && typeof targetId === 'string' ? store.wikiLinkFor(sourceId, targetId) : null));
   handle('notes:related', async (_e, id) => {
     const note = store.get(id);

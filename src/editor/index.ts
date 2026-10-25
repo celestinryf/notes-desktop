@@ -5,7 +5,7 @@ import { EditorState, NodeSelection, TextSelection, Plugin, PluginKey } from '@t
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type MarkdownIt from 'markdown-it';
 import type { StateInline } from 'markdown-it';
-import { isRecord, wikiLinkLabel, wikiLinkName } from '../shared/helpers.mts';
+import { IMAGE_EXT, extOf, isRecord, wikiLinkLabel, wikiLinkName } from '../shared/helpers.mts';
 import { splitFrontMatter } from '../shared/front-matter.mts';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
@@ -210,8 +210,47 @@ function lineEdge(view: EditorView, forward: boolean, extend: boolean) {
   return true;
 }
 
-const WikiLink = TiptapNode.create({
+type PictureLookup = (name: string) => Promise<string | null>;
+
+const isPictureEmbed = (node: PMNode) => node.attrs.embed === true && IMAGE_EXT.has(extOf(wikiLinkName(String(node.attrs.raw))));
+
+const wikiLinkAttrs = (raw: string, embed: boolean) => ({ class: 'wikilink', 'data-wikilink': raw, 'data-embed': embed ? '' : null, title: 'Open "' + wikiLinkLabel(raw) + '" (Ctrl+click or Alt+Enter)' });
+
+function wikiLinkElement(raw: string, embed: boolean) {
+  const a = document.createElement('a');
+  for (const [k, v] of Object.entries(wikiLinkAttrs(raw, embed))) if (v !== null) a.setAttribute(k, v);
+  a.textContent = wikiLinkLabel(raw);
+  return a;
+}
+
+function pictureEmbed(raw: string, picture: PictureLookup) {
+  const name = wikiLinkName(raw);
+  const alias = raw.includes('|') ? raw.slice(raw.lastIndexOf('|') + 1).trim() : '';
+  const size = /^(\d+)(?:x(\d+))?$/.exec(alias);
+  const holder = document.createElement('span');
+  holder.className = 'wiki-embed';
+  const img = document.createElement('img');
+  img.alt = size || !alias ? name : alias;
+  img.title = name + ' (Ctrl+E shows the embed)';
+  img.setAttribute('data-wikilink', raw);
+  img.setAttribute('data-embed', '');
+  if (size) { img.width = Number(size[1]); if (size[2]) img.height = Number(size[2]); }
+  holder.append(img);
+  picture(name).then((src) => {
+    if (src) { img.src = src; return; }
+    const missing = wikiLinkElement(raw, true);
+    missing.classList.add('is-unresolved');
+    missing.title = 'No picture named "' + name + '" in this vault';
+    holder.replaceChildren(missing);
+  });
+  return holder;
+}
+
+const WikiLink = TiptapNode.create<{ picture: PictureLookup | null }>({
   name: 'wikiLink',
+  addOptions() {
+    return { picture: null };
+  },
   group: 'inline',
   inline: true,
   atom: true,
@@ -227,8 +266,14 @@ const WikiLink = TiptapNode.create({
   },
   renderHTML({ node }) {
     const raw = String(node.attrs.raw);
-    const label = wikiLinkLabel(raw);
-    return ['a', { class: 'wikilink', 'data-wikilink': raw, 'data-embed': node.attrs.embed ? '' : null, title: 'Open "' + label + '" (Ctrl+click or Alt+Enter)' }, label];
+    return ['a', wikiLinkAttrs(raw, node.attrs.embed === true), wikiLinkLabel(raw)];
+  },
+  addNodeView() {
+    const picture = this.options.picture;
+    return ({ node }) => {
+      const raw = String(node.attrs.raw);
+      return { dom: picture && isPictureEmbed(node) ? pictureEmbed(raw, picture) : wikiLinkElement(raw, node.attrs.embed === true) };
+    };
   },
   addStorage() {
     return {
@@ -260,7 +305,7 @@ const wikiStatusKey = new PluginKey<WikiStatus>('wikiLinkStatus');
 
 function wikiNames(doc: PMNode) {
   const names = new Set<string>();
-  doc.descendants((node) => { if (node.type.name === 'wikiLink') names.add(wikiLinkName(String(node.attrs.raw))); });
+  doc.descendants((node) => { if (node.type.name === 'wikiLink' && !isPictureEmbed(node)) names.add(wikiLinkName(String(node.attrs.raw))); });
   return Array.from(names).sort();
 }
 
@@ -397,6 +442,7 @@ export type EditorOptions = TriggerOptions & {
   imageBase?: () => string | null,
   onUpdate?: (markdown: string) => void,
   resolveWikiLinks?: WikiLinkResolver,
+  resolvePictures?: WikiLinkResolver,
   onLinkAtCaret?: (on: boolean) => void,
 };
 
@@ -404,6 +450,19 @@ export function create(element: HTMLElement, options: EditorOptions) {
   options = options || {};
   let suppress = false;
   const wikiRequests = { reset: () => {} };
+  const pictureCache = new Map<string, Promise<string | null>>();
+  const resolvePictures = options.resolvePictures;
+  const picture: PictureLookup | null = resolvePictures ? (name) => {
+    let hit = pictureCache.get(name);
+    if (!hit) {
+      hit = resolvePictures([name]).then((rels) => {
+        const rel = rels ? rels[0] : null;
+        return rel ? resolveImageSrc(rel, options.imageBase ? options.imageBase() : null) || null : null;
+      }, () => null);
+      pictureCache.set(name, hit);
+    }
+    return hit;
+  } : null;
   const editor = new Editor({
     element,
     extensions: [
@@ -423,7 +482,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
       Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: false, transformCopiedText: true }),
       NotesKeys,
       triggers(options),
-      WikiLink,
+      WikiLink.configure({ picture }),
       wikiLinkStatus(options.resolveWikiLinks, wikiRequests),
       caretLinkWatch(options.onLinkAtCaret),
     ],
@@ -468,6 +527,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
       editor.view.updateState(EditorState.create({ doc, plugins: editor.state.plugins, selection }));
     } finally { suppress = false; }
     wikiRequests.reset();
+    pictureCache.clear();
     const out = editor.storage.markdown.getMarkdown();
     lastExact = parts.body.replace(/[ \t]+$/gm, '').trimEnd() === out.replace(/[ \t]+$/gm, '').trimEnd();
     return fingerprint(out) === fingerprint(parts.body);
