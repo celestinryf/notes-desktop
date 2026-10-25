@@ -50,6 +50,7 @@ const notesApi = {
     counts: invoke('notes:counts'),
     related: invoke('notes:related'),
     resolveLinks: invoke('notes:resolveLinks'),
+    resolvePictures: invoke('notes:resolvePictures'),
     wikiLinkFor: invoke('notes:wikiLinkFor'),
   },
   signature: {

@@ -58,6 +58,12 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
         const ids = await api.notes.resolveLinks(id, names);
         return state.currentId === id ? ids : null;
       },
+      resolvePictures: async (names: string[]) => {
+        const id = state.currentId;
+        if (!id) return null;
+        const rels = await api.notes.resolvePictures(id, names);
+        return state.currentId === id ? rels : null;
+      },
       onLinkAtCaret: (on: boolean) => showLinkHint(on),
       onTrigger: (t: InlineTrigger | null) => showInlineMenu(t),
       onTriggerKey: (e: KeyboardEvent) => inlineMenuKey(e),

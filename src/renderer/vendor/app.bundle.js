@@ -3022,6 +3022,12 @@
           const ids = await api.notes.resolveLinks(id, names);
           return state.currentId === id ? ids : null;
         },
+        resolvePictures: async (names) => {
+          const id = state.currentId;
+          if (!id) return null;
+          const rels = await api.notes.resolvePictures(id, names);
+          return state.currentId === id ? rels : null;
+        },
         onLinkAtCaret: (on) => showLinkHint(on),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),

@@ -193,6 +193,7 @@ interface IpcContract {
   'notes:counts': () => Counts;
   'notes:related': (id: string) => RelatedNotes | null;
   'notes:resolveLinks': (id: string, names: string[]) => (string | null)[];
+  'notes:resolvePictures': (id: string, names: string[]) => (string | null)[];
   'notes:wikiLinkFor': (sourceId: string, targetId: string) => string | null;
   'folders:tree': () => FolderNode[];
   'folders:path': (id: string) => { id: string; name: string }[];
@@ -325,7 +326,7 @@ interface NotesApi {
     splitIntoBook: Invoker<'notes:splitIntoBook'>; undoSplit: Invoker<'notes:undoSplit'>; trash: Invoker<'notes:trash'>;
     restore: Invoker<'notes:restore'>; destroy: Invoker<'notes:destroy'>; emptyTrash: Invoker<'notes:emptyTrash'>;
     tags: Invoker<'notes:tags'>; counts: Invoker<'notes:counts'>; related: Invoker<'notes:related'>;
-    resolveLinks: Invoker<'notes:resolveLinks'>; wikiLinkFor: Invoker<'notes:wikiLinkFor'>;
+    resolveLinks: Invoker<'notes:resolveLinks'>; resolvePictures: Invoker<'notes:resolvePictures'>; wikiLinkFor: Invoker<'notes:wikiLinkFor'>;
   };
   signature: { get: Invoker<'signature:get'>; set: Invoker<'signature:set'>; forget: Invoker<'signature:forget'> };
   files: {

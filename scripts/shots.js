@@ -139,8 +139,11 @@ function sampleVault(dir) {
     'Garden ideas.md': '# Garden ideas\n\nA small pond by the fence, and a bench under the pear tree. Back to [[Garden home]].\n',
     'projects/Bed plan.md': '# Bed plan\n\nBeds first, then the gravel path. Start from [Garden home](../Garden%20home.md).\n',
     'Planting log.md': '# Planting log\n\n- Garlic along the south bed\n- Tulips by the gate\n',
+    'Trail photos.md': '# Trail photos\n\nThe ridge in October:\n\n![[ridge.png]]\n\nThe same view, small: ![[ridge.png|200]]\n\nStill to scan: ![[summit.png]]\n',
   };
   for (const [rel, text] of Object.entries(files)) { const file = path.join(root, rel); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); }
+  fs.mkdirSync(path.join(root, 'attachments'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'attachments', 'ridge.png'), samplePng(480, 300));
   return { id: 'v-garden', name: 'Garden vault', path: root, remote: '', autoSync: false, syncMinutes: 5, createdAt: Date.now() };
 }
 
@@ -253,6 +256,8 @@ const SCENES = {
   'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
   'tree-pinned-folder': { about: 'A folder (Work) as a tree: its own pinned notes above its subfolders', pin: ['n-retro', 'n-1on1'], settings: { lastFolderId: 'f-work', treeExpanded: ['f-proj'] }, run: openNote('1:1 with Sam') },
   'related-vault': { about: 'A vault note whose [[wikilinks]] and Markdown links show in the related panel', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Garden home')) },
+  'embed-pictures': { about: 'Picture embeds in a vault note: ![[ridge.png]] from another folder, a sized one, and a missing one', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Trail photos'), async () => { await sleep(800); }) },
+  'embed-pictures-end': { about: 'The end of the same note: the sized embed and a missing picture, which keeps the unresolved link look', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Trail photos'), async (page) => { await sleep(800); await page.evaluate(() => { const s = document.querySelector('.editor-scroll'); if (s) s.scrollTop = s.scrollHeight; }); await sleep(400); }) },
   'wikilink-selected': { about: 'A wikilink selected in the rendered view (clicked, or reached with the arrow keys)', vault: true, run: steps(async () => { await sleep(1500); }, openNote('Garden home'), async (page) => { await page.click('.rich-editor-content a.wikilink >> nth=1'); await sleep(400); }) },
   pinned: { about: 'The Pinned view: always a flat list, with the folder of each note trailing', pin: ['n-reading', 'n-retro', 'b2'], run: async (page) => { await page.locator('[data-view="pinned"]').first().click(); await sleep(400); } },
   'settings-search': { about: 'Settings filtered by a search: only matching settings and sections stay', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('width'); await sleep(400); } },
