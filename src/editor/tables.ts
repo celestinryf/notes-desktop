@@ -26,7 +26,7 @@ function styleOf(rows: string[]): TableStyle | null {
   const lines = rows.map((r) => r.replace(/[ \t]+$/, '').replace(/^ +/, ''));
   const pipesAt = (l: string) => Array.from(l.matchAll(PIPE), (m) => m.index).join(',');
   const padded = /^\|[ \t]/.test(lines[0]);
-  const aligned = padded && /^\|[ \t]/.test(lines[1]) && lines.every((l) => l.length === lines[0].length && pipesAt(l) === pipesAt(lines[0]));
+  const aligned = padded && /^\|[ \t]/.test(lines[1]) && cellsOf(lines[1]).every((c) => c.trim().length >= 3) && lines.every((l) => l.length === lines[0].length && pipesAt(l) === pipesAt(lines[0]));
   const aligns = cellsOf(lines[1]).map(alignOf);
   const justifyOf = (rows: string[][]) => aligns.map((_, i): Align => {
     const cells = rows.map((r) => r[i] || '').filter((c) => c.trim());
@@ -74,19 +74,29 @@ function htmlBlock(node: PMNode, parent: PMNode | Fragment) {
   return element.outerHTML;
 }
 
-function cellText(state: MarkdownSerializerState, cell: PMNode) {
-  const para = cell.firstChild;
-  if (!para || !para.childCount || !('out' in state) || !('delim' in state)) return '';
-  const out = state.out, delim = state.delim;
-  state.out = ' ';
-  state.delim = '';
-  try {
-    state.renderInline(para, false);
-    return typeof state.out === 'string' ? state.out.slice(1).replace(/\n/g, ' ') : '';
-  } finally {
-    state.out = out;
-    state.delim = delim;
-  }
+type CellWriter = (cell: PMNode) => string;
+
+function cellWriter(context: unknown): CellWriter | null {
+  const editor = isRecord(context) ? context.editor : null;
+  const storage = isRecord(editor) ? editor.storage : null;
+  const markdown = isRecord(storage) ? storage.markdown : null;
+  const serializer = isRecord(markdown) ? markdown.serializer : null;
+  const serialize = isRecord(serializer) ? serializer.serialize : null;
+  if (typeof serialize !== 'function') return null;
+  return (cell) => {
+    const md: unknown = serialize.call(serializer, cell);
+    return typeof md === 'string' ? inCell(md) : '';
+  };
+}
+
+function inCell(md: string) {
+  return md
+    .replace(/\\\n/g, '<br>')
+    .replace(/\n/g, ' ')
+    .replace(/^\\([-+>])/, '$1')
+    .replace(/^(\d+)\\\./, '$1.')
+    .replace(/^\\(#{1,6})(?=\s|$)/, '$1')
+    .replace(/(\\*)\|/g, (all: string, slashes: string) => (slashes.length % 2 ? all : slashes + '\\|'));
 }
 
 function dashes(width: number, align: Align) {
@@ -152,13 +162,11 @@ export const NotesTable = Table.extend({
   addStorage() {
     return {
       markdown: {
-        serialize(state: MarkdownSerializerState, node: PMNode, parent: PMNode | Fragment) {
-          if (!fitsMarkdown(node)) { state.write(htmlBlock(node, parent)); state.closeBlock(node); return; }
+        serialize(this: unknown, state: MarkdownSerializerState, node: PMNode, parent: PMNode | Fragment) {
+          const write = cellWriter(this);
+          if (!write || !fitsMarkdown(node)) { state.write(htmlBlock(node, parent)); state.closeBlock(node); return; }
           state.write('');
-          const inTable = 'inTable' in state ? state.inTable : false;
-          if ('inTable' in state) state.inTable = true;
-          const rows = childrenOf(node).map((row) => childrenOf(row).map((cell) => cellText(state, cell)));
-          if ('inTable' in state) state.inTable = inTable;
+          const rows = childrenOf(node).map((row) => childrenOf(row).map(write));
           const aligns = childrenOf(childrenOf(node)[0]).map((cell) => asAligns([cell.attrs.align])[0]);
           tableLines(rows, aligns, readStyle(node.attrs.mdTable)).forEach((l) => { state.write(l); state.ensureNewLine(); });
           state.closeBlock(node);

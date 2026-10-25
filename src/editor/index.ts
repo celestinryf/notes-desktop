@@ -41,9 +41,7 @@ const PlainText = Text.extend({
           const text = String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;');
           const next = parent.maybeChild(index + 1);
           const beforeLink = !!next && next.type.name === 'wikiLink' && !next.attrs.embed && text.endsWith('!');
-          const body = beforeLink ? text.slice(0, -1) : text;
-          if ('inTable' in state && state.inTable === true) body.split('|').forEach((part, i) => { if (i) state.write('\\|'); if (part) state.text(part); });
-          else state.text(body);
+          state.text(beforeLink ? text.slice(0, -1) : text);
           if (beforeLink) state.write('\\!');
         },
         parse: {},
