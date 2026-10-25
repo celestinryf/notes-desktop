@@ -102,6 +102,7 @@
           "list-filter": '<path d="M2 5h20" /><path d="M6 12h12" /><path d="M9 19h6" />',
           "arrow-right-left": '<path d="m16 3 4 4-4 4" /><path d="M20 7H4" /><path d="m8 21-4-4 4-4" /><path d="M4 17h16" />',
           "eye": '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" />',
+          "eye-off": '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /><path d="m2 2 20 20" />',
           "highlighter": '<path d="m9 11-6 6v3h9l3-3" /><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />',
           "type": '<path d="M12 4v16" /><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" /><path d="M9 20h6" />',
           "pencil": '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" />',
@@ -1607,11 +1608,14 @@
     attachBtn: pageElement("#attachBtn", HTMLButtonElement),
     recordBtn: pageElement("#recordBtn", HTMLButtonElement),
     historyBtn: pageElement("#historyBtn", HTMLButtonElement),
+    historyKeepBtn: pageElement("#historyKeepBtn", HTMLButtonElement),
     linkNoteSelect: pageElement("#linkNoteSelect", HTMLSelectElement),
     historyDialog: pageElement("#historyDialog", HTMLDialogElement),
     historyList: pageElement("#historyList", HTMLUListElement),
     historyPreview: pageElement("#historyPreview", HTMLPreElement),
     historyStatus: pageElement("#historyStatus", HTMLSpanElement),
+    historyHint: pageElement("#historyHint", HTMLParagraphElement),
+    historyRecordBtn: pageElement("#historyRecordBtn", HTMLButtonElement),
     historyCloseBtn: pageElement("#historyCloseBtn", HTMLButtonElement),
     historyRestoreBtn: pageElement("#historyRestoreBtn", HTMLButtonElement),
     botPanel: pageElement("#botPanel", HTMLElement),
@@ -3900,8 +3904,56 @@
 
   // src/renderer/history-dialog.ts
   var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
+  var KEPT_OUT_HINT = "Kept out of history: new changes are not recorded. The versions below still hold its old text.";
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
     const hist = { versions: [], index: -1, noteId: null };
+    const recordedHint = el.historyHint.textContent || "";
+    function renderKeepOut(note) {
+      const out = !!(note && note.keepOutOfHistory);
+      el.historyKeepBtn.classList.toggle("hidden", !note || !!note.trashedAt || !!note.filePath && note.fileKind !== "text");
+      el.historyKeepBtn.classList.toggle("is-on", out);
+      setLabel(el.historyKeepBtn, out ? "Record in history again" : "Keep out of history");
+      setIcon(el.historyKeepBtn, out ? "eye" : "eye-off");
+      el.historyKeepBtn.title = out ? "Record this note's changes in history again" : "Stop recording this note's changes in history. Earlier versions keep its old text.";
+    }
+    function renderDialogKeepOut(out) {
+      el.historyHint.classList.toggle("with-icon", out);
+      if (out) {
+        const words = document.createElement("span");
+        words.textContent = KEPT_OUT_HINT;
+        el.historyHint.innerHTML = I("eye-off");
+        el.historyHint.append(words);
+      } else el.historyHint.textContent = recordedHint;
+      el.historyRecordBtn.classList.toggle("hidden", !out);
+    }
+    async function setKeepOut(id, on, undoable) {
+      let fresh;
+      try {
+        fresh = await api.notes.keepOutOfHistory(id, on);
+      } catch (err) {
+        toast("Could not change that: " + (err.message || err));
+        return;
+      }
+      if (!fresh) return;
+      if (state.current && state.current.id === id) {
+        state.current.keepOutOfHistory = fresh.keepOutOfHistory;
+        renderKeepOut(state.current);
+      }
+      if (hist.noteId === id && el.historyDialog.open) renderDialogKeepOut(fresh.keepOutOfHistory);
+      const undo = undoable ? { label: "Undo", run: () => {
+        setKeepOut(id, !on, false);
+      } } : void 0;
+      toast(on ? "Kept out of history. New changes are not recorded; earlier versions still hold the old text." : "Recorded in history again.", undo);
+    }
+    function toggleKeepOut() {
+      const note = state.current;
+      if (note && !el.historyKeepBtn.classList.contains("hidden")) setKeepOut(note.id, !note.keepOutOfHistory, true);
+    }
+    function recordAgain() {
+      if (!hist.noteId) return;
+      if (document.activeElement === el.historyRecordBtn) el.historyCloseBtn.focus();
+      setKeepOut(hist.noteId, false, true);
+    }
     async function openHistory() {
       const note = state.current;
       if (!note) return;
@@ -3914,6 +3966,7 @@
       el.historyPreview.textContent = "";
       el.historyRestoreBtn.disabled = true;
       el.historyStatus.textContent = "Loading\u2026";
+      renderDialogKeepOut(false);
       el.historyDialog.showModal();
       const r = await api.app.historyVersions(note.id, 80);
       if (!r.ok) {
@@ -3921,9 +3974,10 @@
         return;
       }
       hist.noteId = note.id;
+      renderDialogKeepOut(r.keptOut);
       hist.versions = r.versions.filter((v) => v.body !== r.current);
       hist.index = -1;
-      el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? " earlier version" : " earlier versions") : "No earlier version differs from the current text yet.";
+      el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? " earlier version" : " earlier versions") : r.keptOut ? "No earlier versions." : "No earlier version differs from the current text yet.";
       hist.versions.forEach((v, i) => {
         const li = document.createElement("li");
         li.setAttribute("role", "option");
@@ -3971,7 +4025,7 @@
       if (ok) toast("Restored the version from " + new Date(v.at).toLocaleString() + ". The text you had is still in history.");
       else if (state.conflictShown !== note.id) toast("Could not save the restored text yet; it will be retried.");
     }
-    return { openHistory, restoreVersion };
+    return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
   }
 
   // src/renderer/speech.ts
@@ -8756,6 +8810,7 @@
       renderFileRow(note);
       renderStickyButton(note);
       renderRemindButton(note);
+      renderKeepOut(note);
       renderLiveRow(note);
       renderBookStrip(note);
       renderRelated(note);
@@ -8841,7 +8896,7 @@
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
-    const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
     async function refreshCurrentMeta() {
       if (!state.currentId) return;
       const fresh = await api.notes.get(state.currentId);
@@ -10296,6 +10351,8 @@
       el.attachBtn.addEventListener("click", attachFiles);
       el.recordBtn.addEventListener("click", toggleRecording);
       el.historyBtn.addEventListener("click", openHistory);
+      el.historyKeepBtn.addEventListener("click", toggleKeepOut);
+      el.historyRecordBtn.addEventListener("click", recordAgain);
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());
       el.historyRestoreBtn.addEventListener("click", restoreVersion);
       el.historyDialog.addEventListener("close", () => focusBody());

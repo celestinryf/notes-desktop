@@ -38,6 +38,7 @@ const notesApi = {
     create: invoke('notes:create'),
     update: invoke('notes:update'),
     togglePin: invoke('notes:togglePin'),
+    keepOutOfHistory: invoke('notes:keepOutOfHistory'),
     duplicate: invoke('notes:duplicate'),
     splitIntoBook: invoke('notes:splitIntoBook'),
     undoSplit: invoke('notes:undoSplit'),

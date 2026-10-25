@@ -124,6 +124,7 @@
             <button role="menuitem" class="menu-item" id="remindBtn" data-icon="alarm-clock"><span class="lbl">Remind me…</span><span class="keys">Ctrl+Shift+M</span></button>
             <button role="menuitem" class="menu-item" id="lockBtn" data-icon="lock"><span class="lbl">Lock</span><span class="keys">Ctrl+L</span></button>
             <button role="menuitem" class="menu-item" id="historyBtn" data-icon="history"><span class="lbl">Earlier versions…</span><span class="keys">Ctrl+Shift+H</span></button>
+            <button role="menuitem" class="menu-item" id="historyKeepBtn" data-icon="eye-off"><span class="lbl">Keep out of history</span></button>
             <button role="menuitem" class="menu-item" id="duplicateBtn" data-icon="copy"><span class="lbl">Duplicate</span></button>
             <button role="menuitem" class="menu-item" id="splitBtn" data-icon="book-plus"><span class="lbl">Split into a book…</span></button>
           </div>
@@ -516,7 +517,10 @@
     <dialog id="historyDialog" class="modal dialog-wide">
       <form method="dialog" class="dialog-form" id="historyForm">
         <h2 class="dialog-title">Earlier versions</h2>
-        <p class="field-hint" id="historyHint">Every saved change is kept in the local history. Pick a version to preview it; Restore puts that text back into the note (the current text stays in history too).</p>
+        <div class="history-hint-row">
+          <p class="field-hint" id="historyHint">Every saved change is kept in the local history. Pick a version to preview it; Restore puts that text back into the note (the current text stays in history too).</p>
+          <button type="button" class="btn btn-small hidden" id="historyRecordBtn">Record in history again</button>
+        </div>
         <div class="history-layout">
           <ul class="history-list" id="historyList" role="listbox" aria-label="Versions"></ul>
           <pre class="history-preview" id="historyPreview"></pre>
