@@ -916,6 +916,10 @@ button.book-name:hover { background: var(--hover); }
 
 .quick-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .field-hint { margin: 0 0 var(--s2); font-size: var(--t-sm); color: var(--fg-2); }
+.field-hint.with-icon { display: flex; gap: var(--s2); align-items: flex-start; }
+.field-hint.with-icon .icon { margin-top: 2px; }
+.history-hint-row { display: flex; gap: var(--s3); align-items: flex-start; }
+.history-hint-row .field-hint { flex: 1; }
 .dialog-wide { width: min(860px, 94vw); }
 .history-layout { display: grid; grid-template-columns: 240px 1fr; gap: var(--s3); height: min(50vh, 420px); }
 .history-list { list-style: none; margin: 0; padding: var(--s1); overflow: auto; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--paper); }

@@ -109,6 +109,7 @@ function main() {
     beforeSnapshot: () => { store.flush(); },
     workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
     linkedFiles: () => store.textFilesOutsideHome(),
+    keptOut: () => store.keptOutOfHistory(),
   });
   store.onContentChange = () => git.noteChanged();
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
@@ -498,6 +499,7 @@ function main() {
   handle('live:stop', (_e, id) => live.stop(id));
   handle('live:status', (_e, id) => live.statusOf(id));
   handle('notes:togglePin', (_e, id) => store.publicNote(store.togglePin(id)));
+  handle('notes:keepOutOfHistory', (_e, id, on) => store.publicNote(store.setKeepOutOfHistory(id, on === true)));
   handle('notes:duplicate', (_e, id) => {
     const copy = store.duplicate(id);
     if (!copy) throw new Error('Note not found');
@@ -1348,7 +1350,7 @@ function main() {
     });
     found.sort((a, b) => b.at - a.at);
     const versions = found.filter((v, i) => i === 0 || v.body !== found[i - 1].body).slice(0, max);
-    return { ok: true, versions, current: note.body };
+    return { ok: true, versions, current: note.body, keptOut: note.keepOutOfHistory };
   });
 
   const ATTACH_DIR = path.join(DATA_DIR, 'attachments');

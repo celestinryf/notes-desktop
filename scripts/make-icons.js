@@ -10,7 +10,7 @@ const NAMES = [
   'code-xml', 'volume-2', 'mic', 'lock', 'lock-open', 'alarm-clock', 'paperclip', 'audio-lines', 'printer',
   'sticky-note', 'bot', 'download', 'share-2', 'replace', 'refresh-cw', 'file-output', 'terminal', 'radio',
   'sun-moon', 'settings', 'check', 'circle-alert', 'save', 'pin-off', 'book', 'mail', 'list-filter', 'arrow-right-left',
-  'eye', 'highlighter', 'type', 'pencil', 'image', 'signature', 'message-square', 'layout-grid', 'undo-2', 'redo-2',
+  'eye', 'eye-off', 'highlighter', 'type', 'pencil', 'image', 'signature', 'message-square', 'layout-grid', 'undo-2', 'redo-2',
   'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'square-stack', 'palette',
 ];
 

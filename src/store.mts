@@ -530,6 +530,7 @@ function noteFrom(raw: Record<string, unknown>, now: number): Note {
     remindAt: isFiniteNumber(raw.remindAt) ? Math.round(raw.remindAt) : null,
     remindedAt: isFiniteNumber(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
     pinned: !!raw.pinned,
+    keepOutOfHistory: raw.keepOutOfHistory === true,
     createdAt,
     updatedAt: isFiniteNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
     trashedAt: isFiniteNumber(raw.trashedAt) ? raw.trashedAt : null,
@@ -1256,15 +1257,16 @@ class Store {
       const plain = this.plain.get(id);
       if (plain === undefined) throw Object.assign(new Error('This note is locked. Unlock it first.'), { code: 'ELOCKED' });
       const key = this._keyOf(id);
-      const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false, lock: L.encrypt(plain, key, note.lock.salt) });
+      const copy = this.create({ title: note.title + ' (copy)', body: '', tags: note.tags, folderId: note.folderId, pinned: false, keepOutOfHistory: note.keepOutOfHistory, lock: L.encrypt(plain, key, note.lock.salt) });
       this.plain.set(copy.id, plain);
       this.keys.set(copy.id, key);
       return this.publicNote(copy);
     }
     const folder = note.folderId ? this.getFolder(note.folderId) : null;
-    if (this.isHome(note.vaultId)) return this._createHomeNote({ title: H.deriveTitle(note) + ' (copy)', body: note.body, tags: note.tags, pinned: false }, folder);
-    if (note.vaultId && folder && folder.vaultId && folder.dirPath) return this.createVaultNote(folder.id, { title: note.title + ' (copy)', body: note.body, tags: note.tags });
-    return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false });
+    const keepOutOfHistory = note.keepOutOfHistory;
+    if (this.isHome(note.vaultId)) return this._createHomeNote({ title: H.deriveTitle(note) + ' (copy)', body: note.body, tags: note.tags, pinned: false, keepOutOfHistory }, folder);
+    if (note.vaultId && folder && folder.vaultId && folder.dirPath) return this.createVaultNote(folder.id, { title: note.title + ' (copy)', body: note.body, tags: note.tags, keepOutOfHistory });
+    return this.create({ title: (note.title || path.basename(note.filePath || '')) + ' (copy)', body: note.body, tags: note.tags, folderId: note.folderId, pinned: false, keepOutOfHistory });
   }
 
   splitIntoBook(id: string, opts?: { name?: string; keepOriginal?: boolean }) {
@@ -1281,7 +1283,7 @@ class Store {
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
     const parentId = parent && (!parent.vaultId || (homeText && this.isHome(parent.vaultId))) ? parent.id : null;
     const folder = folderFrom({ name: String(opts.name || '').trim() || plan.name, parentId, createdAt: now, book: true }, now);
-    const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
+    const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, keepOutOfHistory: note.keepOutOfHistory, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
     const originalTrashed = !opts.keepOriginal;
     const files = homeText && isFileNote(note) ? this._writeBookFiles(note, folder, pages, parent, originalTrashed) : null;
@@ -1546,7 +1548,18 @@ class Store {
   }
 
   textFilesOutsideHome() {
-    return this.notes.flatMap((n) => (this.isTextOutsideHome(n) ? [{ id: n.id, filePath: n.filePath }] : []));
+    return this.notes.flatMap((n) => (this.isTextOutsideHome(n) && !n.keepOutOfHistory ? [{ id: n.id, filePath: n.filePath }] : []));
+  }
+
+  keptOutOfHistory() {
+    return this.notes.filter((n) => n.keepOutOfHistory).map((n) => ({ id: n.id, filePath: n.filePath }));
+  }
+
+  setKeepOutOfHistory(id: string, on: boolean) {
+    const note = this.get(id);
+    if (!note) return null;
+    if (note.keepOutOfHistory === on) return note;
+    return this._change({ notes: [note] }, () => { note.keepOutOfHistory = on; return note; });
   }
 
   _isVaultRoot(f: Folder) {
@@ -1797,7 +1810,7 @@ class Store {
     fs.writeFileSync(full, body, 'utf8');
     return this.create({
       title: stem(name), body, tags: FM.noteTags(body), folderId: folder.id,
-      filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: folder.vaultId, pinned: !!data.pinned,
+      filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId: folder.vaultId, pinned: !!data.pinned, keepOutOfHistory: data.keepOutOfHistory === true,
     });
   }
 

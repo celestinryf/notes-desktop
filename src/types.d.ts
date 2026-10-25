@@ -64,6 +64,7 @@ interface Note {
   remindAt: number | null;
   remindedAt: number | null;
   pinned: boolean;
+  keepOutOfHistory: boolean;
   createdAt: number;
   updatedAt: number;
   trashedAt: number | null;
@@ -166,7 +167,7 @@ type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: f
 type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
 
 interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
-type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string } | { ok: false; error: string };
+type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string; keptOut: boolean } | { ok: false; error: string };
 
 type Ok<T = {}> = ({ ok: true } & T) | { ok: false; error?: string; canceled?: boolean };
 
@@ -180,6 +181,7 @@ interface IpcContract {
   'notes:create': (data?: NoteCreate) => PublicNote;
   'notes:update': (id: string, patch: NotePatch) => PublicNote | null;
   'notes:togglePin': (id: string) => PublicNote | null;
+  'notes:keepOutOfHistory': (id: string, on: boolean) => PublicNote | null;
   'notes:duplicate': (id: string) => PublicNote;
   'notes:splitIntoBook': (id: string, opts?: { name?: string; keepOriginal?: boolean }) => { folder: Folder; pageIds: string[]; originalTrashed: boolean };
   'notes:undoSplit': (folderId: string, pageIds: string[], originalId: string | null) => { restored: boolean; removedIds: string[] };
@@ -319,7 +321,7 @@ type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) =
 interface NotesApi {
   notes: {
     list: Invoker<'notes:list'>; rows: Invoker<'notes:rows'>; searchIds: Invoker<'notes:searchIds'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
-    update: Invoker<'notes:update'>; togglePin: Invoker<'notes:togglePin'>; duplicate: Invoker<'notes:duplicate'>;
+    update: Invoker<'notes:update'>; togglePin: Invoker<'notes:togglePin'>; keepOutOfHistory: Invoker<'notes:keepOutOfHistory'>; duplicate: Invoker<'notes:duplicate'>;
     splitIntoBook: Invoker<'notes:splitIntoBook'>; undoSplit: Invoker<'notes:undoSplit'>; trash: Invoker<'notes:trash'>;
     restore: Invoker<'notes:restore'>; destroy: Invoker<'notes:destroy'>; emptyTrash: Invoker<'notes:emptyTrash'>;
     tags: Invoker<'notes:tags'>; counts: Invoker<'notes:counts'>; related: Invoker<'notes:related'>;

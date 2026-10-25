@@ -19,6 +19,7 @@ const NAME_GIT_REFUSES = /^(\.+|\.git|git~\d+|(con|prn|aux|nul|com\d|lpt\d|conin
 
 type FileCommit = { hash: string; at: number; path: string };
 type LinkedFile = { id: string; filePath: string };
+type KeptOut = { id: string; filePath: string | null };
 type SeenFile = { mtimeMs: number; size: number; hash: string };
 
 type GitRun = { ok: boolean, code: string | number | null | undefined, stdout: string, stderr: string, error: string | null };
@@ -31,6 +32,15 @@ function run(args: string[], cwd: string, timeoutMs?: number, input?: string): P
     if (input !== undefined && child.stdin) { child.stdin.on('error', () => {}); child.stdin.end(input); }
   });
 }
+
+const ignoreLine = (rel: string) => '/' + rel.replace(/[\\*?[\]!#]/g, '\\$&').replace(/ $/, '\\ ');
+
+const KEPT_OUT_FIELDS = new Set(['body', 'title', 'tags']);
+
+const withoutKeptOut = (doc: unknown, ids: Set<string>) => {
+  if (!isRecord(doc) || !Array.isArray(doc.notes)) return doc;
+  return Object.assign({}, doc, { notes: doc.notes.map((n: unknown) => (isRecord(n) && typeof n.id === 'string' && ids.has(n.id) ? Object.fromEntries(Object.entries(n).filter(([k]) => !KEPT_OUT_FIELDS.has(k))) : n)) });
+};
 
 const linkedDir = (id: string) => LINKED_DIR + '/' + id.slice(0, 2).toLowerCase() + '/' + id + '/';
 
@@ -107,10 +117,11 @@ class GitSync {
   beforeSnapshot: () => void;
   workTree: () => string | null;
   linkedFiles: () => LinkedFile[];
+  keptOut: () => KeptOut[];
   linkedSeen: Map<string, SeenFile>;
   linkedError: string | null;
   gitDir: string;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[] }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[] }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -125,13 +136,18 @@ class GitSync {
     this.beforeSnapshot = opts.beforeSnapshot || (() => {});
     this.workTree = opts.workTree || (() => null);
     this.linkedFiles = opts.linkedFiles || (() => []);
+    this.keptOut = opts.keptOut || (() => []);
     this.linkedSeen = new Map();
     this.linkedError = null;
     this.gitDir = path.join(this.dir, '.git');
   }
 
-  _inTree(tree: string, args: string[], timeoutMs?: number) {
-    return run(['-c', 'core.quotePath=false', '-c', 'core.autocrlf=false', '-c', 'core.excludesFile=' + this._treeExclude(), '--git-dir', this.gitDir, '--work-tree', tree].concat(args), tree, timeoutMs);
+  _inTree(tree: string, args: string[], timeoutMs?: number, input?: string) {
+    return run(['-c', 'core.quotePath=false', '-c', 'core.autocrlf=false', '-c', 'core.excludesFile=' + this._treeExclude(), '--git-dir', this.gitDir, '--work-tree', tree].concat(args), tree, timeoutMs, input);
+  }
+
+  _unstage(tree: string, rels: string[]) {
+    return this._inTree(tree, ['rm', '--cached', '-q', '--ignore-unmatch', '--pathspec-from-file=-', '--pathspec-file-nul'], 120000, rels.map((rel) => ':(icase,literal)' + rel).join('\0'));
   }
 
   _treeExclude() {
@@ -162,9 +178,13 @@ class GitSync {
     this._clearStaleLock();
     const tree = this.workTree();
     if (tree) {
-      await this._inTree(tree, ['rm', '--cached', '-q', '--ignore-unmatch', '--', 'notes.json']);
+      const cleared = await this._unstage(tree, ['notes.json'].concat(this._keptOutOf(tree)));
+      if (!cleared.ok) return cleared;
       const added = await this._addTree(tree);
       if (!added.ok) return added;
+      const keptNow = this._keptOutOf(tree);
+      const recleared = keptNow.length ? await this._unstage(tree, keptNow) : added;
+      if (!recleared.ok) return recleared;
       const linked = await this._stageLinked();
       this.linkedError = linked.ok ? null : linked.error || 'git could not stage them';
       if (!linked.ok) {
@@ -175,6 +195,20 @@ class GitSync {
     }
     if (!(await this.takeSnapshot())) return null;
     return run(['add', '-A', '--', 'notes.json'], this.dir);
+  }
+
+  _keptOutOf(tree: string) {
+    const kept = this.keptOut().flatMap((k) => {
+      if (!k.filePath) return [];
+      const rel = path.relative(tree, k.filePath);
+      return rel && !path.isAbsolute(rel) && rel.split(path.sep)[0] !== '..' ? [rel.split(path.sep).join('/')] : [];
+    });
+    const file = path.join(this.gitDir, 'info', 'exclude');
+    const text = kept.map(ignoreLine).join('\n') + (kept.length ? '\n' : '');
+    let have: string | null = null;
+    try { have = fs.readFileSync(file, 'utf8'); } catch (_) {  }
+    if (have !== text) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); }
+    return kept;
   }
 
   async _stageLinked(): Promise<GitRun> {
@@ -303,7 +337,9 @@ class GitSync {
       try {
         if (!fs.existsSync(this.source)) return false;
         if (fs.existsSync(this.snapshot)) { try { fs.chmodSync(this.snapshot, 0o666); } catch (_) {  } }
-        fs.copyFileSync(this.source, this.snapshot);
+        const ids = new Set(this.keptOut().map((k) => k.id));
+        if (ids.size) fs.writeFileSync(this.snapshot, JSON.stringify(withoutKeptOut(JSON.parse(fs.readFileSync(this.source, 'utf8')), ids), null, 2));
+        else fs.copyFileSync(this.source, this.snapshot);
         try { fs.chmodSync(this.snapshot, 0o666); } catch (_) {  }
         return true;
       } catch (err) {
@@ -410,5 +446,5 @@ class GitSync {
   }
 }
 
-export type { FileCommit, LinkedFile };
+export type { FileCommit, LinkedFile, KeptOut };
 export { GitSync };

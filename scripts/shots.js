@@ -241,6 +241,9 @@ const SCENES = {
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
   'palette-query': { about: 'The command palette, typing', run: async (page) => { await page.keyboard.press('Control+p'); await sleep(250); await page.keyboard.type('plan'); await sleep(400); } },
   more: { about: 'The More menu of a note', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
+  'more-kept-out': { about: 'The More menu of a note kept out of history: the item reads "Record in history again"', keepOut: ['n-plan'], run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
+  'history-kept-out': { about: 'Earlier versions of a note kept out of history: the notice and the way back', keepOut: ['n-plan'], settings: { gitEnabled: true }, run: steps(openNote('Q4 planning'), key('Control+Shift+h'), async () => { await sleep(800); }) },
+  'keep-out-toast': { about: 'Keeping a note out of history from the More menu: the toast with Undo', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#historyKeepBtn'); await sleep(500); }) },
   slash: { about: 'The "/" block menu in a note', run: steps(openNote('Ideas for the garden'), typeAtEnd('/', true)) },
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
@@ -293,6 +296,7 @@ async function shoot(theme, name, opts) {
   if (opts.schemes[theme]) data.settings.colorScheme = opts.schemes[theme];
   Object.assign(data.settings, SCENES[name].settings || {});
   for (const id of SCENES[name].pin || []) data.notes.find((n) => n.id === id).pinned = true;
+  for (const id of SCENES[name].keepOut || []) data.notes.find((n) => n.id === id).keepOutOfHistory = true;
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));

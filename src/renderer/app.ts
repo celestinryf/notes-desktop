@@ -1756,6 +1756,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     renderFileRow(note);
     renderStickyButton(note);
     renderRemindButton(note);
+    renderKeepOut(note);
     renderLiveRow(note);
     renderBookStrip(note);
     renderRelated(note);
@@ -1856,7 +1857,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
-  const { openHistory, restoreVersion } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
 
   async function refreshCurrentMeta() {
     if (!state.currentId) return;
@@ -2956,6 +2957,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.attachBtn.addEventListener('click', attachFiles);
     el.recordBtn.addEventListener('click', toggleRecording);
     el.historyBtn.addEventListener('click', openHistory);
+    el.historyKeepBtn.addEventListener('click', toggleKeepOut);
+    el.historyRecordBtn.addEventListener('click', recordAgain);
     el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
     el.historyRestoreBtn.addEventListener('click', restoreVersion);
     el.historyDialog.addEventListener('close', () => focusBody());

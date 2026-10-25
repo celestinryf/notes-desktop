@@ -1,4 +1,4 @@
-import { el } from './dom.ts';
+import { el, I, setLabel, setIcon } from './dom.ts';
 import { state, lockedNow } from './state.ts';
 import { find } from './find-state.ts';
 import { src } from './code-editor.ts';
@@ -7,6 +7,8 @@ import { toast } from './toast.ts';
 import { autoGrow } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
+
+const KEPT_OUT_HINT = 'Kept out of history: new changes are not recorded. The versions below still hold its old text.';
 
 interface HistoryDialogDeps {
   api: NotesApi;
@@ -18,6 +20,49 @@ interface HistoryDialogDeps {
 
 export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }: HistoryDialogDeps) {
   const hist: { versions: HistoryVersion[], index: number, noteId: string | null } = { versions: [], index: -1, noteId: null };
+  const recordedHint = el.historyHint.textContent || '';
+
+  function renderKeepOut(note: PublicNote | null) {
+    const out = !!(note && note.keepOutOfHistory);
+    el.historyKeepBtn.classList.toggle('hidden', !note || !!note.trashedAt || (!!note.filePath && note.fileKind !== 'text'));
+    el.historyKeepBtn.classList.toggle('is-on', out);
+    setLabel(el.historyKeepBtn, out ? 'Record in history again' : 'Keep out of history');
+    setIcon(el.historyKeepBtn, out ? 'eye' : 'eye-off');
+    el.historyKeepBtn.title = out ? "Record this note's changes in history again" : "Stop recording this note's changes in history. Earlier versions keep its old text.";
+  }
+
+  function renderDialogKeepOut(out: boolean) {
+    el.historyHint.classList.toggle('with-icon', out);
+    if (out) {
+      const words = document.createElement('span');
+      words.textContent = KEPT_OUT_HINT;
+      el.historyHint.innerHTML = I('eye-off');
+      el.historyHint.append(words);
+    } else el.historyHint.textContent = recordedHint;
+    el.historyRecordBtn.classList.toggle('hidden', !out);
+  }
+
+  async function setKeepOut(id: string, on: boolean, undoable: boolean) {
+    let fresh: PublicNote | null;
+    try { fresh = await api.notes.keepOutOfHistory(id, on); }
+    catch (err) { toast('Could not change that: ' + (err.message || err)); return; }
+    if (!fresh) return;
+    if (state.current && state.current.id === id) { state.current.keepOutOfHistory = fresh.keepOutOfHistory; renderKeepOut(state.current); }
+    if (hist.noteId === id && el.historyDialog.open) renderDialogKeepOut(fresh.keepOutOfHistory);
+    const undo = undoable ? { label: 'Undo', run: () => { setKeepOut(id, !on, false); } } : undefined;
+    toast(on ? 'Kept out of history. New changes are not recorded; earlier versions still hold the old text.' : 'Recorded in history again.', undo);
+  }
+
+  function toggleKeepOut() {
+    const note = state.current;
+    if (note && !el.historyKeepBtn.classList.contains('hidden')) setKeepOut(note.id, !note.keepOutOfHistory, true);
+  }
+
+  function recordAgain() {
+    if (!hist.noteId) return;
+    if (document.activeElement === el.historyRecordBtn) el.historyCloseBtn.focus();
+    setKeepOut(hist.noteId, false, true);
+  }
 
   async function openHistory() {
     const note = state.current;
@@ -28,13 +73,15 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyPreview.textContent = '';
     el.historyRestoreBtn.disabled = true;
     el.historyStatus.textContent = 'Loading…';
+    renderDialogKeepOut(false);
     el.historyDialog.showModal();
     const r = await api.app.historyVersions(note.id, 80);
     if (!r.ok) { el.historyStatus.textContent = r.error; return; }
     hist.noteId = note.id;
+    renderDialogKeepOut(r.keptOut);
     hist.versions = r.versions.filter((v) => v.body !== r.current);
     hist.index = -1;
-    el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : 'No earlier version differs from the current text yet.';
+    el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? ' earlier version' : ' earlier versions') : r.keptOut ? 'No earlier versions.' : 'No earlier version differs from the current text yet.';
     hist.versions.forEach((v, i) => {
       const li = document.createElement('li');
       li.setAttribute('role', 'option');
@@ -82,5 +129,5 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
   }
 
-  return { openHistory, restoreVersion };
+  return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
 }
