@@ -1283,7 +1283,7 @@ class Store {
     const parent = note.folderId ? this.getFolder(note.folderId) : null;
     const parentId = parent && (!parent.vaultId || (homeText && this.isHome(parent.vaultId))) ? parent.id : null;
     const folder = folderFrom({ name: String(opts.name || '').trim() || plan.name, parentId, createdAt: now, book: true }, now);
-    const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, createdAt: now, updatedAt: now, trashedAt: null }, now));
+    const pages = plan.pages.map((p) => noteFrom({ id: crypto.randomUUID(), title: p.title, body: p.body, tags: note.tags.slice(), folderId: folder.id, pinned: false, keepOutOfHistory: note.keepOutOfHistory, createdAt: now, updatedAt: now, trashedAt: null }, now));
     folder.pageOrder = pages.map((p) => p.id);
     const originalTrashed = !opts.keepOriginal;
     const files = homeText && isFileNote(note) ? this._writeBookFiles(note, folder, pages, parent, originalTrashed) : null;
