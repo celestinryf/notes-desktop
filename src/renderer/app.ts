@@ -1835,7 +1835,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     tall: (n) => rowHasExcerpt(n, state.query),
     draggable: (n) => !n.trashedAt,
     open: (id, newTab) => { openNote(id, { newTab }); },
-    dragStart: (id, e) => { if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; } toPeer({ type: 'drag', id }); },
+    dragStart: (id, e) => {
+      if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; }
+      toPeer({ type: 'drag', id });
+      document.addEventListener('pointermove', () => toPeer({ type: 'drag', id: null }), { once: true });
+    },
     dragEnd: () => toPeer({ type: 'drag', id: null }),
   });
 

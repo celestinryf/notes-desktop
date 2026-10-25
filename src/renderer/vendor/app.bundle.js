@@ -19213,7 +19213,7 @@
       count: rows.length,
       getScrollElement: () => scroller,
       estimateSize: (i) => deps.tall(rows[i]) ? TALL_ROW_PX : ROW_PX,
-      getItemKey: (i) => rows[i].id,
+      getItemKey: (i) => rows[i].id + (deps.tall(rows[i]) ? ":tall" : ""),
       overscan: OVERSCAN
     });
     (0, import_react.useLayoutEffect)(() => {
@@ -25557,6 +25557,7 @@
           e.dataTransfer.effectAllowed = "move";
         }
         toPeer({ type: "drag", id });
+        document.addEventListener("pointermove", () => toPeer({ type: "drag", id: null }), { once: true });
       },
       dragEnd: () => toPeer({ type: "drag", id: null })
     });

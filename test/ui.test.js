@@ -44,10 +44,10 @@ const rendererErrors = [];
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
 const waitForDomWithin = (timeout, fn) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn), timeout);
 const revealRow = (match) => page.evaluate(async (m) => {
-  const hit = () => [...document.querySelectorAll('.note-row')].some((r) => r.offsetParent && (m.id ? r.dataset.id === m.id : r.textContent.toLowerCase().includes(m.text.toLowerCase())));
-  if (hit()) return true;
+  const matches = (r) => (m.id ? r.dataset.id === m.id : r.textContent.toLowerCase().includes(m.text.toLowerCase()));
   const list = document.getElementById('noteList');
-  if (!list || list.classList.contains('hidden')) return false;
+  if (!list || list.classList.contains('hidden')) return [...document.querySelectorAll('.note-row')].some((r) => r.offsetParent && matches(r));
+  const hit = () => [...list.querySelectorAll('.note-row')].some(matches);
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   list.scrollTop = 0;
   await frame();
@@ -1860,6 +1860,13 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   await page.mouse.move(listBox.x, listBox.y);
   await page.mouse.wheel(0, 500);
   await waitForDom(() => document.getElementById('noteList').scrollTop > 0);
+  await clickRow("Scroll filler 0");
+  const activeRowInView = () => page.evaluate(() => { const list = document.getElementById('noteList'); const row = list.querySelector('.note-row.is-active'); if (!row) return false; const a = row.getBoundingClientRect(), b = list.getBoundingClientRect(); return a.top >= b.top - 1 && a.bottom <= b.bottom + 1; });
+  for (let i = 0; i < 80; i++) await page.keyboard.press('Alt+ArrowDown');
+  await waitFor('the last note is revealed', activeRowInView);
+  for (let i = 0; i < 80; i++) await page.keyboard.press('Alt+ArrowUp');
+  await waitFor('the first note is revealed after scrolling back past unrendered rows', activeRowInView);
+  assert.equal(await page.$eval('#noteList .note-row.is-active', (r) => r.getAttribute('aria-posinset')), '1', 'Alt+Up reaches the first note');
   await clickRow("Scroll filler 0");
   await useSourceMode(true);
   await page.fill('#bodyInput', Array.from({ length: 150 }, (_, i) => 'line ' + i).join('\n'));

@@ -33,7 +33,7 @@ function NoteList<T extends Row>({ rows, activeId, scroller, deps, handle }: Lis
     count: rows.length,
     getScrollElement: () => scroller,
     estimateSize: (i) => (deps.tall(rows[i]) ? TALL_ROW_PX : ROW_PX),
-    getItemKey: (i) => rows[i].id,
+    getItemKey: (i) => rows[i].id + (deps.tall(rows[i]) ? ':tall' : ''),
     overscan: OVERSCAN,
   });
   useLayoutEffect(() => { handle.reveal = (index) => list.scrollToIndex(index, { align: 'auto' }); });
