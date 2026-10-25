@@ -14,10 +14,8 @@ import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
-import Table from '@tiptap/extension-table';
+import { NotesTable, NotesTableCell, NotesTableHeader } from './tables.ts';
 import TableRow from '@tiptap/extension-table-row';
-import TableHeader from '@tiptap/extension-table-header';
-import TableCell from '@tiptap/extension-table-cell';
 import { Markdown } from 'tiptap-markdown';
 
 function fingerprint(md: string | null | undefined) {
@@ -43,7 +41,9 @@ const PlainText = Text.extend({
           const text = String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;');
           const next = parent.maybeChild(index + 1);
           const beforeLink = !!next && next.type.name === 'wikiLink' && !next.attrs.embed && text.endsWith('!');
-          state.text(beforeLink ? text.slice(0, -1) : text);
+          const body = beforeLink ? text.slice(0, -1) : text;
+          if ('inTable' in state && state.inTable === true) body.split('|').forEach((part, i) => { if (i) state.write('\\|'); if (part) state.text(part); });
+          else state.text(body);
           if (beforeLink) state.write('\\!');
         },
         parse: {},
@@ -417,10 +417,10 @@ export function create(element: HTMLElement, options: EditorOptions) {
       DashCheckbox,
       Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true, protocols: ['note', 'attachment'], HTMLAttributes: { rel: 'noopener', target: '_blank' } }),
       pictures(options.imageBase),
-      Table.configure({ resizable: false }),
+      NotesTable.configure({ resizable: false }),
       TableRow,
-      TableHeader,
-      TableCell,
+      NotesTableHeader,
+      NotesTableCell,
       Placeholder.configure({ placeholder: options.placeholder || 'Start writing…' }),
       Markdown.configure({ html: true, tightLists: true, bulletListMarker: '-', linkify: false, breaks: true, transformPastedText: false, transformCopiedText: true }),
       NotesKeys,
