@@ -359,6 +359,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     ]);
     if ((listOpts.query || '') !== state.query) return refresh(opts);
     state.notes = notes;
+    state.notesQuery = listOpts.query || '';
     state.outline = outline;
     state.tree = tree;
     state.folderPath = folderPath;
@@ -422,7 +423,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function renderList() {
-    const q = state.query;
+    const q = state.notesQuery;
     const tree = treeModeActive();
     const empty = tree ? !treeHasContent() : !state.notes.length;
     el.noteList.classList.toggle('hidden', tree || empty);

@@ -15,6 +15,7 @@ export const state: RendererState = {
   editingFolder: null,
   query: '',
   notes: [],
+  notesQuery: '',
   currentId: null,
   current: null,
   sourceMode: false,

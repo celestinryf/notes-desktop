@@ -32,17 +32,26 @@ interface ListProps<T extends Row> {
 
 const rowKey = (row: Row, tall: boolean) => row.id + (tall ? ':tall' : '');
 
+type LearnedSize = { size: number; seen: Map<number, number> };
+const learnedSize = (size: number): LearnedSize => ({ size, seen: new Map() });
+function learn(learned: LearnedSize, size: number) {
+  const times = (learned.seen.get(size) || 0) + 1;
+  learned.seen.set(size, times);
+  if (times > (learned.seen.get(learned.size) || 0)) learned.size = size;
+}
+
 function NoteList<T extends Row>({ layout, activeId, scroller, deps, handle }: ListProps<T>) {
   const { rows } = layout;
-  const getItemKey = useCallback((i: number) => layout.keys[i], [layout]);
-  const sizes = useRef({ short: ROW_PX, tall: TALL_ROW_PX });
-  const estimateSize = useCallback((i: number) => (layout.tall[i] ? sizes.current.tall : sizes.current.short), [layout]);
+  const { keys, tall } = layout;
+  const getItemKey = useCallback((i: number) => keys[i], [keys]);
+  const sizes = useRef({ short: learnedSize(ROW_PX), tall: learnedSize(TALL_ROW_PX) });
+  const estimateSize = useCallback((i: number) => (tall[i] ? sizes.current.tall : sizes.current.short).size, [tall]);
   const measure = useCallback((el: HTMLLIElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLElement, HTMLLIElement>) => {
     const size = measureElement(el, entry, instance);
     const index = instance.indexFromElement(el);
-    if (entry && size > 0 && index < layout.tall.length) sizes.current[layout.tall[index] ? 'tall' : 'short'] = size;
+    if (entry && size > 0 && index >= 0 && index < tall.length) learn(tall[index] ? sizes.current.tall : sizes.current.short, size);
     return size;
-  }, [layout]);
+  }, [tall]);
   const list = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroller,
@@ -119,7 +128,8 @@ export function createNoteList<T extends Row>(ul: HTMLUListElement, deps: NoteLi
       if (i < 0) return;
       const tall = deps.tall(row, layout.query);
       const at = <V,>(list: readonly V[], value: V) => { const copy = list.slice(); copy[i] = value; return copy; };
-      layout = { rows: at(layout.rows, row), query: layout.query, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+      const sized = tall === layout.tall[i] ? layout : { ...layout, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+      layout = { ...sized, rows: at(layout.rows, row) };
       paint();
     },
   };

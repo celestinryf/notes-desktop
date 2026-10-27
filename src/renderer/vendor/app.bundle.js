@@ -16211,6 +16211,7 @@
     editingFolder: null,
     query: "",
     notes: [],
+    notesQuery: "",
     currentId: null,
     current: null,
     sourceMode: false,
@@ -19209,17 +19210,24 @@
   var TALL_ROW_PX = 42;
   var OVERSCAN = 16;
   var rowKey = (row, tall) => row.id + (tall ? ":tall" : "");
+  var learnedSize = (size) => ({ size, seen: /* @__PURE__ */ new Map() });
+  function learn(learned, size) {
+    const times = (learned.seen.get(size) || 0) + 1;
+    learned.seen.set(size, times);
+    if (times > (learned.seen.get(learned.size) || 0)) learned.size = size;
+  }
   function NoteList({ layout, activeId, scroller, deps, handle }) {
     const { rows } = layout;
-    const getItemKey = (0, import_react.useCallback)((i) => layout.keys[i], [layout]);
-    const sizes = (0, import_react.useRef)({ short: ROW_PX, tall: TALL_ROW_PX });
-    const estimateSize = (0, import_react.useCallback)((i) => layout.tall[i] ? sizes.current.tall : sizes.current.short, [layout]);
+    const { keys, tall } = layout;
+    const getItemKey = (0, import_react.useCallback)((i) => keys[i], [keys]);
+    const sizes = (0, import_react.useRef)({ short: learnedSize(ROW_PX), tall: learnedSize(TALL_ROW_PX) });
+    const estimateSize = (0, import_react.useCallback)((i) => (tall[i] ? sizes.current.tall : sizes.current.short).size, [tall]);
     const measure = (0, import_react.useCallback)((el2, entry, instance) => {
       const size = measureElement(el2, entry, instance);
       const index = instance.indexFromElement(el2);
-      if (entry && size > 0 && index < layout.tall.length) sizes.current[layout.tall[index] ? "tall" : "short"] = size;
+      if (entry && size > 0 && index >= 0 && index < tall.length) learn(tall[index] ? sizes.current.tall : sizes.current.short, size);
       return size;
-    }, [layout]);
+    }, [tall]);
     const list = useVirtualizer({
       count: rows.length,
       getScrollElement: () => scroller,
@@ -19312,7 +19320,8 @@
           copy[i] = value;
           return copy;
         };
-        layout = { rows: at(layout.rows, row), query: layout.query, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+        const sized = tall === layout.tall[i] ? layout : { ...layout, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+        layout = { ...sized, rows: at(layout.rows, row) };
         paint();
       }
     };
@@ -23970,6 +23979,7 @@
       ]);
       if ((listOpts.query || "") !== state.query) return refresh(opts);
       state.notes = notes;
+      state.notesQuery = listOpts.query || "";
       state.outline = outline;
       state.tree = tree;
       state.folderPath = folderPath;
@@ -24032,7 +24042,7 @@
       }
     }
     function renderList() {
-      const q = state.query;
+      const q = state.notesQuery;
       const tree = treeModeActive();
       const empty = tree ? !treeHasContent() : !state.notes.length;
       el.noteList.classList.toggle("hidden", tree || empty);
