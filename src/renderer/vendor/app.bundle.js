@@ -19206,14 +19206,26 @@
   // src/renderer/note-list.tsx
   var import_jsx_runtime = __toESM(require_jsx_runtime());
   var ROW_PX = 28;
-  var TALL_ROW_PX = 48;
+  var TALL_ROW_PX = 42;
   var OVERSCAN = 16;
-  function NoteList({ rows, activeId, scroller, deps, handle }) {
+  var rowKey = (row, tall) => row.id + (tall ? ":tall" : "");
+  function NoteList({ layout, activeId, scroller, deps, handle }) {
+    const { rows } = layout;
+    const getItemKey = (0, import_react.useCallback)((i) => layout.keys[i], [layout]);
+    const sizes = (0, import_react.useRef)({ short: ROW_PX, tall: TALL_ROW_PX });
+    const estimateSize = (0, import_react.useCallback)((i) => layout.tall[i] ? sizes.current.tall : sizes.current.short, [layout]);
+    const measure = (0, import_react.useCallback)((el2, entry, instance) => {
+      const size = measureElement(el2, entry, instance);
+      const index = instance.indexFromElement(el2);
+      if (entry && size > 0 && index < layout.tall.length) sizes.current[layout.tall[index] ? "tall" : "short"] = size;
+      return size;
+    }, [layout]);
     const list = useVirtualizer({
       count: rows.length,
       getScrollElement: () => scroller,
-      estimateSize: (i) => deps.tall(rows[i]) ? TALL_ROW_PX : ROW_PX,
-      getItemKey: (i) => rows[i].id + (deps.tall(rows[i]) ? ":tall" : ""),
+      estimateSize,
+      getItemKey,
+      measureElement: measure,
       overscan: OVERSCAN
     });
     (0, import_react.useLayoutEffect)(() => {
@@ -19254,7 +19266,7 @@
               e.currentTarget.classList.remove("is-dragging");
               deps.dragEnd();
             } : void 0,
-            dangerouslySetInnerHTML: { __html: deps.html(row, item.index) }
+            dangerouslySetInnerHTML: { __html: deps.html(row, item.index, layout.query) }
           },
           row.id
         );
@@ -19266,21 +19278,22 @@
     const root = (0, import_client.createRoot)(ul);
     const handle = { reveal: () => {
     } };
-    let rows = [];
+    const layoutOf = (rows, query) => {
+      const tall = rows.map((r) => deps.tall(r, query));
+      return { rows, query, tall, keys: rows.map((r, i) => rowKey(r, tall[i])) };
+    };
+    let layout = layoutOf([], "");
     let activeId = null;
-    const overrides = /* @__PURE__ */ new Map();
-    const shown2 = () => overrides.size ? rows.map((r) => overrides.get(r.id) || r) : rows;
-    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime.jsx)(NoteList, { rows: shown2(), activeId, scroller: ul, deps, handle })));
+    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime.jsx)(NoteList, { layout, activeId, scroller: ul, deps, handle })));
     const reveal = () => {
-      const index = activeId ? rows.findIndex((r) => r.id === activeId) : -1;
+      const index = activeId ? layout.rows.findIndex((r) => r.id === activeId) : -1;
       if (index >= 0) handle.reveal(index);
     };
     return {
-      render(next, active) {
+      render(next, active, query) {
         const moved = active !== activeId;
-        rows = next;
+        layout = layoutOf(next, query);
         activeId = active;
-        overrides.clear();
         paint();
         if (moved) reveal();
       },
@@ -19291,8 +19304,15 @@
         reveal();
       },
       replace(row) {
-        if (!rows.some((r) => r.id === row.id)) return;
-        overrides.set(row.id, row);
+        const i = layout.rows.findIndex((r) => r.id === row.id);
+        if (i < 0) return;
+        const tall = deps.tall(row, layout.query);
+        const at = (list, value) => {
+          const copy = list.slice();
+          copy[i] = value;
+          return copy;
+        };
+        layout = { rows: at(layout.rows, row), query: layout.query, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
         paint();
       }
     };
@@ -24035,14 +24055,14 @@
           } else el.listTitle.append(document.createTextNode(p.name));
         });
       } else el.listTitle.textContent = titles[state.view];
-      if (tree || empty) noteList.render([], null);
+      if (tree || empty) noteList.render([], null, "");
       if (tree) {
         renderNoteTree();
         return;
       }
       if (empty) return;
       listPageNumbers = state.view === "folder" && !q && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
-      noteList.render(state.notes, state.currentId);
+      noteList.render(state.notes, state.currentId, q);
     }
     function treeHasContent() {
       const out = state.outline || {};
@@ -24062,7 +24082,7 @@
       const overdue = n.remindAt <= Date.now();
       return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(formatWhen(n.remindAt)) + "</span>";
     }
-    function rowInner(n, q, where = whereMark(n)) {
+    function rowInner(n, q, where = whereMark(n, q)) {
       const title = n.body === void 0 ? n.title : deriveTitle(n);
       const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "";
@@ -24075,8 +24095,8 @@
       const title = (n.body === void 0 ? n.title : deriveTitle(n)).toLowerCase();
       return !tokenize(q).some((t) => title.includes(t));
     }
-    function whereMark(n) {
-      if (treeModeActive() || state.view === "folder" && !state.query) return "";
+    function whereMark(n, q) {
+      if (treeModeActive() || state.view === "folder" && !q) return "";
       return folderMark(n);
     }
     function folderMark(n) {
@@ -25544,9 +25564,9 @@
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     let listPageNumbers = false;
     const noteList = createNoteList(el.noteList, {
-      html: (n, i) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + "</span>" : "") + rowInner(n, state.query),
+      html: (n, i, q) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + "</span>" : "") + rowInner(n, q),
       title: (n) => deriveTitle(n),
-      tall: (n) => rowHasExcerpt(n, state.query),
+      tall: (n, q) => rowHasExcerpt(n, q),
       draggable: (n) => !n.trashedAt,
       open: (id, newTab) => {
         openNote(id, { newTab });
