@@ -2173,22 +2173,28 @@ class Store {
     return path;
   }
 
-  noteOutline(sort?: SortKey) {
+  noteOutline(sort?: SortKey, folders?: readonly string[]): TreeOutline {
+    const want = folders ? new Set(folders) : null;
     const by = new Map<string, Note[]>();
+    for (const k of want || []) by.set(k, []);
+    const pins: Note[] = [];
     for (const n of this.notes) {
       if (n.trashedAt) continue;
+      if (n.pinned) pins.push(n);
       const k = n.folderId || '';
+      if (want && !want.has(k)) continue;
       let list = by.get(k);
       if (!list) { list = []; by.set(k, list); }
       list.push(n);
     }
-    const out: Record<string, OutlineRow[]> = {};
+    const row = (n: Note) => H.outlineRow(this._rowView(n), this.isHome(n.vaultId));
+    const notes: Record<string, OutlineRow[]> = {};
     for (const [k, list] of by) {
       const f = k ? this.getFolder(k) : null;
       const ordered = f && f.book ? this._orderPages(f, list) : H.sortNotes(list, sort || this.settings.sort);
-      out[k] = ordered.map((n) => H.outlineRow(this._rowView(n), this.isHome(n.vaultId)));
+      notes[k] = ordered.map(row);
     }
-    return out;
+    return { notes, pinned: H.sortNotes(pins, sort || this.settings.sort).map(row) };
   }
 
   folderTree() {

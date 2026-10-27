@@ -48,7 +48,7 @@ interface RendererState {
   pending: Map<string, FieldsPatch>;
   inflight: Map<string, Promise<unknown>>;
   selecting: Promise<unknown>;
-  outline?: Record<string, OutlineRow[]> | null;
+  outline?: TreeOutline | null;
   currentLossless?: boolean | null;
   lossyOverride?: string | null;
   lossyToastFor?: string | null;

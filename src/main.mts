@@ -443,7 +443,7 @@ function main() {
   handle('notes:page', async (_e, opts, also) => store.page(opts, await searchIndex.candidates(opts && opts.query), H.stringItems(also), FIRST_PAGE_ROWS));
   handle('notes:rowsFor', (_e, ids, query) => store.rowsFor(H.stringItems(ids), typeof query === 'string' ? query : undefined));
   handle('notes:searchIds', async (_e, query) => { const q = typeof query === 'string' ? query : ''; return store.searchIds(q, await searchIndex.candidates(q)); });
-  handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
+  handle('notes:outline', (_e, sort, folders) => store.noteOutline(typeof sort === 'string' ? sort : undefined, folders === undefined ? undefined : H.stringItems(folders)));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
   handle('notes:latestFile', (_e, kind) => {
     if (kind !== 'docx' && kind !== 'sheet') return null;

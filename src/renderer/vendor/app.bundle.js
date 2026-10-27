@@ -19463,8 +19463,8 @@
       items.push({ kind: "note", key: (away ? AWAY_KEY : "n:") + note.id, note, away, depth, groups, setSize: 0, posInSet: 0 });
     };
     const folderItem = (node, depth, groups) => {
-      const notes = outline[node.id] || [];
-      const kids = node.children.length + notes.length > 0;
+      const loaded = outline.notes[node.id];
+      const kids = node.children.length + (loaded ? loaded.length : node.count) > 0;
       const isHere = here.has(node.id);
       const isOpen = kids && (open.has(node.id) || isHere && input.revealing);
       const key = "f:" + node.id;
@@ -19477,13 +19477,12 @@
       rest.forEach((n) => noteItem(n, depth, groups, false));
     };
     const folderContents = (node, depth, groups) => {
-      const { pins, rest } = pinnedFirst(outline[node.id] || [], node.book);
+      const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);
       fillLevel(node.id, pins, node.children, rest, depth, groups);
     };
     if (input.scope) folderContents(input.scope, 0, []);
     else {
-      const everyPin = sortNotes(Object.values(outline).flat().filter((n) => n.pinned), input.sort);
-      fillLevel(null, everyPin, input.tree, (outline[""] || []).filter((n) => !n.pinned), 0, []);
+      fillLevel(null, outline.pinned.filter((n) => n.pinned), input.tree, (outline.notes[""] || []).filter((n) => !n.pinned), 0, []);
     }
     const active = chooseActive(items, input.currentId, input.activeKey);
     const chosen = items[active];
@@ -24407,7 +24406,7 @@
         api.notes.tags(),
         api.folders.tree(),
         state.view === "folder" && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
-        wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null)
+        wantTree ? api.notes.outline(settingsNow().sort, treeFolders()) : Promise.resolve(null)
       ]);
       if ((listOpts.query || "") !== state.query) return refresh(opts);
       state.noteIds = page.ids;
@@ -24511,10 +24510,27 @@
       noteList.render(state.noteIds, state.currentId, q);
     }
     function treeHasContent() {
-      const out = state.outline || {};
-      if (state.view !== "folder") return state.tree.length > 0 || (out[""] || []).length > 0;
+      if (state.view !== "folder") return state.tree.length > 0 || (state.outline && state.outline.notes[""] || []).length > 0;
       const node = flattenTree(state.tree).find((f) => f.id === state.folderId);
-      return !!node && (node.children.length > 0 || (out[node.id] || []).length > 0);
+      return !!node && (node.children.length > 0 || node.count > 0);
+    }
+    function treeFolders() {
+      const want = /* @__PURE__ */ new Set(["", ...settingsNow().treeExpanded || []]);
+      if (state.view === "folder" && state.folderId) want.add(state.folderId);
+      const here = state.current && state.current.folderId;
+      if (here) {
+        want.add(here);
+        for (const id of pathTo(here)) want.add(id);
+      }
+      return Array.from(want);
+    }
+    async function loadTreeFolders() {
+      const have = state.outline;
+      if (!have) return;
+      const missing = treeFolders().filter((id) => !Object.hasOwn(have.notes, id));
+      if (!missing.length) return;
+      const more = await api.notes.outline(settingsNow().sort, missing);
+      if (state.outline === have) Object.assign(have.notes, more.notes);
     }
     function renderListEmpty() {
       const [title, sub] = state.query ? ["No matches", 'Nothing in this list has "' + state.query + '". Ctrl+P searches everything.'] : state.view === "trash" ? ["Trash is empty", "Notes you delete wait here until you empty the trash."] : state.view === "pinned" ? ["Nothing pinned", "Pin a note (Ctrl+D) to keep it at the top."] : state.view === "reminders" ? ["No reminders", "Set one from a note\u2019s More menu, or press Ctrl+Shift+M."] : state.view === "tag" ? ["No notes with this tag", ""] : state.view === "folder" ? ["This folder is empty", "Press Ctrl+N to write a note here."] : ["No notes yet", "Press Ctrl+N to write your first note."];
@@ -24564,7 +24580,7 @@
       }
       if (state.outline) {
         const title = deriveTitle(note);
-        for (const list of Object.values(state.outline)) {
+        for (const list of [...Object.values(state.outline.notes), state.outline.pinned]) {
           const e = list.find((x) => x.id === note.id);
           if (e) {
             e.title = title;
@@ -24798,7 +24814,7 @@
       return !!state.settings && state.settings.listMode === "tree" && treeModePossible();
     }
     function inTreeScope(noteId) {
-      const out = state.outline || {};
+      const out = state.outline ? state.outline.notes : {};
       const scope = state.view === "folder" ? state.folderId : null;
       const ids = scope ? /* @__PURE__ */ new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
       for (const [folder, notes] of Object.entries(out)) {
@@ -24851,15 +24867,14 @@
       const next = new Set(settingsNow().treeExpanded || []);
       if (on) next.add(id);
       else next.delete(id);
-      updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
+      updateSettings({ treeExpanded: Array.from(next) }).then(loadTreeFolders).then(renderNoteTree);
     }
     function renderNoteTree() {
       const scopeId = state.view === "folder" ? state.folderId : null;
       const { items, active } = treeItems({
-        outline: state.outline || {},
+        outline: state.outline || { notes: {}, pinned: [] },
         tree: state.tree,
         scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
-        sort: settingsNow().sort,
         open: new Set(settingsNow().treeExpanded || []),
         here: new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []),
         revealing: state.revealInTree === state.currentId,
@@ -24918,8 +24933,8 @@
       const have = new Set(settingsNow().treeExpanded || []);
       const missing = path.filter((id) => !have.has(id));
       state.revealInTree = note.id;
-      if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
-      else renderNoteTree();
+      if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadTreeFolders).then(renderNoteTree);
+      else loadTreeFolders().then(renderNoteTree);
     }
     let outlineTimer, outlineSig = "";
     function scheduleOutline() {

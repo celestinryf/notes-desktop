@@ -116,6 +116,7 @@ type IndexReply =
   | { type: 'failed'; seq: number; error: string };
 interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; excerpt?: string }
 interface RowPage { ids: string[]; rows: ListRow[] }
+interface TreeOutline { notes: Record<string, OutlineRow[]>; pinned: OutlineRow[] }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }
 interface TagCount { tag: string; count: number }
 interface NoteCreate { title?: string; body?: string; tags?: string[] | string; folderId?: string | null; pinned?: boolean; remindAt?: number | null }
@@ -178,7 +179,7 @@ interface IpcContract {
   'notes:page': (opts?: ListOpts, also?: string[]) => RowPage;
   'notes:rowsFor': (ids: string[], query?: string) => ListRow[];
   'notes:searchIds': (query: string) => string[];
-  'notes:outline': (sort?: SortKey) => Record<string, OutlineRow[]>;
+  'notes:outline': (sort?: SortKey, folders?: string[]) => TreeOutline;
   'notes:get': (id: string) => PublicNote | null;
   'notes:latestFile': (kind: FileKind) => PublicNote | null;
   'notes:create': (data?: NoteCreate) => PublicNote;

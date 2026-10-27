@@ -358,7 +358,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const [page, counts, tags, tree, folderPath, outline] = await Promise.all([
       api.notes.page(listOpts, (state.currentId ? [state.currentId] : []).concat(noteList.shownIds())), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
-      wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
+      wantTree ? api.notes.outline(settingsNow().sort, treeFolders()) : Promise.resolve(null),
     ]);
     if ((listOpts.query || '') !== state.query) return refresh(opts);
     state.noteIds = page.ids;
@@ -461,10 +461,26 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function treeHasContent() {
-    const out = state.outline || {};
-    if (state.view !== 'folder') return state.tree.length > 0 || (out[''] || []).length > 0;
+    if (state.view !== 'folder') return state.tree.length > 0 || ((state.outline && state.outline.notes['']) || []).length > 0;
     const node = flattenTree(state.tree).find((f) => f.id === state.folderId);
-    return !!node && (node.children.length > 0 || (out[node.id] || []).length > 0);
+    return !!node && (node.children.length > 0 || node.count > 0);
+  }
+
+  function treeFolders() {
+    const want = new Set<string>(['', ...(settingsNow().treeExpanded || [])]);
+    if (state.view === 'folder' && state.folderId) want.add(state.folderId);
+    const here = state.current && state.current.folderId;
+    if (here) { want.add(here); for (const id of pathTo(here)) want.add(id); }
+    return Array.from(want);
+  }
+
+  async function loadTreeFolders() {
+    const have = state.outline;
+    if (!have) return;
+    const missing = treeFolders().filter((id) => !Object.hasOwn(have.notes, id));
+    if (!missing.length) return;
+    const more = await api.notes.outline(settingsNow().sort, missing);
+    if (state.outline === have) Object.assign(have.notes, more.notes);
   }
 
   function renderListEmpty() {
@@ -527,7 +543,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (tabs.ids.includes(note.id)) { tabs.titles.set(note.id, H.deriveTitle(note)); renderActiveTabTitle(); }
     if (state.outline) {
       const title = H.deriveTitle(note);
-      for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
+      for (const list of [...Object.values(state.outline.notes), state.outline.pinned]) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
       noteTree.replace(note.id, note, title);
     }
     if (noteIndex.has(note.id)) {
@@ -739,7 +755,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return !!state.settings && state.settings.listMode === 'tree' && treeModePossible();
   }
   function inTreeScope(noteId: string | null) {
-    const out = state.outline || {};
+    const out = state.outline ? state.outline.notes : {};
     const scope = state.view === 'folder' ? state.folderId : null;
     const ids = scope ? new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
     for (const [folder, notes] of Object.entries(out)) {
@@ -793,16 +809,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function setTreeOpen(id: string, on: boolean) {
     const next = new Set(settingsNow().treeExpanded || []);
     if (on) next.add(id); else next.delete(id);
-    updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
+    updateSettings({ treeExpanded: Array.from(next) }).then(loadTreeFolders).then(renderNoteTree);
   }
 
   function renderNoteTree() {
     const scopeId = state.view === 'folder' ? state.folderId : null;
     const { items, active } = treeItems({
-      outline: state.outline || {},
+      outline: state.outline || { notes: {}, pinned: [] },
       tree: state.tree,
       scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
-      sort: settingsNow().sort,
       open: new Set(settingsNow().treeExpanded || []),
       here: new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []),
       revealing: state.revealInTree === state.currentId,
@@ -856,8 +871,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const have = new Set(settingsNow().treeExpanded || []);
     const missing = path.filter((id) => !have.has(id));
     state.revealInTree = note.id;
-    if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(renderNoteTree);
-    else renderNoteTree();
+    if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadTreeFolders).then(renderNoteTree);
+    else loadTreeFolders().then(renderNoteTree);
   }
 
   let outlineTimer: ReturnType<typeof setTimeout> | undefined, outlineSig = '';
