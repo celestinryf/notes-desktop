@@ -1,4 +1,4 @@
-export function placePopover(menu: HTMLDivElement, anchor: HTMLButtonElement | HTMLDivElement, ev?: PointerEvent | null) {
+export function placePopover(menu: HTMLDivElement, anchor: HTMLButtonElement | HTMLDivElement, ev?: MouseEvent | null) {
   menu.classList.remove('hidden');
   const rect = anchor.getBoundingClientRect();
   menu.style.left = '0px'; menu.style.top = '0px';

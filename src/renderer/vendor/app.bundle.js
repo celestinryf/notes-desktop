@@ -19254,6 +19254,7 @@
       items,
       before: items.length ? items[0].start : 0,
       after: items.length ? list.getTotalSize() - items[items.length - 1].end : 0,
+      total: list.getTotalSize(),
       measureElement: list.measureElement
     };
   }
@@ -19440,14 +19441,30 @@
     keys: items.map((item) => item.key),
     sizes: items.map((item) => item.kind === "heading" ? "heading" : "row")
   });
-  function NoteTree({ layout, activeKey, tabKey, overrides, scroller, deps, handle, painted }) {
-    const { items: rows, before, after, measureElement: measureElement2 } = useVirtualRows(layout, scroller, TREE_SIZES, handle);
-    const hadFocus = scroller.contains(document.activeElement) && document.activeElement !== scroller;
-    (0, import_react2.useLayoutEffect)(() => painted(hadFocus));
+  function NoteTree({ layout, activeKey, tabKey, dragKey, dropKey, marks, overrides, scroller, deps, handle, painted }) {
+    const { items: rows, before, after, total, measureElement: measureElement2 } = useVirtualRows(layout, scroller, TREE_SIZES, handle);
+    (0, import_react2.useLayoutEffect)(() => painted());
+    const refs = (0, import_react2.useRef)(/* @__PURE__ */ new Map());
+    const refFor = (key) => {
+      let ref = refs.current.get(key);
+      if (!ref) {
+        ref = (el2) => {
+          if (!el2) return;
+          measureElement2(el2);
+          return () => {
+            if (el2.contains(document.activeElement)) scroller.focus({ preventScroll: true });
+            refs.current.delete(key);
+            measureElement2(null);
+          };
+        };
+        refs.current.set(key, ref);
+      }
+      return ref;
+    };
     const row = (item, index) => {
       const override = item.kind === "note" ? overrides.get(item.note.id) || null : null;
       const shared = {
-        ref: measureElement2,
+        ref: refFor(item.key),
         "data-index": index,
         "data-key": item.key,
         style: { "--depth": item.depth },
@@ -19466,16 +19483,21 @@
           "div",
           {
             ...shared,
-            className: "tree-row tree-folder" + (item.here ? " is-here" : ""),
+            className: "tree-row tree-folder" + (item.here ? " is-here" : "") + (item.key === dropKey ? " is-drop-target" : ""),
             "data-id": id2,
             "aria-expanded": item.kids ? item.open : void 0,
             onContextMenu: (e) => {
               e.preventDefault();
-              deps.folderMenu(id2, e.currentTarget, e.nativeEvent instanceof PointerEvent ? e.nativeEvent : void 0);
+              deps.folderMenu(id2, e.currentTarget, e.nativeEvent);
             },
-            onDragOver: (e) => deps.dropOver(e.nativeEvent, e.currentTarget),
-            onDragLeave: (e) => deps.dropLeave(e.currentTarget),
-            onDrop: (e) => deps.drop(id2, e.nativeEvent, e.currentTarget)
+            onDragOver: (e) => {
+              if (deps.allowDrop(e.nativeEvent)) marks.drop(item.key);
+            },
+            onDragLeave: () => marks.drop(null, item.key),
+            onDrop: (e) => {
+              marks.drop(null);
+              deps.drop(id2, e.nativeEvent);
+            }
           },
           item.key
         );
@@ -19487,7 +19509,7 @@
         "div",
         {
           ...shared,
-          className: "tree-row tree-note note-row" + (active ? " is-active" : ""),
+          className: "tree-row tree-note note-row" + (active ? " is-active" : "") + (item.key === dragKey ? " is-dragging" : ""),
           "data-id": id,
           "data-depth": item.depth,
           "aria-selected": active,
@@ -19499,11 +19521,11 @@
             }
           },
           onDragStart: (e) => {
-            e.currentTarget.classList.add("is-dragging");
+            marks.drag(item.key);
             deps.dragStart(id, e.nativeEvent);
           },
-          onDragEnd: (e) => {
-            e.currentTarget.classList.remove("is-dragging");
+          onDragEnd: () => {
+            marks.drag(null);
             deps.dragEnd();
           }
         },
@@ -19528,7 +19550,7 @@
       }
       return out;
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { minHeight: total }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Gap, { tag: "div", height: before }),
       nest(rows.map((r) => ({ item: layout.items[r.index], index: r.index })), 0),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Gap, { tag: "div", height: after })
@@ -19543,22 +19565,38 @@
     let activeKey = null;
     let tabKey = null;
     let focusKey = null;
+    let dragKey = null;
+    let dropKey = null;
     const overrides = /* @__PURE__ */ new Map();
     root.tabIndex = -1;
     const rowElement = (key) => Array.from(root.querySelectorAll(".tree-row")).find((r) => r.dataset.key === key) || null;
     const rovingKey = () => tabKey !== null && indexOf.has(tabKey) ? tabKey : activeKey !== null && indexOf.has(activeKey) ? activeKey : layout.keys[0] ?? null;
-    const painted = (hadFocus) => {
+    const painted = () => {
+      const roving = rovingKey();
+      const tabbable = roving !== null && !rowElement(roving) ? 0 : -1;
+      if (root.tabIndex !== tabbable) root.tabIndex = tabbable;
       if (focusKey !== null) {
         const el2 = rowElement(focusKey);
         if (el2) {
           focusKey = null;
           el2.focus();
-          return;
         }
       }
-      if (hadFocus && !root.contains(document.activeElement)) root.focus({ preventScroll: true });
     };
-    const paint = () => (0, import_react_dom3.flushSync)(() => reactRoot.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoteTree, { layout, activeKey, tabKey: rovingKey(), overrides, scroller: root, deps, handle, painted })));
+    const marks = {
+      drag(key) {
+        if (key === dragKey) return;
+        dragKey = key;
+        if (key !== null) document.addEventListener("pointermove", () => marks.drag(null), { once: true });
+        paint();
+      },
+      drop(key, leaving) {
+        if (leaving !== void 0 && dropKey !== leaving || key === dropKey) return;
+        dropKey = key;
+        paint();
+      }
+    };
+    const paint = () => (0, import_react_dom3.flushSync)(() => reactRoot.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoteTree, { layout, activeKey, tabKey: rovingKey(), dragKey, dropKey, marks, overrides, scroller: root, deps, handle, painted })));
     const focusIndex = (index) => {
       tabKey = layout.keys[index];
       focusKey = tabKey;
@@ -19602,18 +19640,30 @@
       }
     });
     root.addEventListener("focusin", (e) => {
+      if (e.target === root) {
+        const roving = rovingKey();
+        const index = roving === null ? void 0 : indexOf.get(roving);
+        if (index !== void 0 && e.relatedTarget instanceof Node && !root.contains(e.relatedTarget) && root.matches(":focus-visible")) focusIndex(index);
+        return;
+      }
       const r = e.target instanceof Element ? e.target.closest(".tree-row") : null;
       const key = r && r.dataset.key;
-      if (key && key !== tabKey) {
+      if (!key) return;
+      if (focusKey !== null && focusKey !== key) focusKey = null;
+      if (key !== tabKey) {
         tabKey = key;
-        paint();
+        queueMicrotask(paint);
       }
+    });
+    root.addEventListener("focusout", (e) => {
+      if (e.relatedTarget instanceof Node && !root.contains(e.relatedTarget)) focusKey = null;
     });
     return {
       render(items, active) {
         layout = layoutOf(items);
         indexOf = new Map(layout.keys.map((k, i) => [k, i]));
         activeKey = active >= 0 ? layout.keys[active] : null;
+        if (focusKey !== null && !indexOf.has(focusKey)) focusKey = null;
         overrides.clear();
         paint();
       },
@@ -24932,14 +24982,13 @@
       if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
       await refresh({ keepEditor: true });
     }
-    function dropOver(e, target) {
-      if (!e.dataTransfer || !(e.dataTransfer.types.includes("text/x-note-id") || e.dataTransfer.types.includes("text/x-folder-id"))) return;
+    function allowNoteDrop(e) {
+      if (!e.dataTransfer || !(e.dataTransfer.types.includes("text/x-note-id") || e.dataTransfer.types.includes("text/x-folder-id"))) return false;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      target.classList.add("is-drop-target");
+      return true;
     }
-    function dropOn(folderId, e, target) {
-      target.classList.remove("is-drop-target");
+    function dropInto(folderId, e) {
       if (!e.dataTransfer) return;
       const noteId = e.dataTransfer.getData("text/x-note-id");
       const movingFolder = e.dataTransfer.getData("text/x-folder-id");
@@ -24950,9 +24999,25 @@
       else if (movingFolder && movingFolder !== folderId) moveFolderTo(movingFolder, folderId);
     }
     function wireDropTarget(target, folderId) {
-      target.addEventListener("dragover", (e) => dropOver(e, target));
+      target.addEventListener("dragover", (e) => {
+        if (allowNoteDrop(e)) target.classList.add("is-drop-target");
+      });
       target.addEventListener("dragleave", () => target.classList.remove("is-drop-target"));
-      target.addEventListener("drop", (e) => dropOn(folderId, e, target));
+      target.addEventListener("drop", (e) => {
+        target.classList.remove("is-drop-target");
+        dropInto(folderId, e);
+      });
+    }
+    function startNoteDrag(id, e) {
+      if (e.dataTransfer) {
+        e.dataTransfer.setData("text/x-note-id", id);
+        e.dataTransfer.effectAllowed = "move";
+      }
+      toPeer({ type: "drag", id });
+      document.addEventListener("pointermove", endNoteDrag, { once: true });
+    }
+    function endNoteDrag() {
+      toPeer({ type: "drag", id: null });
     }
     function renderFolderSelect() {
       const sel = el.folderSelect;
@@ -25775,15 +25840,8 @@
       open: (id, newTab) => {
         openNote(id, { newTab });
       },
-      dragStart: (id, e) => {
-        if (e.dataTransfer) {
-          e.dataTransfer.setData("text/x-note-id", id);
-          e.dataTransfer.effectAllowed = "move";
-        }
-        toPeer({ type: "drag", id });
-        document.addEventListener("pointermove", () => toPeer({ type: "drag", id: null }), { once: true });
-      },
-      dragEnd: () => toPeer({ type: "drag", id: null })
+      dragStart: startNoteDrag,
+      dragEnd: endNoteDrag
     });
     const noteTree = createNoteTree(el.noteTree, {
       html: treeRowHtml,
@@ -25794,17 +25852,10 @@
       },
       toggle: (item, on) => setTreeOpen(item.node.id, on),
       folderMenu: (id, row, e) => openFolderMenu(id, row, e),
-      dropOver,
-      dropLeave: (row) => row.classList.remove("is-drop-target"),
-      drop: dropOn,
-      dragStart: (id, e) => {
-        if (e.dataTransfer) {
-          e.dataTransfer.setData("text/x-note-id", id);
-          e.dataTransfer.effectAllowed = "move";
-        }
-        toPeer({ type: "drag", id });
-      },
-      dragEnd: () => toPeer({ type: "drag", id: null })
+      allowDrop: allowNoteDrop,
+      drop: dropInto,
+      dragStart: startNoteDrag,
+      dragEnd: endNoteDrag
     });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });

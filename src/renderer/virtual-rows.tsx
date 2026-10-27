@@ -51,6 +51,7 @@ export function useVirtualRows<E extends HTMLElement, K extends string>(rows: Ro
     items,
     before: items.length ? items[0].start : 0,
     after: items.length ? list.getTotalSize() - items[items.length - 1].end : 0,
+    total: list.getTotalSize(),
     measureElement: list.measureElement,
   };
 }

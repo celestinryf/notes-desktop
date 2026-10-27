@@ -500,6 +500,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .note-tree { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s4); scrollbar-gutter: stable; }
 .note-tree .tree-row { padding-left: calc(var(--s1) + var(--depth, 0) * var(--indent)); }
 .note-tree:focus { outline: none; }
+.note-tree, .note-list { overflow-anchor: none; }
 .tree-chevron, .tree-spacer { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--fg-3); transition: transform var(--dur-2) var(--ease); }
 .tree-chevron .icon { width: 14px; height: 14px; }
 .tree-chevron.is-open { transform: rotate(90deg); }

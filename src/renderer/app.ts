@@ -977,15 +977,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     await refresh({ keepEditor: true });
   }
 
-  function dropOver(e: DragEvent, target: HTMLElement) {
-    if (!e.dataTransfer || !(e.dataTransfer.types.includes('text/x-note-id') || e.dataTransfer.types.includes('text/x-folder-id'))) return;
+  function allowNoteDrop(e: DragEvent) {
+    if (!e.dataTransfer || !(e.dataTransfer.types.includes('text/x-note-id') || e.dataTransfer.types.includes('text/x-folder-id'))) return false;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    target.classList.add('is-drop-target');
+    return true;
   }
 
-  function dropOn(folderId: string | null, e: DragEvent, target: HTMLElement) {
-    target.classList.remove('is-drop-target');
+  function dropInto(folderId: string | null, e: DragEvent) {
     if (!e.dataTransfer) return;
     const noteId = e.dataTransfer.getData('text/x-note-id');
     const movingFolder = e.dataTransfer.getData('text/x-folder-id');
@@ -997,9 +996,19 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function wireDropTarget(target: HTMLElement, folderId: string | null) {
-    target.addEventListener('dragover', (e) => dropOver(e, target));
+    target.addEventListener('dragover', (e) => { if (allowNoteDrop(e)) target.classList.add('is-drop-target'); });
     target.addEventListener('dragleave', () => target.classList.remove('is-drop-target'));
-    target.addEventListener('drop', (e) => dropOn(folderId, e, target));
+    target.addEventListener('drop', (e) => { target.classList.remove('is-drop-target'); dropInto(folderId, e); });
+  }
+
+  function startNoteDrag(id: string, e: DragEvent) {
+    if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; }
+    toPeer({ type: 'drag', id });
+    document.addEventListener('pointermove', endNoteDrag, { once: true });
+  }
+
+  function endNoteDrag() {
+    toPeer({ type: 'drag', id: null });
   }
 
   function renderFolderSelect() {
@@ -1025,7 +1034,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     setIcon(sel.parentElement, f && f.book ? 'book' : 'folder');
   }
 
-  function openFolderMenu(id: string, anchor: HTMLButtonElement | HTMLDivElement, ev?: PointerEvent) {
+  function openFolderMenu(id: string, anchor: HTMLButtonElement | HTMLDivElement, ev?: MouseEvent) {
     state.menuFolderId = id;
     const menu = el.folderMenu;
     const node: Partial<FolderNode> = flattenTree(state.tree).find((n) => n.id === id) || {};
@@ -1745,12 +1754,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     tall: (n, q) => rowHasExcerpt(n, q),
     draggable: (n) => !n.trashedAt,
     open: (id, newTab) => { openNote(id, { newTab }); },
-    dragStart: (id, e) => {
-      if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; }
-      toPeer({ type: 'drag', id });
-      document.addEventListener('pointermove', () => toPeer({ type: 'drag', id: null }), { once: true });
-    },
-    dragEnd: () => toPeer({ type: 'drag', id: null }),
+    dragStart: startNoteDrag,
+    dragEnd: endNoteDrag,
   });
 
   const noteTree = createNoteTree<RowSource>(el.noteTree, {
@@ -1760,14 +1765,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     openInTab: (id) => { openNote(id, { newTab: true }); },
     toggle: (item, on) => setTreeOpen(item.node.id, on),
     folderMenu: (id, row, e) => openFolderMenu(id, row, e),
-    dropOver,
-    dropLeave: (row) => row.classList.remove('is-drop-target'),
-    drop: dropOn,
-    dragStart: (id, e) => {
-      if (e.dataTransfer) { e.dataTransfer.setData('text/x-note-id', id); e.dataTransfer.effectAllowed = 'move'; }
-      toPeer({ type: 'drag', id });
-    },
-    dragEnd: () => toPeer({ type: 'drag', id: null }),
+    allowDrop: allowNoteDrop,
+    drop: dropInto,
+    dragStart: startNoteDrag,
+    dragEnd: endNoteDrag,
   });
 
   const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
