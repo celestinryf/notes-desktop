@@ -474,13 +474,31 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return Array.from(want);
   }
 
-  async function loadTreeFolders() {
+  function missingTreeFolders() {
     const have = state.outline;
-    if (!have) return;
-    const missing = treeFolders().filter((id) => !Object.hasOwn(have.notes, id));
-    if (!missing.length) return;
-    const more = await api.notes.outline(settingsNow().sort, missing);
-    if (state.outline === have) Object.assign(have.notes, more.notes);
+    return have ? treeFolders().filter((id) => !Object.hasOwn(have.notes, id)) : [];
+  }
+
+  async function loadTreeFolders() {
+    for (let tries = 0; tries < 3; tries++) {
+      const have = state.outline;
+      const missing = missingTreeFolders();
+      if (!have || !missing.length) return;
+      const more = await api.notes.outline(settingsNow().sort, missing);
+      if (state.outline === have) { Object.assign(have.notes, more.notes); return; }
+    }
+  }
+
+  let treeLoading: Promise<void> | null = null;
+  let treeJustLoaded = false;
+  function loadThenRenderTree() {
+    if (treeLoading) return treeLoading;
+    treeLoading = loadTreeFolders().catch(() => {}).then(() => {
+      treeLoading = null;
+      treeJustLoaded = true;
+      try { renderNoteTree(); } finally { treeJustLoaded = false; }
+    });
+    return treeLoading;
   }
 
   function renderListEmpty() {
@@ -544,6 +562,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (state.outline) {
       const title = H.deriveTitle(note);
       for (const list of [...Object.values(state.outline.notes), state.outline.pinned]) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
+      const pinned = state.outline.pinned.filter((x) => x.pinned);
+      if (note.pinned && !note.trashedAt && !pinned.some((x) => x.id === note.id)) pinned.push(H.outlineRow(note));
+      state.outline.pinned = H.sortNotes(pinned, settingsNow().sort);
       noteTree.replace(note.id, note, title);
     }
     if (noteIndex.has(note.id)) {
@@ -758,6 +779,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const out = state.outline ? state.outline.notes : {};
     const scope = state.view === 'folder' ? state.folderId : null;
     const ids = scope ? new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
+    const row = noteId === null ? undefined : rowCache.get(noteId);
+    if (row) return !row.trashedAt && (!ids || (row.folderId !== null && ids.has(row.folderId)));
     for (const [folder, notes] of Object.entries(out)) {
       if (ids && !ids.has(folder)) continue;
       if (notes.some((n) => n.id === noteId)) return true;
@@ -809,10 +832,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function setTreeOpen(id: string, on: boolean) {
     const next = new Set(settingsNow().treeExpanded || []);
     if (on) next.add(id); else next.delete(id);
-    updateSettings({ treeExpanded: Array.from(next) }).then(loadTreeFolders).then(renderNoteTree);
+    updateSettings({ treeExpanded: Array.from(next) }).then(loadThenRenderTree);
   }
 
   function renderNoteTree() {
+    if (!treeJustLoaded && missingTreeFolders().length) loadThenRenderTree();
     const scopeId = state.view === 'folder' ? state.folderId : null;
     const { items, active } = treeItems({
       outline: state.outline || { notes: {}, pinned: [] },
@@ -871,8 +895,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const have = new Set(settingsNow().treeExpanded || []);
     const missing = path.filter((id) => !have.has(id));
     state.revealInTree = note.id;
-    if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadTreeFolders).then(renderNoteTree);
-    else loadTreeFolders().then(renderNoteTree);
+    if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadThenRenderTree);
+    else loadThenRenderTree();
   }
 
   let outlineTimer: ReturnType<typeof setTimeout> | undefined, outlineSig = '';

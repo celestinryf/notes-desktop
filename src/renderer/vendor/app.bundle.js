@@ -24524,13 +24524,37 @@
       }
       return Array.from(want);
     }
-    async function loadTreeFolders() {
+    function missingTreeFolders() {
       const have = state.outline;
-      if (!have) return;
-      const missing = treeFolders().filter((id) => !Object.hasOwn(have.notes, id));
-      if (!missing.length) return;
-      const more = await api.notes.outline(settingsNow().sort, missing);
-      if (state.outline === have) Object.assign(have.notes, more.notes);
+      return have ? treeFolders().filter((id) => !Object.hasOwn(have.notes, id)) : [];
+    }
+    async function loadTreeFolders() {
+      for (let tries = 0; tries < 3; tries++) {
+        const have = state.outline;
+        const missing = missingTreeFolders();
+        if (!have || !missing.length) return;
+        const more = await api.notes.outline(settingsNow().sort, missing);
+        if (state.outline === have) {
+          Object.assign(have.notes, more.notes);
+          return;
+        }
+      }
+    }
+    let treeLoading = null;
+    let treeJustLoaded = false;
+    function loadThenRenderTree() {
+      if (treeLoading) return treeLoading;
+      treeLoading = loadTreeFolders().catch(() => {
+      }).then(() => {
+        treeLoading = null;
+        treeJustLoaded = true;
+        try {
+          renderNoteTree();
+        } finally {
+          treeJustLoaded = false;
+        }
+      });
+      return treeLoading;
     }
     function renderListEmpty() {
       const [title, sub] = state.query ? ["No matches", 'Nothing in this list has "' + state.query + '". Ctrl+P searches everything.'] : state.view === "trash" ? ["Trash is empty", "Notes you delete wait here until you empty the trash."] : state.view === "pinned" ? ["Nothing pinned", "Pin a note (Ctrl+D) to keep it at the top."] : state.view === "reminders" ? ["No reminders", "Set one from a note\u2019s More menu, or press Ctrl+Shift+M."] : state.view === "tag" ? ["No notes with this tag", ""] : state.view === "folder" ? ["This folder is empty", "Press Ctrl+N to write a note here."] : ["No notes yet", "Press Ctrl+N to write your first note."];
@@ -24587,6 +24611,9 @@
             e.pinned = !!note.pinned;
           }
         }
+        const pinned = state.outline.pinned.filter((x) => x.pinned);
+        if (note.pinned && !note.trashedAt && !pinned.some((x) => x.id === note.id)) pinned.push(outlineRow(note));
+        state.outline.pinned = sortNotes(pinned, settingsNow().sort);
         noteTree.replace(note.id, note, title);
       }
       if (noteIndex.has(note.id)) {
@@ -24817,6 +24844,8 @@
       const out = state.outline ? state.outline.notes : {};
       const scope = state.view === "folder" ? state.folderId : null;
       const ids = scope ? /* @__PURE__ */ new Set([scope, ...flattenTree((flattenTree(state.tree).find((f) => f.id === scope) || { children: [] }).children).map((f) => f.id)]) : null;
+      const row = noteId === null ? void 0 : rowCache.get(noteId);
+      if (row) return !row.trashedAt && (!ids || row.folderId !== null && ids.has(row.folderId));
       for (const [folder, notes] of Object.entries(out)) {
         if (ids && !ids.has(folder)) continue;
         if (notes.some((n) => n.id === noteId)) return true;
@@ -24867,9 +24896,10 @@
       const next = new Set(settingsNow().treeExpanded || []);
       if (on) next.add(id);
       else next.delete(id);
-      updateSettings({ treeExpanded: Array.from(next) }).then(loadTreeFolders).then(renderNoteTree);
+      updateSettings({ treeExpanded: Array.from(next) }).then(loadThenRenderTree);
     }
     function renderNoteTree() {
+      if (!treeJustLoaded && missingTreeFolders().length) loadThenRenderTree();
       const scopeId = state.view === "folder" ? state.folderId : null;
       const { items, active } = treeItems({
         outline: state.outline || { notes: {}, pinned: [] },
@@ -24933,8 +24963,8 @@
       const have = new Set(settingsNow().treeExpanded || []);
       const missing = path.filter((id) => !have.has(id));
       state.revealInTree = note.id;
-      if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadTreeFolders).then(renderNoteTree);
-      else loadTreeFolders().then(renderNoteTree);
+      if (missing.length) updateSettings({ treeExpanded: Array.from(have).concat(missing) }).then(loadThenRenderTree);
+      else loadThenRenderTree();
     }
     let outlineTimer, outlineSig = "";
     function scheduleOutline() {
