@@ -356,12 +356,13 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
     const wantTree = settingsNow().listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
     const [page, counts, tags, tree, folderPath, outline] = await Promise.all([
-      api.notes.page(listOpts, state.currentId ? [state.currentId] : []), api.notes.counts(), api.notes.tags(), api.folders.tree(),
+      api.notes.page(listOpts, (state.currentId ? [state.currentId] : []).concat(noteList.shownIds())), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
       wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
     ]);
     if ((listOpts.query || '') !== state.query) return refresh(opts);
     state.noteIds = page.ids;
+    noteIndex = new Map(page.ids.map((id, i) => [id, i]));
     state.notesQuery = listOpts.query || '';
     rowCache.reset(page.rows, state.notesQuery);
     state.outline = outline;
@@ -529,7 +530,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
       noteTree.replace(note.id, note, title);
     }
-    if (state.noteIds.includes(note.id)) {
+    if (noteIndex.has(note.id)) {
       rowCache.set(H.listRow(note, state.notesQuery));
       noteList.changed([note.id]);
     }
@@ -1755,6 +1756,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
   let listPageNumbers = false;
   const rowCache = createRowCache((ids, query) => api.notes.rowsFor(ids, query));
+  let noteIndex = new Map<string, number>();
   const noteList = createNoteList<RowSource>(el.noteList, {
     row: (id) => rowCache.get(id),
     need: (ids) => { rowCache.fetch(ids).then((got) => noteList.changed(got)).catch(() => {}); },
@@ -2147,7 +2149,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
       showSavedTags(patch, updated);
     }
-    const idx = state.noteIds.indexOf(id);
+    const idx = noteIndex.get(id) ?? -1;
     if (idx !== -1) {
       const before = rowCache.get(id);
       refreshRow(updated);

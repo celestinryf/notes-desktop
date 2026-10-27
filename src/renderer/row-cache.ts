@@ -19,7 +19,11 @@ export function createRowCache(load: Load) {
       if (!want.length) return [];
       const at = generation;
       for (const id of want) asked.add(id);
-      const got = await load(want, query);
+      let got: ListRow[];
+      try { got = await load(want, query); } catch (err) {
+        if (at === generation) for (const id of want) asked.delete(id);
+        throw err;
+      }
       if (at !== generation) return [];
       for (const r of got) rows.set(r.id, r);
       return got.map((r) => r.id);

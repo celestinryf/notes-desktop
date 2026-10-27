@@ -19268,11 +19268,15 @@
   var LIST_SIZES = { short: 28, tall: 42 };
   var PREFETCH = 60;
   var rowKey = (id, size) => id + (size === "tall" ? ":tall" : "");
-  function NoteList({ layout, activeId, scroller, deps, handle }) {
+  function NoteList({ layout, activeId, scroller, deps, handle, shown: shown2 }) {
     const { ids } = layout;
     const { items, before, after, measureElement: measureElement2 } = useVirtualRows(layout, scroller, LIST_SIZES, handle);
     (0, import_react2.useEffect)(() => {
-      if (!items.length) return;
+      if (!items.length) {
+        shown2(0, 0);
+        return;
+      }
+      shown2(items[0].index, items[items.length - 1].index + 1);
       const from = Math.max(0, items[0].index - PREFETCH);
       const to = Math.min(ids.length, items[items.length - 1].index + 1 + PREFETCH);
       const missing = [];
@@ -19321,18 +19325,27 @@
     const root = (0, import_client.createRoot)(ul);
     const handle = { reveal: () => {
     } };
-    const sizeOf = (id, query) => {
+    const known = (id, query) => {
       const row = deps.row(id);
-      return (row ? deps.tall(row, query) : query !== "") ? "tall" : "short";
+      return row ? deps.tall(row, query) ? "tall" : "short" : null;
     };
     const layoutOf2 = (ids, query) => {
-      const sizes = ids.map((id) => sizeOf(id, query));
-      return { ids, query, sizes, keys: ids.map((id, i) => rowKey(id, sizes[i])) };
+      const sure = ids.map((id) => known(id, query));
+      const tall = sure.filter((s) => s === "tall").length;
+      const short = sure.filter((s) => s === "short").length;
+      const guess = tall + short ? tall > short ? "tall" : "short" : query ? "tall" : "short";
+      const sizes = sure.map((s) => s || guess);
+      return { ids, query, guess, sizes, keys: ids.map((id, i) => rowKey(id, sizes[i])) };
     };
+    const sizeOf = (id) => known(id, layout.query) || layout.guess;
     let layout = layoutOf2([], "");
+    let range = [0, 0];
+    const shown2 = (from, to) => {
+      range = [from, to];
+    };
     let indexOf = /* @__PURE__ */ new Map();
     let activeId = null;
-    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(NoteList, { layout, activeId, scroller: ul, deps, handle })));
+    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(NoteList, { layout, activeId, scroller: ul, deps, handle, shown: shown2 })));
     const reveal = () => {
       const index = activeId === null ? void 0 : indexOf.get(activeId);
       if (index !== void 0) handle.reveal(index);
@@ -19343,7 +19356,7 @@
       for (const id of ids) {
         const i = indexOf.get(id);
         if (i === void 0) continue;
-        const size = sizeOf(id, layout.query);
+        const size = sizeOf(id);
         if (size === layout.sizes[i]) continue;
         sizes = sizes || layout.sizes.slice();
         keys = keys || layout.keys.slice();
@@ -19367,6 +19380,7 @@
         paint();
         reveal();
       },
+      shownIds: () => layout.ids.slice(range[0], range[1]),
       changed(ids) {
         const listed = ids.filter((id) => indexOf.has(id));
         if (!listed.length) return;
@@ -19398,7 +19412,13 @@
         if (!want.length) return [];
         const at = generation;
         for (const id of want) asked.add(id);
-        const got = await load(want, query);
+        let got;
+        try {
+          got = await load(want, query);
+        } catch (err) {
+          if (at === generation) for (const id of want) asked.delete(id);
+          throw err;
+        }
         if (at !== generation) return [];
         for (const r of got) rows.set(r.id, r);
         return got.map((r) => r.id);
@@ -24382,7 +24402,7 @@
       else if (state.view === "folder") listOpts.folderId = state.folderId;
       const wantTree = settingsNow().listMode === "tree" && !state.query && (state.view === "all" || state.view === "folder");
       const [page, counts, tags, tree, folderPath, outline] = await Promise.all([
-        api.notes.page(listOpts, state.currentId ? [state.currentId] : []),
+        api.notes.page(listOpts, (state.currentId ? [state.currentId] : []).concat(noteList.shownIds())),
         api.notes.counts(),
         api.notes.tags(),
         api.folders.tree(),
@@ -24391,6 +24411,7 @@
       ]);
       if ((listOpts.query || "") !== state.query) return refresh(opts);
       state.noteIds = page.ids;
+      noteIndex = new Map(page.ids.map((id, i) => [id, i]));
       state.notesQuery = listOpts.query || "";
       rowCache.reset(page.rows, state.notesQuery);
       state.outline = outline;
@@ -24552,7 +24573,7 @@
         }
         noteTree.replace(note.id, note, title);
       }
-      if (state.noteIds.includes(note.id)) {
+      if (noteIndex.has(note.id)) {
         rowCache.set(listRow(note, state.notesQuery));
         noteList.changed([note.id]);
       }
@@ -25892,6 +25913,7 @@
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     let listPageNumbers = false;
     const rowCache = createRowCache((ids, query) => api.notes.rowsFor(ids, query));
+    let noteIndex = /* @__PURE__ */ new Map();
     const noteList = createNoteList(el.noteList, {
       row: (id) => rowCache.get(id),
       need: (ids) => {
@@ -26303,7 +26325,7 @@
         if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
         showSavedTags(patch, updated);
       }
-      const idx = state.noteIds.indexOf(id);
+      const idx = noteIndex.get(id) ?? -1;
       if (idx !== -1) {
         const before = rowCache.get(id);
         refreshRow(updated);
