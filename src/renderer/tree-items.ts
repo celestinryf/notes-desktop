@@ -1,5 +1,3 @@
-import * as H from '../shared/helpers.mts';
-
 export const AWAY_KEY = 'p:';
 
 export interface TreeGroup { key: string; owner: string; depth: number; here: boolean; outline: boolean }
@@ -10,10 +8,9 @@ export type HeadingItem = Placed & { kind: 'heading'; noteId: string; index: num
 export type TreeItem = FolderItem | NoteItem | HeadingItem;
 
 export interface TreeInput {
-  outline: Readonly<Record<string, OutlineRow[]>>;
+  outline: TreeOutline;
   tree: readonly FolderNode[];
   scope: FolderNode | null;
-  sort: SortKey;
   open: ReadonlySet<string>;
   here: ReadonlySet<string>;
   revealing: boolean;
@@ -49,8 +46,8 @@ export function treeItems(input: TreeInput) {
     items.push({ kind: 'note', key: (away ? AWAY_KEY : 'n:') + note.id, note, away, depth, groups, setSize: 0, posInSet: 0 });
   };
   const folderItem = (node: FolderNode, depth: number, groups: readonly TreeGroup[]) => {
-    const notes = outline[node.id] || [];
-    const kids = node.children.length + notes.length > 0;
+    const loaded = outline.notes[node.id];
+    const kids = node.children.length + (loaded ? loaded.length : node.count) > 0;
     const isHere = here.has(node.id);
     const isOpen = kids && (open.has(node.id) || (isHere && input.revealing));
     const key = 'f:' + node.id;
@@ -63,13 +60,12 @@ export function treeItems(input: TreeInput) {
     rest.forEach((n) => noteItem(n, depth, groups, false));
   };
   const folderContents = (node: FolderNode, depth: number, groups: readonly TreeGroup[]) => {
-    const { pins, rest } = pinnedFirst(outline[node.id] || [], node.book);
+    const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);
     fillLevel(node.id, pins, node.children, rest, depth, groups);
   };
   if (input.scope) folderContents(input.scope, 0, []);
   else {
-    const everyPin = H.sortNotes(Object.values(outline).flat().filter((n) => n.pinned), input.sort);
-    fillLevel(null, everyPin, input.tree, (outline[''] || []).filter((n) => !n.pinned), 0, []);
+    fillLevel(null, outline.pinned.filter((n) => n.pinned), input.tree, (outline.notes[''] || []).filter((n) => !n.pinned), 0, []);
   }
   const active = chooseActive(items, input.currentId, input.activeKey);
   const chosen = items[active];
