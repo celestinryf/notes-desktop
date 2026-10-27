@@ -1,6 +1,6 @@
 import { NoteIndex, isCorruption, removeIndexFiles } from './note-index.mts';
 import type { IndexNote } from './note-index.mts';
-import { isRecord } from './shared/helpers.mts';
+import { isRecord, stringItems as strings } from './shared/helpers.mts';
 
 let index: NoteIndex | null = null;
 let file = '';
@@ -8,7 +8,6 @@ let syncing: { seq: number; seen: Set<string>; changed: number } | null = null;
 const collectGarbage = typeof globalThis.gc === 'function' ? globalThis.gc : () => {};
 
 const send = (msg: IndexReply) => process.parentPort.postMessage(msg);
-const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 function indexNotes(v: unknown): IndexNote[] {
   if (!Array.isArray(v)) return [];

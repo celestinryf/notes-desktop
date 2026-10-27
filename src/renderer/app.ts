@@ -19,6 +19,7 @@ import { withPeerNotice } from './peer-notice.ts';
 import { createLiveShare } from './live-share.ts';
 import { createSharing } from './sharing.ts';
 import { createNoteList } from './note-list.tsx';
+import { createRowCache } from './row-cache.ts';
 import { createNoteTree } from './note-tree.tsx';
 import { treeItems } from './tree-items.ts';
 import type { TreeItem } from './tree-items.ts';
@@ -354,14 +355,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (state.view === 'tag') listOpts.tag = state.tag || undefined;
     else if (state.view === 'folder') listOpts.folderId = state.folderId;
     const wantTree = settingsNow().listMode === 'tree' && !state.query && (state.view === 'all' || state.view === 'folder');
-    const [notes, counts, tags, tree, folderPath, outline] = await Promise.all([
-      api.notes.rows(listOpts), api.notes.counts(), api.notes.tags(), api.folders.tree(),
+    const [page, counts, tags, tree, folderPath, outline] = await Promise.all([
+      api.notes.page(listOpts, state.currentId ? [state.currentId] : []), api.notes.counts(), api.notes.tags(), api.folders.tree(),
       state.view === 'folder' && state.folderId ? api.folders.path(state.folderId) : Promise.resolve([]),
       wantTree ? api.notes.outline(settingsNow().sort) : Promise.resolve(null),
     ]);
     if ((listOpts.query || '') !== state.query) return refresh(opts);
-    state.notes = notes;
+    state.noteIds = page.ids;
     state.notesQuery = listOpts.query || '';
+    rowCache.reset(page.rows, state.notesQuery);
     state.outline = outline;
     state.tree = tree;
     state.folderPath = folderPath;
@@ -377,17 +379,18 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     renderFolderSelect();
     renderList();
     if (state.current && (book.id || bookOf(state.current))) renderBookStrip(state.current);
-    const inList = treeModeActive() ? inTreeScope(state.currentId) : notes.some((n) => n.id === state.currentId);
+    const ids = page.ids;
+    const inList = treeModeActive() ? inTreeScope(state.currentId) : state.currentId !== null && ids.includes(state.currentId);
     if (!inList && !opts.keepEditor) {
       const tabId = tabs.ids[tabs.at];
       if (!state.currentId && tabId) await selectNote(tabId);
       else if (GUEST) {  }
       else if (tabs.split && tabs.active === 'right') {
-        if (notes.length && !notes.some((n) => n.id === tabs.peerCurrent)) openNote(notes[0].id);
-      } else if (notes.length) await selectNote(notes[0].id);
+        if (ids.length && !(tabs.peerCurrent !== null && ids.includes(tabs.peerCurrent))) openNote(ids[0]);
+      } else if (ids.length) await selectNote(ids[0]);
       else clearEditor();
     } else if (inList) {
-      const fresh = notes.find((n) => n.id === state.currentId);
+      const fresh = state.currentId === null ? undefined : rowCache.get(state.currentId);
       if (fresh && !state.dirty) updateStatus(fresh);
     }
   }
@@ -427,14 +430,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function renderList() {
     const q = state.notesQuery;
     const tree = treeModeActive();
-    const empty = tree ? !treeHasContent() : !state.notes.length;
+    const empty = tree ? !treeHasContent() : !state.noteIds.length;
     el.noteList.classList.toggle('hidden', tree || empty);
     el.noteTree.classList.toggle('hidden', !tree || empty);
     el.listModeSeg.classList.toggle('hidden', !treeModePossible());
     syncListModeSeg();
     el.listEmpty.classList.toggle('hidden', !empty);
     if (empty) renderListEmpty();
-    el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.notes.length));
+    el.emptyTrashBtn.classList.toggle('hidden', !(state.view === 'trash' && state.noteIds.length));
     const titles = { all: 'All notes', pinned: 'Pinned', trash: 'Trash', reminders: 'Reminders', tag: '#' + state.tag };
     el.listTitle.innerHTML = '';
     if (q) el.listTitle.textContent = 'Results';
@@ -453,7 +456,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     noteTree.render([], -1);
     if (empty) return;
     listPageNumbers = state.view === 'folder' && !q && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
-    noteList.render(state.notes, state.currentId, q);
+    noteList.render(state.noteIds, state.currentId, q);
   }
 
   function treeHasContent() {
@@ -526,7 +529,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       for (const list of Object.values(state.outline)) { const e = list.find((x) => x.id === note.id); if (e) { e.title = title; e.pinned = !!note.pinned; } }
       noteTree.replace(note.id, note, title);
     }
-    noteList.replace(note);
+    if (state.noteIds.includes(note.id)) {
+      rowCache.set(H.listRow(note, state.notesQuery));
+      noteList.changed([note.id]);
+    }
   }
 
   async function setView(view: RendererState['view'], arg: string | null = null, refreshOpts?: RefreshOpts) {
@@ -958,7 +964,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   async function moveNoteToFolder(noteId: string, folderId: string | null) {
-    const existing = state.notes.find((n) => n.id === noteId) || (state.currentId === noteId ? state.current : null);
+    const existing = rowCache.get(noteId) || (state.currentId === noteId ? state.current : null);
     if (existing && (existing.folderId || null) === (folderId || null)) return;
     await flushSave();
     let updated;
@@ -1748,7 +1754,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
   let listPageNumbers = false;
+  const rowCache = createRowCache((ids, query) => api.notes.rowsFor(ids, query));
   const noteList = createNoteList<RowSource>(el.noteList, {
+    row: (id) => rowCache.get(id),
+    need: (ids) => { rowCache.fetch(ids).then((got) => noteList.changed(got)).catch(() => {}); },
     html: (n, i, q) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + '</span>' : '') + rowInner(n, q),
     title: (n) => H.deriveTitle(n),
     tall: (n, q) => rowHasExcerpt(n, q),
@@ -2069,8 +2078,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         const updated = await api.notes.update(id, patch);
         if (state.pending.get(id) === patch) state.pending.delete(id);
         if (updated) {
-          const idx = state.notes.findIndex((n) => n.id === id);
-          if (idx !== -1) { state.notes[idx] = H.listRow(updated, state.query); refreshRow(updated); }
+          refreshRow(updated);
           toast('Saved earlier changes to "' + H.truncate(H.deriveTitle(updated), 30) + '"');
         }
       } catch (err) {
@@ -2139,13 +2147,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (el.titleInput.value === patch.title && updated.title !== patch.title && !state.dirty) el.titleInput.value = updated.title;
       showSavedTags(patch, updated);
     }
-    const idx = state.notes.findIndex((n) => n.id === id);
+    const idx = state.noteIds.indexOf(id);
     if (idx !== -1) {
-      const prevTags = (state.notes[idx].tags || []).join(',');
-      state.notes[idx] = H.listRow(updated, state.query);
+      const before = rowCache.get(id);
       refreshRow(updated);
       if (settingsNow().sort === 'updated' && idx !== 0) await refresh({ keepEditor: true });
-      else if (updated.tags.join(',') !== prevTags) await refresh({ keepEditor: true });
+      else if (before ? updated.tags.join(',') !== before.tags.join(',') : patch.tags !== undefined) await refresh({ keepEditor: true });
     }
     api.notes.tags().then(renderTags);
     return true;
@@ -2227,12 +2234,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   async function emptyTrash() {
-    const listed = state.notes.slice();
+    const listed = state.noteIds.slice();
     const n = listed.length;
     if (!n) return;
     const scope = state.query ? ' matching your search' : ' in the trash';
     if (!window.confirm('Permanently delete ' + n + (n === 1 ? ' note' : ' notes') + scope + '? This cannot be undone.')) return;
-    if (state.query) { for (const note of listed) await api.notes.destroy(note.id); }
+    if (state.query) { for (const id of listed) await api.notes.destroy(id); }
     else await api.notes.emptyTrash();
     clearEditor();
     await refresh();
@@ -2747,9 +2754,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
-      const idx = state.notes.findIndex((n) => n.id === state.currentId);
-      const next = state.notes[idx + (e.key === 'ArrowDown' ? 1 : -1)];
-      if (next) selectNote(next.id).then(() => focusBody());
+      const idx = state.currentId === null ? -1 : state.noteIds.indexOf(state.currentId);
+      const next = state.noteIds[idx + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (next) selectNote(next).then(() => focusBody());
     }
   }
 
@@ -2949,8 +2956,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       searchTimer = setTimeout(endSearchStep, 120);
     });
     el.searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && state.notes.length) { selectNote(state.notes[0].id).then(() => focusBody()); }
-      if (e.key === 'ArrowDown' && state.notes.length) { e.preventDefault(); selectNote(state.notes[0].id).then(() => focusBody()); }
+      if (e.key === 'Enter' && state.noteIds.length) { selectNote(state.noteIds[0]).then(() => focusBody()); }
+      if (e.key === 'ArrowDown' && state.noteIds.length) { e.preventDefault(); selectNote(state.noteIds[0]).then(() => focusBody()); }
     });
     el.sortSelect.addEventListener('change', () => { const sort = el.sortSelect.value; if (sort === 'updated' || sort === 'created' || sort === 'title') updateSettings({ sort }).then(() => refresh({ keepEditor: true })); });
     el.emptyTrashBtn.addEventListener('click', emptyTrash);
@@ -3073,8 +3080,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
           if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();
           return;
         }
-        if (state.notes.length) {
-          await selectNote(state.notes[0].id);
+        if (state.noteIds.length) {
+          await selectNote(state.noteIds[0]);
           focusBody();
           return;
         }
@@ -3128,7 +3135,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();
     if (GUEST) { toPeer({ type: 'hello' }); return; }
-    if (!state.currentId && state.notes.length) await selectNote(state.notes[0].id);
+    if (!state.currentId && state.noteIds.length) await selectNote(state.noteIds[0]);
     if (panesOf(settings).split) openSplit(true);
     if (state.current) focusBody();
     api.app.rendererReady().catch(() => {});

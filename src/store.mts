@@ -886,7 +886,27 @@ class Store {
 
   rows(opts?: ListOpts, candidates?: ReadonlySet<string> | null) {
     const query = opts && opts.query;
-    return this.list(opts, candidates).map((n) => H.listRow(this._rowView(n), query, this.isHome(n.vaultId)));
+    return this.list(opts, candidates).map((n) => this._row(n, query));
+  }
+
+  page(opts: ListOpts | undefined, candidates: ReadonlySet<string> | null, also: readonly string[], size: number): RowPage {
+    const query = opts && opts.query;
+    const listed = this.list(opts, candidates);
+    const first = listed.slice(0, size);
+    const shown = new Set(first.map((n) => n.id));
+    return { ids: listed.map((n) => n.id), rows: first.map((n) => this._row(n, query)).concat(this.rowsFor(also.filter((id) => !shown.has(id)), query)) };
+  }
+
+  rowsFor(ids: readonly string[], query?: string) {
+    if (!ids.length) return [];
+    const wanted = new Set(ids);
+    const found = new Map<string, Note>();
+    for (const n of this.notes) if (wanted.has(n.id)) found.set(n.id, n);
+    return ids.flatMap((id) => { const n = found.get(id); return n ? [this._row(n, query)] : []; });
+  }
+
+  _row(n: Note, query?: string) {
+    return H.listRow(this._rowView(n), query, this.isHome(n.vaultId));
   }
 
   _rowView(n: Note) {

@@ -37,6 +37,7 @@ const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
 const TITLE_BAR_H = 40;
+const FIRST_PAGE_ROWS = 120;
 
 app.setName('Notes');
 crafts.registerSchemes(protocol);
@@ -439,6 +440,8 @@ function main() {
   ipcMain.on('app:trace', (_e, event: unknown, fields: unknown) => trace.fromPage(event, fields));
   handle('notes:list', async (_e, opts) => store.list(opts, await searchIndex.candidates(opts && opts.query)).map((n) => store.publicNote(n)));
   handle('notes:rows', async (_e, opts) => store.rows(opts, await searchIndex.candidates(opts && opts.query)));
+  handle('notes:page', async (_e, opts, also) => store.page(opts, await searchIndex.candidates(opts && opts.query), H.stringItems(also), FIRST_PAGE_ROWS));
+  handle('notes:rowsFor', (_e, ids, query) => store.rowsFor(H.stringItems(ids), typeof query === 'string' ? query : undefined));
   handle('notes:searchIds', async (_e, query) => { const q = typeof query === 'string' ? query : ''; return store.searchIds(q, await searchIndex.candidates(q)); });
   handle('notes:outline', (_e, sort) => store.noteOutline(typeof sort === 'string' ? sort : undefined));
   handle('notes:get', (_e, id) => store.publicNote(store.get(id)));
