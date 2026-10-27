@@ -1,19 +1,21 @@
-import { useLayoutEffect } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { measureElement, useVirtualizer } from '@tanstack/react-virtual';
+import type { Virtualizer } from '@tanstack/react-virtual';
 
 const ROW_PX = 28;
-const TALL_ROW_PX = 48;
+const TALL_ROW_PX = 42;
 const OVERSCAN = 16;
 
 type Row = { id: string };
 type Handle = { reveal: (index: number) => void };
+type Layout<T extends Row> = { rows: readonly T[]; query: string; tall: readonly boolean[]; keys: readonly string[] };
 
 interface NoteListDeps<T extends Row> {
-  html: (row: T, index: number) => string;
+  html: (row: T, index: number, query: string) => string;
   title: (row: T) => string;
-  tall: (row: T) => boolean;
+  tall: (row: T, query: string) => boolean;
   draggable: (row: T) => boolean;
   open: (id: string, newTab: boolean) => void;
   dragStart: (id: string, e: DragEvent) => void;
@@ -21,19 +23,41 @@ interface NoteListDeps<T extends Row> {
 }
 
 interface ListProps<T extends Row> {
-  rows: readonly T[];
+  layout: Layout<T>;
   activeId: string | null;
   scroller: HTMLElement;
   deps: NoteListDeps<T>;
   handle: Handle;
 }
 
-function NoteList<T extends Row>({ rows, activeId, scroller, deps, handle }: ListProps<T>) {
+const rowKey = (row: Row, tall: boolean) => row.id + (tall ? ':tall' : '');
+
+type LearnedSize = { size: number; seen: Map<number, number> };
+const learnedSize = (size: number): LearnedSize => ({ size, seen: new Map() });
+function learn(learned: LearnedSize, size: number) {
+  const times = (learned.seen.get(size) || 0) + 1;
+  learned.seen.set(size, times);
+  if (times > (learned.seen.get(learned.size) || 0)) learned.size = size;
+}
+
+function NoteList<T extends Row>({ layout, activeId, scroller, deps, handle }: ListProps<T>) {
+  const { rows } = layout;
+  const { keys, tall } = layout;
+  const getItemKey = useCallback((i: number) => keys[i], [keys]);
+  const sizes = useRef({ short: learnedSize(ROW_PX), tall: learnedSize(TALL_ROW_PX) });
+  const estimateSize = useCallback((i: number) => (tall[i] ? sizes.current.tall : sizes.current.short).size, [tall]);
+  const measure = useCallback((el: HTMLLIElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLElement, HTMLLIElement>) => {
+    const size = measureElement(el, entry, instance);
+    const index = instance.indexFromElement(el);
+    if (entry && size > 0 && index >= 0 && index < tall.length) learn(tall[index] ? sizes.current.tall : sizes.current.short, size);
+    return size;
+  }, [tall]);
   const list = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroller,
-    estimateSize: (i) => (deps.tall(rows[i]) ? TALL_ROW_PX : ROW_PX),
-    getItemKey: (i) => rows[i].id + (deps.tall(rows[i]) ? ':tall' : ''),
+    estimateSize,
+    getItemKey,
+    measureElement: measure,
     overscan: OVERSCAN,
   });
   useLayoutEffect(() => { handle.reveal = (index) => list.scrollToIndex(index, { align: 'auto' }); });
@@ -62,7 +86,7 @@ function NoteList<T extends Row>({ rows, activeId, scroller, deps, handle }: Lis
             onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); deps.open(row.id, true); } }}
             onDragStart={drag ? (e) => { e.currentTarget.classList.add('is-dragging'); deps.dragStart(row.id, e.nativeEvent); } : undefined}
             onDragEnd={drag ? (e) => { e.currentTarget.classList.remove('is-dragging'); deps.dragEnd(); } : undefined}
-            dangerouslySetInnerHTML={{ __html: deps.html(row, item.index) }}
+            dangerouslySetInnerHTML={{ __html: deps.html(row, item.index, layout.query) }}
           />
         );
       })}
@@ -74,21 +98,22 @@ function NoteList<T extends Row>({ rows, activeId, scroller, deps, handle }: Lis
 export function createNoteList<T extends Row>(ul: HTMLUListElement, deps: NoteListDeps<T>) {
   const root = createRoot(ul);
   const handle: Handle = { reveal: () => {} };
-  let rows: readonly T[] = [];
+  const layoutOf = (rows: readonly T[], query: string): Layout<T> => {
+    const tall = rows.map((r) => deps.tall(r, query));
+    return { rows, query, tall, keys: rows.map((r, i) => rowKey(r, tall[i])) };
+  };
+  let layout = layoutOf([], '');
   let activeId: string | null = null;
-  const overrides = new Map<string, T>();
-  const shown = () => (overrides.size ? rows.map((r) => overrides.get(r.id) || r) : rows);
-  const paint = () => flushSync(() => root.render(<NoteList rows={shown()} activeId={activeId} scroller={ul} deps={deps} handle={handle} />));
+  const paint = () => flushSync(() => root.render(<NoteList layout={layout} activeId={activeId} scroller={ul} deps={deps} handle={handle} />));
   const reveal = () => {
-    const index = activeId ? rows.findIndex((r) => r.id === activeId) : -1;
+    const index = activeId ? layout.rows.findIndex((r) => r.id === activeId) : -1;
     if (index >= 0) handle.reveal(index);
   };
   return {
-    render(next: readonly T[], active: string | null) {
+    render(next: readonly T[], active: string | null, query: string) {
       const moved = active !== activeId;
-      rows = next;
+      layout = layoutOf(next, query);
       activeId = active;
-      overrides.clear();
       paint();
       if (moved) reveal();
     },
@@ -99,8 +124,12 @@ export function createNoteList<T extends Row>(ul: HTMLUListElement, deps: NoteLi
       reveal();
     },
     replace(row: T) {
-      if (!rows.some((r) => r.id === row.id)) return;
-      overrides.set(row.id, row);
+      const i = layout.rows.findIndex((r) => r.id === row.id);
+      if (i < 0) return;
+      const tall = deps.tall(row, layout.query);
+      const at = <V,>(list: readonly V[], value: V) => { const copy = list.slice(); copy[i] = value; return copy; };
+      const sized = tall === layout.tall[i] ? layout : { ...layout, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+      layout = { ...sized, rows: at(layout.rows, row) };
       paint();
     },
   };

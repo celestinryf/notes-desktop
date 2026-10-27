@@ -30,6 +30,7 @@ interface RendererState {
   editingFolder: FolderEdit | null;
   query: string;
   notes: ListRow[];
+  notesQuery: string;
   currentId: string | null;
   current: PublicNote | null;
   sourceMode: boolean;

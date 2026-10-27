@@ -359,6 +359,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     ]);
     if ((listOpts.query || '') !== state.query) return refresh(opts);
     state.notes = notes;
+    state.notesQuery = listOpts.query || '';
     state.outline = outline;
     state.tree = tree;
     state.folderPath = folderPath;
@@ -422,7 +423,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function renderList() {
-    const q = state.query;
+    const q = state.notesQuery;
     const tree = treeModeActive();
     const empty = tree ? !treeHasContent() : !state.notes.length;
     el.noteList.classList.toggle('hidden', tree || empty);
@@ -445,11 +446,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         } else el.listTitle.append(document.createTextNode(p.name));
       });
     } else el.listTitle.textContent = titles[state.view];
-    if (tree || empty) noteList.render([], null);
+    if (tree || empty) noteList.render([], null, '');
     if (tree) { renderNoteTree(); return; }
     if (empty) return;
     listPageNumbers = state.view === 'folder' && !q && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
-    noteList.render(state.notes, state.currentId);
+    noteList.render(state.notes, state.currentId, q);
   }
 
   function treeHasContent() {
@@ -479,7 +480,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return '<span class="row-meta remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
-  function rowInner(n: RowSource, q: string, where = whereMark(n)) {
+  function rowInner(n: RowSource, q: string, where = whereMark(n, q)) {
     const title = n.body === undefined ? n.title : H.deriveTitle(n);
     const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
     const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '';
@@ -496,8 +497,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return !H.tokenize(q).some((t) => title.includes(t));
   }
 
-  function whereMark(n: RowSource) {
-    if (treeModeActive() || (state.view === 'folder' && !state.query)) return '';
+  function whereMark(n: RowSource, q: string) {
+    if (treeModeActive() || (state.view === 'folder' && !q)) return '';
     return folderMark(n);
   }
 
@@ -1830,9 +1831,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
   let listPageNumbers = false;
   const noteList = createNoteList<RowSource>(el.noteList, {
-    html: (n, i) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + '</span>' : '') + rowInner(n, state.query),
+    html: (n, i, q) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + '</span>' : '') + rowInner(n, q),
     title: (n) => H.deriveTitle(n),
-    tall: (n) => rowHasExcerpt(n, state.query),
+    tall: (n, q) => rowHasExcerpt(n, q),
     draggable: (n) => !n.trashedAt,
     open: (id, newTab) => { openNote(id, { newTab }); },
     dragStart: (id, e) => {
