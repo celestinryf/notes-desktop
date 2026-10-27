@@ -31,6 +31,8 @@ const notesApi = {
   notes: {
     list: invoke('notes:list'),
     rows: invoke('notes:rows'),
+    page: invoke('notes:page'),
+    rowsFor: invoke('notes:rowsFor'),
     searchIds: invoke('notes:searchIds'),
     outline: invoke('notes:outline'),
     get: invoke('notes:get'),

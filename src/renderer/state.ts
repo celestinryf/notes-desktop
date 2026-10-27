@@ -14,7 +14,7 @@ export const state: RendererState = {
   menuFolderId: null,
   editingFolder: null,
   query: '',
-  notes: [],
+  noteIds: [],
   notesQuery: '',
   currentId: null,
   current: null,

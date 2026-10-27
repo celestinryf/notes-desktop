@@ -115,6 +115,7 @@ type IndexReply =
   | { type: 'purged'; seq: number }
   | { type: 'failed'; seq: number; error: string };
 interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; excerpt?: string }
+interface RowPage { ids: string[]; rows: ListRow[] }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }
 interface TagCount { tag: string; count: number }
 interface NoteCreate { title?: string; body?: string; tags?: string[] | string; folderId?: string | null; pinned?: boolean; remindAt?: number | null }
@@ -174,6 +175,8 @@ type Ok<T = {}> = ({ ok: true } & T) | { ok: false; error?: string; canceled?: b
 interface IpcContract {
   'notes:list': (opts?: ListOpts) => PublicNote[];
   'notes:rows': (opts?: ListOpts) => ListRow[];
+  'notes:page': (opts?: ListOpts, also?: string[]) => RowPage;
+  'notes:rowsFor': (ids: string[], query?: string) => ListRow[];
   'notes:searchIds': (query: string) => string[];
   'notes:outline': (sort?: SortKey) => Record<string, OutlineRow[]>;
   'notes:get': (id: string) => PublicNote | null;
@@ -321,7 +324,7 @@ type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) =
 
 interface NotesApi {
   notes: {
-    list: Invoker<'notes:list'>; rows: Invoker<'notes:rows'>; searchIds: Invoker<'notes:searchIds'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
+    list: Invoker<'notes:list'>; rows: Invoker<'notes:rows'>; page: Invoker<'notes:page'>; rowsFor: Invoker<'notes:rowsFor'>; searchIds: Invoker<'notes:searchIds'>; outline: Invoker<'notes:outline'>; get: Invoker<'notes:get'>; latestFile: Invoker<'notes:latestFile'>; create: Invoker<'notes:create'>;
     update: Invoker<'notes:update'>; togglePin: Invoker<'notes:togglePin'>; keepOutOfHistory: Invoker<'notes:keepOutOfHistory'>; duplicate: Invoker<'notes:duplicate'>;
     splitIntoBook: Invoker<'notes:splitIntoBook'>; undoSplit: Invoker<'notes:undoSplit'>; trash: Invoker<'notes:trash'>;
     restore: Invoker<'notes:restore'>; destroy: Invoker<'notes:destroy'>; emptyTrash: Invoker<'notes:emptyTrash'>;

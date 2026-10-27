@@ -34,7 +34,7 @@ export function useVirtualRows<E extends HTMLElement, K extends string>(rows: Ro
   const measure = useCallback((el: E, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLElement, E>) => {
     const size = measureElement(el, entry, instance);
     const index = instance.indexFromElement(el);
-    if (entry && size > 0 && index >= 0 && index < sizes.length) learn(sizeOf(sizes[index]), size);
+    if (entry && size > 0 && el.dataset.placeholder === undefined && index >= 0 && index < sizes.length) learn(sizeOf(sizes[index]), size);
     return size;
   }, [sizes]);
   const list = useVirtualizer<HTMLElement, E>({
