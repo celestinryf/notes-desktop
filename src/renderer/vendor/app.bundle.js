@@ -19448,15 +19448,15 @@
     const refFor = (key) => {
       let ref = refs.current.get(key);
       if (!ref) {
-        ref = (el2) => {
+        const own = (el2) => {
           if (!el2) return;
           measureElement2(el2);
           return () => {
             if (el2.contains(document.activeElement)) scroller.focus({ preventScroll: true });
-            refs.current.delete(key);
-            measureElement2(null);
+            if (refs.current.get(key) === own) refs.current.delete(key);
           };
         };
+        ref = own;
         refs.current.set(key, ref);
       }
       return ref;
@@ -19569,7 +19569,7 @@
     let dropKey = null;
     const overrides = /* @__PURE__ */ new Map();
     root.tabIndex = -1;
-    const rowElement = (key) => Array.from(root.querySelectorAll(".tree-row")).find((r) => r.dataset.key === key) || null;
+    const rowElement = (key) => root.querySelector('.tree-row[data-key="' + CSS.escape(key) + '"]');
     const rovingKey = () => tabKey !== null && indexOf.has(tabKey) ? tabKey : activeKey !== null && indexOf.has(activeKey) ? activeKey : layout.keys[0] ?? null;
     const painted = () => {
       const roving = rovingKey();
@@ -19587,7 +19587,8 @@
       drag(key) {
         if (key === dragKey) return;
         dragKey = key;
-        if (key !== null) document.addEventListener("pointermove", () => marks.drag(null), { once: true });
+        if (key === null) dropKey = null;
+        else document.addEventListener("pointermove", () => marks.drag(null), { once: true });
         paint();
       },
       drop(key, leaving) {
@@ -19654,6 +19655,9 @@
         tabKey = key;
         queueMicrotask(paint);
       }
+    });
+    root.addEventListener("pointerdown", () => {
+      focusKey = null;
     });
     root.addEventListener("focusout", (e) => {
       if (e.relatedTarget instanceof Node && !root.contains(e.relatedTarget)) focusKey = null;

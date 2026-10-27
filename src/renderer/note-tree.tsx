@@ -59,15 +59,15 @@ function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, marks, overr
   const refFor = (key: string) => {
     let ref = refs.current.get(key);
     if (!ref) {
-      ref = (el) => {
+      const own: RefCallback<HTMLDivElement> = (el) => {
         if (!el) return;
         measureElement(el);
         return () => {
           if (el.contains(document.activeElement)) scroller.focus({ preventScroll: true });
-          refs.current.delete(key);
-          measureElement(null);
+          if (refs.current.get(key) === own) refs.current.delete(key);
         };
       };
+      ref = own;
       refs.current.set(key, ref);
     }
     return ref;
@@ -159,7 +159,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
   let dropKey: string | null = null;
   const overrides = new Map<string, TreeOverride<N>>();
   root.tabIndex = -1;
-  const rowElement = (key: string) => Array.from(root.querySelectorAll<HTMLElement>('.tree-row')).find((r) => r.dataset.key === key) || null;
+  const rowElement = (key: string) => root.querySelector<HTMLElement>('.tree-row[data-key="' + CSS.escape(key) + '"]');
   const rovingKey = () => (tabKey !== null && indexOf.has(tabKey) ? tabKey : activeKey !== null && indexOf.has(activeKey) ? activeKey : layout.keys[0] ?? null);
   const painted = () => {
     const roving = rovingKey();
@@ -174,7 +174,8 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     drag(key) {
       if (key === dragKey) return;
       dragKey = key;
-      if (key !== null) document.addEventListener('pointermove', () => marks.drag(null), { once: true });
+      if (key === null) dropKey = null;
+      else document.addEventListener('pointermove', () => marks.drag(null), { once: true });
       paint();
     },
     drop(key, leaving) {
@@ -232,6 +233,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     if (focusKey !== null && focusKey !== key) focusKey = null;
     if (key !== tabKey) { tabKey = key; queueMicrotask(paint); }
   });
+  root.addEventListener('pointerdown', () => { focusKey = null; });
   root.addEventListener('focusout', (e) => {
     if (e.relatedTarget instanceof Node && !root.contains(e.relatedTarget)) focusKey = null;
   });
