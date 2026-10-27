@@ -17162,9 +17162,11 @@
   }
 
   // src/renderer/note-list.tsx
-  var import_react = __toESM(require_react());
   var import_react_dom2 = __toESM(require_react_dom());
   var import_client = __toESM(require_client());
+
+  // src/renderer/virtual-rows.tsx
+  var import_react = __toESM(require_react());
 
   // node_modules/@tanstack/react-virtual/dist/esm/index.js
   var React = __toESM(require_react(), 1);
@@ -19204,32 +19206,40 @@
     });
   }
 
-  // src/renderer/note-list.tsx
+  // src/renderer/virtual-rows.tsx
   var import_jsx_runtime = __toESM(require_jsx_runtime());
-  var ROW_PX = 28;
-  var TALL_ROW_PX = 42;
   var OVERSCAN = 16;
-  var rowKey = (row, tall) => row.id + (tall ? ":tall" : "");
-  var learnedSize = (size) => ({ size, seen: /* @__PURE__ */ new Map() });
   function learn(learned, size) {
     const times = (learned.seen.get(size) || 0) + 1;
     learned.seen.set(size, times);
     if (times > (learned.seen.get(learned.size) || 0)) learned.size = size;
   }
-  function NoteList({ layout, activeId, scroller, deps, handle }) {
-    const { rows } = layout;
-    const { keys, tall } = layout;
+  function Gap({ tag, height }) {
+    if (height <= 0) return null;
+    const Tag = tag;
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Tag, { className: "virtual-gap", role: "presentation", "aria-hidden": "true", style: { height } });
+  }
+  function useVirtualRows(rows, scroller, guesses, handle) {
+    const { keys, sizes } = rows;
+    const learned = (0, import_react.useRef)(/* @__PURE__ */ new Map());
+    const sizeOf = (kind) => {
+      let size = learned.current.get(kind);
+      if (!size) {
+        size = { size: guesses[kind], seen: /* @__PURE__ */ new Map() };
+        learned.current.set(kind, size);
+      }
+      return size;
+    };
     const getItemKey = (0, import_react.useCallback)((i) => keys[i], [keys]);
-    const sizes = (0, import_react.useRef)({ short: learnedSize(ROW_PX), tall: learnedSize(TALL_ROW_PX) });
-    const estimateSize = (0, import_react.useCallback)((i) => (tall[i] ? sizes.current.tall : sizes.current.short).size, [tall]);
+    const estimateSize = (0, import_react.useCallback)((i) => sizeOf(sizes[i]).size, [sizes]);
     const measure = (0, import_react.useCallback)((el2, entry, instance) => {
       const size = measureElement(el2, entry, instance);
       const index = instance.indexFromElement(el2);
-      if (entry && size > 0 && index >= 0 && index < tall.length) learn(tall[index] ? sizes.current.tall : sizes.current.short, size);
+      if (entry && size > 0 && index >= 0 && index < sizes.length) learn(sizeOf(sizes[index]), size);
       return size;
-    }, [tall]);
+    }, [sizes]);
     const list = useVirtualizer({
-      count: rows.length,
+      count: keys.length,
       getScrollElement: () => scroller,
       estimateSize,
       getItemKey,
@@ -19240,17 +19250,31 @@
       handle.reveal = (index) => list.scrollToIndex(index, { align: "auto" });
     });
     const items = list.getVirtualItems();
-    const before = items.length ? items[0].start : 0;
-    const after = items.length ? list.getTotalSize() - items[items.length - 1].end : 0;
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-      before > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { className: "note-list-gap", role: "presentation", "aria-hidden": "true", style: { height: before } }),
+    return {
+      items,
+      before: items.length ? items[0].start : 0,
+      after: items.length ? list.getTotalSize() - items[items.length - 1].end : 0,
+      total: list.getTotalSize(),
+      measureElement: list.measureElement
+    };
+  }
+
+  // src/renderer/note-list.tsx
+  var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+  var LIST_SIZES = { short: 28, tall: 42 };
+  var rowKey = (row, size) => row.id + (size === "tall" ? ":tall" : "");
+  function NoteList({ layout, activeId, scroller, deps, handle }) {
+    const { rows } = layout;
+    const { items, before, after, measureElement: measureElement2 } = useVirtualRows(layout, scroller, LIST_SIZES, handle);
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Gap, { tag: "li", height: before }),
       items.map((item) => {
         const row = rows[item.index];
         const drag = deps.draggable(row);
-        return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "li",
           {
-            ref: list.measureElement,
+            ref: measureElement2,
             "data-index": item.index,
             "data-id": row.id,
             className: "note-row" + (row.id === activeId ? " is-active" : ""),
@@ -19279,20 +19303,21 @@
           row.id
         );
       }),
-      after > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { className: "note-list-gap", role: "presentation", "aria-hidden": "true", style: { height: after } })
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Gap, { tag: "li", height: after })
     ] });
   }
   function createNoteList(ul, deps) {
     const root = (0, import_client.createRoot)(ul);
     const handle = { reveal: () => {
     } };
-    const layoutOf = (rows, query) => {
-      const tall = rows.map((r) => deps.tall(r, query));
-      return { rows, query, tall, keys: rows.map((r, i) => rowKey(r, tall[i])) };
+    const sizeOf = (row, query) => deps.tall(row, query) ? "tall" : "short";
+    const layoutOf2 = (rows, query) => {
+      const sizes = rows.map((r) => sizeOf(r, query));
+      return { rows, query, sizes, keys: rows.map((r, i) => rowKey(r, sizes[i])) };
     };
-    let layout = layoutOf([], "");
+    let layout = layoutOf2([], "");
     let activeId = null;
-    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime.jsx)(NoteList, { layout, activeId, scroller: ul, deps, handle })));
+    const paint = () => (0, import_react_dom2.flushSync)(() => root.render(/* @__PURE__ */ (0, import_jsx_runtime2.jsx)(NoteList, { layout, activeId, scroller: ul, deps, handle })));
     const reveal = () => {
       const index = activeId ? layout.rows.findIndex((r) => r.id === activeId) : -1;
       if (index >= 0) handle.reveal(index);
@@ -19300,7 +19325,7 @@
     return {
       render(next, active, query) {
         const moved = active !== activeId;
-        layout = layoutOf(next, query);
+        layout = layoutOf2(next, query);
         activeId = active;
         paint();
         if (moved) reveal();
@@ -19314,14 +19339,352 @@
       replace(row) {
         const i = layout.rows.findIndex((r) => r.id === row.id);
         if (i < 0) return;
-        const tall = deps.tall(row, layout.query);
+        const size = sizeOf(row, layout.query);
         const at = (list, value) => {
           const copy = list.slice();
           copy[i] = value;
           return copy;
         };
-        const sized = tall === layout.tall[i] ? layout : { ...layout, tall: at(layout.tall, tall), keys: at(layout.keys, rowKey(row, tall)) };
+        const sized = size === layout.sizes[i] ? layout : { ...layout, sizes: at(layout.sizes, size), keys: at(layout.keys, rowKey(row, size)) };
         layout = { ...sized, rows: at(layout.rows, row) };
+        paint();
+      }
+    };
+  }
+
+  // src/renderer/note-tree.tsx
+  var import_react2 = __toESM(require_react());
+  var import_react_dom3 = __toESM(require_react_dom());
+  var import_client2 = __toESM(require_client());
+
+  // src/renderer/tree-items.ts
+  var AWAY_KEY = "p:";
+  function chooseActive(items, id, activeKey) {
+    if (!id) return -1;
+    let first = -1;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind !== "note" || item.note.id !== id) continue;
+      if (item.key === activeKey) return i;
+      if (first < 0) first = i;
+    }
+    return first;
+  }
+  function numberSiblings(items) {
+    const parentOf = (item) => item.groups.length ? item.groups[item.groups.length - 1].key : "";
+    const sizes = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const p = parentOf(item);
+      const n = (sizes.get(p) || 0) + 1;
+      sizes.set(p, n);
+      item.posInSet = n;
+    }
+    for (const item of items) item.setSize = sizes.get(parentOf(item)) || 0;
+  }
+  function treeItems(input) {
+    const { outline, open, here } = input;
+    const items = [];
+    const pinnedFirst = (notes, book) => book ? { pins: [], rest: notes } : { pins: notes.filter((n) => n.pinned), rest: notes.filter((n) => !n.pinned) };
+    const noteItem = (note, depth, groups, away) => {
+      items.push({ kind: "note", key: (away ? AWAY_KEY : "n:") + note.id, note, away, depth, groups, setSize: 0, posInSet: 0 });
+    };
+    const folderItem = (node, depth, groups) => {
+      const notes = outline[node.id] || [];
+      const kids = node.children.length + notes.length > 0;
+      const isHere = here.has(node.id);
+      const isOpen = kids && (open.has(node.id) || isHere && input.revealing);
+      const key = "f:" + node.id;
+      items.push({ kind: "folder", key, node, open: isOpen, kids, here: isHere, depth, groups, setSize: 0, posInSet: 0 });
+      if (isOpen) folderContents(node, depth + 1, [...groups, { key: "g:" + key, owner: key, depth, here: isHere, outline: false }]);
+    };
+    const fillLevel = (folderId, pins, folders, rest, depth, groups) => {
+      pins.forEach((n) => noteItem(n, depth, groups, n.folderId !== folderId));
+      folders.forEach((c) => folderItem(c, depth, groups));
+      rest.forEach((n) => noteItem(n, depth, groups, false));
+    };
+    const folderContents = (node, depth, groups) => {
+      const { pins, rest } = pinnedFirst(outline[node.id] || [], node.book);
+      fillLevel(node.id, pins, node.children, rest, depth, groups);
+    };
+    if (input.scope) folderContents(input.scope, 0, []);
+    else {
+      const everyPin = sortNotes(Object.values(outline).flat().filter((n) => n.pinned), input.sort);
+      fillLevel(null, everyPin, input.tree, (outline[""] || []).filter((n) => !n.pinned), 0, []);
+    }
+    const active = chooseActive(items, input.currentId, input.activeKey);
+    const chosen = items[active];
+    if (chosen && chosen.kind === "note" && input.headings.length >= 2) {
+      const minLevel = Math.min(...input.headings.map((h) => h.level));
+      const groups = [...chosen.groups, { key: "g:" + chosen.key, owner: chosen.key, depth: chosen.depth, here: true, outline: true }];
+      const headings = input.headings.map((h, index) => ({
+        kind: "heading",
+        key: "h:" + chosen.note.id + ":" + index,
+        noteId: chosen.note.id,
+        index,
+        text: h.text,
+        depth: chosen.depth + 1 + (h.level - minLevel),
+        groups,
+        setSize: 0,
+        posInSet: 0
+      }));
+      items.splice(active + 1, 0, ...headings);
+    }
+    numberSiblings(items);
+    return { items, active };
+  }
+
+  // src/renderer/note-tree.tsx
+  var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+  var TREE_SIZES = { row: 28, heading: 24 };
+  var layoutOf = (items) => ({
+    items,
+    keys: items.map((item) => item.key),
+    sizes: items.map((item) => item.kind === "heading" ? "heading" : "row")
+  });
+  function NoteTree({ layout, activeKey, tabKey, dragKey, dropKey, marks, overrides, scroller, deps, handle, painted }) {
+    const { items: rows, before, after, total, measureElement: measureElement2 } = useVirtualRows(layout, scroller, TREE_SIZES, handle);
+    (0, import_react2.useLayoutEffect)(() => painted());
+    const refs = (0, import_react2.useRef)(/* @__PURE__ */ new Map());
+    const refFor = (key) => {
+      let ref = refs.current.get(key);
+      if (!ref) {
+        const own = (el2) => {
+          if (!el2) return;
+          measureElement2(el2);
+          return () => {
+            if (el2.contains(document.activeElement)) scroller.focus({ preventScroll: true });
+            if (refs.current.get(key) === own) refs.current.delete(key);
+          };
+        };
+        ref = own;
+        refs.current.set(key, ref);
+      }
+      return ref;
+    };
+    const row = (item, index) => {
+      const override = item.kind === "note" ? overrides.get(item.note.id) || null : null;
+      const shared = {
+        ref: refFor(item.key),
+        "data-index": index,
+        "data-key": item.key,
+        style: { "--depth": item.depth },
+        role: "treeitem",
+        "aria-level": item.depth + 1,
+        "aria-setsize": item.setSize,
+        "aria-posinset": item.posInSet,
+        tabIndex: item.key === tabKey ? 0 : -1,
+        title: override ? override.title : deps.title(item),
+        dangerouslySetInnerHTML: { __html: deps.html(item, override ? override.note : null) },
+        onClick: (e) => deps.activate(item, e.nativeEvent)
+      };
+      if (item.kind === "folder") {
+        const id2 = item.node.id;
+        return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          "div",
+          {
+            ...shared,
+            className: "tree-row tree-folder" + (item.here ? " is-here" : "") + (item.key === dropKey ? " is-drop-target" : ""),
+            "data-id": id2,
+            "aria-expanded": item.kids ? item.open : void 0,
+            onContextMenu: (e) => {
+              e.preventDefault();
+              deps.folderMenu(id2, e.currentTarget, e.nativeEvent);
+            },
+            onDragOver: (e) => {
+              if (deps.allowDrop(e.nativeEvent)) marks.drop(item.key);
+            },
+            onDragLeave: () => marks.drop(null, item.key),
+            onDrop: (e) => {
+              marks.drop(null);
+              deps.drop(id2, e.nativeEvent);
+            }
+          },
+          item.key
+        );
+      }
+      if (item.kind === "heading") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-heading" }, item.key);
+      const id = item.note.id;
+      const active = item.key === activeKey;
+      return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+        "div",
+        {
+          ...shared,
+          className: "tree-row tree-note note-row" + (active ? " is-active" : "") + (item.key === dragKey ? " is-dragging" : ""),
+          "data-id": id,
+          "data-depth": item.depth,
+          "aria-selected": active,
+          draggable: true,
+          onAuxClick: (e) => {
+            if (e.button === 1) {
+              e.preventDefault();
+              deps.openInTab(id);
+            }
+          },
+          onDragStart: (e) => {
+            marks.drag(item.key);
+            deps.dragStart(id, e.nativeEvent);
+          },
+          onDragEnd: () => {
+            marks.drag(null);
+            deps.dragEnd();
+          }
+        },
+        item.key
+      );
+    };
+    const nest = (slice, level) => {
+      const out = [];
+      for (let i = 0; i < slice.length; ) {
+        const group = slice[i].item.groups[level];
+        if (!group) {
+          out.push(row(slice[i].item, slice[i].index));
+          i++;
+          continue;
+        }
+        let j = i + 1;
+        while (j < slice.length && slice[j].item.groups[level]?.key === group.key) j++;
+        out.push(
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "tree-children" + (group.here ? " is-here" : "") + (group.outline ? " tree-outline" : ""), role: "group", style: { "--depth": group.depth }, children: nest(slice.slice(i, j), level + 1) }, group.key)
+        );
+        i = j;
+      }
+      return out;
+    };
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { minHeight: total }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Gap, { tag: "div", height: before }),
+      nest(rows.map((r) => ({ item: layout.items[r.index], index: r.index })), 0),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Gap, { tag: "div", height: after })
+    ] });
+  }
+  function createNoteTree(root, deps) {
+    const reactRoot = (0, import_client2.createRoot)(root);
+    const handle = { reveal: () => {
+    } };
+    let layout = layoutOf([]);
+    let indexOf = /* @__PURE__ */ new Map();
+    let activeKey = null;
+    let tabKey = null;
+    let focusKey = null;
+    let dragKey = null;
+    let dropKey = null;
+    const overrides = /* @__PURE__ */ new Map();
+    root.tabIndex = -1;
+    const rowElement = (key) => root.querySelector('.tree-row[data-key="' + CSS.escape(key) + '"]');
+    const rovingKey = () => tabKey !== null && indexOf.has(tabKey) ? tabKey : activeKey !== null && indexOf.has(activeKey) ? activeKey : layout.keys[0] ?? null;
+    const painted = () => {
+      const roving = rovingKey();
+      const tabbable = roving !== null && !rowElement(roving) ? 0 : -1;
+      if (root.tabIndex !== tabbable) root.tabIndex = tabbable;
+      if (focusKey !== null) {
+        const el2 = rowElement(focusKey);
+        if (el2) {
+          focusKey = null;
+          el2.focus();
+        }
+      }
+    };
+    const marks = {
+      drag(key) {
+        if (key === dragKey) return;
+        dragKey = key;
+        if (key === null) dropKey = null;
+        else document.addEventListener("pointermove", () => marks.drag(null), { once: true });
+        paint();
+      },
+      drop(key, leaving) {
+        if (leaving !== void 0 && dropKey !== leaving || key === dropKey) return;
+        dropKey = key;
+        paint();
+      }
+    };
+    const paint = () => (0, import_react_dom3.flushSync)(() => reactRoot.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoteTree, { layout, activeKey, tabKey: rovingKey(), dragKey, dropKey, marks, overrides, scroller: root, deps, handle, painted })));
+    const focusIndex = (index) => {
+      tabKey = layout.keys[index];
+      focusKey = tabKey;
+      if (!rowElement(tabKey)) handle.reveal(index);
+      paint();
+    };
+    root.addEventListener("keydown", (e) => {
+      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.altKey || e.ctrlKey || e.metaKey) return;
+      const onRoot = e.target === root;
+      const rowEl = onRoot ? null : e.target.closest(".tree-row");
+      if (!onRoot && (!rowEl || e.target !== rowEl || !root.contains(rowEl))) return;
+      const key = rowEl ? rowEl.dataset.key : rovingKey();
+      const i = key === void 0 || key === null ? -1 : indexOf.get(key) ?? -1;
+      if (i < 0) return;
+      const item = layout.items[i];
+      const go = (j) => {
+        if (j >= 0 && j < layout.items.length) {
+          e.preventDefault();
+          focusIndex(j);
+        }
+      };
+      if (e.key === "ArrowDown") go(i + 1);
+      else if (e.key === "ArrowUp") go(i - 1);
+      else if (e.key === "Home") go(0);
+      else if (e.key === "End") go(layout.items.length - 1);
+      else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        if (item.kind === "folder" && item.kids && !item.open) deps.toggle(item, true);
+        else if (item.kind === "folder" && item.open) go(i + 1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (item.kind === "folder" && item.open) deps.toggle(item, false);
+        else {
+          const group = item.groups[item.groups.length - 1];
+          const parent = group ? indexOf.get(group.owner) : void 0;
+          if (parent !== void 0) focusIndex(parent);
+        }
+      } else if (rowEl && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        rowEl.click();
+      }
+    });
+    root.addEventListener("focusin", (e) => {
+      if (e.target === root) {
+        const roving = rovingKey();
+        const index = roving === null ? void 0 : indexOf.get(roving);
+        if (index !== void 0 && e.relatedTarget instanceof Node && !root.contains(e.relatedTarget) && root.matches(":focus-visible")) focusIndex(index);
+        return;
+      }
+      const r = e.target instanceof Element ? e.target.closest(".tree-row") : null;
+      const key = r && r.dataset.key;
+      if (!key) return;
+      if (focusKey !== null && focusKey !== key) focusKey = null;
+      if (key !== tabKey) {
+        tabKey = key;
+        queueMicrotask(paint);
+      }
+    });
+    root.addEventListener("pointerdown", () => {
+      focusKey = null;
+    });
+    root.addEventListener("focusout", (e) => {
+      if (e.relatedTarget instanceof Node && !root.contains(e.relatedTarget)) focusKey = null;
+    });
+    return {
+      render(items, active) {
+        layout = layoutOf(items);
+        indexOf = new Map(layout.keys.map((k, i) => [k, i]));
+        activeKey = active >= 0 ? layout.keys[active] : null;
+        if (focusKey !== null && !indexOf.has(focusKey)) focusKey = null;
+        overrides.clear();
+        paint();
+      },
+      setActive(id, preferKey) {
+        const index = chooseActive(layout.items, id, preferKey);
+        const next = index >= 0 ? layout.keys[index] : null;
+        if (next === activeKey) return;
+        activeKey = next;
+        paint();
+      },
+      revealActive() {
+        const index = activeKey === null ? -1 : indexOf.get(activeKey) ?? -1;
+        if (index >= 0) handle.reveal(index);
+      },
+      replace(id, note, title) {
+        if (!layout.items.some((item) => item.kind === "note" && item.note.id === id)) return;
+        overrides.set(id, { note, title });
         paint();
       }
     };
@@ -23747,7 +24110,6 @@
     }
     const NARROW_W = 1e3;
     const PEEK_EDGE_PX = 24;
-    const AWAY_KEY = "p:";
     let treeActiveKey = null;
     let sidebarPeek = null;
     let peekTimer;
@@ -24070,6 +24432,7 @@
         renderNoteTree();
         return;
       }
+      noteTree.render([], -1);
       if (empty) return;
       listPageNumbers = state.view === "folder" && !q && !!(flattenTree(state.tree).find((x) => x.id === state.folderId) || {}).book;
       noteList.render(state.notes, state.currentId, q);
@@ -24135,10 +24498,7 @@
             e.pinned = !!note.pinned;
           }
         }
-        for (const row of el.noteTree.querySelectorAll('.tree-note[data-id="' + note.id + '"]')) {
-          row.innerHTML = treeNoteInner(note, row.dataset.key === AWAY_KEY + note.id);
-          row.title = title;
-        }
+        noteTree.replace(note.id, note, title);
       }
       noteList.replace(note);
     }
@@ -24411,157 +24771,55 @@
       const h = el.richEditor.querySelectorAll(".rich-editor-content :is(h1, h2, h3, h4, h5, h6)")[i];
       if (h) h.scrollIntoView({ block: "start", behavior: "smooth" });
     }
+    function setTreeOpen(id, on) {
+      const next = new Set(settingsNow().treeExpanded || []);
+      if (on) next.add(id);
+      else next.delete(id);
+      updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
+    }
     function renderNoteTree() {
-      const root = el.noteTree;
-      const refocus = treeFocusKey(root);
-      root.innerHTML = "";
-      const out = state.outline || {};
-      const open = new Set(settingsNow().treeExpanded || []);
       const scopeId = state.view === "folder" ? state.folderId : null;
-      const scopeNode = scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) : null;
-      const here = new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []);
-      const heads = currentHeadings();
-      const minLevel = heads.length ? Math.min(...heads.map((h) => h.level)) : 1;
-      const setOpen = (id, on) => {
-        const next = new Set(settingsNow().treeExpanded || []);
-        if (on) next.add(id);
-        else next.delete(id);
-        updateSettings({ treeExpanded: Array.from(next) }).then(renderNoteTree);
-      };
-      const noteRow = (n, depth, into, awayFromFolder = false) => {
-        const row = document.createElement("div");
-        row.className = "tree-row tree-note note-row";
-        row.dataset.id = n.id;
-        row.dataset.key = (awayFromFolder ? AWAY_KEY : "n:") + n.id;
-        row.dataset.depth = String(depth);
-        row.style.setProperty("--depth", String(depth));
-        row.setAttribute("role", "treeitem");
-        row.setAttribute("aria-level", String(depth + 1));
-        row.setAttribute("aria-selected", "false");
-        row.tabIndex = -1;
-        row.innerHTML = treeNoteInner(n, awayFromFolder);
-        row.title = n.title;
-        row.addEventListener("click", (e) => {
-          const newTab = e.ctrlKey || e.metaKey;
-          if (!newTab && treeActiveKey !== row.dataset.key) {
-            treeActiveKey = row.dataset.key || null;
-            if (n.id === state.currentId) renderNoteTree();
-          }
-          openNote(n.id, { newTab });
-        });
-        row.addEventListener("auxclick", (e) => {
-          if (e.button === 1) {
-            e.preventDefault();
-            openNote(n.id, { newTab: true });
-          }
-        });
-        row.draggable = true;
-        row.addEventListener("dragstart", (e) => {
-          if (e.dataTransfer) {
-            e.dataTransfer.setData("text/x-note-id", n.id);
-            e.dataTransfer.effectAllowed = "move";
-          }
-          row.classList.add("is-dragging");
-          toPeer({ type: "drag", id: n.id });
-        });
-        row.addEventListener("dragend", () => {
-          row.classList.remove("is-dragging");
-          toPeer({ type: "drag", id: null });
-        });
-        into.append(row);
-      };
-      const outlineUnder = (row) => {
-        if (heads.length < 2) return;
-        const depth = Number(row.dataset.depth);
-        const group = treeGroup(depth, true);
-        group.classList.add("tree-outline");
-        heads.forEach((h, i) => {
-          const hr = document.createElement("div");
-          hr.className = "tree-row tree-heading";
-          hr.dataset.key = "h:" + row.dataset.id + ":" + i;
-          hr.style.setProperty("--depth", String(depth + 1 + (h.level - minLevel)));
-          hr.setAttribute("role", "treeitem");
-          hr.setAttribute("aria-level", String(depth + 2 + (h.level - minLevel)));
-          hr.tabIndex = -1;
-          hr.innerHTML = '<span class="tree-spacer" aria-hidden="true"></span>';
-          const hName = document.createElement("span");
-          hName.className = "row-name";
-          hName.textContent = h.text;
-          hr.append(hName);
-          hr.title = h.text;
-          hr.addEventListener("click", () => jumpToHeading(i));
-          group.append(hr);
-        });
-        row.after(group);
-      };
-      const folderRow = (node, depth, into) => {
-        const notes = out[node.id] || [];
-        const kids = node.children.length + notes.length > 0;
-        const isOpen = kids && (open.has(node.id) || here.has(node.id) && state.revealInTree === state.currentId);
-        const row = document.createElement("div");
-        row.className = "tree-row tree-folder" + (here.has(node.id) ? " is-here" : "");
-        row.dataset.id = node.id;
-        row.dataset.key = "f:" + node.id;
-        row.style.setProperty("--depth", String(depth));
-        row.setAttribute("role", "treeitem");
-        row.setAttribute("aria-level", String(depth + 1));
-        if (kids) row.setAttribute("aria-expanded", String(isOpen));
-        row.tabIndex = -1;
-        setRowToggle(row, kids ? (on) => setOpen(node.id, on) : null);
-        row.innerHTML = '<span class="tree-chevron' + (isOpen ? " is-open" : "") + (kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + "</span>";
-        const rowName = document.createElement("span");
-        rowName.className = "row-name";
-        rowName.textContent = node.name;
-        row.append(rowName);
-        if (node.book) row.insertAdjacentHTML("beforeend", bookMark());
-        const rowCount = document.createElement("span");
-        rowCount.className = "count";
-        rowCount.textContent = node.count ? String(node.count) : "";
-        row.append(rowCount);
-        row.title = node.name;
-        row.addEventListener("click", () => {
-          if (kids) setOpen(node.id, !isOpen);
-        });
-        row.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          openFolderMenu(node.id, row, e);
-        });
-        wireDropTarget(row, node.id);
-        into.append(row);
-        if (isOpen) {
-          const group = treeGroup(depth, here.has(node.id));
-          folderContents(node, depth + 1, group);
-          into.append(group);
-        }
-      };
-      const pinnedFirst = (notes, book2) => book2 ? { pins: [], rest: notes } : { pins: notes.filter((n) => n.pinned), rest: notes.filter((n) => !n.pinned) };
-      const fillLevel = (folderId, pins, folders, rest, depth, into) => {
-        pins.forEach((n) => noteRow(n, depth, into, n.folderId !== folderId));
-        folders.forEach((c) => folderRow(c, depth, into));
-        rest.forEach((n) => noteRow(n, depth, into));
-      };
-      const folderContents = (node, depth, into) => {
-        const { pins, rest } = pinnedFirst(out[node.id] || [], node.book);
-        fillLevel(node.id, pins, node.children, rest, depth, into);
-      };
-      const frag = document.createDocumentFragment();
-      if (scopeNode) folderContents(scopeNode, 0, frag);
-      else {
-        const everyPin = sortNotes(Object.values(out).flat().filter((n) => n.pinned), settingsNow().sort);
-        fillLevel(null, everyPin, state.tree, (out[""] || []).filter((n) => !n.pinned), 0, frag);
-      }
-      const chosen = activeTreeRow(frag, state.currentId);
-      if (chosen) {
-        setRowActive(chosen, true);
-        outlineUnder(chosen);
-      }
-      root.append(frag);
-      restoreTreeFocus(root, refocus);
-      const active = root.querySelector(".tree-note.is-active");
-      if (active && state.revealInTree === state.currentId) {
-        active.scrollIntoView({ block: "nearest" });
+      const { items, active } = treeItems({
+        outline: state.outline || {},
+        tree: state.tree,
+        scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
+        sort: settingsNow().sort,
+        open: new Set(settingsNow().treeExpanded || []),
+        here: new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []),
+        revealing: state.revealInTree === state.currentId,
+        currentId: state.currentId,
+        activeKey: treeActiveKey,
+        headings: currentHeadings()
+      });
+      noteTree.render(items, active);
+      if (active >= 0 && state.revealInTree === state.currentId) {
+        noteTree.revealActive();
         state.revealInTree = null;
       }
+    }
+    function treeRowHtml(item, override) {
+      if (item.kind === "note") return treeNoteInner(override || item.note, item.away);
+      if (item.kind === "heading") return '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name">' + escapeHtml(item.text) + "</span>";
+      return '<span class="tree-chevron' + (item.open ? " is-open" : "") + (item.kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + '</span><span class="row-name">' + escapeHtml(item.node.name) + "</span>" + (item.node.book ? bookMark() : "") + '<span class="count">' + (item.node.count ? String(item.node.count) : "") + "</span>";
+    }
+    function treeRowTitle(item) {
+      return item.kind === "note" ? item.note.title : item.kind === "folder" ? item.node.name : item.text;
+    }
+    function activateTreeRow(item, e) {
+      if (item.kind === "folder") {
+        if (item.kids) setTreeOpen(item.node.id, !item.open);
+        return;
+      }
+      if (item.kind === "heading") {
+        jumpToHeading(item.index);
+        return;
+      }
+      const newTab = e.ctrlKey || e.metaKey;
+      if (!newTab && treeActiveKey !== item.key) {
+        treeActiveKey = item.key;
+        if (item.note.id === state.currentId) renderNoteTree();
+      }
+      openNote(item.note.id, { newTab });
     }
     function revealInSidebar(note) {
       if (GUEST) return;
@@ -24577,8 +24835,7 @@
       if (GUEST || !treeModeActive() || !note) return;
       if (!note.folderId || state.view === "all" && note.pinned) {
         renderNoteTree();
-        const active = el.noteTree.querySelector(".tree-note.is-active");
-        if (active) active.scrollIntoView({ block: "nearest" });
+        noteTree.revealActive();
         return;
       }
       const path = pathTo(note.folderId);
@@ -24729,26 +24986,42 @@
       if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
       await refresh({ keepEditor: true });
     }
+    function allowNoteDrop(e) {
+      if (!e.dataTransfer || !(e.dataTransfer.types.includes("text/x-note-id") || e.dataTransfer.types.includes("text/x-folder-id"))) return false;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      return true;
+    }
+    function dropInto(folderId, e) {
+      if (!e.dataTransfer) return;
+      const noteId = e.dataTransfer.getData("text/x-note-id");
+      const movingFolder = e.dataTransfer.getData("text/x-folder-id");
+      if (!noteId && !movingFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (noteId) moveNoteToFolder(noteId, folderId);
+      else if (movingFolder && movingFolder !== folderId) moveFolderTo(movingFolder, folderId);
+    }
     function wireDropTarget(target, folderId) {
-      const accepts = (e) => e.dataTransfer && (e.dataTransfer.types.includes("text/x-note-id") || e.dataTransfer.types.includes("text/x-folder-id"));
       target.addEventListener("dragover", (e) => {
-        if (!accepts(e)) return;
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-        target.classList.add("is-drop-target");
+        if (allowNoteDrop(e)) target.classList.add("is-drop-target");
       });
       target.addEventListener("dragleave", () => target.classList.remove("is-drop-target"));
       target.addEventListener("drop", (e) => {
         target.classList.remove("is-drop-target");
-        if (!e.dataTransfer) return;
-        const noteId = e.dataTransfer.getData("text/x-note-id");
-        const movingFolder = e.dataTransfer.getData("text/x-folder-id");
-        if (!noteId && !movingFolder) return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (noteId) moveNoteToFolder(noteId, folderId);
-        else if (movingFolder && movingFolder !== folderId) moveFolderTo(movingFolder, folderId);
+        dropInto(folderId, e);
       });
+    }
+    function startNoteDrag(id, e) {
+      if (e.dataTransfer) {
+        e.dataTransfer.setData("text/x-note-id", id);
+        e.dataTransfer.effectAllowed = "move";
+      }
+      toPeer({ type: "drag", id });
+      document.addEventListener("pointermove", endNoteDrag, { once: true });
+    }
+    function endNoteDrag() {
+      toPeer({ type: "drag", id: null });
     }
     function renderFolderSelect() {
       const sel = el.folderSelect;
@@ -25532,17 +25805,7 @@
     }
     function markActiveRow(id) {
       noteList.setActive(id);
-      const chosen = activeTreeRow(el.noteTree, id);
-      el.noteTree.querySelectorAll(".note-row").forEach((r) => setRowActive(r, r === chosen));
-    }
-    function setRowActive(row, on) {
-      row.classList.toggle("is-active", on);
-      if (row.hasAttribute("aria-selected")) row.setAttribute("aria-selected", String(on));
-    }
-    function activeTreeRow(root, id) {
-      if (!id) return null;
-      const rows = Array.from(root.querySelectorAll('.tree-note[data-id="' + id + '"]'));
-      return rows.find((r) => r.dataset.key === treeActiveKey) || rows[0] || null;
+      noteTree.setActive(id, treeActiveKey);
     }
     function focusAfterOpen(where) {
       if (where === "title") el.titleInput.focus();
@@ -25581,15 +25844,22 @@
       open: (id, newTab) => {
         openNote(id, { newTab });
       },
-      dragStart: (id, e) => {
-        if (e.dataTransfer) {
-          e.dataTransfer.setData("text/x-note-id", id);
-          e.dataTransfer.effectAllowed = "move";
-        }
-        toPeer({ type: "drag", id });
-        document.addEventListener("pointermove", () => toPeer({ type: "drag", id: null }), { once: true });
+      dragStart: startNoteDrag,
+      dragEnd: endNoteDrag
+    });
+    const noteTree = createNoteTree(el.noteTree, {
+      html: treeRowHtml,
+      title: treeRowTitle,
+      activate: activateTreeRow,
+      openInTab: (id) => {
+        openNote(id, { newTab: true });
       },
-      dragEnd: () => toPeer({ type: "drag", id: null })
+      toggle: (item, on) => setTreeOpen(item.node.id, on),
+      folderMenu: (id, row, e) => openFolderMenu(id, row, e),
+      allowDrop: allowNoteDrop,
+      drop: dropInto,
+      dragStart: startNoteDrag,
+      dragEnd: endNoteDrag
     });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
@@ -26834,7 +27104,6 @@
       bindSidebarFloat();
       el.tagsFold.addEventListener("click", () => updateSettings({ tagsCollapsed: !settingsNow().tagsCollapsed }));
       bindTreeKeys(el.folderTree);
-      bindTreeKeys(el.noteTree);
       el.listModeSeg.addEventListener("click", (e) => {
         const b = closestTo(e, "[data-mode]");
         const mode = b && b.dataset.mode;
