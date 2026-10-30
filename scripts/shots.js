@@ -241,6 +241,7 @@ const SCENES = {
   bot: { about: 'The Claude Code panel', run: steps(openNote('Q4 planning'), key('Control+Shift+a')) },
   search: { about: 'Searching the list', run: async (page) => { await page.keyboard.press('Control+Shift+f'); await page.keyboard.type('bench'); await sleep(500); } },
   trash: { about: 'The trash view, empty', run: async (page) => { await page.locator('[data-view="trash"]').first().click(); await sleep(400); } },
+  'trashed-toast': { about: 'A note moved to the trash from the More menu: the toast with Undo (the shots cannot reach the Recycle Bin, so this is the fallback wording)', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#deleteBtn'); await sleep(500); }) },
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
   'palette-query': { about: 'The command palette, typing', run: async (page) => { await page.keyboard.press('Control+p'); await sleep(250); await page.keyboard.type('plan'); await sleep(400); } },
   more: { about: 'The More menu of a note', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
