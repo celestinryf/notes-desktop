@@ -14,7 +14,7 @@ const { isViewerOnlyFile } = H;
 type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean };
 
 export function canFindInNote() {
-  return !!state.current && !lockedNow() && !el.editor.classList.contains('hidden') && !el.editorColumn.classList.contains('shows-document') && !el.editor.classList.contains('shows-image');
+  return !!state.current && state.current.fileKind !== 'binary' && !lockedNow() && !el.editor.classList.contains('hidden') && !el.editorColumn.classList.contains('shows-document') && !el.editor.classList.contains('shows-image');
 }
 
 export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {

@@ -21299,7 +21299,7 @@
   // src/renderer/find-bar.ts
   var { isViewerOnlyFile: isViewerOnlyFile8 } = helpers_exports;
   function canFindInNote() {
-    return !!state.current && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
+    return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
   }
   function createFindBar({ api, flushSave, GUEST }) {
     function openFind() {
