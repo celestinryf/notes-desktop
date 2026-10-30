@@ -68,6 +68,7 @@ test.before(async () => {
       ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
       NOTES_APP_DRY_TERMINAL: '1',
       NOTES_APP_NO_CRAFTS: '1',
+      NOTES_APP_NO_RECYCLE_BIN: '1',
     }),
   });
   page = await app.firstWindow();

@@ -3,10 +3,10 @@ import * as FM from '../shared/front-matter.mts';
 import * as NotesThemes from '../shared/themes.mts';
 import NotesIcons from './icons.js';
 import { NotesPalette } from './palette.ts';
-import { I, el, setIcon, setPressed } from './dom.ts';
+import { I, el, setIcon, setLabel, setPressed } from './dom.ts';
 import { state, lockedNow, settingsNow } from './state.ts';
 import { find } from './find-state.ts';
-import { escapeHtml, highlight, ipcErrorText } from './text.ts';
+import { escapeHtml, highlight, ipcErrorText, trashedMessage, trashLabel } from './text.ts';
 import { toast } from './toast.ts';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.ts';
 import { placePopover } from './popover.ts';
@@ -1727,6 +1727,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (bot.open) describeBotScope();
     el.pinBtn.classList.toggle('hidden', inTrash);
     el.deleteBtn.classList.toggle('hidden', inTrash);
+    setLabel(el.deleteBtn, trashLabel(note));
     el.lockBtn.classList.toggle('hidden', inTrash || ((!!note.filePath || !!note.vaultId) && !note.home));
     el.attachBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.recordBtn.classList.toggle('hidden', inTrash || fileReadOnly);
@@ -1898,8 +1899,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.fileKind.textContent = fileBadge(note);
     el.fileConvertBtn.classList.add('hidden');
     api.files.convertOptions(note.id).then((opts) => { if (state.currentId === note.id) el.fileConvertBtn.classList.toggle('hidden', !opts.length); }).catch(() => {});
-    el.filePath.textContent = note.filePath;
-    el.filePath.title = note.filePath || '';
+    const shownPath = note.trashedAt && note.trashedFrom ? note.trashedFrom : note.filePath;
+    el.filePath.textContent = shownPath;
+    el.filePath.title = shownPath || '';
     if (note.fileKind === 'pdf') {
       el.pdfEditor.classList.remove('hidden');
       showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
@@ -2248,13 +2250,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (!state.current || state.current.trashedAt) return;
     const id = state.currentId;
     if (!id) return;
-    const title = H.deriveTitle(state.current);
+    const before = state.current;
+    const title = H.deriveTitle(before);
     await flushSave();
     if (documentDirty() && !window.confirm('Your changes to this document could not be saved. Move it to the trash anyway and lose them?')) return;
-    await api.notes.trash(id);
+    const after = await api.notes.trash(id);
     clearEditor();
     await refresh();
-    toast('Moved "' + H.truncate(title, 30) + '" to trash', { label: 'Undo', run: async () => { await api.notes.restore(id); await refresh({ keepEditor: true }); await selectNote(id); } });
+    toast(trashedMessage(before, after, title), after ? { label: 'Undo', run: async () => { await api.notes.restore(id); await refresh({ keepEditor: true }); await selectNote(id); } } : undefined);
   }
 
   async function restoreCurrent() {

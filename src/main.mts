@@ -20,6 +20,7 @@ import { createCraftTrace } from './craft-trace.mts';
 import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
+import { recycle } from './recycle-bin.mts';
 import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } from './files.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
@@ -34,6 +35,7 @@ const DATA_DIR = process.env.NOTES_APP_DATA_DIR || path.join(app.getPath('appDat
 const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_START_HIDDEN === '1';
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
+const USE_RECYCLE_BIN = process.env.NOTES_APP_NO_RECYCLE_BIN !== '1';
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
 const TITLE_BAR_H = 40;
@@ -311,6 +313,7 @@ function main() {
       w.focus();
       app.focus({ steal: true });
     }
+    forgetEmptiedBin();
     w.webContents.send('app:shown');
     writeRuntime();
     return w;
@@ -483,6 +486,17 @@ function main() {
   }
   store.onFileText = (id) => { fanReloaded({ reason: 'file', id }); };
 
+  function forgetEmptiedBin() {
+    if (store.saveBlocked) return;
+    try { if (store.forgetEmptiedBin()) fanReloaded({ reason: 'trash' }); } catch (err) { console.error('[trash] forgetting emptied notes failed', err); }
+  }
+
+  async function recycleFileOf(id: string) {
+    const note = store.get(id);
+    if (!USE_RECYCLE_BIN || !note || note.trashedAt || !note.vaultId || !note.filePath || !fs.existsSync(note.filePath)) return undefined;
+    return recycle(note.filePath, (p) => shell.trashItem(p));
+  }
+
   let trayRefreshTimer: NodeJS.Timeout | undefined;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
 
@@ -519,7 +533,7 @@ function main() {
     for (const id of r.removedIds) { live.stop(id); stickies.close(id); }
     return r;
   });
-  handle('notes:trash', (_e, id) => { live.stop(id); const n = store.trash(id); stickies.close(id); return store.publicNote(n); });
+  handle('notes:trash', async (_e, id) => { live.stop(id); const n = store.trash(id, await recycleFileOf(id)); stickies.close(id); return store.publicNote(n); });
   handle('notes:restore', (_e, id) => store.publicNote(store.restore(id)));
   handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
   handle('notes:emptyTrash', () => store.emptyTrash());
@@ -1484,6 +1498,7 @@ function main() {
     step('tray', createTray);
     step('hotkey', () => registerHotkey(store.settings.hotkey));
     step('login item', applyLoginItem);
+    step('recycle bin', forgetEmptiedBin);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
     if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());

@@ -8,6 +8,8 @@ import * as F from './files.mts';
 import * as L from './lock.mts';
 import * as FM from './shared/front-matter.mts';
 import { VaultLinker, nameHints } from './vault-links.mts';
+import { restoreFromBin, removeFromBin, binRecordOf } from './recycle-bin.mts';
+import type { Recycled } from './recycle-bin.mts';
 
 const SCHEMA_VERSION = 2;
 const TAGS_IN_FILES_VERSION = 2;
@@ -1374,7 +1376,7 @@ class Store {
       try { return F.readText(n.filePath).body !== n.body; } catch (_) { return true; }
     };
     if (pages.some(changedOnDisk)) throw new Error('A page was edited outside Notes after the split, and undoing would lose the edit. Delete the book yourself if you want it gone.');
-    const origInBin = !!orig && this._inVaultTrash(orig);
+    const origInBin = !!orig && this._hasTrashedFile(orig);
     const result = this._change({ notes: orig && !origInBin ? [orig] : [], dropped: pages.map((n) => n.id), folders: true }, () => {
       this.notes = this.notes.filter((n) => !pages.includes(n));
       if (!this.notes.some((n) => n.folderId === folder.id) && !this.folders.some((f) => f.parentId === folder.id)) this.folders = this.folders.filter((f) => f !== folder);
@@ -1735,12 +1737,27 @@ class Store {
       const same = orphans.get(text);
       return same ? same.shift() : undefined;
     };
+    let binned: Map<string, Note> | null = null;
+    const backFromBin = (key: string) => {
+      if (!binned) {
+        binned = new Map();
+        for (const n of this.notes) if (n.vaultId === id && n.trashedAt && n.trashedFrom && n.filePath && H.isRecycleBinPath(n.filePath) && !fs.existsSync(n.filePath)) binned.set(F.pathKey(n.trashedFrom), n);
+      }
+      return binned.get(key);
+    };
     for (const file of disk.files) {
       const folder = placeOf(file.dirKey);
       if (folder === undefined) continue;
       const folderId = folder ? folder.id : null;
       const locked = isLockPath(file.full);
       if (locked && !home) continue;
+      const back = byKey.has(file.key) ? undefined : backFromBin(file.key);
+      if (back) {
+        remember(back);
+        back.filePath = file.full;
+        delete back.trashedFrom;
+        byKey.set(file.key, back);
+      }
       const note = byKey.get(file.key);
       if (note) {
         const mtimeNow = note.fileMtime !== file.mtime ? F.mtimeOf(file.full) : note.fileMtime;
@@ -1942,24 +1959,29 @@ class Store {
     return next;
   }
 
-  trash(id: string) {
+  trash(id: string, recycled?: Recycled) {
     const note = this.get(id);
     if (!note || note.trashedAt) return note;
     this.relock(id);
     let moved: { from: string, to: string } | null = null;
-    if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
+    if (recycled && recycled.recycled && note.filePath) {
+      if (!recycled.binPath) { this._drop([id]); return null; }
+      moved = { from: note.filePath, to: recycled.binPath };
+    } else if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
       const next = path.join(dir, uniqueName(dir, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md'));
       fs.renameSync(note.filePath, next);
       moved = { from: note.filePath, to: next };
-      note.trashedFrom = note.filePath;
-      note.filePath = next;
     }
+    if (moved) { note.trashedFrom = moved.from; note.filePath = moved.to; }
     try {
       return this._change({ notes: [note] }, () => { note.trashedAt = this.now(); note.sticky = null; return note; });
     } catch (err) {
       const live = this.get(id) || note;
-      if (moved) { try { fs.renameSync(moved.to, moved.from); live.filePath = moved.from; delete live.trashedFrom; } catch (_) {  } }
+      if (moved) {
+        const { from, to } = moved;
+        try { if (H.isRecycleBinPath(to)) restoreFromBin(to, from); else fs.renameSync(to, from); live.filePath = from; delete live.trashedFrom; } catch (_) {  }
+      }
       throw err;
     }
   }
@@ -1968,8 +1990,10 @@ class Store {
     const note = this.get(id);
     if (!note || !note.trashedAt) return note;
     const v = note.vaultId ? this.getVault(note.vaultId) : null;
+    const inBin = !!note.filePath && H.isRecycleBinPath(note.filePath);
+    if (inBin && note.filePath && !fs.existsSync(note.filePath)) throw Object.assign(new Error('This note is no longer in the Recycle Bin.'), { code: 'EGONE' });
     const origin = note.trashedFrom || (v && note.filePath ? path.join(v.path, path.basename(note.filePath)) : null);
-    if (note.vaultId && note.filePath && origin && fs.existsSync(note.filePath) && /[\\/]\.trash[\\/]/.test(note.filePath)) {
+    if (note.vaultId && note.filePath && origin && fs.existsSync(note.filePath) && (inBin || /[\\/]\.trash[\\/]/.test(note.filePath))) {
       const dir = path.dirname(origin);
       fs.mkdirSync(dir, { recursive: true });
       const next = path.join(dir, uniqueName(dir, stem(path.basename(origin)), path.extname(origin) || '.md'));
@@ -1980,14 +2004,17 @@ class Store {
       if (folder) note.folderId = folder.id;
       else if (this.isHome(note.vaultId) && F.pathKey(dir) === F.pathKey(this._homeDir(null))) note.folderId = null;
       delete note.trashedFrom;
+      let restored: Note;
       try {
-        return this._change({ notes: [note] }, () => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
+        restored = this._change({ notes: [note] }, () => { note.trashedAt = null; if (note.folderId && !this.getFolder(note.folderId)) note.folderId = null; note.updatedAt = this.now(); return note; });
       } catch (err) {
         try { fs.renameSync(next, wasAt); } catch (_) {  }
         const live = this.get(id) || note;
         live.filePath = wasAt; live.trashedFrom = wasFrom; live.folderId = wasFolder; live.trashedAt = live.trashedAt || note.trashedAt;
         throw err;
       }
+      if (inBin) fs.rmSync(binRecordOf(wasAt), { force: true });
+      return restored;
     }
     return this._change({ notes: [note] }, () => {
       note.trashedAt = null;
@@ -1997,30 +2024,45 @@ class Store {
     });
   }
 
-  _inVaultTrash(note: Note): note is FileNote {
-    return !!(note.vaultId && note.trashedAt && note.filePath && /[\\/]\.trash[\\/]/.test(note.filePath) && fs.existsSync(note.filePath));
+  _hasTrashedFile(note: Note): note is FileNote {
+    return !!(note.vaultId && note.trashedAt && note.filePath && (/[\\/]\.trash[\\/]/.test(note.filePath) || H.isRecycleBinPath(note.filePath)) && fs.existsSync(note.filePath));
+  }
+
+  _removeTrashedFile(note: FileNote) {
+    if (H.isRecycleBinPath(note.filePath)) removeFromBin(note.filePath);
+    else fs.rmSync(note.filePath);
+  }
+
+  _drop(ids: string[]) {
+    const gone = new Set(ids);
+    const before = this.notes.length;
+    const dropped = this._commit(() => { this.notes = this.notes.filter((n) => !gone.has(n.id)); return before - this.notes.length; }, undefined, { notes: [], dropped: ids, purge: true });
+    this._removeStaleJournals(0);
+    return dropped;
+  }
+
+  _restoredInExplorer(note: Note) {
+    return !!note.trashedFrom && fs.existsSync(note.trashedFrom) && !this.findByPath(note.trashedFrom);
+  }
+
+  forgetEmptiedBin() {
+    const gone = this.notes.filter((n) => n.trashedAt && n.filePath && H.isRecycleBinPath(n.filePath) && !fs.existsSync(n.filePath) && !this._restoredInExplorer(n)).map((n) => n.id);
+    return gone.length ? this._drop(gone) : 0;
   }
 
   destroy(id: string) {
-    const idx = this.notes.findIndex((n) => n.id === id);
-    if (idx === -1) return false;
+    const note = this.get(id);
+    if (!note) return false;
     this.relock(id);
-    const note = this.notes[idx];
-    if (this._inVaultTrash(note)) fs.rmSync(note.filePath);
-    const destroyed = this._commit(() => { this.notes.splice(idx, 1); return true; }, undefined, { notes: [], dropped: [id], purge: true });
-    this._removeStaleJournals(0);
-    return destroyed;
+    if (this._hasTrashedFile(note)) this._removeTrashedFile(note);
+    return this._drop([id]) > 0;
   }
 
   emptyTrash() {
-    const before = this.notes.length;
     if (!this.notes.some((n) => n.trashedAt)) return 0;
-    for (const n of this.notes) if (this._inVaultTrash(n)) { try { fs.rmSync(n.filePath); } catch (_) {  } }
+    for (const n of this.notes) if (this._hasTrashedFile(n)) { try { this._removeTrashedFile(n); } catch (_) {  } }
     for (const n of this.notes) if (n.trashedAt) this.relock(n.id);
-    const gone = this.notes.filter((n) => n.trashedAt).map((n) => n.id);
-    const emptied = this._commit(() => { this.notes = this.notes.filter((n) => !n.trashedAt); return before - this.notes.length; }, undefined, { notes: [], dropped: gone, purge: true });
-    this._removeStaleJournals(0);
-    return emptied;
+    return this._drop(this.notes.filter((n) => n.trashedAt).map((n) => n.id));
   }
 
   tags() {

@@ -316,7 +316,7 @@ async function shoot(theme, name, opts) {
     args: [ROOT],
     env: Object.assign({}, process.env, {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1',
-      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1',
+      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1', NOTES_APP_NO_RECYCLE_BIN: '1',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
     }, SCENES[name].env || {}),
   });

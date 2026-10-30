@@ -143,7 +143,7 @@ Settings › Agent files › **Add my agent files** links your coding agents' fi
 | Ctrl+Shift+T | Stick to the desktop |
 | Ctrl+Shift+P | Print |
 | Ctrl+Shift+A | Claude Code panel |
-| Ctrl+Shift+Del | Move to trash (Ctrl+Del also works outside a text field) |
+| Ctrl+Shift+Del | Move to the Recycle Bin (Ctrl+Del also works outside a text field) |
 | Alt+↑, Alt+↓ | Previous or next note |
 | Ctrl+T, Ctrl+W | New tab, close tab |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next or previous tab |
