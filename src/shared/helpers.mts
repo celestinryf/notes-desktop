@@ -576,6 +576,22 @@ const isObjectLike = (v: unknown): v is Record<string, unknown> => !!v && typeof
 const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
 const stringItems = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+const GIT_ERRORS: [RegExp, string][] = [
+  [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
+  [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, 'GitHub did not accept the sign-in for this backup.'],
+  [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, 'Notes could not reach GitHub. Check the connection; Notes tries again with the next change.'],
+  [/\[rejected\]|fetch first|non-fast-forward/i, 'The backup on GitHub has versions this PC does not have, because another computer backed up to it. Syncing two computers comes in a later update.'],
+  [/^Files outside the notes folder were not saved to history/, 'Some files outside the notes folder were not saved to history.'],
+];
+
+const isLinkedNotice = (raw: string | null) => !!raw && raw.startsWith('Files outside the notes folder were not saved to history');
+
+function gitErrorText(raw: string | null) {
+  if (!raw) return null;
+  const known = GIT_ERRORS.find(([re]) => re.test(raw));
+  return { text: known ? known[1] : raw.startsWith('push failed') ? 'The backup failed.' : 'History could not save a version.', details: raw };
+}
+
 const isRecycleBinPath = (p: string | null | undefined) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
 const isLinkedFile = (n: { vaultId: string | null, filePath: string | null }) => !n.vaultId && !!n.filePath;
 
@@ -586,7 +602,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile,
+  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

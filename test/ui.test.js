@@ -1457,12 +1457,12 @@ test('git history: edits are committed to a repo in the data folder', async () =
 
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
-  await waitForDom(() => /commit/.test(document.getElementById('gitStatus').textContent));
+  await waitForDom(() => /version/.test(document.getElementById('gitStatus').textContent));
   assert.equal(await page.$eval('#gitPushBtn', (b) => b.disabled), true, 'push disabled without a remote');
   await waitForDom(() => document.getElementById('toast').classList.contains('hidden'));
   await page.click('#gitCommitBtn');
-  await waitForDom(() => !document.getElementById('toast').classList.contains('hidden') && /Committed|Nothing new to commit|Commit failed/.test(document.getElementById('toast').textContent));
-  assert.match(await page.textContent('#toast'), /Committed|Nothing new to commit/);
+  await waitForDom(() => !document.getElementById('toast').classList.contains('hidden') && /Saved a version|Nothing new to save|could not/.test(document.getElementById('toast').textContent));
+  assert.match(await page.textContent('#toast'), /Saved a version|Nothing new to save/);
   assert.equal(await page.$eval('#saveSettingsBtn', (b) => b.disabled), true, 'nothing to save');
   await page.keyboard.press('Escape');
   await waitForDom(() => !document.getElementById('settingsDialog').open);

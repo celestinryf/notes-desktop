@@ -262,6 +262,11 @@ class GitSync {
     return hashes;
   }
 
+  _keptError() {
+    const last = this.state.lastError;
+    return last && last.startsWith('push failed') ? last : this._linkedNotice();
+  }
+
   _linkedNotice() {
     return this.linkedError ? 'Files outside the notes folder were not saved to history: ' + this.linkedError : null;
   }
@@ -373,10 +378,10 @@ class GitSync {
       let add: GitRun | null;
       try { add = await this._stage(); }
       catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
-      if (!add) { this._set({ pending: false }); return { ok: true, nothingToCommit: true }; }
+      if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
       if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
       const staged = await this._staged();
-      if (staged.ok) { this._set(Object.assign({ pending: false }, this.linkedError ? { lastError: this._linkedNotice() } : {})); return { ok: true, nothingToCommit: true }; }
+      if (staged.ok) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
       const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
       const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
       if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
@@ -444,7 +449,48 @@ class GitSync {
     if (!commits.length) return true;
     return eachBlob(commits.map((c) => c.hash + ':' + c.path), this.dir, 20000, visit);
   }
+
+  async versions(limit: number, skip: number): Promise<RawVersion[]> {
+    if (!this.state.initialized) return [];
+    const r = await run(['-c', 'core.quotePath=false', 'log', '-M', '-z', '--name-status', '--format=%x1e%H%x1f%ct', '-n', String(limit), '--skip=' + skip], this.dir, 60000);
+    if (!r.ok) return [];
+    return r.stdout.split('\x1e').filter((chunk) => chunk.trim()).map(parseVersion);
+  }
+
+  async blobBefore(hash: string, relPath: string, maxBytes: number): Promise<{ ok: true, data: Buffer } | { ok: false, reason: 'missing' | 'too large' }> {
+    const spec = hash + '^:' + relPath;
+    const size = await run(['cat-file', '-s', spec], this.dir);
+    const bytes = size.ok ? parseInt(size.stdout.trim(), 10) : NaN;
+    if (!Number.isInteger(bytes)) return { ok: false, reason: 'missing' };
+    if (bytes > maxBytes) return { ok: false, reason: 'too large' };
+    const data = await runBytes(['cat-file', 'blob', spec], this.dir, maxBytes + 1);
+    return data ? { ok: true, data } : { ok: false, reason: 'missing' };
+  }
 }
 
-export type { FileCommit, LinkedFile, KeptOut };
-export { GitSync };
+type RawVersion = { hash: string, at: number, files: { status: string, path: string }[] };
+
+function parseVersion(chunk: string): RawVersion {
+  const tokens = chunk.split('\0');
+  const [hash, ts] = tokens[0].trim().split('\x1f');
+  const files: RawVersion['files'] = [];
+  for (let i = 1; i < tokens.length; i++) {
+    const status = tokens[i].trim();
+    if (!/^[ACDMRTUXB]\d*$/.test(status)) continue;
+    const step = status[0] === 'R' || status[0] === 'C' ? 2 : 1;
+    const file = tokens[i + step];
+    if (file === undefined) break;
+    files.push({ status: status[0], path: file });
+    i += step;
+  }
+  return { hash, at: parseInt(ts, 10) * 1000, files };
+}
+
+function runBytes(args: string[], cwd: string, maxBuffer: number): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, timeout: 20000, windowsHide: true, maxBuffer, encoding: 'buffer' }, (err, stdout) => resolve(err ? null : stdout));
+  });
+}
+
+export type { FileCommit, LinkedFile, KeptOut, RawVersion };
+export { GitSync, LINKED_DIR, parseVersion };

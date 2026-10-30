@@ -154,6 +154,8 @@ const notesApi = {
     commit: invoke('git:commit'),
     push: invoke('git:push'),
     history: invoke('git:history'),
+    versions: invoke('git:versions'),
+    bringBack: invoke('git:bringBack'),
   },
   app: {
     info: invoke('app:info'),
