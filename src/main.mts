@@ -26,6 +26,7 @@ import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { isUtf8 } from 'node:buffer';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 interface HiddenPageOptions { isolated?: boolean; javascript?: boolean; allowFiles?: string[]; readDir?: string; timeoutMs?: number }
@@ -1113,6 +1114,8 @@ function main() {
 
   const CHANGE_KINDS: Record<string, VersionChangeKind> = { A: 'added', M: 'changed', R: 'renamed', D: 'removed' };
   const bringsBack = (rel: string) => TEXT_EXT.has(extOf(rel)) || extOf(rel) === 'mdlock';
+  const RESERVED_NAME = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+  const safePart = (p: string) => !!p && p !== '.' && p !== '..' && !/[\\:*?"<>|\x00-\x1f]/.test(p) && !RESERVED_NAME.test(p) && !/[. ]$/.test(p);
   const noteTitle = (note: Note | null, name: string) => (note && H.deriveTitle(store.publicNote(note))) || H.stemOf(name);
 
   function versionChange(file: { status: string, path: string }): VersionChange | null {
@@ -1130,24 +1133,35 @@ function main() {
     return { kind, title: noteTitle(note, name), path: file.path, noteId: note && !note.trashedAt ? note.id : null, canBringBack: kind === 'removed' && !!full && !note && bringsBack(name) && !fs.existsSync(full) };
   }
 
+  const VERSION_BATCH = 200;
+  const VERSION_SCAN_LIMIT = 10000;
+
   handle('git:versions', async (_e, limit) => {
-    const wanted = Math.min(1000, Math.max(1, typeof limit === 'number' ? Math.floor(limit) : 100));
-    const raw = await git.versions(wanted);
-    const versions = raw.map((v) => ({ hash: v.hash, at: v.at, changes: v.files.map(versionChange).filter((c): c is VersionChange => !!c) })).filter((v) => v.changes.length);
-    return { versions, more: raw.length === wanted };
+    const wanted = Math.min(5000, Math.max(1, typeof limit === 'number' ? Math.floor(limit) : 100));
+    const versions: LibraryVersion[] = [];
+    for (let skip = 0; versions.length <= wanted && skip < VERSION_SCAN_LIMIT; skip += VERSION_BATCH) {
+      const raw = await git.versions(VERSION_BATCH, skip);
+      for (const v of raw) {
+        const changes = v.files.map(versionChange).filter((c): c is VersionChange => !!c);
+        if (changes.length) versions.push({ hash: v.hash, at: v.at, changes });
+      }
+      if (raw.length < VERSION_BATCH) break;
+    }
+    return { versions: versions.slice(0, wanted), more: versions.length > wanted };
   });
 
   handle('git:bringBack', async (_e, hash, rel): Promise<BringBackResult> => {
     const home = store.homeVault();
     const parts = typeof rel === 'string' ? rel.split('/') : [];
     const name = parts[parts.length - 1] || '';
-    if (!home || typeof hash !== 'string' || !/^[0-9a-f]{40}$/.test(hash) || !parts.length || parts.some((p) => !p || p === '.' || p === '..') || parts[0].startsWith('.') || !bringsBack(name)) return { ok: false, error: 'That note cannot be brought back.' };
+    if (!home || typeof hash !== 'string' || !/^[0-9a-f]{40}$/.test(hash) || !parts.length || !parts.every(safePart) || parts[0].startsWith('.') || !bringsBack(name)) return { ok: false, error: 'That note cannot be brought back.' };
     const dir = path.join(home.path, ...parts.slice(0, -1));
-    if (!convert.isInside(dir, home.path)) return { ok: false, error: 'That note cannot be brought back.' };
-    const text = await git.textBefore(hash, parts.join('/'));
-    if (text === null) return { ok: false, error: 'That version of the note could not be read.' };
+    if (!convert.isInside(path.join(dir, name), home.path)) return { ok: false, error: 'That note cannot be brought back.' };
+    const blob = await git.blobBefore(hash, parts.join('/'), H.MAX_TEXT_BYTES);
+    if (!blob.ok) return { ok: false, error: blob.reason === 'too large' ? 'That note is too large to bring back here.' : 'That version of the note could not be read.' };
+    if (blob.data.includes(0) || !isUtf8(blob.data)) return { ok: false, error: 'That file is not plain text, so it was not brought back.' };
     fs.mkdirSync(dir, { recursive: true });
-    const written = convert.writeNew(dir, H.stemOf(name), extOf(name), text);
+    const written = convert.writeNew(dir, H.stemOf(name), extOf(name), blob.data);
     await store.scanVault(home.id);
     fanReloaded({ reason: 'vault' });
     const note = store.findByPath(written);

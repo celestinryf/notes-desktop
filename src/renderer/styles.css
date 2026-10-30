@@ -945,7 +945,11 @@ button.book-name:hover { background: var(--hover); }
 .library-status { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
 .library-status-text { margin: 0; max-width: 68ch; font-size: var(--t-sm); line-height: 1.5; color: var(--fg-2); }
 .library-status-text.is-error { color: var(--danger); }
-.library-details summary { display: list-item; padding: var(--s1) 0; line-height: 16px; cursor: pointer; width: max-content; font-size: var(--t-xs); color: var(--fg-3); }
+.library-details summary { display: flex; align-items: center; gap: var(--s1); min-height: 24px; list-style: none; cursor: pointer; width: max-content; font-size: var(--t-xs); color: var(--fg-3); }
+.library-details summary::-webkit-details-marker { display: none; }
+.library-details summary .icon { transition: transform var(--dur-1); }
+.library-details[open] summary .icon { transform: rotate(90deg); }
+#libraryDialog { margin-top: var(--s7); }
 .library-details pre { margin: var(--s1) 0 0; max-height: 120px; overflow: auto; padding: var(--s2) var(--s3); border-radius: var(--r-md); background: var(--well); font-family: var(--font-mono); font-size: var(--t-xs); white-space: pre-wrap; word-break: break-word; }
 .library-actions { display: flex; gap: var(--s2); }
 .library-changes { overflow: auto; padding: var(--s2) var(--s3); border-radius: var(--r-md); background: var(--well); }

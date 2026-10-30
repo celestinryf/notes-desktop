@@ -4,6 +4,7 @@ import { toast } from './toast.ts';
 import { ipcErrorText } from './text.ts';
 
 const PAGE = 100;
+const LIST_STEPS: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
 const GIT_DOWNLOAD = 'https://git-scm.com/download/win';
 const KIND_WORDS: Record<VersionChangeKind, string> = { added: 'added', changed: 'changed', renamed: 'renamed', removed: 'removed' };
 
@@ -52,12 +53,12 @@ interface LibraryDialogDeps {
   flushSave: () => Promise<boolean>;
   updateSettings: (patch: SettingsPatch) => Promise<unknown>;
   openSettingsAt: (sectionId: string) => void;
-  openNoteHistory: (id: string) => Promise<unknown>;
+  openNoteHistory: (id: string, pick: { hash: string, at: number }) => Promise<unknown>;
   openNote: (id: string) => Promise<unknown>;
 }
 
 export function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openNoteHistory, openNote }: LibraryDialogDeps) {
-  const lib: { status: GitState | null, versions: LibraryVersion[], index: number, limit: number, more: boolean } = { status: null, versions: [], index: -1, limit: PAGE, more: false };
+  const lib: { status: GitState | null, versions: LibraryVersion[], index: number, limit: number, more: boolean, loads: number } = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
 
   function renderStatus(s: GitState) {
     lib.status = s;
@@ -89,14 +90,17 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     renderStatus(s);
     renderDialogStatus(s);
     if (!el.libraryDialog.open) el.libraryDialog.showModal();
+    el.libraryPrimaryBtn.focus();
     await loadVersions();
-    if (lib.versions.length) el.libraryList.focus(); else el.libraryPrimaryBtn.focus();
   }
 
   async function loadVersions() {
     const s = lib.status;
-    if (!s || !s.enabled || s.available === false) { lib.versions = []; renderVersions(); return; }
-    const r = await api.git.versions(lib.limit);
+    const load = ++lib.loads;
+    if (!s || !s.enabled || s.available === false) { lib.versions = []; lib.more = false; renderVersions(); return; }
+    let r: LibraryVersions;
+    try { r = await api.git.versions(lib.limit); } catch (err) { if (load === lib.loads) el.libraryHint.textContent = 'Could not list the versions: ' + ipcErrorText(err); return; }
+    if (load !== lib.loads) return;
     lib.versions = r.versions;
     lib.more = r.more;
     renderVersions();
@@ -105,6 +109,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
   function renderVersions() {
     const keep = lib.index >= 0 && lib.versions[lib.index] ? lib.versions[lib.index].hash : null;
     el.libraryList.innerHTML = '';
+    el.libraryList.removeAttribute('aria-activedescendant');
     el.libraryChanges.innerHTML = '';
     el.libraryMoreBtn.classList.toggle('hidden', !lib.more);
     const s = lib.status;
@@ -195,8 +200,9 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     b.type = 'button';
     b.className = 'btn btn-small';
     if (noteId) {
-      b.textContent = 'Earlier versions';
-      b.addEventListener('click', () => { el.libraryDialog.close(); openNoteHistory(noteId); });
+      b.textContent = 'Open this version';
+      b.title = 'Show this note as it was then, with a way to restore it';
+      b.addEventListener('click', () => { el.libraryDialog.close(); openNoteHistory(noteId, { hash: v.hash, at: v.at }); });
     } else {
       b.textContent = 'Bring back';
       b.addEventListener('click', () => bringBack(v, c));
@@ -216,7 +222,9 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
   function moveSelection(e: KeyboardEvent) {
     if (!lib.versions.length) return;
     const last = lib.versions.length - 1;
-    const to = e.key === 'ArrowDown' ? Math.min(last, lib.index + 1) : e.key === 'ArrowUp' ? Math.max(0, lib.index - 1) : e.key === 'Home' ? 0 : e.key === 'End' ? last : -1;
+    if (e.key === 'Enter') { const first = el.libraryChanges.querySelector('button'); if (first instanceof HTMLButtonElement) { e.preventDefault(); first.focus(); } return; }
+    const step = LIST_STEPS[e.key];
+    const to = step !== undefined ? Math.max(0, Math.min(last, lib.index + step)) : e.key === 'Home' ? 0 : e.key === 'End' ? last : -1;
     if (to < 0) return;
     e.preventDefault();
     showVersion(to);
@@ -248,10 +256,13 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
   async function saveVersionNow() {
     await flushSave();
     const r = await api.git.commit();
-    renderStatus(await api.git.status());
+    const after = await api.git.status();
+    renderStatus(after);
     if (el.libraryDialog.open) await loadVersions();
-    if (!r.ok) { const problem = H.gitErrorText(r.error || r.skipped || null); toast(problem ? problem.text : 'History is off.'); return; }
-    toast(r.nothingToCommit ? 'Nothing new to save. The last version has every change.' : 'Saved a version');
+    if (!r.ok && r.skipped === 'disabled') { toast('History is off.'); return; }
+    const problem = H.gitErrorText(after.lastError) || (r.ok ? null : H.gitErrorText(r.error || 'commit failed'));
+    if (problem) { toast(problem.text, { label: 'Details', run: () => { openLibrary(); } }); return; }
+    toast(r.ok && r.nothingToCommit ? 'Nothing new to save. The last version has every change.' : 'Saved a version');
   }
 
   function bind() {

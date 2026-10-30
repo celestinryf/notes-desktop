@@ -21149,7 +21149,7 @@
       if (document.activeElement === el.historyRecordBtn) el.historyCloseBtn.focus();
       setKeepOut(hist.noteId, false, true);
     }
-    async function openHistory() {
+    async function openHistory(pick) {
       const note = state.current;
       if (!note) return;
       if (note.trashedAt) {
@@ -21188,7 +21188,14 @@
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
-      if (hist.versions.length) showVersion(0);
+      if (hist.versions.length) showVersion(pickIndex(pick));
+    }
+    function pickIndex(pick) {
+      if (!pick) return 0;
+      const exact = hist.versions.findIndex((v) => v.hash === pick.hash);
+      if (exact >= 0) return exact;
+      const before = hist.versions.findIndex((v) => v.at <= pick.at);
+      return before >= 0 ? before : 0;
     }
     function showVersion(i) {
       hist.index = i;
@@ -21225,6 +21232,7 @@
 
   // src/renderer/library-dialog.ts
   var PAGE = 100;
+  var LIST_STEPS = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
   var GIT_DOWNLOAD = "https://git-scm.com/download/win";
   var KIND_WORDS = { added: "added", changed: "changed", renamed: "renamed", removed: "removed" };
   function historyLook(s, now) {
@@ -21263,7 +21271,7 @@
     return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
   }
   function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openNoteHistory, openNote }) {
-    const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false };
+    const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
     function renderStatus(s) {
       lib.status = s;
       const look = historyLook(s);
@@ -21292,18 +21300,26 @@
       renderStatus(s);
       renderDialogStatus(s);
       if (!el.libraryDialog.open) el.libraryDialog.showModal();
+      el.libraryPrimaryBtn.focus();
       await loadVersions();
-      if (lib.versions.length) el.libraryList.focus();
-      else el.libraryPrimaryBtn.focus();
     }
     async function loadVersions() {
       const s = lib.status;
+      const load = ++lib.loads;
       if (!s || !s.enabled || s.available === false) {
         lib.versions = [];
+        lib.more = false;
         renderVersions();
         return;
       }
-      const r = await api.git.versions(lib.limit);
+      let r;
+      try {
+        r = await api.git.versions(lib.limit);
+      } catch (err) {
+        if (load === lib.loads) el.libraryHint.textContent = "Could not list the versions: " + ipcErrorText(err);
+        return;
+      }
+      if (load !== lib.loads) return;
       lib.versions = r.versions;
       lib.more = r.more;
       renderVersions();
@@ -21311,6 +21327,7 @@
     function renderVersions() {
       const keep = lib.index >= 0 && lib.versions[lib.index] ? lib.versions[lib.index].hash : null;
       el.libraryList.innerHTML = "";
+      el.libraryList.removeAttribute("aria-activedescendant");
       el.libraryChanges.innerHTML = "";
       el.libraryMoreBtn.classList.toggle("hidden", !lib.more);
       const s = lib.status;
@@ -21399,10 +21416,11 @@
       b.type = "button";
       b.className = "btn btn-small";
       if (noteId) {
-        b.textContent = "Earlier versions";
+        b.textContent = "Open this version";
+        b.title = "Show this note as it was then, with a way to restore it";
         b.addEventListener("click", () => {
           el.libraryDialog.close();
-          openNoteHistory(noteId);
+          openNoteHistory(noteId, { hash: v.hash, at: v.at });
         });
       } else {
         b.textContent = "Bring back";
@@ -21429,7 +21447,16 @@
     function moveSelection(e) {
       if (!lib.versions.length) return;
       const last = lib.versions.length - 1;
-      const to = e.key === "ArrowDown" ? Math.min(last, lib.index + 1) : e.key === "ArrowUp" ? Math.max(0, lib.index - 1) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
+      if (e.key === "Enter") {
+        const first = el.libraryChanges.querySelector("button");
+        if (first instanceof HTMLButtonElement) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      const step = LIST_STEPS[e.key];
+      const to = step !== void 0 ? Math.max(0, Math.min(last, lib.index + step)) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
       if (to < 0) return;
       e.preventDefault();
       showVersion(to);
@@ -21475,14 +21502,21 @@
     async function saveVersionNow() {
       await flushSave();
       const r = await api.git.commit();
-      renderStatus(await api.git.status());
+      const after = await api.git.status();
+      renderStatus(after);
       if (el.libraryDialog.open) await loadVersions();
-      if (!r.ok) {
-        const problem = gitErrorText(r.error || r.skipped || null);
-        toast(problem ? problem.text : "History is off.");
+      if (!r.ok && r.skipped === "disabled") {
+        toast("History is off.");
         return;
       }
-      toast(r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
+      const problem = gitErrorText(after.lastError) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
+      if (problem) {
+        toast(problem.text, { label: "Details", run: () => {
+          openLibrary();
+        } });
+        return;
+      }
+      toast(r.ok && r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
     }
     function bind() {
       el.historyStatusBtn.addEventListener("click", () => {
@@ -26340,9 +26374,10 @@
       flushSave,
       updateSettings,
       openSettingsAt: (sectionId) => openSettings(sectionId),
-      openNoteHistory: async (id) => {
+      openNoteHistory: async (id, pick) => {
         await selectNote(id);
-        openHistory();
+        if (state.currentId === id) openHistory(pick);
+        else toast("That note could not be opened right now.");
       },
       openNote: (id) => selectNote(id)
     });
@@ -27802,7 +27837,7 @@
       });
       el.attachBtn.addEventListener("click", attachFiles);
       el.recordBtn.addEventListener("click", toggleRecording);
-      el.historyBtn.addEventListener("click", openHistory);
+      el.historyBtn.addEventListener("click", () => openHistory());
       el.historyKeepBtn.addEventListener("click", toggleKeepOut);
       el.historyRecordBtn.addEventListener("click", recordAgain);
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());

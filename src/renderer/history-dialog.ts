@@ -64,7 +64,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     setKeepOut(hist.noteId, false, true);
   }
 
-  async function openHistory() {
+  async function openHistory(pick?: { hash: string, at: number }) {
     const note = state.current;
     if (!note) return;
     if (note.trashedAt) { toast('Restore the note from the trash first; then its earlier versions can be restored.'); return; }
@@ -97,7 +97,15 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
       li.addEventListener('click', () => showVersion(i));
       el.historyList.append(li);
     });
-    if (hist.versions.length) showVersion(0);
+    if (hist.versions.length) showVersion(pickIndex(pick));
+  }
+
+  function pickIndex(pick?: { hash: string, at: number }) {
+    if (!pick) return 0;
+    const exact = hist.versions.findIndex((v) => v.hash === pick.hash);
+    if (exact >= 0) return exact;
+    const before = hist.versions.findIndex((v) => v.at <= pick.at);
+    return before >= 0 ? before : 0;
   }
 
   function showVersion(i: number) {

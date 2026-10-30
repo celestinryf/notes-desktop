@@ -1840,7 +1840,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
     openSettingsAt: (sectionId) => openSettings(sectionId),
-    openNoteHistory: async (id) => { await selectNote(id); openHistory(); },
+    openNoteHistory: async (id, pick) => { await selectNote(id); if (state.currentId === id) openHistory(pick); else toast('That note could not be opened right now.'); },
     openNote: (id) => selectNote(id),
   });
 
@@ -2943,7 +2943,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     });
     el.attachBtn.addEventListener('click', attachFiles);
     el.recordBtn.addEventListener('click', toggleRecording);
-    el.historyBtn.addEventListener('click', openHistory);
+    el.historyBtn.addEventListener('click', () => openHistory());
     el.historyKeepBtn.addEventListener('click', toggleKeepOut);
     el.historyRecordBtn.addEventListener('click', recordAgain);
     el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
