@@ -840,7 +840,7 @@ test('undo after switching notes does nothing; typing with the find bar open doe
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.keyboard.press('Control+Shift+f');
+  await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'gamma');
   await waitForDom(() => document.getElementById('findCount').textContent === '1/1');
@@ -861,7 +861,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   await useSourceMode(true);
   await page.fill('#bodyInput', 'needle one\nhay\nneedle two\n');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'needle one\nhay\nneedle two\n');
-  await page.keyboard.press('Control+Shift+f');
+  await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'needle');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
@@ -880,7 +880,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.click('#findInput');
   await page.keyboard.press('Escape');
   await useSourceMode(false);
-  await page.keyboard.press('Control+Shift+f');
+  await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'NEEDLE');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
@@ -898,7 +898,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Escape');
   await waitForDom(() => !CSS.highlights.has('notes-find'));
   await useSourceMode(true);
-  await page.keyboard.press('Control+Shift+f');
+  await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'zzzz-not-here');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === 'No matches');
@@ -1912,7 +1912,7 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   await page.emulateMedia({ media: 'screen' });
   assert.equal(printed.display, 'block');
   assert.ok(printed.left < 2, 'note starts at the left edge: ' + printed.left);
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press('Control+Shift+f');
   await waitFor('list shown for search', listShown);
   await waitForDom(() => document.activeElement === document.getElementById('searchInput'));
   await page.keyboard.press('Control+Shift+Backslash');

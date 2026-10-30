@@ -13,9 +13,13 @@ const { isViewerOnlyFile } = H;
 
 type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean };
 
+export function canFindInNote() {
+  return !!state.current && state.current.fileKind !== 'binary' && !lockedNow() && !el.editor.classList.contains('hidden') && !el.editorColumn.classList.contains('shows-document') && !el.editor.classList.contains('shows-image');
+}
+
 export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
   function openFind() {
-    if (!state.current) return;
+    if (!canFindInNote()) return;
     find.open = true;
     el.findBar.classList.remove('hidden');
     const selection = window.getSelection();

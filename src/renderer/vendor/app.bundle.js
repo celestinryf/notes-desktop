@@ -21298,9 +21298,12 @@
 
   // src/renderer/find-bar.ts
   var { isViewerOnlyFile: isViewerOnlyFile8 } = helpers_exports;
+  function canFindInNote() {
+    return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
+  }
   function createFindBar({ api, flushSave, GUEST }) {
     function openFind() {
-      if (!state.current) return;
+      if (!canFindInNote()) return;
       find.open = true;
       el.findBar.classList.remove("hidden");
       const selection = window.getSelection();
@@ -24661,6 +24664,16 @@
     async function showList() {
       if (settingsNow().listCollapsed) await updateSettings({ listCollapsed: false });
     }
+    function searchList() {
+      if (GUEST) {
+        toPeer({ type: "command", name: "search" });
+        return;
+      }
+      showList().then(() => {
+        el.searchInput.focus();
+        el.searchInput.select();
+      });
+    }
     function folderParents() {
       const m = /* @__PURE__ */ new Map();
       for (const f of flattenTree(state.tree)) m.set(f.id, f.parentId || null);
@@ -25650,10 +25663,7 @@
     function runSideCommand(name, m) {
       if (GUEST) return;
       if (name === "newNote") newNote({ title: m && typeof m.title === "string" ? m.title : "" });
-      else if (name === "search") showList().then(() => {
-        el.searchInput.focus();
-        el.searchInput.select();
-      });
+      else if (name === "search") searchList();
       else if (name === "openFiles") openFiles();
       else if (name === "settings") openSettings();
       else if (name === "newFolder") startCreateFolder(state.view === "folder" ? state.folderId : null);
@@ -26869,16 +26879,17 @@
         cmd("open-file", "Create", "Open a file as a note\u2026", "folder-open", "Ctrl+O", side("openFiles", () => openFiles()), true, "markdown pdf word docx txt"),
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
+        cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
         cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "folder files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
-        cmd("find", "This note", "Find in this note", "search", "Ctrl+Shift+F", () => openFind(), noteOpen),
+        cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), canFindInNote()),
         cmd("image-size", "This note", "Image: actual size, or fitted to the pane", "zoom-in", "Enter on the picture", () => toggleImageSize(), !!(state.current && state.current.fileKind === "image"), "zoom 100% fit picture"),
         cmd("replace", "This note", "Find and replace", "replace", "Ctrl+H", () => {
           if (!find.open) openFind();
           toggleReplace(true);
-        }, noteOpen),
+        }, canFindInNote()),
         ...[...el.moreMenu.querySelectorAll(".menu-item")].map((b) => fromButton(b, "This note")),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
@@ -27011,7 +27022,7 @@
       if (inDialog) return;
       if (GUEST && ctrl && !e.altKey) {
         const k = e.key.toLowerCase();
-        const guestCommands = { n: "newNote", f: "search", o: "openFiles", ",": "settings" };
+        const guestCommands = { n: "newNote", o: "openFiles", ",": "settings" };
         const cmd = e.shiftKey ? k === "n" ? "newFolder" : null : guestCommands[k];
         if (cmd) {
           e.preventDefault();
@@ -27048,15 +27059,15 @@
             return;
           case "h":
             e.preventDefault();
-            if (!find.open) openFind();
-            toggleReplace(true);
+            if (canFindInNote()) {
+              if (!find.open) openFind();
+              toggleReplace(true);
+            }
             return;
           case "f":
             e.preventDefault();
-            showList().then(() => {
-              el.searchInput.focus();
-              el.searchInput.select();
-            });
+            if (canFindInNote()) openFind();
+            else searchList();
             return;
           case "e":
             e.preventDefault();
@@ -27152,7 +27163,7 @@
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        openFind();
+        searchList();
         return;
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "o") {
