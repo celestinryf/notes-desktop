@@ -143,6 +143,22 @@ function writeIfStill(file: string, data: Buffer, look: Look | null) {
   return true;
 }
 
+function unpark(parked: string, from: string) {
+  if (!fs.existsSync(from)) fs.renameSync(parked, from);
+  else fs.rmSync(parked, { force: true });
+}
+
+function renameByCase(from: string, to: string, data: Buffer) {
+  const parked = from + '.notes-case-' + process.pid + '.tmp';
+  fs.renameSync(from, parked);
+  let written = false;
+  try { written = writeIfStill(to, data, null); }
+  catch (err) { unpark(parked, from); throw err; }
+  if (!written) { unpark(parked, from); return false; }
+  try { fs.rmSync(parked, { force: true }); } catch (err) { console.error('[sync] could not remove ' + parked, err); }
+  return true;
+}
+
 function writeCopy(ctx: PullContext, file: string, data: Buffer, stamp: string) {
   const dir = path.dirname(file);
   const copy = path.join(dir, conflictName(path.basename(file), stamp, (c) => fs.existsSync(path.join(dir, c))));
@@ -171,15 +187,11 @@ async function applyChanges(ctx: PullContext, changes: TreeChange[], stamp: stri
       const from = absOf(gone.path), to = absOf(arriving.path);
       const look = looks.get(from) || null;
       const data = await blobOf(ctx, arriving);
-      if (look && look.oid === gone.oldOid && stillAsLooked(from, look)) {
-        const parked = from + '.notes-case-' + process.pid + '.tmp';
-        fs.renameSync(from, parked);
-        try { writeIfStill(to, data, null); fs.rmSync(parked, { force: true }); }
-        catch (err) { if (!fs.existsSync(from)) fs.renameSync(parked, from); throw err; }
-        changed.push(arriving.path);
-      } else if (!look || look.oid !== arriving.newOid) {
-        copies.push(writeCopy(ctx, to, data, stamp));
-      }
+      const moved = !look ? writeIfStill(to, data, null)
+        : look.oid === gone.oldOid && stillAsLooked(from, look) ? renameByCase(from, to, data)
+        : look.oid === arriving.newOid;
+      if (moved) changed.push(arriving.path);
+      else copies.push(writeCopy(ctx, to, data, stamp));
       continue;
     }
     for (const c of group) {
