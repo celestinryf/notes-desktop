@@ -327,7 +327,7 @@ function main() {
       app.focus({ steal: true });
     }
     forgetEmptiedBin();
-    git.syncIfDue(SYNC_ON_SHOW_MS);
+    syncInBackground(SYNC_ON_SHOW_MS);
     w.webContents.send('app:shown');
     writeRuntime();
     return w;
@@ -1552,6 +1552,13 @@ function main() {
     try { store.flush(); } catch (err) { console.error('[store] flush failed', err); }
   }
 
+  function syncInBackground(minGapMs: number) {
+    if (!git.syncDue(minGapMs)) return;
+    Promise.all([flushWindow(win, 3000), stickies.flushAll((w: BrowserWindow) => flushWindow(w, 800))])
+      .then(() => (git.syncDue(minGapMs) ? git.sync() : null))
+      .catch((err) => console.error('[sync] background sync failed', err));
+  }
+
   function flushWindow(w: BrowserWindow | null, ms: number) {
     return new Promise((resolve) => {
       if (!w || w.isDestroyed()) return resolve(undefined);
@@ -1599,7 +1606,7 @@ function main() {
     step('recycle bin', forgetEmptiedBin);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
-    setInterval(() => git.syncIfDue(SYNC_EVERY_MS), SYNC_ON_SHOW_MS);
+    setInterval(() => syncInBackground(SYNC_EVERY_MS), SYNC_ON_SHOW_MS);
     if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());
     step('stickies', () => stickies.restoreAll());
     step('reminders', () => reminders.start());

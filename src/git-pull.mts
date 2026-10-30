@@ -114,55 +114,86 @@ async function resolveConflicts(ctx: PullContext, mergedTree: string, entries: S
   }
 }
 
-async function diskOids(dir: string, files: string[]) {
-  const oids = new Map<string, string>();
-  const present = files.filter((f) => { try { return fs.statSync(f).isFile(); } catch (_) { return false; } });
-  if (!present.length) return oids;
-  const r = await run(['hash-object', '--no-filters', '--stdin-paths'], dir, 120000, present.join('\n') + '\n');
+type Look = { oid: string, mtimeMs: number, size: number };
+
+async function lookAtFiles(dir: string, files: string[]) {
+  const looks = new Map<string, Look>();
+  const present = files.flatMap((f) => { try { const st = fs.statSync(f); return st.isFile() ? [{ f, st }] : []; } catch (_) { return []; } });
+  if (!present.length) return looks;
+  const r = await run(['hash-object', '--no-filters', '--stdin-paths'], dir, 120000, present.map((p) => p.f).join('\n') + '\n');
   if (!r.ok) throw new Error('could not read the notes folder: ' + r.error);
   const got = r.stdout.split(/\r?\n/).filter((l) => /^[0-9a-f]{40,64}$/.test(l));
-  present.forEach((f, i) => { if (got[i]) oids.set(f, got[i]); });
-  return oids;
+  present.forEach(({ f, st }, i) => { if (got[i]) looks.set(f, { oid: got[i], mtimeMs: st.mtimeMs, size: st.size }); });
+  return looks;
 }
 
-function writeAtomic(file: string, data: Buffer) {
+function stillAsLooked(file: string, look: Look | null) {
+  let st: fs.Stats | null = null;
+  try { st = fs.statSync(file); } catch (_) {  }
+  if (!look) return !st;
+  return !!st && st.mtimeMs === look.mtimeMs && st.size === look.size;
+}
+
+function writeIfStill(file: string, data: Buffer, look: Look | null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.notes-sync-' + process.pid + '.tmp';
   fs.writeFileSync(tmp, data);
+  if (!stillAsLooked(file, look)) { fs.rmSync(tmp, { force: true }); return false; }
   try { fs.renameSync(tmp, file); } catch (err) { fs.rmSync(tmp, { force: true }); throw err; }
+  return true;
 }
 
-function freeCopyPath(file: string, stamp: string) {
+function writeCopy(ctx: PullContext, file: string, data: Buffer, stamp: string) {
   const dir = path.dirname(file);
-  const name = conflictName(path.basename(file), stamp, (c) => fs.existsSync(path.join(dir, c)));
-  return path.join(dir, name);
+  const copy = path.join(dir, conflictName(path.basename(file), stamp, (c) => fs.existsSync(path.join(dir, c))));
+  writeIfStill(copy, data, null);
+  return path.relative(ctx.tree, copy).split(path.sep).join('/');
+}
+
+async function blobOf(ctx: PullContext, c: TreeChange) {
+  const data = c.newOid ? await runBytes(['cat-file', 'blob', c.newOid], ctx.dir, MAX_BLOB_BYTES) : null;
+  if (!data) throw new Error('could not read ' + c.path + ' from the repository');
+  return data;
 }
 
 async function applyChanges(ctx: PullContext, changes: TreeChange[], stamp: string) {
   const relevant = changes.filter((c) => isTracked(c.path));
   const absOf = (rel: string) => path.join(ctx.tree, ...rel.split('/'));
-  const oids = await diskOids(ctx.dir, relevant.map((c) => absOf(c.path)));
+  const looks = await lookAtFiles(ctx.dir, relevant.map((c) => absOf(c.path)));
   const changed: string[] = [];
   const copies: string[] = [];
-  for (const c of relevant) {
-    const file = absOf(c.path);
-    const onDisk = oids.get(file) || null;
-    const untouched = onDisk === c.oldOid;
-    if (untouched && !c.newOid) {
-      if (onDisk) await ctx.discard(file);
-      changed.push(c.path);
+  const byName = new Map<string, TreeChange[]>();
+  for (const c of relevant) { const key = c.path.toLowerCase(); byName.set(key, (byName.get(key) || []).concat(c)); }
+  for (const group of byName.values()) {
+    const gone = group.find((c) => !c.newOid);
+    const arriving = group.find((c) => c.newOid);
+    if (gone && arriving && gone.path !== arriving.path) {
+      const from = absOf(gone.path), to = absOf(arriving.path);
+      const look = looks.get(from) || null;
+      const data = await blobOf(ctx, arriving);
+      if (look && look.oid === gone.oldOid && stillAsLooked(from, look)) {
+        const parked = from + '.notes-case-' + process.pid + '.tmp';
+        fs.renameSync(from, parked);
+        try { writeIfStill(to, data, null); fs.rmSync(parked, { force: true }); }
+        catch (err) { if (!fs.existsSync(from)) fs.renameSync(parked, from); throw err; }
+        changed.push(arriving.path);
+      } else if (!look || look.oid !== arriving.newOid) {
+        copies.push(writeCopy(ctx, to, data, stamp));
+      }
       continue;
     }
-    if (!c.newOid) continue;
-    const data = await runBytes(['cat-file', 'blob', c.newOid], ctx.dir, MAX_BLOB_BYTES);
-    if (!data) throw new Error('could not read ' + c.path + ' from the repository');
-    if (untouched) {
-      writeAtomic(file, data);
-      changed.push(c.path);
-    } else if (onDisk !== c.newOid) {
-      const copy = freeCopyPath(file, stamp);
-      writeAtomic(copy, data);
-      copies.push(path.relative(ctx.tree, copy).split(path.sep).join('/'));
+    for (const c of group) {
+      const file = absOf(c.path);
+      const look = looks.get(file) || null;
+      const untouched = (look ? look.oid : null) === c.oldOid;
+      if (!c.newOid) {
+        if (untouched && look && stillAsLooked(file, look)) { await ctx.discard(file); changed.push(c.path); }
+        continue;
+      }
+      if (look && look.oid === c.newOid) continue;
+      const data = await blobOf(ctx, c);
+      if (untouched && writeIfStill(file, data, look)) changed.push(c.path);
+      else copies.push(writeCopy(ctx, file, data, stamp));
     }
   }
   return { changed, copies };
@@ -190,7 +221,7 @@ async function pullInto(ctx: PullContext): Promise<PullResult> {
   let mergeCopies: string[] = [];
   if (ours && !(await isAncestor(ctx.dir, ours, theirs))) {
     const m = await run(['merge-tree', '--write-tree', '-z', '--allow-unrelated-histories', ours, theirs], ctx.dir, 120000);
-    if (m.code !== 0 && m.code !== 1) return { ok: false, error: /write-tree|unknown option/i.test(m.error || '') ? 'this git is too old to merge (Notes needs git 2.38 or newer)' : m.error || 'merge failed' };
+    if (m.code !== 0 && m.code !== 1) return { ok: false, error: /write-tree|unknown option/i.test(m.error || '') ? 'this git is too old to merge (Notes needs git 2.41 or newer)' : m.error || 'merge failed' };
     const { tree, entries } = parseMergeTree(m.stdout);
     if (!/^[0-9a-f]{40,64}$/.test(tree)) return { ok: false, error: 'merge failed: ' + (m.error || 'no tree') };
     const resolved = entries.length ? await resolveConflicts(ctx, tree, entries, stamp) : { tree, copies: [] };

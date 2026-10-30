@@ -375,7 +375,7 @@ class GitSync {
 
   async flush() {
     if (this.timer) clearTimeout(this.timer);
-    if (this.state.pending) await this.commit();
+    if (this.state.pending) await this.commit(undefined, { pull: false });
     if (this.busy) await this.busy;
   }
 
@@ -414,11 +414,12 @@ class GitSync {
     return { ok: true };
   }
 
-  async commit(message?: string) {
+  async commit(message?: string, opts?: { pull?: boolean }) {
     if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
+    const pull = !opts || opts.pull !== false;
     return this._serial(async () => {
       const r = await this._commitNow(message);
-      if (r.ok && !r.nothingToCommit && this.state.remote) await this._pushOrSync();
+      if (r.ok && !r.nothingToCommit && this.state.remote) await (pull ? this._pushOrSync() : this._pushNow());
       return r;
     });
   }
@@ -440,9 +441,8 @@ class GitSync {
     });
   }
 
-  syncIfDue(minGapMs: number) {
-    if (!this.state.enabled || !this.state.remote || this.busy || this.now() - this.lastSyncTry < minGapMs) return;
-    this.sync().catch(() => {});
+  syncDue(minGapMs: number) {
+    return this.state.enabled && !!this.state.remote && !this.busy && this.now() - this.lastSyncTry >= minGapMs;
   }
 
   async _pushNow(): Promise<GitResult> {
@@ -472,7 +472,7 @@ class GitSync {
     if (!r.ok) { this._set({ lastError: 'sync failed: ' + r.error }); return { ok: false, error: r.error }; }
     if (r.changed.length || r.copies.length || r.merged) {
       await this.refreshCounts();
-      try { await this.onPulled({ changed: r.changed, copies: r.copies }); } catch (_) {  }
+      try { await this.onPulled({ changed: r.changed, copies: r.copies }); } catch (err) { console.error('[sync] after a pull', err); }
     }
     return { ok: true };
   }
@@ -482,16 +482,23 @@ class GitSync {
   }
 
   async _ownedLinked(): Promise<Set<string> | null> {
-    try { return new Set(JSON.parse(fs.readFileSync(this._ownedFile(), 'utf8'))); } catch (_) {  }
+    try {
+      const saved: unknown = JSON.parse(fs.readFileSync(this._ownedFile(), 'utf8'));
+      if (Array.isArray(saved) && saved.every((p) => typeof p === 'string')) return new Set(saved);
+    } catch (_) {  }
     const listed = await run(['ls-files', '-z', '--', LINKED_DIR], this.dir, 60000);
     if (!listed.ok) return null;
-    const owned = new Set(listed.stdout.split('\0').filter(Boolean));
+    const mine = new Set(this.linkedFiles().map((f) => f.id));
+    const owned = new Set(listed.stdout.split('\0').filter((p) => p && mine.has(p.split('/')[2] || '')));
     this._saveOwnedLinked(owned);
     return owned;
   }
 
   _saveOwnedLinked(owned: Set<string>) {
-    fs.writeFileSync(this._ownedFile(), JSON.stringify(Array.from(owned).sort()));
+    const file = this._ownedFile();
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(Array.from(owned).sort()));
+    fs.renameSync(tmp, file);
   }
 
   async history(limit?: number, onlyPath?: string) {
