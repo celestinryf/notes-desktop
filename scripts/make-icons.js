@@ -12,7 +12,7 @@ const NAMES = [
   'sun-moon', 'settings', 'check', 'circle-alert', 'save', 'pin-off', 'book', 'mail', 'list-filter', 'arrow-right-left',
   'eye', 'eye-off', 'highlighter', 'type', 'pencil', 'image', 'signature', 'message-square', 'layout-grid', 'undo-2', 'redo-2',
   'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'square-stack', 'palette',
-  'cloud-check', 'cloud-upload', 'cloud-alert',
+  'cloud-check', 'cloud-upload', 'cloud-alert', 'globe', 'log-out',
 ];
 
 const pkg = path.dirname(require.resolve('lucide-static/package.json'));

@@ -158,6 +158,15 @@ const notesApi = {
     versions: invoke('git:versions'),
     bringBack: invoke('git:bringBack'),
   },
+  github: {
+    status: invoke('github:status'),
+    signIn: invoke('github:signIn'),
+    waitSignIn: invoke('github:waitSignIn'),
+    cancelSignIn: invoke('github:cancelSignIn'),
+    signOut: invoke('github:signOut'),
+    repos: invoke('github:repos'),
+    createRepo: invoke('github:createRepo'),
+  },
   app: {
     info: invoke('app:info'),
     hide: invoke('app:hide'),
@@ -186,6 +195,7 @@ const notesApi = {
     systemTheme: on('theme:system'),
     gitStatus: on('git:status'),
     gitPulled: on('git:pulled'),
+    githubStatus: on('github:status'),
     flush: on('app:flush'),
     reloaded: on('notes:reloaded'),
     vaultStatus: on('vault:status'),

@@ -32,6 +32,7 @@ import { createLocking } from './locking.ts';
 import { createAttachments } from './attachments.ts';
 import { createHistoryDialog } from './history-dialog.ts';
 import { createLibraryDialog, statusSentence } from './library-dialog.ts';
+import { createGithubDialog } from './github-dialog.ts';
 import { createSpeech } from './speech.ts';
 import { createFindBar, canFindInNote } from './find-bar.ts';
 import { createPdfNote } from './pdf-note.ts';
@@ -1837,9 +1838,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
   const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+  const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
     openSettingsAt: (sectionId) => openSettings(sectionId),
+    openGithub: () => github.open(),
     openNoteHistory: async (id, pick) => { await selectNote(id); if (state.currentId === id) openHistory(pick); else toast('That note could not be opened right now.'); },
     openNote: (id) => selectNote(id),
   });
@@ -2593,6 +2596,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function renderGitStatus(s: GitState | null) {
     if (!s) return;
     library.renderStatus(s);
+    github.remoteChanged(s.remote);
     const problem = H.gitErrorText(s.lastError);
     el.gitStatus.textContent = statusSentence(s) + (problem ? ' ' + problem.text : '');
     el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? '1' : '0';
@@ -2657,6 +2661,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('filter-list', 'Go to', 'Filter the note list', 'search', 'Ctrl+Shift+F', searchList, true, 'search notes title text tags'),
       cmd('library', 'Go to', 'History and sync', 'history', 'Ctrl+Shift+B', () => library.openLibrary(), !GUEST, 'versions git backup github restore earlier deleted bring back'),
       cmd('sync', 'Go to', 'Sync now', 'refresh-cw', '', () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, 'git push pull github backup another computer'),
+      cmd('github', 'Go to', 'Sync with GitHub…', 'globe', '', () => github.open(), !GUEST, 'sign in github repository private sync another computer'),
+      cmd('githubSignOut', 'Go to', 'Sign out of GitHub', 'log-out', '', () => github.signOut(), !GUEST && !!github.statusNow()?.signedIn, 'github account token'),
       cmd('save-version', 'Go to', 'Save a version now', 'save', '', () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, 'git commit history snapshot'),
       cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'folder files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
@@ -2718,7 +2724,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function onKeydown(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return;
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.signDialog.open;
+    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.githubDialog.open || el.signDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfOpen() || docxOpen())) {
       e.preventDefault();
       if (pdfOpen()) flushPdf({ commit: true, explicit: true });
@@ -3056,6 +3062,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.gitPushBtn.addEventListener('click', () => { library.syncNow(); });
     fromMain('gitPulled', api.on.gitPulled, (pulled) => library.noticePulled(pulled));
     fromMain('gitStatus', api.on.gitStatus, (s) => renderGitStatus(s));
+    fromMain('githubStatus', api.on.githubStatus, (s) => github.renderStatus(s));
+    api.github.status().then((s) => github.renderStatus(s)).catch(() => {});
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
     el.splitBtn.addEventListener('click', openSplitDialog);
@@ -3192,6 +3200,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     restoreTabs(settings);
     bind();
     library.bind();
+    github.bind();
     bindTabs();
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();

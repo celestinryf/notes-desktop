@@ -1,9 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol, safeStorage } from 'electron';
 import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
+import { GitHub } from './github.mts';
+import { TokenStore } from './github-token.mts';
+import { GitHubSession } from './github-session.mts';
 import { GitSync, LINKED_DIR } from './gitSync.mts';
 import { VaultPictures } from './vault-pictures.mts';
 import type { FileCommit } from './gitSync.mts';
@@ -110,7 +113,14 @@ function main() {
   trace.write('app-start', { uptimeMs: Math.round(process.uptime() * 1000), hidden: START_HIDDEN, version: app.getVersion() });
   const store = new Store(DATA_DIR).load();
   let filesMove = ensureNotesFolder(store);
+  const github = new GitHubSession({
+    store: new TokenStore(path.join(DATA_DIR, 'github-token.bin'), safeStorage),
+    github: new GitHub(),
+    dry: process.env.NOTES_APP_DRY_GITHUB === 'code' || process.env.NOTES_APP_DRY_GITHUB === 'signed-in' ? process.env.NOTES_APP_DRY_GITHUB : '',
+    onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('github:status', s); },
+  });
   const git = new GitSync(DATA_DIR, {
+    remoteEnv: (url) => github.authEnvFor(url),
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
@@ -1125,6 +1135,13 @@ function main() {
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
   handle('git:sync', () => git.sync());
+  handle('github:status', () => github.status());
+  handle('github:signIn', () => github.startSignIn());
+  handle('github:waitSignIn', () => github.waitSignIn());
+  handle('github:cancelSignIn', () => { github.cancelSignIn(); });
+  handle('github:signOut', () => { github.signOut(); });
+  handle('github:repos', () => github.repos());
+  handle('github:createRepo', (_e, name) => github.createRepo(typeof name === 'string' ? name.trim() : ''));
 
   const CHANGE_KINDS: Record<string, VersionChangeKind> = { A: 'added', M: 'changed', R: 'renamed', D: 'removed' };
   const bringsBack = (rel: string) => TEXT_EXT.has(extOf(rel)) || extOf(rel) === 'mdlock';

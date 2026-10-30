@@ -117,8 +117,9 @@ class GitSync {
   gitDir: string;
   discardFile: (absPath: string) => Promise<void>;
   onPulled: (pulled: Pulled) => void | Promise<void>;
+  remoteEnv: (url: string) => Record<string, string> | undefined;
   lastSyncTry: number;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void> }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -139,6 +140,7 @@ class GitSync {
     this.gitDir = path.join(this.dir, '.git');
     this.discardFile = opts.discardFile || (async (absPath) => { fs.rmSync(absPath, { force: true }); });
     this.onPulled = opts.onPulled || (() => {});
+    this.remoteEnv = opts.remoteEnv || (() => undefined);
     this.lastSyncTry = 0;
   }
 
@@ -445,7 +447,7 @@ class GitSync {
   }
 
   async _pushNow(): Promise<GitResult> {
-    const r = await run(['push', '-q', '-u', 'origin', 'HEAD:main'], this.dir, 60000);
+    const r = await run(['push', '-q', '-u', 'origin', 'HEAD:main'], this.dir, 60000, undefined, this.remoteEnv(this.state.remote));
     if (!r.ok) { this._set({ lastError: 'push failed: ' + r.error }); return { ok: false, error: r.error }; }
     this._set({ lastPushAt: this.now(), lastError: this._linkedNotice() });
     return { ok: true };
@@ -466,7 +468,7 @@ class GitSync {
     const owned = await this._ownedLinked();
     if (!owned) { this._set({ lastError: 'sync failed: could not read which files this PC keeps' }); return { ok: false, error: 'could not read the index' }; }
     let r: PullResult;
-    try { r = await pullInto({ dir: this.dir, gitDir: this.gitDir, tree, now: this.now, discard: this.discardFile }); }
+    try { r = await pullInto({ dir: this.dir, gitDir: this.gitDir, tree, now: this.now, discard: this.discardFile, env: this.remoteEnv(this.state.remote) }); }
     catch (err) { r = { ok: false, error: err instanceof Error ? err.message : String(err) }; }
     if (!r.ok) { this._set({ lastError: 'sync failed: ' + r.error }); return { ok: false, error: r.error }; }
     if (r.changed.length || r.copies.length || r.merged) {

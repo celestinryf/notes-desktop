@@ -121,7 +121,9 @@
           "palette": '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />',
           "cloud-check": '<path d="m17 15-5.5 5.5L9 18" /><path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327" />',
           "cloud-upload": '<path d="M12 13v8" /><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" /><path d="m8 17 4-4 4 4" />',
-          "cloud-alert": '<path d="M12 12v4" /><path d="M12 20h.01" /><path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642" />'
+          "cloud-alert": '<path d="M12 12v4" /><path d="M12 20h.01" /><path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642" />',
+          "globe": '<circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /><path d="M2 12h20" />',
+          "log-out": '<path d="m16 17 5-5-5-5" /><path d="M21 12H9" /><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />'
         };
         function svg(name, size) {
           const body = PATHS[name];
@@ -14700,6 +14702,7 @@
   __export(helpers_exports, {
     CRAFT_OF: () => CRAFT_OF,
     EDITOR_MIN: () => EDITOR_MIN,
+    GITHUB_CANCELLED: () => GITHUB_CANCELLED,
     IMAGE_EXT: () => IMAGE_EXT,
     IMAGE_MIME: () => IMAGE_MIME,
     MAX_TEXT_BYTES: () => MAX_TEXT_BYTES,
@@ -14750,6 +14753,7 @@
     plainTextFromMarkdown: () => plainTextFromMarkdown,
     readFrontMatter: () => readFrontMatter,
     relativeTime: () => relativeTime,
+    repoNameProblem: () => repoNameProblem,
     safeFilename: () => safeFilename,
     searchHay: () => searchHay,
     snippet: () => snippet,
@@ -14764,6 +14768,7 @@
     tokenize: () => tokenize,
     traceClock: () => traceClock,
     truncate: () => truncate,
+    validRepoName: () => validRepoName,
     vaultLinks: () => vaultLinks,
     wikiLinkLabel: () => wikiLinkLabel,
     wikiLinkName: () => wikiLinkName,
@@ -15330,6 +15335,10 @@
     return Math.max(1, score - t.length / 20);
   }
   var isObjectLike = (v) => !!v && typeof v === "object";
+  var GITHUB_CANCELLED = "The sign-in was cancelled.";
+  var GITHUB_REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+  var validRepoName = (name) => GITHUB_REPO_NAME.test(name) && name !== "." && name !== ".." && !/\.git$/i.test(name);
+  var repoNameProblem = (name) => !name ? "Give the repository a name." : validRepoName(name) ? "" : "A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
   var GIT_ERRORS = [
@@ -16062,6 +16071,22 @@
     editorWidthInput: pageElement("#editorWidthInput", HTMLInputElement),
     editorWidthValue: pageElement("#editorWidthValue", HTMLSpanElement),
     editorFullWidthInput: pageElement("#editorFullWidthInput", HTMLInputElement),
+    githubDialog: pageElement("#githubDialog", HTMLDialogElement),
+    githubForm: pageElement("#githubForm", HTMLFormElement),
+    githubHint: pageElement("#githubHint", HTMLParagraphElement),
+    githubCode: pageElement("#githubCode", HTMLParagraphElement),
+    githubWait: pageElement("#githubWait", HTMLParagraphElement),
+    githubRepoField: pageElement("#githubRepoField", HTMLLabelElement),
+    githubRepoSelect: pageElement("#githubRepoSelect", HTMLSelectElement),
+    githubNameField: pageElement("#githubNameField", HTMLLabelElement),
+    githubNameInput: pageElement("#githubNameInput", HTMLInputElement),
+    githubError: pageElement("#githubError", HTMLParagraphElement),
+    githubCopyBtn: pageElement("#githubCopyBtn", HTMLButtonElement),
+    githubSignOutBtn: pageElement("#githubSignOutBtn", HTMLButtonElement),
+    githubCloseBtn: pageElement("#githubCloseBtn", HTMLButtonElement),
+    githubPrimaryBtn: pageElement("#githubPrimaryBtn", HTMLButtonElement),
+    githubAccount: pageElement("#githubAccount", HTMLSpanElement),
+    githubSettingsBtn: pageElement("#githubSettingsBtn", HTMLButtonElement),
     gitEnabledInput: pageElement("#gitEnabledInput", HTMLInputElement),
     gitRemoteInput: pageElement("#gitRemoteInput", HTMLInputElement),
     gitStatus: pageElement("#gitStatus", HTMLSpanElement),
@@ -21277,7 +21302,7 @@
     const shown2 = titles.slice(0, 2).join(", ");
     return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
   }
-  function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openNoteHistory, openNote }) {
+  function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openGithub, openNoteHistory, openNote }) {
     const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
     function renderStatus(s) {
       lib.status = s;
@@ -21294,7 +21319,7 @@
       el.libraryDetails.classList.toggle("hidden", !problem);
       el.libraryDetailsText.textContent = problem ? problem.details : "";
       el.librarySaveBtn.classList.toggle("hidden", !s.enabled || s.available === false);
-      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Set up sync\u2026" : problem ? "Try again" : "Sync now");
+      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Sync with GitHub\u2026" : problem ? "Try again" : "Sync now");
     }
     async function openLibrary() {
       await flushSave();
@@ -21483,7 +21508,7 @@
       }
       if (!s.remote) {
         el.libraryDialog.close();
-        openSettingsAt("set-history");
+        await openGithub();
         return;
       }
       await syncNow();
@@ -21553,6 +21578,252 @@
       } });
     }
     return { bind, openLibrary, renderStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+  }
+
+  // src/renderer/github-dialog.ts
+  var NEW_REPO = "";
+  var DEFAULT_NAME = "notes";
+  var APPLICATIONS = "https://github.com/settings/applications";
+  var INTRO = "Notes keeps your notes in a private repository on your GitHub account. GitHub will ask you to approve Notes; it needs access to your private repositories to create and write one. Sign in once: Notes keeps the sign-in on this PC, protected by Windows.";
+  var CODE_HINT = "Enter this code on github.com, then come back here. The code is copied for you when you open the page.";
+  function minutesLeft(expiresAt) {
+    return Math.max(1, Math.round((expiresAt - Date.now()) / 6e4));
+  }
+  function settingsLabel(status, remote) {
+    if (!status || !status.signedIn) return "Sign in with GitHub\u2026";
+    return remote ? "Change repository\u2026" : "Choose a repository\u2026";
+  }
+  var sameRepo = (a, b) => a.trim().replace(/(\.git)?\/*$/i, "").toLowerCase() === b.trim().replace(/(\.git)?\/*$/i, "").toLowerCase();
+  function createGithubDialog({ api, updateSettings, afterRepoSet }) {
+    const gh = { status: null, remote: "", step: "signed-out", busy: false, code: null, opened: 0 };
+    function show(step) {
+      gh.step = step;
+      el.githubCode.classList.toggle("hidden", step !== "code");
+      el.githubWait.classList.toggle("hidden", step !== "code");
+      el.githubCopyBtn.classList.toggle("hidden", step !== "code");
+      el.githubRepoField.classList.toggle("hidden", step !== "repo");
+      el.githubSignOutBtn.classList.toggle("hidden", step !== "repo");
+      el.githubError.textContent = "";
+      el.githubPrimaryBtn.disabled = gh.busy;
+      syncNameField();
+    }
+    function syncNameField() {
+      const creating = gh.step === "repo" && el.githubRepoSelect.value === NEW_REPO;
+      el.githubNameField.classList.toggle("hidden", !creating);
+      if (gh.step !== "repo" || gh.busy) return;
+      const problem = creating ? repoNameProblem(el.githubNameInput.value.trim()) : "";
+      el.githubError.textContent = problem;
+      el.githubPrimaryBtn.disabled = !!problem;
+      setLabel(el.githubPrimaryBtn, creating ? "Create and sync" : "Use this repository");
+    }
+    function setBusy(busy, label) {
+      gh.busy = busy;
+      el.githubPrimaryBtn.disabled = busy;
+      if (label) setLabel(el.githubPrimaryBtn, label);
+    }
+    function showSignedOut(error) {
+      show("signed-out");
+      el.githubHint.textContent = INTRO;
+      setLabel(el.githubPrimaryBtn, "Sign in with GitHub");
+      el.githubError.textContent = error || "";
+    }
+    function showCode2(code2) {
+      gh.code = code2;
+      show("code");
+      el.githubHint.textContent = CODE_HINT;
+      el.githubCode.textContent = code2.userCode;
+      el.githubCode.setAttribute("aria-label", "Code " + code2.userCode.split("").join(" "));
+      el.githubWait.textContent = "Waiting for github.com\u2026 the code expires in " + minutesLeft(code2.expiresAt) + " min.";
+      setLabel(el.githubPrimaryBtn, "Open github.com");
+    }
+    async function showRepo(opened) {
+      show("repo");
+      const login = gh.status && gh.status.login ? gh.status.login : "GitHub";
+      el.githubHint.textContent = "Signed in as " + login + ". Pick where the notes go.";
+      el.githubRepoSelect.innerHTML = "";
+      el.githubRepoSelect.append(new Option("New private repository", NEW_REPO));
+      if (!el.githubNameInput.value.trim()) el.githubNameInput.value = DEFAULT_NAME;
+      const loading = new Option("Loading your repositories\u2026", "__loading");
+      loading.disabled = true;
+      el.githubRepoSelect.append(loading);
+      syncNameField();
+      let r;
+      try {
+        r = await api.github.repos();
+      } catch (err) {
+        r = { ok: false, error: ipcErrorText(err) };
+      }
+      if (opened !== gh.opened || gh.step !== "repo") return;
+      loading.remove();
+      if (!r.ok) {
+        el.githubError.textContent = r.error;
+        if (!await stillSignedIn()) showSignedOut(r.error);
+        return;
+      }
+      for (const repo of r.repos) el.githubRepoSelect.append(new Option(repo.fullName, repo.cloneUrl));
+      const current = gh.remote ? r.repos.find((repo) => sameRepo(repo.cloneUrl, gh.remote)) : void 0;
+      const made = current || r.repos.find((repo) => repo.fromNotes);
+      if (made) el.githubRepoSelect.value = made.cloneUrl;
+      if (r.repos.length) el.githubHint.textContent += " Setting up another computer? Choose the repository you made before. Only private repositories are listed.";
+      syncNameField();
+    }
+    async function stillSignedIn() {
+      try {
+        gh.status = await api.github.status();
+      } catch (_) {
+        gh.status = null;
+      }
+      return !!gh.status && gh.status.signedIn;
+    }
+    async function open() {
+      if (gh.step === "code") api.github.cancelSignIn().catch(() => {
+      });
+      const opened = ++gh.opened;
+      el.githubError.textContent = "";
+      const signedIn = await stillSignedIn();
+      if (opened !== gh.opened) return;
+      if (!el.githubDialog.open) el.githubDialog.showModal();
+      if (signedIn) await showRepo(opened);
+      else showSignedOut();
+      el.githubPrimaryBtn.focus();
+    }
+    async function signIn() {
+      const opened = gh.opened;
+      setBusy(true, "Signing in\u2026");
+      let r;
+      try {
+        r = await api.github.signIn();
+      } catch (err) {
+        r = { ok: false, error: ipcErrorText(err) };
+      }
+      if (opened !== gh.opened) {
+        api.github.cancelSignIn().catch(() => {
+        });
+        return;
+      }
+      setBusy(false);
+      if (!r.ok) {
+        showSignedOut(r.error);
+        return;
+      }
+      showCode2(r);
+      el.githubPrimaryBtn.focus();
+      let done;
+      try {
+        done = await api.github.waitSignIn();
+      } catch (err) {
+        done = { ok: false, error: ipcErrorText(err) };
+      }
+      if (opened !== gh.opened || !el.githubDialog.open) return;
+      if (!done.ok) {
+        showSignedOut(done.error === GITHUB_CANCELLED ? "" : done.error);
+        return;
+      }
+      await stillSignedIn();
+      await showRepo(opened);
+      el.githubRepoSelect.focus();
+    }
+    async function copyCode() {
+      if (!gh.code) return;
+      try {
+        await navigator.clipboard.writeText(gh.code.userCode);
+      } catch (_) {
+      }
+    }
+    async function openGithub() {
+      if (!gh.code) return;
+      await copyCode();
+      if (/^https:\/\/github\.com\//.test(gh.code.verificationUri)) api.app.openExternal(gh.code.verificationUri);
+      else el.githubError.textContent = "GitHub gave a sign-in page that is not on github.com, so Notes did not open it: " + gh.code.verificationUri;
+    }
+    async function useRepo() {
+      let url = el.githubRepoSelect.value;
+      const creating = url === NEW_REPO;
+      if (creating && repoNameProblem(el.githubNameInput.value.trim())) {
+        syncNameField();
+        return;
+      }
+      setBusy(true, creating ? "Creating\u2026" : "Connecting\u2026");
+      try {
+        if (creating) {
+          let r;
+          try {
+            r = await api.github.createRepo(el.githubNameInput.value.trim());
+          } catch (err) {
+            r = { ok: false, error: ipcErrorText(err) };
+          }
+          if (!r.ok) {
+            el.githubError.textContent = r.error;
+            if (!await stillSignedIn()) showSignedOut(r.error);
+            return;
+          }
+          url = r.repo.cloneUrl;
+        }
+        await updateSettings({ gitEnabled: true, gitRemote: url });
+      } catch (err) {
+        el.githubError.textContent = "Notes could not set the repository: " + ipcErrorText(err);
+        return;
+      } finally {
+        setBusy(false);
+        if (gh.step === "repo") syncNameField();
+      }
+      el.githubDialog.close();
+      await afterRepoSet();
+    }
+    async function primary() {
+      if (gh.busy) return;
+      if (gh.step === "signed-out") await signIn();
+      else if (gh.step === "code") await openGithub();
+      else await useRepo();
+    }
+    async function signOut() {
+      await api.github.signOut();
+      await stillSignedIn();
+      if (el.githubDialog.open) showSignedOut();
+      toast("Signed out of GitHub on this PC. To take Notes off your GitHub account too, remove it under Applications.", { label: "Open", run: () => {
+        api.app.openExternal(APPLICATIONS);
+      } });
+    }
+    function renderSettings() {
+      const s = gh.status;
+      el.githubAccount.textContent = s && s.signedIn ? "Signed in to GitHub as " + s.login + "." : "Not signed in to GitHub.";
+      setLabel(el.githubSettingsBtn, settingsLabel(s, gh.remote));
+    }
+    function renderStatus(s) {
+      gh.status = s;
+      renderSettings();
+      if (el.githubDialog.open && !s.signedIn && gh.step === "repo") showSignedOut();
+    }
+    function remoteChanged(remote) {
+      gh.remote = remote;
+      renderSettings();
+    }
+    function close() {
+      gh.opened++;
+      if (gh.step === "code") api.github.cancelSignIn().catch(() => {
+      });
+      setBusy(false);
+    }
+    function bind() {
+      el.githubForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        primary();
+      });
+      el.githubCloseBtn.addEventListener("click", () => el.githubDialog.close());
+      el.githubCopyBtn.addEventListener("click", () => {
+        copyCode();
+      });
+      el.githubSignOutBtn.addEventListener("click", () => {
+        signOut();
+      });
+      el.githubRepoSelect.addEventListener("change", syncNameField);
+      el.githubNameInput.addEventListener("input", syncNameField);
+      el.githubDialog.addEventListener("close", close);
+      el.githubSettingsBtn.addEventListener("click", () => {
+        open();
+      });
+    }
+    return { bind, open, signOut, renderStatus, remoteChanged, statusNow: () => gh.status };
   }
 
   // src/renderer/speech.ts
@@ -26383,11 +26654,13 @@
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
     const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+    const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
     const library = createLibraryDialog({
       api,
       flushSave,
       updateSettings,
       openSettingsAt: (sectionId) => openSettings(sectionId),
+      openGithub: () => github.open(),
       openNoteHistory: async (id, pick) => {
         await selectNote(id);
         if (state.currentId === id) openHistory(pick);
@@ -27210,6 +27483,7 @@
     function renderGitStatus(s) {
       if (!s) return;
       library.renderStatus(s);
+      github.remoteChanged(s.remote);
       const problem = gitErrorText(s.lastError);
       el.gitStatus.textContent = statusSentence(s) + (problem ? " " + problem.text : "");
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
@@ -27273,6 +27547,8 @@
         cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
         cmd("library", "Go to", "History and sync", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
         cmd("sync", "Go to", "Sync now", "refresh-cw", "", () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push pull github backup another computer"),
+        cmd("github", "Go to", "Sync with GitHub\u2026", "globe", "", () => github.open(), !GUEST, "sign in github repository private sync another computer"),
+        cmd("githubSignOut", "Go to", "Sign out of GitHub", "log-out", "", () => github.signOut(), !GUEST && !!github.statusNow()?.signedIn, "github account token"),
         cmd("save-version", "Go to", "Save a version now", "save", "", () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, "git commit history snapshot"),
         cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "folder files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
@@ -27344,7 +27620,7 @@
     function onKeydown(e) {
       if (e.isComposing || e.keyCode === 229) return;
       const ctrl = e.ctrlKey || e.metaKey;
-      const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.signDialog.open;
+      const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.githubDialog.open || el.signDialog.open;
       if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s" && (pdfOpen() || docxOpen())) {
         e.preventDefault();
         if (pdfOpen()) flushPdf({ commit: true, explicit: true });
@@ -28038,6 +28314,9 @@
       });
       fromMain("gitPulled", api.on.gitPulled, (pulled) => library.noticePulled(pulled));
       fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
+      fromMain("githubStatus", api.on.githubStatus, (s) => github.renderStatus(s));
+      api.github.status().then((s) => github.renderStatus(s)).catch(() => {
+      });
       el.exportBtn.addEventListener("click", exportCurrent);
       el.duplicateBtn.addEventListener("click", duplicateCurrent);
       el.splitBtn.addEventListener("click", openSplitDialog);
@@ -28258,6 +28537,7 @@
       restoreTabs(settings);
       bind();
       library.bind();
+      github.bind();
       bindTabs();
       if (settings.lastFolderId) {
         state.view = "folder";

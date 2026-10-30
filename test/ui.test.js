@@ -67,6 +67,7 @@ test.before(async () => {
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
       ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
       NOTES_APP_DRY_TERMINAL: '1',
+      NOTES_APP_DRY_GITHUB: 'code',
       NOTES_APP_NO_CRAFTS: '1',
       NOTES_APP_NO_RECYCLE_BIN: '1',
     }),
@@ -1951,6 +1952,39 @@ test('window state: Esc hides, a second launch re-shows the first instance, data
   await page.waitForSelector('.note-row', { timeout: 8000 });
   assert.equal(await page.$eval('#noteList .note-row', (r) => Number(r.getAttribute('aria-setsize'))), before);
   step('data survived reload');
+});
+
+test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancels it, and Settings shows the account state', async () => {
+  await page.keyboard.press('Control+Shift+b');
+  await page.waitForSelector('#libraryDialog[open]');
+  await waitForDom(() => /Sync with GitHub/.test(document.getElementById('libraryPrimaryBtn').textContent));
+  await page.click('#libraryPrimaryBtn');
+  await page.waitForSelector('#githubDialog[open]');
+  assert.equal(await page.$eval('#libraryDialog', (d) => d.open), false, 'the History dialog closed');
+  assert.match(await page.textContent('#githubPrimaryBtn'), /Sign in with GitHub/);
+  assert.equal(await page.$eval('#githubCode', (p) => p.classList.contains('hidden')), true, 'no code before signing in');
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'githubPrimaryBtn', 'first focus on the primary');
+  await page.keyboard.press('Enter');
+  await waitForDom(() => !document.getElementById('githubCode').classList.contains('hidden'));
+  assert.equal(await page.textContent('#githubCode'), 'WDJB-MJHT');
+  assert.match(await page.textContent('#githubWait'), /Waiting for github\.com… the code expires in 1[45] min\./);
+  assert.match(await page.textContent('#githubPrimaryBtn'), /Open github\.com/);
+  assert.equal(await page.$eval('#githubCopyBtn', (b) => b.classList.contains('hidden')), false, 'Copy code is offered');
+  assert.equal(await page.$eval('#githubRepoField', (l) => l.classList.contains('hidden')), true, 'no repository step yet');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !document.getElementById('githubDialog').open);
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await waitForDom(() => /Not signed in to GitHub/.test(document.getElementById('githubAccount').textContent));
+  assert.match(await page.textContent('#githubSettingsBtn'), /Sign in with GitHub/);
+  await page.click('#githubSettingsBtn');
+  await page.waitForSelector('#githubDialog[open]');
+  assert.match(await page.textContent('#githubHint'), /GitHub will ask you to approve Notes/);
+  await page.click('#githubCloseBtn');
+  await waitForDom(() => !document.getElementById('githubDialog').open);
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
 });
 
 test('no renderer errors were logged during the run', () => {

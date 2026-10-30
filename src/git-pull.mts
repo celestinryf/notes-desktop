@@ -8,6 +8,7 @@ type PullContext = {
   tree: string;
   now: () => number;
   discard: (absPath: string) => Promise<void>;
+  env?: Record<string, string>;
 };
 type PullResult = { ok: true, changed: string[], copies: string[], merged: boolean } | { ok: false, error: string };
 type StageEntry = { mode: string, oid: string, stage: number, path: string };
@@ -211,15 +212,15 @@ async function applyChanges(ctx: PullContext, changes: TreeChange[], stamp: stri
   return { changed, copies };
 }
 
-async function fetchRemote(dir: string) {
-  const r = await run(['fetch', '-q', 'origin', '+refs/heads/main:' + REMOTE_REF], dir, 120000);
+async function fetchRemote(dir: string, env?: Record<string, string>) {
+  const r = await run(['fetch', '-q', 'origin', '+refs/heads/main:' + REMOTE_REF], dir, 120000, undefined, env);
   if (r.ok) return { ok: true as const, empty: false };
   if (/couldn't find remote ref|could not find remote ref/i.test(r.error || '')) return { ok: true as const, empty: true };
   return { ok: false as const, error: r.error || 'fetch failed' };
 }
 
 async function pullInto(ctx: PullContext): Promise<PullResult> {
-  const fetched = await fetchRemote(ctx.dir);
+  const fetched = await fetchRemote(ctx.dir, ctx.env);
   if (!fetched.ok) return { ok: false, error: fetched.error };
   const none = { ok: true as const, changed: [], copies: [], merged: false };
   if (fetched.empty) return none;
