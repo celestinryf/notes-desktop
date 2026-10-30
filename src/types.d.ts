@@ -217,6 +217,7 @@ interface IpcContract {
   'git:status': () => GitState;
   'git:commit': () => GitResult;
   'git:push': () => GitResult;
+  'git:sync': () => GitResult;
   'git:history': (limit?: number) => GitCommit[];
   'git:versions': (limit?: number) => LibraryVersions;
   'git:bringBack': (hash: string, path: string) => BringBackResult;
@@ -314,6 +315,7 @@ interface MainEvents {
   'settings:changed': [settings: Settings];
   'theme:system': [theme: Theme];
   'git:status': [status: GitState];
+  'git:pulled': [pulled: { changed: string[]; copies: string[] }];
   'app:flush': [];
   'notes:reloaded': [payload: { reason: string; id?: string }];
   'vault:status': [payload: { id: string; status: VaultStatus }];
@@ -372,7 +374,7 @@ interface NotesApi {
     setBook: Invoker<'folders:setBook'>; reorderPages: Invoker<'folders:reorderPages'>; move: Invoker<'folders:move'>; delete: Invoker<'folders:delete'>;
   };
   settings: { get: Invoker<'settings:get'>; set: Invoker<'settings:set'> };
-  git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; history: Invoker<'git:history'>; versions: Invoker<'git:versions'>; bringBack: Invoker<'git:bringBack'> };
+  git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; sync: Invoker<'git:sync'>; history: Invoker<'git:history'>; versions: Invoker<'git:versions'>; bringBack: Invoker<'git:bringBack'> };
   app: {
     info: Invoker<'app:info'>; hide: Invoker<'app:hide'>; print: Invoker<'app:print'>; copy: Invoker<'app:copy'>; emailNote: Invoker<'app:emailNote'>;
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
@@ -382,7 +384,7 @@ interface NotesApi {
   };
   on: {
     shown: Listener<'app:shown'>; newNote: Listener<'app:new-note'>; settingsChanged: Listener<'settings:changed'>; systemTheme: Listener<'theme:system'>;
-    gitStatus: Listener<'git:status'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
+    gitStatus: Listener<'git:status'>; gitPulled: Listener<'git:pulled'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
     botEvent: Listener<'bot:event'>; noteChanged: Listener<'notes:changed'>; stickyChanged: Listener<'sticky:changed'>; stickiesChanged: Listener<'stickies:changed'>;
     openNote: Listener<'app:open-note'>; reminderFired: Listener<'reminder:fired'>; notice: Listener<'app:notice'>; liveStatus: Listener<'live:status'>;
     relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>;

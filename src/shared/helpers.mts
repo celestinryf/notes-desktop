@@ -579,8 +579,9 @@ const stringItems = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is strin
 const GIT_ERRORS: [RegExp, string][] = [
   [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
   [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, 'GitHub did not accept the sign-in for this backup.'],
-  [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, 'Notes could not reach GitHub. Check the connection; Notes tries again with the next change.'],
-  [/\[rejected\]|fetch first|non-fast-forward/i, 'The backup on GitHub has versions this PC does not have, because another computer backed up to it. Syncing two computers comes in a later update.'],
+  [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, 'Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes.'],
+  [/\[rejected\]|fetch first|non-fast-forward/i, 'GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync.'],
+  [/too old to merge/i, 'Syncing needs git 2.41 or newer. Update Git for Windows, then restart Notes.'],
   [/^Files outside the notes folder were not saved to history/, 'Some files outside the notes folder were not saved to history.'],
 ];
 
@@ -589,7 +590,7 @@ const isLinkedNotice = (raw: string | null) => !!raw && raw.startsWith('Files ou
 function gitErrorText(raw: string | null) {
   if (!raw) return null;
   const known = GIT_ERRORS.find(([re]) => re.test(raw));
-  return { text: known ? known[1] : raw.startsWith('push failed') ? 'The backup failed.' : 'History could not save a version.', details: raw };
+  return { text: known ? known[1] : /^(push|sync) failed/.test(raw) ? 'The sync failed.' : 'History could not save a version.', details: raw };
 }
 
 const isRecycleBinPath = (p: string | null | undefined) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
