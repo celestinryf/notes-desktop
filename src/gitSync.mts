@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { run, runBytes, AUTHOR } from './git-run.mts';
+import type { GitRun } from './git-run.mts';
+import { pullInto } from './git-pull.mts';
+import type { PullResult } from './git-pull.mts';
 import { MAX_TEXT_BYTES, isRecord } from './shared/helpers.mts';
 
-const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
 const LINKED_DIR = '.linked';
@@ -21,17 +24,9 @@ type FileCommit = { hash: string; at: number; path: string };
 type LinkedFile = { id: string; filePath: string };
 type KeptOut = { id: string; filePath: string | null };
 type SeenFile = { mtimeMs: number; size: number; hash: string };
+type Pulled = { changed: string[], copies: string[] };
 
-type GitRun = { ok: boolean, code: string | number | null | undefined, stdout: string, stderr: string, error: string | null };
 
-function run(args: string[], cwd: string, timeoutMs?: number, input?: string): Promise<GitRun> {
-  return new Promise((resolve) => {
-    const child = execFile('git', args, { cwd, timeout: timeoutMs || 20000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ ok: !err, code: err ? err.code : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), error: err ? String(stderr || err.message).trim() : null });
-    });
-    if (input !== undefined && child.stdin) { child.stdin.on('error', () => {}); child.stdin.end(input); }
-  });
-}
 
 const ignoreLine = (rel: string) => '/' + rel.replace(/[\\*?[\]!#]/g, '\\$&').replace(/ $/, '\\ ');
 
@@ -121,7 +116,10 @@ class GitSync {
   linkedSeen: Map<string, SeenFile>;
   linkedError: string | null;
   gitDir: string;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[] }) {
+  discardFile: (absPath: string) => Promise<void>;
+  onPulled: (pulled: Pulled) => void | Promise<void>;
+  lastSyncTry: number;
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void> }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -140,6 +138,9 @@ class GitSync {
     this.linkedSeen = new Map();
     this.linkedError = null;
     this.gitDir = path.join(this.dir, '.git');
+    this.discardFile = opts.discardFile || (async (absPath) => { fs.rmSync(absPath, { force: true }); });
+    this.onPulled = opts.onPulled || (() => {});
+    this.lastSyncTry = 0;
   }
 
   _inTree(tree: string, args: string[], timeoutMs?: number, input?: string) {
@@ -212,8 +213,10 @@ class GitSync {
   }
 
   async _stageLinked(): Promise<GitRun> {
+    const owned = await this._ownedLinked();
     const listed = await run(['ls-files', '-s', '-z', '--', LINKED_DIR], this.dir, 60000);
     if (!listed.ok) return listed;
+    if (!owned) return { ok: false, code: 1, stdout: '', stderr: '', error: 'could not read which linked files this PC keeps' };
     const staged = new Map<string, string>();
     for (const record of listed.stdout.split('\0')) {
       const m = /^\d+ ([0-9a-f]{40,64}) \d\t([\s\S]+)$/.exec(record);
@@ -244,10 +247,18 @@ class GitSync {
       const was = staged.get(linkedPath(file));
       if (was) wantedPaths.set(linkedPath(file), was);
     }
+    const dropped = Array.from(staged.keys()).filter((p) => !wantedPaths.has(p) && owned.has(p));
     const changes = Array.from(wantedPaths).filter(([p, hash]) => staged.get(p) !== hash).map(([p, hash]) => '100644 ' + hash + '\t' + p + '\0')
-      .concat(Array.from(staged.keys()).filter((p) => !wantedPaths.has(p)).map((p) => '0 ' + '0'.repeat(40) + '\t' + p + '\0'));
-    if (!changes.length) return { ok: true, code: 0, stdout: '', stderr: '', error: null };
-    return run(['update-index', '-z', '--index-info'], this.dir, 120000, changes.join(''));
+      .concat(dropped.map((p) => '0 ' + '0'.repeat(40) + '\t' + p + '\0'));
+    const droppedSet = new Set(dropped);
+    const nowOwned = new Set(Array.from(owned).filter((p) => !droppedSet.has(p)).concat(Array.from(wantedPaths.keys())));
+    if (!changes.length) {
+      if (nowOwned.size !== owned.size || Array.from(nowOwned).some((p) => !owned.has(p))) this._saveOwnedLinked(nowOwned);
+      return { ok: true, code: 0, stdout: '', stderr: '', error: null };
+    }
+    const updated = await run(['update-index', '-z', '--index-info'], this.dir, 120000, changes.join(''));
+    if (updated.ok) this._saveOwnedLinked(nowOwned);
+    return updated;
   }
 
   async _hashFiles(paths: string[]): Promise<(string | null)[]> {
@@ -264,7 +275,7 @@ class GitSync {
 
   _keptError() {
     const last = this.state.lastError;
-    return last && last.startsWith('push failed') ? last : this._linkedNotice();
+    return last && /^(push|sync) failed/.test(last) ? last : this._linkedNotice();
   }
 
   _linkedNotice() {
@@ -368,39 +379,119 @@ class GitSync {
     if (this.busy) await this.busy;
   }
 
-  async commit(message?: string) {
-    if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
+  async _serial(job: () => Promise<GitResult>): Promise<GitResult> {
     const prev = this.busy;
     const work = (async () => {
       if (prev) { try { await prev; } catch (_) {  } }
-      if (!(await this.available())) return { ok: false, error: 'git unavailable' };
-      if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
-      let add: GitRun | null;
-      try { add = await this._stage(); }
-      catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
-      if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
-      if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
-      const staged = await this._staged();
-      if (staged.ok) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
-      const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
-      const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
-      if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
-      if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
-      this._set({ lastError: this._linkedNotice(), pending: false });
-      await this.refreshCounts();
-      if (this.state.remote) await this.push();
-      return { ok: true };
+      return job();
     })();
     this.busy = work;
     try { return await work; } finally { if (this.busy === work) this.busy = null; }
   }
 
+  async _ready(): Promise<GitResult | null> {
+    if (!(await this.available())) return { ok: false, error: 'git unavailable' };
+    if (!this.state.initialized && !(await this.ensureRepo())) return { ok: false, error: this.state.lastError };
+    return null;
+  }
+
+  async _commitNow(message?: string): Promise<GitResult> {
+    const notReady = await this._ready();
+    if (notReady) return notReady;
+    let add: GitRun | null;
+    try { add = await this._stage(); }
+    catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
+    if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
+    const staged = await this._staged();
+    if (staged.ok) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
+    const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
+    if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
+    if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
+    this._set({ lastError: this._linkedNotice(), pending: false });
+    await this.refreshCounts();
+    return { ok: true };
+  }
+
+  async commit(message?: string) {
+    if (!this.state.enabled) return { ok: false, skipped: 'disabled' };
+    return this._serial(async () => {
+      const r = await this._commitNow(message);
+      if (r.ok && !r.nothingToCommit && this.state.remote) await this._pushOrSync();
+      return r;
+    });
+  }
+
   async push() {
     if (!this.state.enabled || !this.state.remote) return { ok: false, skipped: 'no remote' };
+    return this._serial(() => this._pushOrSync());
+  }
+
+  async sync(): Promise<GitResult> {
+    if (!this.state.enabled || !this.state.remote) return { ok: false, skipped: 'no remote' };
+    this.lastSyncTry = this.now();
+    return this._serial(async () => {
+      const committed = await this._commitNow();
+      if (!committed.ok) return committed;
+      const pulled = await this._pull();
+      if (!pulled.ok) return pulled;
+      return this._pushNow();
+    });
+  }
+
+  syncIfDue(minGapMs: number) {
+    if (!this.state.enabled || !this.state.remote || this.busy || this.now() - this.lastSyncTry < minGapMs) return;
+    this.sync().catch(() => {});
+  }
+
+  async _pushNow(): Promise<GitResult> {
     const r = await run(['push', '-q', '-u', 'origin', 'HEAD:main'], this.dir, 60000);
     if (!r.ok) { this._set({ lastError: 'push failed: ' + r.error }); return { ok: false, error: r.error }; }
-    this._set({ lastPushAt: this.now(), lastError: null });
+    this._set({ lastPushAt: this.now(), lastError: this._linkedNotice() });
     return { ok: true };
+  }
+
+  async _pushOrSync(): Promise<GitResult> {
+    const pushed = await this._pushNow();
+    if (pushed.ok || !/\[rejected\]|fetch first|non-fast-forward/i.test(pushed.error || '')) return pushed;
+    const pulled = await this._pull();
+    return pulled.ok ? this._pushNow() : pulled;
+  }
+
+  async _pull(): Promise<GitResult> {
+    const notReady = await this._ready();
+    if (notReady) return notReady;
+    const tree = this.workTree();
+    if (!tree) return { ok: true };
+    const owned = await this._ownedLinked();
+    if (!owned) { this._set({ lastError: 'sync failed: could not read which files this PC keeps' }); return { ok: false, error: 'could not read the index' }; }
+    let r: PullResult;
+    try { r = await pullInto({ dir: this.dir, gitDir: this.gitDir, tree, now: this.now, discard: this.discardFile }); }
+    catch (err) { r = { ok: false, error: err instanceof Error ? err.message : String(err) }; }
+    if (!r.ok) { this._set({ lastError: 'sync failed: ' + r.error }); return { ok: false, error: r.error }; }
+    if (r.changed.length || r.copies.length || r.merged) {
+      await this.refreshCounts();
+      try { await this.onPulled({ changed: r.changed, copies: r.copies }); } catch (_) {  }
+    }
+    return { ok: true };
+  }
+
+  _ownedFile() {
+    return path.join(this.gitDir, 'notes-linked-own');
+  }
+
+  async _ownedLinked(): Promise<Set<string> | null> {
+    try { return new Set(JSON.parse(fs.readFileSync(this._ownedFile(), 'utf8'))); } catch (_) {  }
+    const listed = await run(['ls-files', '-z', '--', LINKED_DIR], this.dir, 60000);
+    if (!listed.ok) return null;
+    const owned = new Set(listed.stdout.split('\0').filter(Boolean));
+    this._saveOwnedLinked(owned);
+    return owned;
+  }
+
+  _saveOwnedLinked(owned: Set<string>) {
+    fs.writeFileSync(this._ownedFile(), JSON.stringify(Array.from(owned).sort()));
   }
 
   async history(limit?: number, onlyPath?: string) {
@@ -486,11 +577,5 @@ function parseVersion(chunk: string): RawVersion {
   return { hash, at: parseInt(ts, 10) * 1000, files };
 }
 
-function runBytes(args: string[], cwd: string, maxBuffer: number): Promise<Buffer | null> {
-  return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: 20000, windowsHide: true, maxBuffer, encoding: 'buffer' }, (err, stdout) => resolve(err ? null : stdout));
-  });
-}
-
-export type { FileCommit, LinkedFile, KeptOut, RawVersion };
+export type { FileCommit, LinkedFile, KeptOut, RawVersion, Pulled };
 export { GitSync, LINKED_DIR, parseVersion };

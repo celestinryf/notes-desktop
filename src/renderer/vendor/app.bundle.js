@@ -15335,15 +15335,16 @@
   var GIT_ERRORS = [
     [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
     [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, "GitHub did not accept the sign-in for this backup."],
-    [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again with the next change."],
-    [/\[rejected\]|fetch first|non-fast-forward/i, "The backup on GitHub has versions this PC does not have, because another computer backed up to it. Syncing two computers comes in a later update."],
+    [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes."],
+    [/\[rejected\]|fetch first|non-fast-forward/i, "GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync."],
+    [/too old to merge/i, "Syncing needs git 2.38 or newer. Update Git for Windows, then restart Notes."],
     [/^Files outside the notes folder were not saved to history/, "Some files outside the notes folder were not saved to history."]
   ];
   var isLinkedNotice = (raw) => !!raw && raw.startsWith("Files outside the notes folder were not saved to history");
   function gitErrorText(raw) {
     if (!raw) return null;
     const known = GIT_ERRORS.find(([re]) => re.test(raw));
-    return { text: known ? known[1] : raw.startsWith("push failed") ? "The backup failed." : "History could not save a version.", details: raw };
+    return { text: known ? known[1] : /^(push|sync) failed/.test(raw) ? "The sync failed." : "History could not save a version.", details: raw };
   }
   var isRecycleBinPath = (p) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
   var isLinkedFile = (n) => !n.vaultId && !!n.filePath;
@@ -21244,10 +21245,10 @@
   function historyLook(s, now) {
     if (!s.enabled) return { icon: "history", label: "History is off", error: false };
     if (s.available === false) return { icon: "circle-alert", label: "History needs git", error: true };
-    if (s.lastError) return { icon: "cloud-alert", label: s.lastError.startsWith("push failed") ? "Backup failed" : "History needs attention", error: true };
+    if (s.lastError) return { icon: "cloud-alert", label: /^(push|sync) failed/.test(s.lastError) ? "Sync failed" : "History needs attention", error: true };
     if (s.pending) return { icon: "cloud-upload", label: "Saving a version\u2026", error: false };
     if (!s.commits) return { icon: "history", label: "No versions yet", error: false };
-    if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Backed up " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not backed up yet", error: false };
+    if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Synced " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not synced yet", error: false };
     return { icon: "history", label: "Saved " + relativeTime(s.lastCommitAt ?? 0, now) + ", this PC only", error: false };
   }
   function remoteName(url) {
@@ -21257,9 +21258,9 @@
   function statusSentence(s) {
     if (!s.enabled) return "History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.";
     if (s.available === false) return "Notes keeps history with git, and git is not installed on this PC. Install Git for Windows, then restart Notes.";
-    const saved = s.commits ? s.commits + (s.commits === 1 ? " version" : " versions") + " kept, the last " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
-    if (!s.remote) return saved + " They are on this PC only. Back them up to GitHub to keep a copy somewhere else.";
-    return saved + " " + (s.lastPushAt ? "Backed up " + relativeTime(s.lastPushAt) + " to " + remoteName(s.remote) + "." : "Not backed up to " + remoteName(s.remote) + " yet.");
+    const saved = s.commits ? "The last version was saved " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
+    if (!s.remote) return saved + " They are on this PC only. Sync with a GitHub repository to keep a copy somewhere else and to have your notes on another computer.";
+    return saved + " " + (s.lastPushAt ? "Synced " + relativeTime(s.lastPushAt) + " with " + remoteName(s.remote) + "." : "Not synced with " + remoteName(s.remote) + " yet.");
   }
   function dayLabel(at, now) {
     const day = new Date(at);
@@ -21293,7 +21294,7 @@
       el.libraryDetails.classList.toggle("hidden", !problem);
       el.libraryDetailsText.textContent = problem ? problem.details : "";
       el.librarySaveBtn.classList.toggle("hidden", !s.enabled || s.available === false);
-      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Set up backup\u2026" : problem ? "Try again" : "Back up now");
+      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Set up sync\u2026" : problem ? "Try again" : "Sync now");
     }
     async function openLibrary() {
       await flushSave();
@@ -21485,22 +21486,21 @@
         openSettingsAt("set-history");
         return;
       }
-      await backUpNow();
+      await syncNow();
     }
-    async function backUpNow() {
+    async function syncNow() {
       const s = lib.status || await api.git.status();
       if (!s.enabled || !s.remote) {
         await openLibrary();
         return;
       }
       await flushSave();
-      const saved = await api.git.commit();
-      const pushed = saved.ok && saved.nothingToCommit ? await api.git.push() : saved;
+      const synced = await api.git.sync();
       const after = await api.git.status();
       renderStatus(after);
       if (el.libraryDialog.open) await loadVersions();
-      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (pushed.ok ? null : gitErrorText(pushed.error || pushed.skipped || "push failed"));
-      if (!problem) toast("Backed up to " + remoteName(after.remote));
+      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (synced.ok ? null : gitErrorText(synced.error || synced.skipped || "sync failed"));
+      if (!problem) toast("Synced with " + remoteName(after.remote));
       else toast(problem.text, { label: "Details", run: () => {
         openLibrary();
       } });
@@ -21544,7 +21544,15 @@
         if (lib.status) renderStatus(lib.status);
       }, 6e4);
     }
-    return { bind, openLibrary, renderStatus, backUpNow, saveVersionNow, statusNow: () => lib.status };
+    function noticePulled(pulled) {
+      if (el.libraryDialog.open) loadVersions();
+      if (!pulled.copies.length) return;
+      const n = pulled.copies.length;
+      toast(n === 1 ? "A note was changed on both computers. The other version is saved beside it as a conflict copy." : n + " notes were changed on both computers. The other versions are saved beside them as conflict copies.", { label: "Show", run: () => {
+        openLibrary();
+      } });
+    }
+    return { bind, openLibrary, renderStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
   }
 
   // src/renderer/speech.ts
@@ -27263,8 +27271,8 @@
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
         cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
-        cmd("library", "Go to", "History and backup", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
-        cmd("back-up", "Go to", "Back up now", "cloud-upload", "", () => library.backUpNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push github sync"),
+        cmd("library", "Go to", "History and sync", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
+        cmd("sync", "Go to", "Sync now", "refresh-cw", "", () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push pull github backup another computer"),
         cmd("save-version", "Go to", "Save a version now", "save", "", () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, "git commit history snapshot"),
         cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "folder files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
@@ -28026,8 +28034,9 @@
         library.saveVersionNow();
       });
       el.gitPushBtn.addEventListener("click", () => {
-        library.backUpNow();
+        library.syncNow();
       });
+      fromMain("gitPulled", api.on.gitPulled, (pulled) => library.noticePulled(pulled));
       fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
       el.exportBtn.addEventListener("click", exportCurrent);
       el.duplicateBtn.addEventListener("click", duplicateCurrent);

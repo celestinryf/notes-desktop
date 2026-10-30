@@ -2655,8 +2655,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
       cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
       cmd('filter-list', 'Go to', 'Filter the note list', 'search', 'Ctrl+Shift+F', searchList, true, 'search notes title text tags'),
-      cmd('library', 'Go to', 'History and backup', 'history', 'Ctrl+Shift+B', () => library.openLibrary(), !GUEST, 'versions git backup github restore earlier deleted bring back'),
-      cmd('back-up', 'Go to', 'Back up now', 'cloud-upload', '', () => library.backUpNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, 'git push github sync'),
+      cmd('library', 'Go to', 'History and sync', 'history', 'Ctrl+Shift+B', () => library.openLibrary(), !GUEST, 'versions git backup github restore earlier deleted bring back'),
+      cmd('sync', 'Go to', 'Sync now', 'refresh-cw', '', () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, 'git push pull github backup another computer'),
       cmd('save-version', 'Go to', 'Save a version now', 'save', '', () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, 'git commit history snapshot'),
       cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'folder files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
@@ -3053,7 +3053,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.gitRemoteInput.addEventListener('change', commitRemote);
     el.gitRemoteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemote(); } });
     el.gitCommitBtn.addEventListener('click', () => { library.saveVersionNow(); });
-    el.gitPushBtn.addEventListener('click', () => { library.backUpNow(); });
+    el.gitPushBtn.addEventListener('click', () => { library.syncNow(); });
+    fromMain('gitPulled', api.on.gitPulled, (pulled) => library.noticePulled(pulled));
     fromMain('gitStatus', api.on.gitStatus, (s) => renderGitStatus(s));
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);

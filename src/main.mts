@@ -37,6 +37,8 @@ const START_HIDDEN = process.argv.includes('--hidden') || process.env.NOTES_APP_
 const SHOW_INACTIVE = process.env.NOTES_APP_INACTIVE === '1';
 const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const USE_RECYCLE_BIN = process.env.NOTES_APP_NO_RECYCLE_BIN !== '1';
+const SYNC_EVERY_MS = 5 * 60 * 1000;
+const SYNC_ON_SHOW_MS = 60 * 1000;
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
 const TITLE_BAR_H = 40;
@@ -115,6 +117,16 @@ function main() {
     workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
     linkedFiles: () => store.textFilesOutsideHome(),
     keptOut: () => store.keptOutOfHistory(),
+    discardFile: async (absPath) => {
+      if (USE_RECYCLE_BIN && process.platform === 'win32') { try { await shell.trashItem(absPath); return; } catch (_) {  } }
+      fs.rmSync(absPath, { force: true });
+    },
+    onPulled: async (pulled) => {
+      const home = store.homeVault();
+      if (home) await store.scanVault(home.id);
+      fanReloaded({ reason: 'vault' });
+      if (win && !win.isDestroyed()) win.webContents.send('git:pulled', pulled);
+    },
   });
   store.onContentChange = () => git.noteChanged();
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
@@ -315,6 +327,7 @@ function main() {
       app.focus({ steal: true });
     }
     forgetEmptiedBin();
+    git.syncIfDue(SYNC_ON_SHOW_MS);
     w.webContents.send('app:shown');
     writeRuntime();
     return w;
@@ -1111,6 +1124,7 @@ function main() {
   handle('git:commit', () => git.commit('manual commit'));
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
+  handle('git:sync', () => git.sync());
 
   const CHANGE_KINDS: Record<string, VersionChangeKind> = { A: 'added', M: 'changed', R: 'renamed', D: 'removed' };
   const bringsBack = (rel: string) => TEXT_EXT.has(extOf(rel)) || extOf(rel) === 'mdlock';
@@ -1585,6 +1599,7 @@ function main() {
     step('recycle bin', forgetEmptiedBin);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
+    setInterval(() => git.syncIfDue(SYNC_EVERY_MS), SYNC_ON_SHOW_MS);
     if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());
     step('stickies', () => stickies.restoreAll());
     step('reminders', () => reminders.start());

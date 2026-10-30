@@ -242,6 +242,7 @@ const SCENES = {
   search: { about: 'Searching the list', run: async (page) => { await page.keyboard.press('Control+Shift+f'); await page.keyboard.type('bench'); await sleep(500); } },
   trash: { about: 'The trash view, empty', run: async (page) => { await page.locator('[data-view="trash"]').first().click(); await sleep(400); } },
   library: { about: 'History and backup: versions listed by the notes they changed, history on, no backup set up', settings: { gitEnabled: true }, env: { NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(async () => { await sleep(1500); }, openNote('Q4 planning'), typeAtEnd('Next step: a dry run.', true), async () => { await sleep(1500); }, openNote('Groceries'), typeAtEnd('Lemons', true), async () => { await sleep(1500); }, key('Control+Shift+b'), async () => { await sleep(1200); }) },
+  'library-synced': { about: 'History and sync with a repository set and in sync: Synced just now, Sync now', settings: { gitEnabled: true }, syncRemote: true, env: { NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(openNote('Groceries'), typeAtEnd('Lemons', true), async () => { await sleep(3000); }, key('Control+Shift+b'), async () => { await sleep(1200); }) },
   'library-off': { about: 'History and backup with history off: the way to turn it on', run: steps(key('Control+Shift+b'), async () => { await sleep(600); }) },
   'library-error': { about: 'History and backup when the backup fails: the plain reason, details, and the status row in the sidebar', settings: { gitEnabled: true, gitRemote: 'https://github.invalid/you/notes-backup.git' }, env: { NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(openNote('Groceries'), typeAtEnd('Lemons', true), async () => { await sleep(4000); }, key('Control+Shift+b'), async () => { await sleep(1200); }) },
   'trashed-toast': { about: 'A note moved to the trash from the More menu: the toast with Undo (the shots cannot reach the Recycle Bin, so this is the fallback wording)', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#deleteBtn'); await sleep(500); }) },
@@ -314,6 +315,7 @@ async function shoot(theme, name, opts) {
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
   if (SCENES[name].office) data.notes.push(sampleOfficeNote(dataDir, SCENES[name].office));
   if (SCENES[name].vault) data.vaults.push(sampleVault(dataDir));
+  if (SCENES[name].syncRemote) { const bare = path.join(dataDir, 'remote.git'); execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]); data.settings.gitRemote = bare; }
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),
