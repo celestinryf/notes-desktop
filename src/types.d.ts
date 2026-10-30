@@ -145,6 +145,12 @@ interface VersionChange { kind: VersionChangeKind; title: string; path: string; 
 interface LibraryVersion { hash: string; at: number; changes: VersionChange[] }
 interface LibraryVersions { versions: LibraryVersion[]; more: boolean }
 type BringBackResult = { ok: true; noteId: string | null } | { ok: false; error: string };
+interface GithubStatus { signedIn: boolean; login: string | null; canKeep: boolean }
+type GithubCodeResult = { ok: true; userCode: string; verificationUri: string; expiresAt: number } | { ok: false; error: string };
+type GithubSignInResult = { ok: true; login: string } | { ok: false; error: string };
+interface GithubRepo { name: string; fullName: string; cloneUrl: string; fromNotes: boolean }
+type GithubRepoResult = { ok: true; repo: GithubRepo } | { ok: false; error: string };
+type GithubReposResult = { ok: true; repos: GithubRepo[] } | { ok: false; error: string };
 type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
 type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
 type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };
@@ -221,6 +227,13 @@ interface IpcContract {
   'git:history': (limit?: number) => GitCommit[];
   'git:versions': (limit?: number) => LibraryVersions;
   'git:bringBack': (hash: string, path: string) => BringBackResult;
+  'github:status': () => GithubStatus;
+  'github:signIn': () => GithubCodeResult;
+  'github:waitSignIn': () => GithubSignInResult;
+  'github:cancelSignIn': () => void;
+  'github:signOut': () => void;
+  'github:repos': () => GithubReposResult;
+  'github:createRepo': (name: string) => GithubRepoResult;
   'app:info': () => AppInfo;
   'app:hide': () => void;
   'app:titleBar': (colors: { color: string; symbol: string }) => boolean;
@@ -316,6 +329,7 @@ interface MainEvents {
   'theme:system': [theme: Theme];
   'git:status': [status: GitState];
   'git:pulled': [pulled: { changed: string[]; copies: string[] }];
+  'github:status': [status: GithubStatus];
   'app:flush': [];
   'notes:reloaded': [payload: { reason: string; id?: string }];
   'vault:status': [payload: { id: string; status: VaultStatus }];
@@ -375,6 +389,7 @@ interface NotesApi {
   };
   settings: { get: Invoker<'settings:get'>; set: Invoker<'settings:set'> };
   git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; sync: Invoker<'git:sync'>; history: Invoker<'git:history'>; versions: Invoker<'git:versions'>; bringBack: Invoker<'git:bringBack'> };
+  github: { status: Invoker<'github:status'>; signIn: Invoker<'github:signIn'>; waitSignIn: Invoker<'github:waitSignIn'>; cancelSignIn: Invoker<'github:cancelSignIn'>; signOut: Invoker<'github:signOut'>; repos: Invoker<'github:repos'>; createRepo: Invoker<'github:createRepo'> };
   app: {
     info: Invoker<'app:info'>; hide: Invoker<'app:hide'>; print: Invoker<'app:print'>; copy: Invoker<'app:copy'>; emailNote: Invoker<'app:emailNote'>;
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
@@ -384,7 +399,7 @@ interface NotesApi {
   };
   on: {
     shown: Listener<'app:shown'>; newNote: Listener<'app:new-note'>; settingsChanged: Listener<'settings:changed'>; systemTheme: Listener<'theme:system'>;
-    gitStatus: Listener<'git:status'>; gitPulled: Listener<'git:pulled'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
+    gitStatus: Listener<'git:status'>; gitPulled: Listener<'git:pulled'>; githubStatus: Listener<'github:status'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
     botEvent: Listener<'bot:event'>; noteChanged: Listener<'notes:changed'>; stickyChanged: Listener<'sticky:changed'>; stickiesChanged: Listener<'stickies:changed'>;
     openNote: Listener<'app:open-note'>; reminderFired: Listener<'reminder:fired'>; notice: Listener<'app:notice'>; liveStatus: Listener<'live:status'>;
     relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>;

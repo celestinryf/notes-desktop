@@ -430,11 +430,13 @@
               <h3>History</h3>
               <div class="field">
                 <label class="field-check"><input id="gitEnabledInput" type="checkbox" /><span>Keep every change in a git history in the data folder</span></label>
-                <input id="gitRemoteInput" class="input" type="text" placeholder="Sync with a GitHub repository, e.g. git@github.com:you/notes.git" aria-label="Sync repository" autocomplete="off" spellcheck="false" />
+                <input id="gitRemoteInput" class="input" type="text" placeholder="Sync with a repository, e.g. https://github.com/you/notes.git" aria-label="Sync repository" autocomplete="off" spellcheck="false" />
                 <span class="field-help" id="gitStatus"></span>
+                <span class="field-help" id="githubAccount"></span>
                 <div class="dialog-actions">
                   <button type="button" class="btn btn-small" id="gitCommitBtn">Save a version now</button>
                   <button type="button" class="btn btn-small" id="gitPushBtn">Sync now</button>
+                  <button type="button" class="btn btn-small" id="githubSettingsBtn"><span class="lbl">Sign in with GitHub…</span></button>
                 </div>
               </div>
             </section>
@@ -557,6 +559,30 @@
           <span class="spacer"></span>
           <button type="button" class="btn btn-small hidden" id="libraryMoreBtn">Show older versions</button>
           <button type="button" class="btn btn-small" id="libraryCloseBtn">Close</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="githubDialog" class="modal dialog-small" aria-labelledby="githubTitle">
+      <form method="dialog" class="dialog-form" id="githubForm">
+        <h2 class="dialog-title" id="githubTitle">Sync with GitHub</h2>
+        <p class="field-hint" id="githubHint" aria-live="polite"></p>
+        <p class="github-code hidden" id="githubCode"></p>
+        <p class="github-wait hidden" id="githubWait" aria-live="polite"></p>
+        <label class="field hidden" id="githubRepoField">
+          <span class="field-label">Repository</span>
+          <select id="githubRepoSelect" class="select" aria-label="Repository"></select>
+        </label>
+        <label class="field hidden" id="githubNameField">
+          <span class="field-label">Name</span>
+          <input id="githubNameInput" class="input" type="text" value="notes" autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="lock-screen-error" id="githubError" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-small hidden" id="githubCopyBtn">Copy code</button>
+          <button type="button" class="btn btn-small hidden" id="githubSignOutBtn">Sign out</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="githubCloseBtn">Close</button>
+          <button type="submit" class="btn btn-primary btn-small" id="githubPrimaryBtn"><span class="lbl">Sign in with GitHub</span></button>
         </div>
       </form>
     </dialog>

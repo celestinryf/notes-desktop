@@ -53,11 +53,12 @@ interface LibraryDialogDeps {
   flushSave: () => Promise<boolean>;
   updateSettings: (patch: SettingsPatch) => Promise<unknown>;
   openSettingsAt: (sectionId: string) => void;
+  openGithub: () => Promise<unknown>;
   openNoteHistory: (id: string, pick: { hash: string, at: number }) => Promise<unknown>;
   openNote: (id: string) => Promise<unknown>;
 }
 
-export function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openNoteHistory, openNote }: LibraryDialogDeps) {
+export function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openGithub, openNoteHistory, openNote }: LibraryDialogDeps) {
   const lib: { status: GitState | null, versions: LibraryVersion[], index: number, limit: number, more: boolean, loads: number } = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
 
   function renderStatus(s: GitState) {
@@ -76,7 +77,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     el.libraryDetails.classList.toggle('hidden', !problem);
     el.libraryDetailsText.textContent = problem ? problem.details : '';
     el.librarySaveBtn.classList.toggle('hidden', !s.enabled || s.available === false);
-    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote ? 'Set up sync…' : problem ? 'Try again' : 'Sync now');
+    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote ? 'Sync with GitHub…' : problem ? 'Try again' : 'Sync now');
   }
 
   async function openLibrary() {
@@ -235,7 +236,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     if (!s) return;
     if (!s.enabled) { await updateSettings({ gitEnabled: true }); renderStatus(await api.git.status()); await loadVersions(); return; }
     if (s.available === false) { api.app.openExternal(GIT_DOWNLOAD); return; }
-    if (!s.remote) { el.libraryDialog.close(); openSettingsAt('set-history'); return; }
+    if (!s.remote) { el.libraryDialog.close(); await openGithub(); return; }
     await syncNow();
   }
 
