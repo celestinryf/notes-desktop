@@ -140,6 +140,11 @@ interface GitState {
 }
 type GitResult = { ok: true; nothingToCommit?: boolean } | { ok: false; error?: string | null; skipped?: string };
 interface GitCommit { hash: string; at: number; subject: string }
+type VersionChangeKind = 'added' | 'changed' | 'renamed' | 'removed';
+interface VersionChange { kind: VersionChangeKind; title: string; path: string; noteId: string | null; canBringBack: boolean }
+interface LibraryVersion { hash: string; at: number; changes: VersionChange[] }
+interface LibraryVersions { versions: LibraryVersion[]; more: boolean }
+type BringBackResult = { ok: true; noteId: string | null } | { ok: false; error: string };
 type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
 type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
 type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };
@@ -213,6 +218,8 @@ interface IpcContract {
   'git:commit': () => GitResult;
   'git:push': () => GitResult;
   'git:history': (limit?: number) => GitCommit[];
+  'git:versions': (limit?: number) => LibraryVersions;
+  'git:bringBack': (hash: string, path: string) => BringBackResult;
   'app:info': () => AppInfo;
   'app:hide': () => void;
   'app:titleBar': (colors: { color: string; symbol: string }) => boolean;
@@ -365,7 +372,7 @@ interface NotesApi {
     setBook: Invoker<'folders:setBook'>; reorderPages: Invoker<'folders:reorderPages'>; move: Invoker<'folders:move'>; delete: Invoker<'folders:delete'>;
   };
   settings: { get: Invoker<'settings:get'>; set: Invoker<'settings:set'> };
-  git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; history: Invoker<'git:history'> };
+  git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; history: Invoker<'git:history'>; versions: Invoker<'git:versions'>; bringBack: Invoker<'git:bringBack'> };
   app: {
     info: Invoker<'app:info'>; hide: Invoker<'app:hide'>; print: Invoker<'app:print'>; copy: Invoker<'app:copy'>; emailNote: Invoker<'app:emailNote'>;
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;

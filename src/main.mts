@@ -4,7 +4,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, d
 import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
-import { GitSync } from './gitSync.mts';
+import { GitSync, LINKED_DIR } from './gitSync.mts';
 import { VaultPictures } from './vault-pictures.mts';
 import type { FileCommit } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
@@ -21,7 +21,7 @@ import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
 import { recycle } from './recycle-bin.mts';
-import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey } from './files.mts';
+import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey, TEXT_EXT, extOf } from './files.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -1110,6 +1110,49 @@ function main() {
   handle('git:commit', () => git.commit('manual commit'));
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
+
+  const CHANGE_KINDS: Record<string, VersionChangeKind> = { A: 'added', M: 'changed', R: 'renamed', D: 'removed' };
+  const bringsBack = (rel: string) => TEXT_EXT.has(extOf(rel)) || extOf(rel) === 'mdlock';
+  const noteTitle = (note: Note | null, name: string) => (note && H.deriveTitle(store.publicNote(note))) || H.stemOf(name);
+
+  function versionChange(file: { status: string, path: string }): VersionChange | null {
+    const parts = file.path.split('/');
+    const name = parts[parts.length - 1];
+    const kind = CHANGE_KINDS[file.status] || 'changed';
+    if (parts[0] === LINKED_DIR) {
+      const note = store.get(parts[2] || '');
+      return { kind, title: noteTitle(note, name), path: file.path, noteId: note && !note.trashedAt ? note.id : null, canBringBack: false };
+    }
+    if (parts[0].startsWith('.') || file.path === 'notes.json') return null;
+    const home = store.homeVault();
+    const full = home ? path.join(home.path, ...parts) : null;
+    const note = full ? store.findByPath(full) : null;
+    return { kind, title: noteTitle(note, name), path: file.path, noteId: note && !note.trashedAt ? note.id : null, canBringBack: kind === 'removed' && !!full && !note && bringsBack(name) && !fs.existsSync(full) };
+  }
+
+  handle('git:versions', async (_e, limit) => {
+    const wanted = Math.min(1000, Math.max(1, typeof limit === 'number' ? Math.floor(limit) : 100));
+    const raw = await git.versions(wanted);
+    const versions = raw.map((v) => ({ hash: v.hash, at: v.at, changes: v.files.map(versionChange).filter((c): c is VersionChange => !!c) })).filter((v) => v.changes.length);
+    return { versions, more: raw.length === wanted };
+  });
+
+  handle('git:bringBack', async (_e, hash, rel): Promise<BringBackResult> => {
+    const home = store.homeVault();
+    const parts = typeof rel === 'string' ? rel.split('/') : [];
+    const name = parts[parts.length - 1] || '';
+    if (!home || typeof hash !== 'string' || !/^[0-9a-f]{40}$/.test(hash) || !parts.length || parts.some((p) => !p || p === '.' || p === '..') || parts[0].startsWith('.') || !bringsBack(name)) return { ok: false, error: 'That note cannot be brought back.' };
+    const dir = path.join(home.path, ...parts.slice(0, -1));
+    if (!convert.isInside(dir, home.path)) return { ok: false, error: 'That note cannot be brought back.' };
+    const text = await git.textBefore(hash, parts.join('/'));
+    if (text === null) return { ok: false, error: 'That version of the note could not be read.' };
+    fs.mkdirSync(dir, { recursive: true });
+    const written = convert.writeNew(dir, H.stemOf(name), extOf(name), text);
+    await store.scanVault(home.id);
+    fanReloaded({ reason: 'vault' });
+    const note = store.findByPath(written);
+    return { ok: true, noteId: note ? note.id : null };
+  });
 
   handle('app:dictate', async () => {
     if (process.platform !== 'win32') return { ok: false, error: 'Dictation is only wired up for Windows here.' };

@@ -43,6 +43,9 @@
       <button type="button" class="nav-heading nav-fold" id="tagsFold" aria-expanded="true" aria-controls="tagList" data-icon="chevron-down"><span>Tags</span></button>
       <nav class="nav tags" id="tagList" aria-label="Tags"></nav>
 
+      <div class="sidebar-status">
+        <button class="foot-btn status-btn" id="historyStatusBtn" data-icon="history" title="History and backup (Ctrl+Shift+B)"><span class="lbl">History</span></button>
+      </div>
       <div class="sidebar-foot">
         <button class="foot-btn" id="openFileBtn" data-icon="folder-open" title="Open files as notes (Ctrl+O). Markdown, text, LaTeX, PDF, Word, and more."><span>Open file…</span></button>
         <span class="spacer"></span>
@@ -427,11 +430,11 @@
               <h3>History</h3>
               <div class="field">
                 <label class="field-check"><input id="gitEnabledInput" type="checkbox" /><span>Keep every change in a git history in the data folder</span></label>
-                <input id="gitRemoteInput" class="input" type="text" placeholder="Optional remote to push to, e.g. git@github.com:you/notes-backup.git" aria-label="Git remote" autocomplete="off" spellcheck="false" />
+                <input id="gitRemoteInput" class="input" type="text" placeholder="Back up to a GitHub repository, e.g. git@github.com:you/notes-backup.git" aria-label="Backup repository" autocomplete="off" spellcheck="false" />
                 <span class="field-help" id="gitStatus"></span>
                 <div class="dialog-actions">
-                  <button type="button" class="btn btn-small" id="gitCommitBtn">Commit now</button>
-                  <button type="button" class="btn btn-small" id="gitPushBtn">Push now</button>
+                  <button type="button" class="btn btn-small" id="gitCommitBtn">Save a version now</button>
+                  <button type="button" class="btn btn-small" id="gitPushBtn">Back up now</button>
                 </div>
               </div>
             </section>
@@ -530,6 +533,30 @@
           <span class="spacer"></span>
           <button type="button" class="btn btn-small" id="historyCloseBtn">Close</button>
           <button type="button" class="btn btn-primary btn-small" id="historyRestoreBtn" disabled>Restore this version</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="libraryDialog" class="modal dialog-wide" aria-labelledby="libraryTitle">
+      <form method="dialog" class="dialog-form" id="libraryForm">
+        <h2 class="dialog-title" id="libraryTitle">History and backup</h2>
+        <div class="library-status">
+          <p class="library-status-text" id="libraryStatusText"></p>
+          <details class="library-details hidden" id="libraryDetails"><summary>Show details</summary><pre id="libraryDetailsText"></pre></details>
+          <div class="library-actions">
+            <button type="button" class="btn btn-primary btn-small" id="libraryPrimaryBtn"><span class="lbl">Back up now</span></button>
+            <button type="button" class="btn btn-small" id="librarySaveBtn">Save a version now</button>
+          </div>
+        </div>
+        <p class="library-empty hidden" id="libraryEmpty"></p>
+        <div class="history-layout" id="libraryLayout">
+          <ul class="history-list" id="libraryList" role="listbox" aria-label="Versions" tabindex="0"></ul>
+          <div class="library-changes" id="libraryChanges" aria-live="polite"></div>
+        </div>
+        <div class="dialog-actions">
+          <span class="field-hint" id="libraryHint"></span>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small hidden" id="libraryMoreBtn">Show older versions</button>
+          <button type="button" class="btn btn-small" id="libraryCloseBtn">Close</button>
         </div>
       </form>
     </dialog>

@@ -31,6 +31,7 @@ import { createVaultsPanel } from './vaults-panel.ts';
 import { createLocking } from './locking.ts';
 import { createAttachments } from './attachments.ts';
 import { createHistoryDialog } from './history-dialog.ts';
+import { createLibraryDialog, statusSentence } from './library-dialog.ts';
 import { createSpeech } from './speech.ts';
 import { createFindBar, canFindInNote } from './find-bar.ts';
 import { createPdfNote } from './pdf-note.ts';
@@ -1836,6 +1837,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
   const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+  const library = createLibraryDialog({
+    api, flushSave, updateSettings,
+    openSettingsAt: (sectionId) => openSettings(sectionId),
+    openNoteHistory: async (id) => { await selectNote(id); openHistory(); },
+    openNote: (id) => selectNote(id),
+  });
 
   async function refreshCurrentMeta() {
     if (!state.currentId) return;
@@ -2325,7 +2332,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
 
-  function openSettings() {
+  function openSettings(sectionId?: string) {
     const s = settingsNow();
     draft = {};
     el.hotkeyInput.value = H.displayAccelerator(s.hotkey).replace(/ /g, '');
@@ -2354,6 +2361,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.ttsRateValue.textContent = Number(s.ttsRate).toFixed(1) + '×';
     refreshGitStatus();
     el.settingsScroll.scrollTop = 0;
+    const section = sectionId ? el.settingsScroll.querySelector('#' + sectionId) : null;
+    if (section) section.scrollIntoView({ block: 'start' });
     markSettingsSection();
     el.settingsSearch.focus();
   }
@@ -2583,13 +2592,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   function renderGitStatus(s: GitState | null) {
     if (!s) return;
-    let text;
-    if (!s.enabled) text = 'Off. Your notes file is still backed up to the backups folder.';
-    else if (s.available === false) text = 'git was not found on this computer, so no history is being kept.';
-    else if (!s.commits) text = s.pending ? 'First commit coming up…' : 'Repository ready; no commits yet.';
-    else text = s.commits + (s.commits === 1 ? ' commit' : ' commits') + ', last ' + H.relativeTime(s.lastCommitAt ?? 0) + (s.pending ? ', changes waiting' : '') + (s.remote ? (s.lastPushAt ? ', pushed ' + H.relativeTime(s.lastPushAt) : ', not pushed yet') : '');
-    if (s.lastError) text += '  Error: ' + s.lastError;
-    el.gitStatus.textContent = text;
+    library.renderStatus(s);
+    const problem = H.gitErrorText(s.lastError);
+    el.gitStatus.textContent = statusSentence(s) + (problem ? ' ' + problem.text : '');
     el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? '1' : '0';
     el.gitCommitBtn.dataset.off = !s.enabled ? '1' : '0';
     syncSettingsDirty();
@@ -2650,6 +2655,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
       cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
       cmd('filter-list', 'Go to', 'Filter the note list', 'search', 'Ctrl+Shift+F', searchList, true, 'search notes title text tags'),
+      cmd('library', 'Go to', 'History and backup', 'history', 'Ctrl+Shift+B', () => library.openLibrary(), !GUEST, 'versions git backup github restore earlier deleted bring back'),
+      cmd('back-up', 'Go to', 'Back up now', 'cloud-upload', '', () => library.backUpNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, 'git push github sync'),
+      cmd('save-version', 'Go to', 'Save a version now', 'save', '', () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, 'git commit history snapshot'),
       cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'folder files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
@@ -2673,7 +2681,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       ...(['all', 'pinned', 'reminders', 'trash'] as const).map((v) => cmd('go-' + v, 'Go to', { all: 'All notes', pinned: 'Pinned', reminders: 'Reminders', trash: 'Trash' }[v], { all: 'notebook-text', pinned: 'star', reminders: 'bell', trash: 'trash-2' }[v], '', () => setView(v), !GUEST)),
       ...flattenTree(state.tree).map((f) => cmd('folder-' + f.id, 'Go to', (f.book ? 'Book: ' : 'Folder: ') + f.name, f.book ? 'book-open' : 'folder', '', () => setView('folder', f.id), !GUEST)),
       ...[...el.tagList.querySelectorAll<HTMLButtonElement>('.nav-item')].map((b) => cmd('tag-' + b.firstChild?.textContent, 'Go to', 'Tag: #' + b.firstChild?.textContent, 'hash', '', () => b.click(), !GUEST)),
-      cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', openSettings), true, 'preferences options hotkey font search'),
+      cmd('settings', 'App', 'Settings', 'settings', 'Ctrl+,', side('settings', () => openSettings()), true, 'preferences options hotkey font search'),
       ...Object.keys(NotesThemes.SCHEMES).map((id) => cmd('scheme-' + id, 'View', 'Colour scheme: ' + NotesThemes.SCHEMES[id].name, 'palette', '', () => updateSettings({ colorScheme: id }), !GUEST && (settingsNow().colorScheme) !== id, 'theme colors appearance')),
       cmd('scheme-custom', 'View', 'Colour scheme: custom colours…', 'palette', '', side('settings', () => { openSettings(); document.getElementById('set-appearance')?.scrollIntoView({ block: 'start' }); }), true, 'theme colors appearance pick'),
       cmd('import', 'App', 'Import Markdown files…', 'download', '', () => el.importBtn.click(), !GUEST),
@@ -2710,7 +2718,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function onKeydown(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return;
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
+    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.signDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfOpen() || docxOpen())) {
       e.preventDefault();
       if (pdfOpen()) flushPdf({ commit: true, explicit: true });
@@ -2791,6 +2799,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); attachFiles(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); toggleRecording(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); openHistory(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'b') { e.preventDefault(); if (!GUEST) library.openLibrary(); return; }
     if (ctrl && !e.shiftKey && (e.key === 'PageDown' || e.key === 'PageUp')) { if (stepPage(e.key === 'PageDown' ? 1 : -1)) e.preventDefault(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); openRemindDialog(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
@@ -2975,7 +2984,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     });
     el.navItems.forEach((b) => b.addEventListener('click', () => { const view = b.dataset.view; if (isListView(view)) setView(view); }));
     el.themeBtn.addEventListener('click', () => updateSettings({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' }));
-    el.settingsBtn.addEventListener('click', openSettings);
+    el.settingsBtn.addEventListener('click', () => openSettings());
     el.toggleSidebarBtn.addEventListener('click', toggleSidebar);
     el.toggleListBtn.addEventListener('click', toggleList);
     el.hideListBtn.addEventListener('click', toggleList);
@@ -3043,8 +3052,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const commitRemote = () => setDraft({ gitRemote: el.gitRemoteInput.value.trim() });
     el.gitRemoteInput.addEventListener('change', commitRemote);
     el.gitRemoteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemote(); } });
-    el.gitCommitBtn.addEventListener('click', async () => { await flushSave(); const r = await api.git.commit(); toast(r.ok ? (r.nothingToCommit ? 'Nothing new to commit' : 'Committed') : 'Commit failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
-    el.gitPushBtn.addEventListener('click', async () => { const r = await api.git.push(); toast(r.ok ? 'Pushed' : 'Push failed: ' + (r.error || r.skipped)); refreshGitStatus(); });
+    el.gitCommitBtn.addEventListener('click', () => { library.saveVersionNow(); });
+    el.gitPushBtn.addEventListener('click', () => { library.backUpNow(); });
     fromMain('gitStatus', api.on.gitStatus, (s) => renderGitStatus(s));
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
@@ -3181,10 +3190,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     applyInfo(info);
     restoreTabs(settings);
     bind();
+    library.bind();
     bindTabs();
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
     await refresh();
     if (GUEST) { toPeer({ type: 'hello' }); return; }
+    refreshGitStatus();
     if (!state.currentId && state.noteIds.length) await selectNote(state.noteIds[0]);
     if (panesOf(settings).split) openSplit(true);
     if (state.current) focusBody();

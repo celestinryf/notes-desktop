@@ -118,7 +118,10 @@
           "italic": '<line x1="19" x2="10" y1="4" y2="4" /><line x1="14" x2="5" y1="20" y2="20" /><line x1="15" x2="9" y1="4" y2="20" />',
           "underline": '<path d="M6 4v6a6 6 0 0 0 12 0V4" /><line x1="4" x2="20" y1="20" y2="20" />',
           "square-stack": '<path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" /><path d="M10 16c-1.1 0-2-.9-2-2v-4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" /><rect width="8" height="8" x="14" y="14" rx="2" />',
-          "palette": '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />'
+          "palette": '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />',
+          "cloud-check": '<path d="m17 15-5.5 5.5L9 18" /><path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327" />',
+          "cloud-upload": '<path d="M12 13v8" /><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" /><path d="m8 17 4-4 4 4" />',
+          "cloud-alert": '<path d="M12 12v4" /><path d="M12 20h.01" /><path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642" />'
         };
         function svg(name, size) {
           const body = PATHS[name];
@@ -14719,6 +14722,7 @@
     formatWhen: () => formatWhen,
     frontMatterText: () => frontMatterText,
     fuzzyScore: () => fuzzyScore,
+    gitErrorText: () => gitErrorText,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
     isLinkedFile: () => isLinkedFile,
@@ -15327,6 +15331,18 @@
   var isObjectLike = (v) => !!v && typeof v === "object";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  var GIT_ERRORS = [
+    [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
+    [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, "GitHub did not accept the sign-in for this backup."],
+    [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again with the next change."],
+    [/\[rejected\]|fetch first|non-fast-forward/i, "The backup on GitHub has versions this PC does not have, because another computer backed up to it. Syncing two computers comes in a later update."],
+    [/^Files outside the notes folder were not saved to history/, "Some files outside the notes folder were not saved to history."]
+  ];
+  function gitErrorText(raw) {
+    if (!raw) return null;
+    const known = GIT_ERRORS.find(([re]) => re.test(raw));
+    return { text: known ? known[1] : raw.startsWith("push failed") ? "The backup failed." : "History could not save a version.", details: raw };
+  }
   var isRecycleBinPath = (p) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
   var isLinkedFile = (n) => !n.vaultId && !!n.filePath;
   var tenths = (n) => Math.round(n * 10) / 10;
@@ -16184,6 +16200,20 @@
     botScope: pageElement("#botScope", HTMLSpanElement),
     botAllowEdits: pageElement("#botAllowEdits", HTMLInputElement),
     botTerminalBtn: pageElement("#botTerminalBtn", HTMLButtonElement),
+    historyStatusBtn: pageElement("#historyStatusBtn", HTMLButtonElement),
+    libraryDialog: pageElement("#libraryDialog", HTMLDialogElement),
+    libraryStatusText: pageElement("#libraryStatusText", HTMLParagraphElement),
+    libraryDetails: pageElement("#libraryDetails", HTMLDetailsElement),
+    libraryDetailsText: pageElement("#libraryDetailsText", HTMLPreElement),
+    libraryPrimaryBtn: pageElement("#libraryPrimaryBtn", HTMLButtonElement),
+    librarySaveBtn: pageElement("#librarySaveBtn", HTMLButtonElement),
+    libraryList: pageElement("#libraryList", HTMLUListElement),
+    libraryChanges: pageElement("#libraryChanges", HTMLDivElement),
+    libraryEmpty: pageElement("#libraryEmpty", HTMLParagraphElement),
+    libraryLayout: pageElement("#libraryLayout", HTMLDivElement),
+    libraryHint: pageElement("#libraryHint", HTMLSpanElement),
+    libraryMoreBtn: pageElement("#libraryMoreBtn", HTMLButtonElement),
+    libraryCloseBtn: pageElement("#libraryCloseBtn", HTMLButtonElement),
     botCloseBtn: pageElement("#botCloseBtn", HTMLButtonElement),
     botPrompt: pageElement("#botPrompt", HTMLTextAreaElement),
     botRunBtn: pageElement("#botRunBtn", HTMLButtonElement),
@@ -21193,6 +21223,290 @@
     return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
   }
 
+  // src/renderer/library-dialog.ts
+  var PAGE = 100;
+  var GIT_DOWNLOAD = "https://git-scm.com/download/win";
+  var KIND_WORDS = { added: "added", changed: "changed", renamed: "renamed", removed: "removed" };
+  function historyLook(s, now) {
+    if (!s.enabled) return { icon: "history", label: "History is off", error: false };
+    if (s.available === false) return { icon: "circle-alert", label: "History needs git", error: true };
+    if (s.lastError) return { icon: "cloud-alert", label: s.lastError.startsWith("push failed") ? "Backup failed" : "History needs attention", error: true };
+    if (s.pending) return { icon: "cloud-upload", label: "Saving a version\u2026", error: false };
+    if (!s.commits) return { icon: "history", label: "No versions yet", error: false };
+    if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Backed up " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not backed up yet", error: false };
+    return { icon: "history", label: "Saved " + relativeTime(s.lastCommitAt ?? 0, now) + ", this PC only", error: false };
+  }
+  function remoteName(url) {
+    const m = /github\.com[:/]([^/]+\/[^/]+?)(\.git)?$/i.exec(url.trim());
+    return m ? "github.com/" + m[1] : url.trim();
+  }
+  function statusSentence(s) {
+    if (!s.enabled) return "History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.";
+    if (s.available === false) return "Notes keeps history with git, and git is not installed on this PC. Install Git for Windows, then restart Notes.";
+    const saved = s.commits ? s.commits + (s.commits === 1 ? " version" : " versions") + " kept, the last " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
+    if (!s.remote) return saved + " They are on this PC only. Back them up to GitHub to keep a copy somewhere else.";
+    return saved + " " + (s.lastPushAt ? "Backed up " + relativeTime(s.lastPushAt) + " to " + remoteName(s.remote) + "." : "Not backed up to " + remoteName(s.remote) + " yet.");
+  }
+  function dayLabel(at, now) {
+    const day = new Date(at);
+    day.setHours(0, 0, 0, 0);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const days = Math.round((today.getTime() - day.getTime()) / 864e5);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return new Date(at).toLocaleDateString(void 0, { weekday: "long", day: "numeric", month: "long", year: day.getFullYear() === today.getFullYear() ? void 0 : "numeric" });
+  }
+  function changedSummary(v) {
+    const titles = Array.from(new Set(v.changes.map((c) => c.title)));
+    const shown2 = titles.slice(0, 2).join(", ");
+    return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
+  }
+  function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openNoteHistory, openNote }) {
+    const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false };
+    function renderStatus(s) {
+      lib.status = s;
+      const look = historyLook(s);
+      setLabel(el.historyStatusBtn, look.label);
+      setIcon(el.historyStatusBtn, look.icon);
+      el.historyStatusBtn.classList.toggle("is-error", look.error);
+      if (el.libraryDialog.open) renderDialogStatus(s);
+    }
+    function renderDialogStatus(s) {
+      const problem = s.enabled && s.available !== false ? gitErrorText(s.lastError) : null;
+      el.libraryStatusText.textContent = problem ? problem.text : statusSentence(s);
+      el.libraryStatusText.classList.toggle("is-error", !!problem || s.available === false);
+      el.libraryDetails.classList.toggle("hidden", !problem);
+      el.libraryDetailsText.textContent = problem ? problem.details : "";
+      el.librarySaveBtn.classList.toggle("hidden", !s.enabled || s.available === false);
+      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Set up backup\u2026" : problem ? "Try again" : "Back up now");
+    }
+    async function openLibrary() {
+      await flushSave();
+      lib.limit = PAGE;
+      el.libraryList.innerHTML = "";
+      el.libraryChanges.innerHTML = "";
+      el.libraryHint.textContent = "Loading versions\u2026";
+      el.libraryMoreBtn.classList.add("hidden");
+      const s = await api.git.status();
+      renderStatus(s);
+      renderDialogStatus(s);
+      if (!el.libraryDialog.open) el.libraryDialog.showModal();
+      await loadVersions();
+      if (lib.versions.length) el.libraryList.focus();
+      else el.libraryPrimaryBtn.focus();
+    }
+    async function loadVersions() {
+      const s = lib.status;
+      if (!s || !s.enabled || s.available === false) {
+        lib.versions = [];
+        renderVersions();
+        return;
+      }
+      const r = await api.git.versions(lib.limit);
+      lib.versions = r.versions;
+      lib.more = r.more;
+      renderVersions();
+    }
+    function renderVersions() {
+      const keep = lib.index >= 0 && lib.versions[lib.index] ? lib.versions[lib.index].hash : null;
+      el.libraryList.innerHTML = "";
+      el.libraryChanges.innerHTML = "";
+      el.libraryMoreBtn.classList.toggle("hidden", !lib.more);
+      const s = lib.status;
+      const empty = !lib.versions.length;
+      el.libraryLayout.classList.toggle("hidden", empty);
+      const working = !!s && s.enabled && s.available !== false;
+      el.libraryEmpty.classList.toggle("hidden", !empty || !working);
+      if (empty) {
+        lib.index = -1;
+        el.libraryHint.textContent = "";
+        el.libraryEmpty.textContent = "No versions yet. Notes saves one a moment after you change a note.";
+        return;
+      }
+      el.libraryHint.textContent = lib.versions.length + (lib.versions.length === 1 ? " version" : " versions") + (lib.more ? " shown" : "");
+      const now = Date.now();
+      let day = "";
+      lib.versions.forEach((v, i) => {
+        const label = dayLabel(v.at, now);
+        if (label !== day) {
+          day = label;
+          const head = document.createElement("li");
+          head.className = "history-day";
+          head.setAttribute("role", "presentation");
+          head.textContent = label;
+          el.libraryList.append(head);
+        }
+        const li = document.createElement("li");
+        li.id = "library-v" + i;
+        li.setAttribute("role", "option");
+        li.dataset.index = String(i);
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const what = document.createElement("span");
+        what.className = "first";
+        what.textContent = changedSummary(v);
+        li.append(when, what);
+        li.addEventListener("click", () => showVersion(i));
+        el.libraryList.append(li);
+      });
+      const again = keep ? lib.versions.findIndex((v) => v.hash === keep) : -1;
+      showVersion(again >= 0 ? again : 0);
+    }
+    function showVersion(i) {
+      const v = lib.versions[i];
+      if (!v) return;
+      lib.index = i;
+      for (const li of el.libraryList.children) {
+        if (!(li instanceof HTMLElement) || li.dataset.index === void 0) continue;
+        const on = Number(li.dataset.index) === i;
+        li.classList.toggle("is-active", on);
+        li.setAttribute("aria-selected", String(on));
+        if (on) li.scrollIntoView({ block: "nearest" });
+      }
+      el.libraryList.setAttribute("aria-activedescendant", "library-v" + i);
+      el.libraryChanges.innerHTML = "";
+      const head = document.createElement("p");
+      head.className = "library-changes-head";
+      const day = dayLabel(v.at, Date.now());
+      head.textContent = "Changed " + (day === "Today" || day === "Yesterday" ? day.toLowerCase() : "on " + day) + " at " + new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const list = document.createElement("ul");
+      list.className = "library-change-list";
+      for (const c of v.changes) {
+        const row = document.createElement("li");
+        const text = document.createElement("span");
+        text.className = "change-text";
+        const title = document.createElement("span");
+        title.className = "change-title";
+        title.textContent = c.title;
+        title.title = c.path;
+        const kind = document.createElement("span");
+        kind.className = "change-kind";
+        kind.textContent = KIND_WORDS[c.kind];
+        text.append(title, kind);
+        row.append(text);
+        const action = changeAction(v, c);
+        if (action) row.append(action);
+        list.append(row);
+      }
+      el.libraryChanges.append(head, list);
+    }
+    function changeAction(v, c) {
+      const noteId = c.noteId;
+      if (!noteId && !c.canBringBack) return null;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn btn-small";
+      if (noteId) {
+        b.textContent = "Earlier versions";
+        b.addEventListener("click", () => {
+          el.libraryDialog.close();
+          openNoteHistory(noteId);
+        });
+      } else {
+        b.textContent = "Bring back";
+        b.addEventListener("click", () => bringBack(v, c));
+      }
+      return b;
+    }
+    async function bringBack(v, c) {
+      let r;
+      try {
+        r = await api.git.bringBack(v.hash, c.path);
+      } catch (err) {
+        toast("Could not bring it back: " + ipcErrorText(err));
+        return;
+      }
+      if (!r.ok) {
+        toast(r.error);
+        return;
+      }
+      el.libraryDialog.close();
+      toast('Brought back "' + truncate(c.title, 30) + '" from ' + new Date(v.at).toLocaleString() + ".");
+      if (r.noteId) await openNote(r.noteId);
+    }
+    function moveSelection(e) {
+      if (!lib.versions.length) return;
+      const last = lib.versions.length - 1;
+      const to = e.key === "ArrowDown" ? Math.min(last, lib.index + 1) : e.key === "ArrowUp" ? Math.max(0, lib.index - 1) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      showVersion(to);
+    }
+    async function primaryAction() {
+      const s = lib.status;
+      if (!s) return;
+      if (!s.enabled) {
+        await updateSettings({ gitEnabled: true });
+        renderStatus(await api.git.status());
+        await loadVersions();
+        return;
+      }
+      if (s.available === false) {
+        api.app.openExternal(GIT_DOWNLOAD);
+        return;
+      }
+      if (!s.remote) {
+        el.libraryDialog.close();
+        openSettingsAt("set-history");
+        return;
+      }
+      await backUpNow();
+    }
+    async function backUpNow() {
+      const s = lib.status || await api.git.status();
+      if (!s.enabled || !s.remote) {
+        await openLibrary();
+        return;
+      }
+      await flushSave();
+      const saved = await api.git.commit();
+      const pushed = saved.ok && saved.nothingToCommit ? await api.git.push() : saved;
+      const after = await api.git.status();
+      renderStatus(after);
+      if (el.libraryDialog.open) await loadVersions();
+      const problem = gitErrorText(after.lastError) || (pushed.ok ? null : gitErrorText(pushed.error || pushed.skipped || "push failed"));
+      if (!problem) toast("Backed up to " + remoteName(after.remote));
+      else toast(problem.text, { label: "Details", run: () => {
+        openLibrary();
+      } });
+    }
+    async function saveVersionNow() {
+      await flushSave();
+      const r = await api.git.commit();
+      renderStatus(await api.git.status());
+      if (el.libraryDialog.open) await loadVersions();
+      if (!r.ok) {
+        const problem = gitErrorText(r.error || r.skipped || null);
+        toast(problem ? problem.text : "History is off.");
+        return;
+      }
+      toast(r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
+    }
+    function bind() {
+      el.historyStatusBtn.addEventListener("click", () => {
+        openLibrary();
+      });
+      el.libraryPrimaryBtn.addEventListener("click", () => {
+        primaryAction();
+      });
+      el.librarySaveBtn.addEventListener("click", () => {
+        saveVersionNow();
+      });
+      el.libraryCloseBtn.addEventListener("click", () => el.libraryDialog.close());
+      el.libraryMoreBtn.addEventListener("click", () => {
+        lib.limit += PAGE;
+        loadVersions();
+      });
+      el.libraryList.addEventListener("keydown", moveSelection);
+      setInterval(() => {
+        if (lib.status) renderStatus(lib.status);
+      }, 6e4);
+    }
+    return { bind, openLibrary, renderStatus, backUpNow, saveVersionNow, statusNow: () => lib.status };
+  }
+
   // src/renderer/speech.ts
   var { isViewerOnlyFile: isViewerOnlyFile7, isNonMarkdownFile: isNonMarkdownFile3 } = helpers_exports;
   function createSpeech({ api }) {
@@ -26021,6 +26335,17 @@
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
     const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+    const library = createLibraryDialog({
+      api,
+      flushSave,
+      updateSettings,
+      openSettingsAt: (sectionId) => openSettings(sectionId),
+      openNoteHistory: async (id) => {
+        await selectNote(id);
+        openHistory();
+      },
+      openNote: (id) => selectNote(id)
+    });
     async function refreshCurrentMeta() {
       if (!state.currentId) return;
       const fresh = await api.notes.get(state.currentId);
@@ -26529,7 +26854,7 @@
     }
     const { showCode: showCode2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
     const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
-    function openSettings() {
+    function openSettings(sectionId) {
       const s = settingsNow();
       draft = {};
       el.hotkeyInput.value = displayAccelerator(s.hotkey).replace(/ /g, "");
@@ -26558,6 +26883,8 @@
       el.ttsRateValue.textContent = Number(s.ttsRate).toFixed(1) + "\xD7";
       refreshGitStatus();
       el.settingsScroll.scrollTop = 0;
+      const section = sectionId ? el.settingsScroll.querySelector("#" + sectionId) : null;
+      if (section) section.scrollIntoView({ block: "start" });
       markSettingsSection();
       el.settingsSearch.focus();
     }
@@ -26833,13 +27160,9 @@
     }
     function renderGitStatus(s) {
       if (!s) return;
-      let text;
-      if (!s.enabled) text = "Off. Your notes file is still backed up to the backups folder.";
-      else if (s.available === false) text = "git was not found on this computer, so no history is being kept.";
-      else if (!s.commits) text = s.pending ? "First commit coming up\u2026" : "Repository ready; no commits yet.";
-      else text = s.commits + (s.commits === 1 ? " commit" : " commits") + ", last " + relativeTime(s.lastCommitAt ?? 0) + (s.pending ? ", changes waiting" : "") + (s.remote ? s.lastPushAt ? ", pushed " + relativeTime(s.lastPushAt) : ", not pushed yet" : "");
-      if (s.lastError) text += "  Error: " + s.lastError;
-      el.gitStatus.textContent = text;
+      library.renderStatus(s);
+      const problem = gitErrorText(s.lastError);
+      el.gitStatus.textContent = statusSentence(s) + (problem ? " " + problem.text : "");
       el.gitPushBtn.dataset.off = !s.enabled || !s.remote ? "1" : "0";
       el.gitCommitBtn.dataset.off = !s.enabled ? "1" : "0";
       syncSettingsDirty();
@@ -26899,6 +27222,9 @@
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
         cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
+        cmd("library", "Go to", "History and backup", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
+        cmd("back-up", "Go to", "Back up now", "cloud-upload", "", () => library.backUpNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push github sync"),
+        cmd("save-version", "Go to", "Save a version now", "save", "", () => library.saveVersionNow(), !GUEST && !!library.statusNow()?.enabled, "git commit history snapshot"),
         cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "folder files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
@@ -26925,7 +27251,7 @@
         ...["all", "pinned", "reminders", "trash"].map((v) => cmd("go-" + v, "Go to", { all: "All notes", pinned: "Pinned", reminders: "Reminders", trash: "Trash" }[v], { all: "notebook-text", pinned: "star", reminders: "bell", trash: "trash-2" }[v], "", () => setView(v), !GUEST)),
         ...flattenTree(state.tree).map((f) => cmd("folder-" + f.id, "Go to", (f.book ? "Book: " : "Folder: ") + f.name, f.book ? "book-open" : "folder", "", () => setView("folder", f.id), !GUEST)),
         ...[...el.tagList.querySelectorAll(".nav-item")].map((b) => cmd("tag-" + b.firstChild?.textContent, "Go to", "Tag: #" + b.firstChild?.textContent, "hash", "", () => b.click(), !GUEST)),
-        cmd("settings", "App", "Settings", "settings", "Ctrl+,", side("settings", openSettings), true, "preferences options hotkey font search"),
+        cmd("settings", "App", "Settings", "settings", "Ctrl+,", side("settings", () => openSettings()), true, "preferences options hotkey font search"),
         ...Object.keys(SCHEMES).map((id) => cmd("scheme-" + id, "View", "Colour scheme: " + SCHEMES[id].name, "palette", "", () => updateSettings({ colorScheme: id }), !GUEST && settingsNow().colorScheme !== id, "theme colors appearance")),
         cmd("scheme-custom", "View", "Colour scheme: custom colours\u2026", "palette", "", side("settings", () => {
           openSettings();
@@ -26969,7 +27295,7 @@
     function onKeydown(e) {
       if (e.isComposing || e.keyCode === 229) return;
       const ctrl = e.ctrlKey || e.metaKey;
-      const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.signDialog.open;
+      const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.signDialog.open;
       if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s" && (pdfOpen() || docxOpen())) {
         e.preventDefault();
         if (pdfOpen()) flushPdf({ commit: true, explicit: true });
@@ -27198,6 +27524,11 @@
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "h") {
         e.preventDefault();
         openHistory();
+        return;
+      }
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        if (!GUEST) library.openLibrary();
         return;
       }
       if (ctrl && !e.shiftKey && (e.key === "PageDown" || e.key === "PageUp")) {
@@ -27559,7 +27890,7 @@
         if (isListView(view)) setView(view);
       }));
       el.themeBtn.addEventListener("click", () => updateSettings({ theme: effectiveTheme() === "dark" ? "light" : "dark" }));
-      el.settingsBtn.addEventListener("click", openSettings);
+      el.settingsBtn.addEventListener("click", () => openSettings());
       el.toggleSidebarBtn.addEventListener("click", toggleSidebar);
       el.toggleListBtn.addEventListener("click", toggleList);
       el.hideListBtn.addEventListener("click", toggleList);
@@ -27650,16 +27981,11 @@
           commitRemote();
         }
       });
-      el.gitCommitBtn.addEventListener("click", async () => {
-        await flushSave();
-        const r = await api.git.commit();
-        toast(r.ok ? r.nothingToCommit ? "Nothing new to commit" : "Committed" : "Commit failed: " + (r.error || r.skipped));
-        refreshGitStatus();
+      el.gitCommitBtn.addEventListener("click", () => {
+        library.saveVersionNow();
       });
-      el.gitPushBtn.addEventListener("click", async () => {
-        const r = await api.git.push();
-        toast(r.ok ? "Pushed" : "Push failed: " + (r.error || r.skipped));
-        refreshGitStatus();
+      el.gitPushBtn.addEventListener("click", () => {
+        library.backUpNow();
       });
       fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
       el.exportBtn.addEventListener("click", exportCurrent);
@@ -27881,6 +28207,7 @@
       applyInfo(info);
       restoreTabs(settings);
       bind();
+      library.bind();
       bindTabs();
       if (settings.lastFolderId) {
         state.view = "folder";
@@ -27892,6 +28219,7 @@
         toPeer({ type: "hello" });
         return;
       }
+      refreshGitStatus();
       if (!state.currentId && state.noteIds.length) await selectNote(state.noteIds[0]);
       if (panesOf(settings).split) openSplit(true);
       if (state.current) focusBody();

@@ -444,7 +444,27 @@ class GitSync {
     if (!commits.length) return true;
     return eachBlob(commits.map((c) => c.hash + ':' + c.path), this.dir, 20000, visit);
   }
+
+  async versions(limit?: number): Promise<RawVersion[]> {
+    if (!this.state.initialized) return [];
+    const r = await run(['-c', 'core.quotePath=false', 'log', '-M', '--name-status', '--format=%x1e%H%x1f%ct', '-n', String(limit || 100)], this.dir, 60000);
+    if (!r.ok) return [];
+    return r.stdout.split('\x1e').map((chunk) => chunk.trim()).filter(Boolean).map((chunk) => {
+      const [head, ...lines] = chunk.split('\n');
+      const [hash, ts] = head.split('\x1f');
+      const files = lines.map((l) => l.split('\t')).filter((parts) => parts.length >= 2 && parts[0]).map((parts) => ({ status: parts[0].charAt(0), path: parts[parts.length - 1] }));
+      return { hash, at: parseInt(ts, 10) * 1000, files };
+    });
+  }
+
+  async textBefore(hash: string, relPath: string) {
+    const found: { text: string | null } = { text: null };
+    await eachBlob([hash + '^:' + relPath], this.dir, 20000, (_i, t) => { found.text = t; });
+    return found.text;
+  }
 }
 
-export type { FileCommit, LinkedFile, KeptOut };
-export { GitSync };
+type RawVersion = { hash: string, at: number, files: { status: string, path: string }[] };
+
+export type { FileCommit, LinkedFile, KeptOut, RawVersion };
+export { GitSync, LINKED_DIR };
