@@ -239,7 +239,7 @@ const SCENES = {
   share: { about: 'The share menu', run: steps(openNote('Q4 planning'), key('Control+Shift+s')) },
   book: { about: 'A book: pages as tabs', run: openNote('Birds of the ridge') },
   bot: { about: 'The Claude Code panel', run: steps(openNote('Q4 planning'), key('Control+Shift+a')) },
-  search: { about: 'Searching the list', run: async (page) => { await page.keyboard.press('Control+f'); await page.keyboard.type('bench'); await sleep(500); } },
+  search: { about: 'Searching the list', run: async (page) => { await page.keyboard.press('Control+Shift+f'); await page.keyboard.type('bench'); await sleep(500); } },
   trash: { about: 'The trash view, empty', run: async (page) => { await page.locator('[data-view="trash"]').first().click(); await sleep(400); } },
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
   'palette-query': { about: 'The command palette, typing', run: async (page) => { await page.keyboard.press('Control+p'); await sleep(250); await page.keyboard.type('plan'); await sleep(400); } },

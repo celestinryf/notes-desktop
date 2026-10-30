@@ -44,7 +44,8 @@ npm start
 
 **Finding and organising**
 - **Command palette (Ctrl+P):** one box finds any note by title or text and runs every command, each listed with its shortcut. Type `>` to see commands only.
-- **Search (Ctrl+F)** filters the list by title, text and tags, with matches highlighted.
+- **Find in a note (Ctrl+F)** highlights every match and steps through them; Ctrl+H replaces.
+- **Search (Ctrl+Shift+F)** filters the list by title, text and tags, with matches highlighted.
 - **Folders** nest as deep as you like. Drag notes and folders to move them. The note list shows folders with their notes inside, or one flat list (the switch is beside the sort menu).
 - **Tags**, a **Pinned** view, a **Reminders** view and a **Trash** with Undo, restore, delete forever and empty trash.
 - **Pinned notes stay on top.** In All notes, every pinned note comes first, wherever it lives. In a folder, that folder's pinned notes come first.
@@ -124,8 +125,8 @@ Settings › Agent files › **Add my agent files** links your coding agents' fi
 | Ctrl+N | New note |
 | Ctrl+O | Open a file as a note |
 | Ctrl+Shift+N | New folder |
-| Ctrl+F | Search all notes |
-| Ctrl+Shift+F | Find in this note (Enter, Shift+Enter or F3 to step) |
+| Ctrl+F | Find in this note (Enter, Shift+Enter or F3 to step); with no note open, search the list |
+| Ctrl+Shift+F | Search the note list |
 | Ctrl+H | Find and replace |
 | Ctrl+E | Markdown source or rendered view |
 | Ctrl+D | Pin or unpin |
