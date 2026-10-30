@@ -2,7 +2,7 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { markdownToHtml } from './note-html.ts';
 import * as H from '../shared/helpers.mts';
-import { escapeHtml, ipcErrorText } from './text.ts';
+import { escapeHtml, ipcErrorText, trashedMessage } from './text.ts';
 import { toast } from './toast.ts';
 import { placePopover } from './popover.ts';
 
@@ -241,10 +241,10 @@ export function createBooks({ api, flattenTree, selectNote, selectNoteNow, refre
       } else if (action === 'delete') {
         if (id === state.currentId) { await trashCurrent(); return; }
         const title = H.deriveTitle(page) || 'Untitled';
-        await api.notes.trash(id);
+        const after = await api.notes.trash(id);
         await refresh({ keepEditor: true });
         if (state.current) renderBookStrip(state.current);
-        toast('Moved "' + H.truncate(title, 30) + '" to trash', { label: 'Undo', run: async () => { await api.notes.restore(id); await refresh({ keepEditor: true }); if (state.current) renderBookStrip(state.current); } });
+        toast(trashedMessage(page, after, title), after ? { label: 'Undo', run: async () => { await api.notes.restore(id); await refresh({ keepEditor: true }); if (state.current) renderBookStrip(state.current); } } : undefined);
       }
     } catch (err) {
       toast('Could not change the page: ' + (err.message || err));

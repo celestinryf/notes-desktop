@@ -14721,11 +14721,13 @@
     fuzzyScore: () => fuzzyScore,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
+    isLinkedFile: () => isLinkedFile,
     isNonMarkdownFile: () => isNonMarkdownFile,
     isObjectLike: () => isObjectLike,
     isOoxmlWordFile: () => isOoxmlWordFile,
     isPlainTextFile: () => isPlainTextFile,
     isRecord: () => isRecord,
+    isRecycleBinPath: () => isRecycleBinPath,
     isTableFile: () => isTableFile,
     isViewerOnlyFile: () => isViewerOnlyFile,
     linkLeaf: () => linkLeaf,
@@ -15325,6 +15327,8 @@
   var isObjectLike = (v) => !!v && typeof v === "object";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  var isRecycleBinPath = (p) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
+  var isLinkedFile = (n) => !n.vaultId && !!n.filePath;
   var tenths = (n) => Math.round(n * 10) / 10;
   var traceClock = () => tenths(performance.timeOrigin + performance.now());
   var msSince = (start) => tenths(performance.now() - start);
@@ -15695,6 +15699,18 @@
     if (!tokens.length) return escapeHtml(raw);
     const re = new RegExp("(" + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
     return raw.split(re).map((part, i) => i % 2 ? '<span class="mark">' + escapeHtml(part) + "</span>" : escapeHtml(part)).join("");
+  }
+  function trashedMessage(before, after, title) {
+    const name = '"' + truncate(title, 30) + '"';
+    if (isLinkedFile(before)) return "Removed " + name + " from Notes. The file is still on disk.";
+    if (!after) return "Sent " + name + " to the Recycle Bin. Restore it from there if you need it back.";
+    if (isRecycleBinPath(after.filePath)) return "Moved " + name + " to the Recycle Bin";
+    if (before.filePath) return "Moved " + name + " to Notes' Trash. It could not go to the Recycle Bin.";
+    return "Moved " + name + " to trash";
+  }
+  function trashLabel(note) {
+    if (isLinkedFile(note)) return "Remove from Notes";
+    return note.filePath ? "Move to Recycle Bin" : "Move to trash";
   }
   function ipcErrorText(err) {
     const message = typeof err === "object" && err !== null && "message" in err ? err.message : void 0;
@@ -16696,14 +16712,14 @@
             return;
           }
           const title = deriveTitle(page) || "Untitled";
-          await api.notes.trash(id);
+          const after = await api.notes.trash(id);
           await refresh({ keepEditor: true });
           if (state.current) renderBookStrip(state.current);
-          toast('Moved "' + truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+          toast(trashedMessage(page, after, title), after ? { label: "Undo", run: async () => {
             await api.notes.restore(id);
             await refresh({ keepEditor: true });
             if (state.current) renderBookStrip(state.current);
-          } });
+          } } : void 0);
         }
       } catch (err) {
         toast("Could not change the page: " + (err.message || err));
@@ -25903,6 +25919,7 @@
       if (bot.open) describeBotScope();
       el.pinBtn.classList.toggle("hidden", inTrash);
       el.deleteBtn.classList.toggle("hidden", inTrash);
+      setLabel(el.deleteBtn, trashLabel(note));
       el.lockBtn.classList.toggle("hidden", inTrash || (!!note.filePath || !!note.vaultId) && !note.home);
       el.attachBtn.classList.toggle("hidden", inTrash || fileReadOnly);
       el.recordBtn.classList.toggle("hidden", inTrash || fileReadOnly);
@@ -26060,8 +26077,9 @@
         if (state.currentId === note.id) el.fileConvertBtn.classList.toggle("hidden", !opts.length);
       }).catch(() => {
       });
-      el.filePath.textContent = note.filePath;
-      el.filePath.title = note.filePath || "";
+      const shownPath = note.trashedAt && note.trashedFrom ? note.trashedFrom : note.filePath;
+      el.filePath.textContent = shownPath;
+      el.filePath.title = shownPath || "";
       if (note.fileKind === "pdf") {
         el.pdfEditor.classList.remove("hidden");
         showBanner("Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.");
@@ -26435,17 +26453,18 @@
       if (!state.current || state.current.trashedAt) return;
       const id = state.currentId;
       if (!id) return;
-      const title = deriveTitle(state.current);
+      const before = state.current;
+      const title = deriveTitle(before);
       await flushSave();
       if (documentDirty() && !window.confirm("Your changes to this document could not be saved. Move it to the trash anyway and lose them?")) return;
-      await api.notes.trash(id);
+      const after = await api.notes.trash(id);
       clearEditor();
       await refresh();
-      toast('Moved "' + truncate(title, 30) + '" to trash', { label: "Undo", run: async () => {
+      toast(trashedMessage(before, after, title), after ? { label: "Undo", run: async () => {
         await api.notes.restore(id);
         await refresh({ keepEditor: true });
         await selectNote(id);
-      } });
+      } } : void 0);
     }
     async function restoreCurrent() {
       if (!state.current || !state.current.trashedAt) return;

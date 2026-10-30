@@ -241,6 +241,7 @@ const SCENES = {
   bot: { about: 'The Claude Code panel', run: steps(openNote('Q4 planning'), key('Control+Shift+a')) },
   search: { about: 'Searching the list', run: async (page) => { await page.keyboard.press('Control+Shift+f'); await page.keyboard.type('bench'); await sleep(500); } },
   trash: { about: 'The trash view, empty', run: async (page) => { await page.locator('[data-view="trash"]').first().click(); await sleep(400); } },
+  'trashed-toast': { about: 'A note moved to the trash from the More menu: the toast with Undo (the shots cannot reach the Recycle Bin, so this is the fallback wording)', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#deleteBtn'); await sleep(500); }) },
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
   'palette-query': { about: 'The command palette, typing', run: async (page) => { await page.keyboard.press('Control+p'); await sleep(250); await page.keyboard.type('plan'); await sleep(400); } },
   more: { about: 'The More menu of a note', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
@@ -316,7 +317,7 @@ async function shoot(theme, name, opts) {
     args: [ROOT],
     env: Object.assign({}, process.env, {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1',
-      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1',
+      NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1', NOTES_APP_NO_RECYCLE_BIN: '1',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
     }, SCENES[name].env || {}),
   });

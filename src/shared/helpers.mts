@@ -576,6 +576,9 @@ const isObjectLike = (v: unknown): v is Record<string, unknown> => !!v && typeof
 const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
 const stringItems = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+const isRecycleBinPath = (p: string | null | undefined) => !!p && /^[a-z]:[\\/]\$recycle\.bin[\\/]/i.test(p);
+const isLinkedFile = (n: { vaultId: string | null, filePath: string | null }) => !n.vaultId && !!n.filePath;
+
 const tenths = (n: number) => Math.round(n * 10) / 10;
 const traceClock = () => tenths(performance.timeOrigin + performance.now());
 const msSince = (start: number) => tenths(performance.now() - start);
@@ -583,7 +586,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince,
+  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
