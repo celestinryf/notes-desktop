@@ -15703,7 +15703,8 @@
   function trashedMessage(before, after, title) {
     const name = '"' + truncate(title, 30) + '"';
     if (isLinkedFile(before)) return "Removed " + name + " from Notes. The file is still on disk.";
-    if (!after || isRecycleBinPath(after.filePath)) return "Moved " + name + " to the Recycle Bin";
+    if (!after) return "Sent " + name + " to the Recycle Bin. Restore it from there if you need it back.";
+    if (isRecycleBinPath(after.filePath)) return "Moved " + name + " to the Recycle Bin";
     if (before.filePath) return "Moved " + name + " to Notes' Trash. It could not go to the Recycle Bin.";
     return "Moved " + name + " to trash";
   }

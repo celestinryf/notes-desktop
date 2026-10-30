@@ -533,7 +533,18 @@ function main() {
     for (const id of r.removedIds) { live.stop(id); stickies.close(id); }
     return r;
   });
-  handle('notes:trash', async (_e, id) => { live.stop(id); const n = store.trash(id, await recycleFileOf(id)); stickies.close(id); return store.publicNote(n); });
+  handle('notes:trash', async (_e, id) => {
+    if (store.recycling.has(id)) return store.publicNote(store.get(id));
+    live.stop(id);
+    store.recycling.add(id);
+    try {
+      const n = store.trash(id, await recycleFileOf(id));
+      stickies.close(id);
+      return store.publicNote(n);
+    } finally {
+      store.recycling.delete(id);
+    }
+  });
   handle('notes:restore', (_e, id) => store.publicNote(store.restore(id)));
   handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
   handle('notes:emptyTrash', () => store.emptyTrash());

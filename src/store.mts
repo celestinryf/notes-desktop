@@ -8,7 +8,7 @@ import * as F from './files.mts';
 import * as L from './lock.mts';
 import * as FM from './shared/front-matter.mts';
 import { VaultLinker, nameHints } from './vault-links.mts';
-import { restoreFromBin, removeFromBin, binRecordOf } from './recycle-bin.mts';
+import { restoreFromBin, removeFromBin, binRecordOf, binReachable } from './recycle-bin.mts';
 import type { Recycled } from './recycle-bin.mts';
 
 const SCHEMA_VERSION = 2;
@@ -571,6 +571,7 @@ class Store {
   now: () => number;
   notes: Note[];
   plain: Map<string, string>;
+  recycling: Set<string>;
   keys: Map<string, Buffer>;
   pathKeys: WeakMap<Note, { filePath: string; key: string }>;
   folders: Folder[];
@@ -600,6 +601,7 @@ class Store {
     this.now = opts.now || Date.now;
     this.notes = [];
     this.plain = new Map();
+    this.recycling = new Set();
     this.keys = new Map();
     this.pathKeys = new WeakMap();
     this.folders = [];
@@ -939,6 +941,7 @@ class Store {
   update(id: string, patch?: NoteUpdate) {
     const note = this.get(id);
     if (!note) return null;
+    if (this.recycling.has(id)) throw Object.assign(new Error('This note is moving to the Recycle Bin.'), { code: 'EBUSY' });
     patch = patch || {};
     const before = Object.assign({}, note, { tags: note.tags.slice() });
     let changed = false;
@@ -1719,7 +1722,7 @@ class Store {
       seenFolders.add(sub.id);
     }
     const onDisk = new Set(disk.files.map((f) => f.key));
-    const missing = (n: Note) => n.vaultId === id && !n.trashedAt && !onDisk.has(this._pathKeyOf(n) ?? '') && !(n.filePath && fs.existsSync(n.filePath));
+    const missing = (n: Note) => n.vaultId === id && !n.trashedAt && !this.recycling.has(n.id) && !onDisk.has(this._pathKeyOf(n) ?? '') && !(n.filePath && fs.existsSync(n.filePath));
     const seenNotes = new Set<string>();
     const touched = new Set<Note>();
     const fresh: Note[] = [];
@@ -1737,13 +1740,18 @@ class Store {
       const same = orphans.get(text);
       return same ? same.shift() : undefined;
     };
-    let binned: Map<string, Note> | null = null;
-    const backFromBin = (key: string) => {
+    let binned: Map<string, Note[]> | null = null;
+    const backFromBin = (key: string, mtime: number | null) => {
       if (!binned) {
         binned = new Map();
-        for (const n of this.notes) if (n.vaultId === id && n.trashedAt && n.trashedFrom && n.filePath && H.isRecycleBinPath(n.filePath) && !fs.existsSync(n.filePath)) binned.set(F.pathKey(n.trashedFrom), n);
+        for (const n of this.notes) {
+          if (n.vaultId !== id || !n.trashedAt || !n.trashedFrom || !n.filePath || !H.isRecycleBinPath(n.filePath) || fs.existsSync(n.filePath)) continue;
+          const k = F.pathKey(n.trashedFrom);
+          const same = binned.get(k);
+          if (same) same.push(n); else binned.set(k, [n]);
+        }
       }
-      return binned.get(key);
+      return (binned.get(key) || []).find((n) => mtime !== null && n.fileMtime === mtime);
     };
     for (const file of disk.files) {
       const folder = placeOf(file.dirKey);
@@ -1751,7 +1759,7 @@ class Store {
       const folderId = folder ? folder.id : null;
       const locked = isLockPath(file.full);
       if (locked && !home) continue;
-      const back = byKey.has(file.key) ? undefined : backFromBin(file.key);
+      const back = byKey.has(file.key) ? undefined : backFromBin(file.key, file.mtime);
       if (back) {
         remember(back);
         back.filePath = file.full;
@@ -1964,9 +1972,9 @@ class Store {
     if (!note || note.trashedAt) return note;
     this.relock(id);
     let moved: { from: string, to: string } | null = null;
-    if (recycled && recycled.recycled && note.filePath) {
+    if (recycled && recycled.recycled) {
       if (!recycled.binPath) { this._drop([id]); return null; }
-      moved = { from: note.filePath, to: recycled.binPath };
+      moved = { from: recycled.from, to: recycled.binPath };
     } else if (note.vaultId && note.filePath && fs.existsSync(note.filePath)) {
       const dir = this._vaultTrashDir(note.vaultId);
       const next = path.join(dir, uniqueName(dir, stem(path.basename(note.filePath)), path.extname(note.filePath) || '.md'));
@@ -1980,7 +1988,8 @@ class Store {
       const live = this.get(id) || note;
       if (moved) {
         const { from, to } = moved;
-        try { if (H.isRecycleBinPath(to)) restoreFromBin(to, from); else fs.renameSync(to, from); live.filePath = from; delete live.trashedFrom; } catch (_) {  }
+        const back = fs.existsSync(from) ? path.join(path.dirname(from), uniqueName(path.dirname(from), stem(path.basename(from)), path.extname(from) || '.md')) : from;
+        try { if (H.isRecycleBinPath(to)) restoreFromBin(to, back); else fs.renameSync(to, back); live.filePath = back; delete live.trashedFrom; } catch (_) {  }
       }
       throw err;
     }
@@ -2042,11 +2051,11 @@ class Store {
   }
 
   _restoredInExplorer(note: Note) {
-    return !!note.trashedFrom && fs.existsSync(note.trashedFrom) && !this.findByPath(note.trashedFrom);
+    return !!note.trashedFrom && note.fileMtime !== null && F.mtimeOf(note.trashedFrom) === note.fileMtime && !this.findByPath(note.trashedFrom);
   }
 
   forgetEmptiedBin() {
-    const gone = this.notes.filter((n) => n.trashedAt && n.filePath && H.isRecycleBinPath(n.filePath) && !fs.existsSync(n.filePath) && !this._restoredInExplorer(n)).map((n) => n.id);
+    const gone = this.notes.filter((n) => n.trashedAt && n.filePath && H.isRecycleBinPath(n.filePath) && binReachable(n.filePath) && !fs.existsSync(n.filePath) && !this._restoredInExplorer(n)).map((n) => n.id);
     return gone.length ? this._drop(gone) : 0;
   }
 

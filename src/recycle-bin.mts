@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as F from './files.mts';
 
-type Recycled = { recycled: false } | { recycled: true, binPath: string | null };
+type Recycled = { recycled: false } | { recycled: true, from: string, binPath: string | null };
 type BinRecord = { original: string, deletedAt: number };
 
 const FILETIME_EPOCH_MS = 11644473600000;
@@ -54,11 +54,12 @@ function findInBin(filePath: string, since: number) {
 }
 
 async function recycle(filePath: string, trashItem: (p: string) => Promise<void>): Promise<Recycled> {
-  if (process.platform !== 'win32' || !/^[a-z]:\\$/i.test(path.parse(filePath).root)) return { recycled: false };
+  const root = path.parse(filePath).root;
+  if (process.platform !== 'win32' || !/^[a-z]:\\$/i.test(root) || !fs.existsSync(path.join(root, '$Recycle.Bin'))) return { recycled: false };
   const since = Date.now();
   try { await trashItem(filePath); } catch (_) { return { recycled: false }; }
   if (fs.existsSync(filePath)) return { recycled: false };
-  return { recycled: true, binPath: findInBin(filePath, since) };
+  return { recycled: true, from: filePath, binPath: findInBin(filePath, since) };
 }
 
 function restoreFromBin(binPath: string, to: string) {
@@ -67,10 +68,14 @@ function restoreFromBin(binPath: string, to: string) {
   fs.rmSync(binRecordOf(binPath), { force: true });
 }
 
+function binReachable(binPath: string) {
+  return fs.existsSync(path.dirname(binPath));
+}
+
 function removeFromBin(binPath: string) {
   fs.rmSync(binPath, { force: true, recursive: true });
   fs.rmSync(binRecordOf(binPath), { force: true });
 }
 
-export { recycle, restoreFromBin, removeFromBin, readBinRecord, binRecordOf };
+export { recycle, restoreFromBin, removeFromBin, readBinRecord, binRecordOf, binReachable };
 export type { Recycled };
