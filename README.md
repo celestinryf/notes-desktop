@@ -125,7 +125,7 @@ Settings › Agent files › **Add my agent files** links your coding agents' fi
 | Ctrl+N | New note |
 | Ctrl+O | Open a file as a note |
 | Ctrl+Shift+N | New folder |
-| Ctrl+F | Find in this note (Enter, Shift+Enter or F3 to step); with no note open, search the list |
+| Ctrl+F | Find in this note (Enter, Shift+Enter or F3 to step); with no note open, or on a PDF, Word file, spreadsheet or picture, search the list |
 | Ctrl+Shift+F | Search the note list |
 | Ctrl+H | Find and replace |
 | Ctrl+E | Markdown source or rendered view |

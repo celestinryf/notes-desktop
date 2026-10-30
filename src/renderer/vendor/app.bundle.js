@@ -21298,9 +21298,12 @@
 
   // src/renderer/find-bar.ts
   var { isViewerOnlyFile: isViewerOnlyFile8 } = helpers_exports;
+  function canFindInNote() {
+    return !!state.current && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
+  }
   function createFindBar({ api, flushSave, GUEST }) {
     function openFind() {
-      if (!state.current) return;
+      if (!canFindInNote()) return;
       find.open = true;
       el.findBar.classList.remove("hidden");
       const selection = window.getSelection();
@@ -26881,12 +26884,12 @@
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
-        cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), noteOpen),
+        cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), canFindInNote()),
         cmd("image-size", "This note", "Image: actual size, or fitted to the pane", "zoom-in", "Enter on the picture", () => toggleImageSize(), !!(state.current && state.current.fileKind === "image"), "zoom 100% fit picture"),
         cmd("replace", "This note", "Find and replace", "replace", "Ctrl+H", () => {
           if (!find.open) openFind();
           toggleReplace(true);
-        }, noteOpen),
+        }, canFindInNote()),
         ...[...el.moreMenu.querySelectorAll(".menu-item")].map((b) => fromButton(b, "This note")),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
@@ -27056,12 +27059,14 @@
             return;
           case "h":
             e.preventDefault();
-            if (!find.open) openFind();
-            toggleReplace(true);
+            if (canFindInNote()) {
+              if (!find.open) openFind();
+              toggleReplace(true);
+            }
             return;
           case "f":
             e.preventDefault();
-            if (state.current) openFind();
+            if (canFindInNote()) openFind();
             else searchList();
             return;
           case "e":
