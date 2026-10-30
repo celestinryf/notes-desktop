@@ -1,7 +1,7 @@
 import { el, setLabel } from './dom.ts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
-import { repoNameProblem, GITHUB_CANCELLED } from '../shared/helpers.mts';
+import { repoNameProblem, GITHUB_CANCELLED, githubButtonLabel, accountSentence } from '../shared/helpers.mts';
 
 type Step = 'signed-out' | 'code' | 'repo';
 
@@ -19,11 +19,6 @@ const CODE_HINT = 'Enter this code on github.com, then come back here. The code 
 
 function minutesLeft(expiresAt: number) {
   return Math.max(1, Math.round((expiresAt - Date.now()) / 60000));
-}
-
-function settingsLabel(status: GithubStatus | null, remote: string) {
-  if (!status || !status.signedIn) return 'Sign in with GitHub…';
-  return remote ? 'Change repository…' : 'Choose a repository…';
 }
 
 const sameRepo = (a: string, b: string) => a.trim().replace(/(\.git)?\/*$/i, '').toLowerCase() === b.trim().replace(/(\.git)?\/*$/i, '').toLowerCase();
@@ -188,8 +183,8 @@ export function createGithubDialog({ api, updateSettings, afterRepoSet }: Github
 
   function renderSettings() {
     const s = gh.status;
-    el.githubAccount.textContent = s && s.signedIn ? 'Signed in to GitHub as ' + s.login + '.' : 'Not signed in to GitHub.';
-    setLabel(el.githubSettingsBtn, settingsLabel(s, gh.remote));
+    el.githubAccount.textContent = accountSentence(s);
+    setLabel(el.githubSettingsBtn, githubButtonLabel(s, gh.remote));
   }
 
   function renderStatus(s: GithubStatus) {

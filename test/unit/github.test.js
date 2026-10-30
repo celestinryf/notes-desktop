@@ -3,7 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { GitHub, gitAuthEnv, isGitHubHttps, DEFAULT_CLIENT_ID } = require('../../src/github.mts');
+const { GitHub, gitAuthEnv, DEFAULT_CLIENT_ID } = require('../../src/github.mts');
+const { isGitHubHttps, githubButtonLabel, accountSentence } = require('../../src/shared/helpers.mts');
 const { validRepoName } = require('../../src/shared/helpers.mts');
 const { TokenStore, CANNOT_KEEP } = require('../../src/github-token.mts');
 const { GitHubSession } = require('../../src/github-session.mts');
@@ -141,6 +142,21 @@ test('validRepoName and isGitHubHttps', () => {
   assert.equal(isGitHubHttps('git@github.com:me/notes.git'), false);
   assert.equal(isGitHubHttps('https://gitlab.com/me/notes.git'), false);
   assert.equal(isGitHubHttps('https://github.com.evil.test/x'), false);
+  assert.equal(isGitHubHttps('https://example.com/github.com-mirror.git'), false);
+});
+
+test('githubButtonLabel and accountSentence follow the sign-in state, with no status as signed out', () => {
+  const out = { signedIn: false, login: null, canKeep: true };
+  const on = { signedIn: true, login: 'celes', canKeep: true };
+  assert.equal(githubButtonLabel(null, ''), 'Sync with GitHub…');
+  assert.equal(githubButtonLabel(out, ''), 'Sync with GitHub…');
+  assert.equal(githubButtonLabel(null, 'https://github.com/me/notes.git'), 'Sign in with GitHub…');
+  assert.equal(githubButtonLabel(out, 'https://github.com/me/notes.git'), 'Sign in with GitHub…');
+  assert.equal(githubButtonLabel(on, ''), 'Choose a repository…');
+  assert.equal(githubButtonLabel(on, 'https://github.com/me/notes.git'), 'Change repository…');
+  assert.match(accountSentence(null), /^Not signed in to GitHub\. Sign in so Notes can sync/);
+  assert.equal(accountSentence(out), accountSentence(null));
+  assert.equal(accountSentence(on), 'Signed in to GitHub as celes.');
 });
 
 test('gitAuthEnv hands the token to git through config variables, never arguments', () => {

@@ -52,13 +52,13 @@ interface LibraryDialogDeps {
   api: NotesApi;
   flushSave: () => Promise<boolean>;
   updateSettings: (patch: SettingsPatch) => Promise<unknown>;
-  openSettingsAt: (sectionId: string) => void;
   openGithub: () => Promise<unknown>;
+  githubStatus: () => GithubStatus | null;
   openNoteHistory: (id: string, pick: { hash: string, at: number }) => Promise<unknown>;
   openNote: (id: string) => Promise<unknown>;
 }
 
-export function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openGithub, openNoteHistory, openNote }: LibraryDialogDeps) {
+export function createLibraryDialog({ api, flushSave, updateSettings, openGithub, githubStatus, openNoteHistory, openNote }: LibraryDialogDeps) {
   const lib: { status: GitState | null, versions: LibraryVersion[], index: number, limit: number, more: boolean, loads: number } = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
 
   function renderStatus(s: GitState) {
@@ -71,13 +71,36 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
   }
 
   function renderDialogStatus(s: GitState) {
-    const problem = s.enabled && s.available !== false ? H.gitErrorText(s.lastError) : null;
+    const working = s.enabled && s.available !== false;
+    const problem = working ? H.gitErrorText(s.lastError) : null;
+    const account = githubStatus();
+    const showAccount = working && !!s.remote && account !== null && (H.isGitHubHttps(s.remote) || account.signedIn);
+    const signInFirst = needsSignIn(s);
+    const syncLabel = problem ? 'Try again' : 'Sync now';
     el.libraryStatusText.textContent = problem ? problem.text : statusSentence(s);
     el.libraryStatusText.classList.toggle('is-error', !!problem || s.available === false);
+    el.libraryAccountText.textContent = showAccount ? H.accountSentence(account) : '';
+    el.libraryAccountText.classList.toggle('hidden', !showAccount);
     el.libraryDetails.classList.toggle('hidden', !problem);
     el.libraryDetailsText.textContent = problem ? problem.details : '';
-    el.librarySaveBtn.classList.toggle('hidden', !s.enabled || s.available === false);
-    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote ? 'Sync with GitHub…' : problem ? 'Try again' : 'Sync now');
+    el.librarySaveBtn.classList.toggle('hidden', !working);
+    el.libraryGithubBtn.classList.toggle('hidden', !showAccount);
+    setLabel(el.libraryGithubBtn, signInFirst ? syncLabel : H.githubButtonLabel(account, s.remote));
+    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote || signInFirst ? H.githubButtonLabel(account, s.remote) : syncLabel);
+  }
+
+  function needsSignIn(s: GitState) {
+    const account = githubStatus();
+    return s.enabled && s.available !== false && H.isGitHubHttps(s.remote) && account !== null && !account.signedIn;
+  }
+
+  function refreshStatus() {
+    if (lib.status) renderStatus(lib.status);
+  }
+
+  async function goToGithub() {
+    el.libraryDialog.close();
+    await openGithub();
   }
 
   async function openLibrary() {
@@ -236,8 +259,13 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     if (!s) return;
     if (!s.enabled) { await updateSettings({ gitEnabled: true }); renderStatus(await api.git.status()); await loadVersions(); return; }
     if (s.available === false) { api.app.openExternal(GIT_DOWNLOAD); return; }
-    if (!s.remote) { el.libraryDialog.close(); await openGithub(); return; }
+    if (!s.remote || needsSignIn(s)) { await goToGithub(); return; }
     await syncNow();
+  }
+
+  async function githubAction() {
+    if (lib.status && needsSignIn(lib.status)) await syncNow();
+    else await goToGithub();
   }
 
   async function syncNow() {
@@ -269,6 +297,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     el.historyStatusBtn.addEventListener('click', () => { openLibrary(); });
     el.libraryPrimaryBtn.addEventListener('click', () => { primaryAction(); });
     el.librarySaveBtn.addEventListener('click', () => { saveVersionNow(); });
+    el.libraryGithubBtn.addEventListener('click', () => { githubAction(); });
     el.libraryCloseBtn.addEventListener('click', () => el.libraryDialog.close());
     el.libraryMoreBtn.addEventListener('click', () => { lib.limit += PAGE; loadVersions(); });
     el.libraryList.addEventListener('keydown', moveSelection);
@@ -282,5 +311,5 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     toast(n === 1 ? 'A note was changed on both computers. The other version is saved beside it as a conflict copy.' : n + ' notes were changed on both computers. The other versions are saved beside them as conflict copies.', { label: 'Show', run: () => { openLibrary(); } });
   }
 
-  return { bind, openLibrary, renderStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+  return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
 }

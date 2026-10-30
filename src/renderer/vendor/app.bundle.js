@@ -14715,6 +14715,7 @@
     WORD_TO_DOCX_EXT: () => WORD_TO_DOCX_EXT,
     YAML_KEY_LINE: () => YAML_KEY_LINE,
     ZIP_DOC_EXT: () => ZIP_DOC_EXT,
+    accountSentence: () => accountSentence,
     clampPane: () => clampPane,
     countWords: () => countWords,
     deriveTitle: () => deriveTitle,
@@ -14726,8 +14727,10 @@
     frontMatterText: () => frontMatterText,
     fuzzyScore: () => fuzzyScore,
     gitErrorText: () => gitErrorText,
+    githubButtonLabel: () => githubButtonLabel,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
+    isGitHubHttps: () => isGitHubHttps,
     isLinkedFile: () => isLinkedFile,
     isLinkedNotice: () => isLinkedNotice,
     isNonMarkdownFile: () => isNonMarkdownFile,
@@ -15339,6 +15342,9 @@
   var GITHUB_REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
   var validRepoName = (name) => GITHUB_REPO_NAME.test(name) && name !== "." && name !== ".." && !/\.git$/i.test(name);
   var repoNameProblem = (name) => !name ? "Give the repository a name." : validRepoName(name) ? "" : "A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.";
+  var isGitHubHttps = (url) => /^https:\/\/github\.com\//i.test(url.trim());
+  var githubButtonLabel = (status, remote) => !status || !status.signedIn ? remote ? "Sign in with GitHub\u2026" : "Sync with GitHub\u2026" : remote ? "Change repository\u2026" : "Choose a repository\u2026";
+  var accountSentence = (status) => status && status.signedIn ? "Signed in to GitHub as " + status.login + "." : "Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
   var GIT_ERRORS = [
@@ -16087,6 +16093,8 @@
     githubPrimaryBtn: pageElement("#githubPrimaryBtn", HTMLButtonElement),
     githubAccount: pageElement("#githubAccount", HTMLSpanElement),
     githubSettingsBtn: pageElement("#githubSettingsBtn", HTMLButtonElement),
+    libraryGithubBtn: pageElement("#libraryGithubBtn", HTMLButtonElement),
+    libraryAccountText: pageElement("#libraryAccountText", HTMLParagraphElement),
     gitEnabledInput: pageElement("#gitEnabledInput", HTMLInputElement),
     gitRemoteInput: pageElement("#gitRemoteInput", HTMLInputElement),
     gitStatus: pageElement("#gitStatus", HTMLSpanElement),
@@ -21302,7 +21310,7 @@
     const shown2 = titles.slice(0, 2).join(", ");
     return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
   }
-  function createLibraryDialog({ api, flushSave, updateSettings, openSettingsAt, openGithub, openNoteHistory, openNote }) {
+  function createLibraryDialog({ api, flushSave, updateSettings, openGithub, githubStatus, openNoteHistory, openNote }) {
     const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
     function renderStatus(s) {
       lib.status = s;
@@ -21313,13 +21321,33 @@
       if (el.libraryDialog.open) renderDialogStatus(s);
     }
     function renderDialogStatus(s) {
-      const problem = s.enabled && s.available !== false ? gitErrorText(s.lastError) : null;
+      const working = s.enabled && s.available !== false;
+      const problem = working ? gitErrorText(s.lastError) : null;
+      const account = githubStatus();
+      const showAccount = working && !!s.remote && account !== null && (isGitHubHttps(s.remote) || account.signedIn);
+      const signInFirst = needsSignIn(s);
+      const syncLabel = problem ? "Try again" : "Sync now";
       el.libraryStatusText.textContent = problem ? problem.text : statusSentence(s);
       el.libraryStatusText.classList.toggle("is-error", !!problem || s.available === false);
+      el.libraryAccountText.textContent = showAccount ? accountSentence(account) : "";
+      el.libraryAccountText.classList.toggle("hidden", !showAccount);
       el.libraryDetails.classList.toggle("hidden", !problem);
       el.libraryDetailsText.textContent = problem ? problem.details : "";
-      el.librarySaveBtn.classList.toggle("hidden", !s.enabled || s.available === false);
-      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Sync with GitHub\u2026" : problem ? "Try again" : "Sync now");
+      el.librarySaveBtn.classList.toggle("hidden", !working);
+      el.libraryGithubBtn.classList.toggle("hidden", !showAccount);
+      setLabel(el.libraryGithubBtn, signInFirst ? syncLabel : githubButtonLabel(account, s.remote));
+      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote || signInFirst ? githubButtonLabel(account, s.remote) : syncLabel);
+    }
+    function needsSignIn(s) {
+      const account = githubStatus();
+      return s.enabled && s.available !== false && isGitHubHttps(s.remote) && account !== null && !account.signedIn;
+    }
+    function refreshStatus() {
+      if (lib.status) renderStatus(lib.status);
+    }
+    async function goToGithub() {
+      el.libraryDialog.close();
+      await openGithub();
     }
     async function openLibrary() {
       await flushSave();
@@ -21506,12 +21534,15 @@
         api.app.openExternal(GIT_DOWNLOAD);
         return;
       }
-      if (!s.remote) {
-        el.libraryDialog.close();
-        await openGithub();
+      if (!s.remote || needsSignIn(s)) {
+        await goToGithub();
         return;
       }
       await syncNow();
+    }
+    async function githubAction() {
+      if (lib.status && needsSignIn(lib.status)) await syncNow();
+      else await goToGithub();
     }
     async function syncNow() {
       const s = lib.status || await api.git.status();
@@ -21559,6 +21590,9 @@
       el.librarySaveBtn.addEventListener("click", () => {
         saveVersionNow();
       });
+      el.libraryGithubBtn.addEventListener("click", () => {
+        githubAction();
+      });
       el.libraryCloseBtn.addEventListener("click", () => el.libraryDialog.close());
       el.libraryMoreBtn.addEventListener("click", () => {
         lib.limit += PAGE;
@@ -21577,7 +21611,7 @@
         openLibrary();
       } });
     }
-    return { bind, openLibrary, renderStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+    return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
   }
 
   // src/renderer/github-dialog.ts
@@ -21588,10 +21622,6 @@
   var CODE_HINT = "Enter this code on github.com, then come back here. The code is copied for you when you open the page.";
   function minutesLeft(expiresAt) {
     return Math.max(1, Math.round((expiresAt - Date.now()) / 6e4));
-  }
-  function settingsLabel(status, remote) {
-    if (!status || !status.signedIn) return "Sign in with GitHub\u2026";
-    return remote ? "Change repository\u2026" : "Choose a repository\u2026";
   }
   var sameRepo = (a, b) => a.trim().replace(/(\.git)?\/*$/i, "").toLowerCase() === b.trim().replace(/(\.git)?\/*$/i, "").toLowerCase();
   function createGithubDialog({ api, updateSettings, afterRepoSet }) {
@@ -21786,8 +21816,8 @@
     }
     function renderSettings() {
       const s = gh.status;
-      el.githubAccount.textContent = s && s.signedIn ? "Signed in to GitHub as " + s.login + "." : "Not signed in to GitHub.";
-      setLabel(el.githubSettingsBtn, settingsLabel(s, gh.remote));
+      el.githubAccount.textContent = accountSentence(s);
+      setLabel(el.githubSettingsBtn, githubButtonLabel(s, gh.remote));
     }
     function renderStatus(s) {
       gh.status = s;
@@ -26659,8 +26689,8 @@
       api,
       flushSave,
       updateSettings,
-      openSettingsAt: (sectionId) => openSettings(sectionId),
       openGithub: () => github.open(),
+      githubStatus: () => github.statusNow(),
       openNoteHistory: async (id, pick) => {
         await selectNote(id);
         if (state.currentId === id) openHistory(pick);
@@ -28314,8 +28344,12 @@
       });
       fromMain("gitPulled", api.on.gitPulled, (pulled) => library.noticePulled(pulled));
       fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
-      fromMain("githubStatus", api.on.githubStatus, (s) => github.renderStatus(s));
-      api.github.status().then((s) => github.renderStatus(s)).catch(() => {
+      const githubStatusChanged = (s) => {
+        github.renderStatus(s);
+        library.refreshStatus();
+      };
+      fromMain("githubStatus", api.on.githubStatus, githubStatusChanged);
+      api.github.status().then(githubStatusChanged).catch(() => {
       });
       el.exportBtn.addEventListener("click", exportCurrent);
       el.duplicateBtn.addEventListener("click", duplicateCurrent);

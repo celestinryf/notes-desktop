@@ -1958,6 +1958,8 @@ test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancel
   await page.keyboard.press('Control+Shift+b');
   await page.waitForSelector('#libraryDialog[open]');
   await waitForDom(() => /Sync with GitHub/.test(document.getElementById('libraryPrimaryBtn').textContent));
+  assert.equal(await page.$eval('#libraryGithubBtn', (b) => b.classList.contains('hidden')), true, 'no second GitHub button while the primary is Sync with GitHub');
+  assert.equal(await page.$eval('#libraryAccountText', (p) => p.classList.contains('hidden')), true, 'no account line without a repository');
   await page.click('#libraryPrimaryBtn');
   await page.waitForSelector('#githubDialog[open]');
   assert.equal(await page.$eval('#libraryDialog', (d) => d.open), false, 'the History dialog closed');
@@ -1977,7 +1979,7 @@ test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancel
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
   await waitForDom(() => /Not signed in to GitHub/.test(document.getElementById('githubAccount').textContent));
-  assert.match(await page.textContent('#githubSettingsBtn'), /Sign in with GitHub/);
+  assert.match(await page.textContent('#githubSettingsBtn'), /Sync with GitHub/, 'the same label as the History dialog while no repository is set');
   await page.click('#githubSettingsBtn');
   await page.waitForSelector('#githubDialog[open]');
   assert.match(await page.textContent('#githubHint'), /GitHub will ask you to approve Notes/);
