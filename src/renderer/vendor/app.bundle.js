@@ -14715,6 +14715,7 @@
     WORD_TO_DOCX_EXT: () => WORD_TO_DOCX_EXT,
     YAML_KEY_LINE: () => YAML_KEY_LINE,
     ZIP_DOC_EXT: () => ZIP_DOC_EXT,
+    accountSentence: () => accountSentence,
     clampPane: () => clampPane,
     countWords: () => countWords,
     deriveTitle: () => deriveTitle,
@@ -14726,8 +14727,10 @@
     frontMatterText: () => frontMatterText,
     fuzzyScore: () => fuzzyScore,
     gitErrorText: () => gitErrorText,
+    githubButtonLabel: () => githubButtonLabel,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
+    isGitHubHttps: () => isGitHubHttps,
     isLinkedFile: () => isLinkedFile,
     isLinkedNotice: () => isLinkedNotice,
     isNonMarkdownFile: () => isNonMarkdownFile,
@@ -15339,6 +15342,9 @@
   var GITHUB_REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
   var validRepoName = (name) => GITHUB_REPO_NAME.test(name) && name !== "." && name !== ".." && !/\.git$/i.test(name);
   var repoNameProblem = (name) => !name ? "Give the repository a name." : validRepoName(name) ? "" : "A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.";
+  var isGitHubHttps = (url) => /^https:\/\/github\.com\//i.test(url.trim());
+  var githubButtonLabel = (status, remote) => !status || !status.signedIn ? remote ? "Sign in with GitHub\u2026" : "Sync with GitHub\u2026" : remote ? "Change repository\u2026" : "Choose a repository\u2026";
+  var accountSentence = (status) => status && status.signedIn ? "Signed in to GitHub as " + status.login + "." : "Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
   var GIT_ERRORS = [
@@ -16088,6 +16094,7 @@
     githubAccount: pageElement("#githubAccount", HTMLSpanElement),
     githubSettingsBtn: pageElement("#githubSettingsBtn", HTMLButtonElement),
     libraryGithubBtn: pageElement("#libraryGithubBtn", HTMLButtonElement),
+    libraryAccountText: pageElement("#libraryAccountText", HTMLParagraphElement),
     gitEnabledInput: pageElement("#gitEnabledInput", HTMLInputElement),
     gitRemoteInput: pageElement("#gitRemoteInput", HTMLInputElement),
     gitStatus: pageElement("#gitStatus", HTMLSpanElement),
@@ -21263,6 +21270,350 @@
     return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
   }
 
+  // src/renderer/library-dialog.ts
+  var PAGE = 100;
+  var LIST_STEPS = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
+  var GIT_DOWNLOAD = "https://git-scm.com/download/win";
+  var KIND_WORDS = { added: "added", changed: "changed", renamed: "renamed", removed: "removed" };
+  function historyLook(s, now) {
+    if (!s.enabled) return { icon: "history", label: "History is off", error: false };
+    if (s.available === false) return { icon: "circle-alert", label: "History needs git", error: true };
+    if (s.lastError) return { icon: "cloud-alert", label: /^(push|sync) failed/.test(s.lastError) ? "Sync failed" : "History needs attention", error: true };
+    if (s.pending) return { icon: "cloud-upload", label: "Saving a version\u2026", error: false };
+    if (!s.commits) return { icon: "history", label: "No versions yet", error: false };
+    if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Synced " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not synced yet", error: false };
+    return { icon: "history", label: "Saved " + relativeTime(s.lastCommitAt ?? 0, now) + ", this PC only", error: false };
+  }
+  function remoteName(url) {
+    const m = /github\.com[:/]([^/]+\/[^/]+?)(\.git)?$/i.exec(url.trim());
+    return m ? "github.com/" + m[1] : url.trim();
+  }
+  function statusSentence(s) {
+    if (!s.enabled) return "History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.";
+    if (s.available === false) return "Notes keeps history with git, but could not start it. Run npm install in the Notes folder again, or install Git for Windows, then restart Notes.";
+    const saved = s.commits ? "The last version was saved " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
+    if (!s.remote) return saved + " They are on this PC only. Sync with a GitHub repository to keep a copy somewhere else and to have your notes on another computer.";
+    return saved + " " + (s.lastPushAt ? "Synced " + relativeTime(s.lastPushAt) + " with " + remoteName(s.remote) + "." : "Not synced with " + remoteName(s.remote) + " yet.");
+  }
+  function dayLabel(at, now) {
+    const day = new Date(at);
+    day.setHours(0, 0, 0, 0);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const days = Math.round((today.getTime() - day.getTime()) / 864e5);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return new Date(at).toLocaleDateString(void 0, { weekday: "long", day: "numeric", month: "long", year: day.getFullYear() === today.getFullYear() ? void 0 : "numeric" });
+  }
+  function changedSummary(v) {
+    const titles = Array.from(new Set(v.changes.map((c) => c.title)));
+    const shown2 = titles.slice(0, 2).join(", ");
+    return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
+  }
+  function createLibraryDialog({ api, flushSave, updateSettings, openGithub, githubStatus, openNoteHistory, openNote }) {
+    const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
+    function renderStatus(s) {
+      lib.status = s;
+      const look = historyLook(s);
+      setLabel(el.historyStatusBtn, look.label);
+      setIcon(el.historyStatusBtn, look.icon);
+      el.historyStatusBtn.classList.toggle("is-error", look.error);
+      if (el.libraryDialog.open) renderDialogStatus(s);
+    }
+    function renderDialogStatus(s) {
+      const working = s.enabled && s.available !== false;
+      const problem = working ? gitErrorText(s.lastError) : null;
+      const account = githubStatus();
+      const showAccount = working && !!s.remote && account !== null && (isGitHubHttps(s.remote) || account.signedIn);
+      const signInFirst = needsSignIn(s);
+      const syncLabel = problem ? "Try again" : "Sync now";
+      el.libraryStatusText.textContent = problem ? problem.text : statusSentence(s);
+      el.libraryStatusText.classList.toggle("is-error", !!problem || s.available === false);
+      el.libraryAccountText.textContent = showAccount ? accountSentence(account) : "";
+      el.libraryAccountText.classList.toggle("hidden", !showAccount);
+      el.libraryDetails.classList.toggle("hidden", !problem);
+      el.libraryDetailsText.textContent = problem ? problem.details : "";
+      el.librarySaveBtn.classList.toggle("hidden", !working);
+      el.libraryGithubBtn.classList.toggle("hidden", !showAccount);
+      setLabel(el.libraryGithubBtn, signInFirst ? syncLabel : githubButtonLabel(account, s.remote));
+      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote || signInFirst ? githubButtonLabel(account, s.remote) : syncLabel);
+    }
+    function needsSignIn(s) {
+      const account = githubStatus();
+      return s.enabled && s.available !== false && isGitHubHttps(s.remote) && account !== null && !account.signedIn;
+    }
+    function refreshStatus() {
+      if (lib.status) renderStatus(lib.status);
+    }
+    async function goToGithub() {
+      el.libraryDialog.close();
+      await openGithub();
+    }
+    async function openLibrary() {
+      await flushSave();
+      lib.limit = PAGE;
+      el.libraryList.innerHTML = "";
+      el.libraryChanges.innerHTML = "";
+      el.libraryHint.textContent = "Loading versions\u2026";
+      el.libraryMoreBtn.classList.add("hidden");
+      const s = await api.git.status();
+      renderStatus(s);
+      renderDialogStatus(s);
+      if (!el.libraryDialog.open) el.libraryDialog.showModal();
+      el.libraryPrimaryBtn.focus();
+      await loadVersions();
+    }
+    async function loadVersions() {
+      const s = lib.status;
+      const load = ++lib.loads;
+      if (!s || !s.enabled || s.available === false) {
+        lib.versions = [];
+        lib.more = false;
+        renderVersions();
+        return;
+      }
+      let r;
+      try {
+        r = await api.git.versions(lib.limit);
+      } catch (err) {
+        if (load === lib.loads) el.libraryHint.textContent = "Could not list the versions: " + ipcErrorText(err);
+        return;
+      }
+      if (load !== lib.loads) return;
+      lib.versions = r.versions;
+      lib.more = r.more;
+      renderVersions();
+    }
+    function renderVersions() {
+      const keep = lib.index >= 0 && lib.versions[lib.index] ? lib.versions[lib.index].hash : null;
+      el.libraryList.innerHTML = "";
+      el.libraryList.removeAttribute("aria-activedescendant");
+      el.libraryChanges.innerHTML = "";
+      el.libraryMoreBtn.classList.toggle("hidden", !lib.more);
+      const s = lib.status;
+      const empty = !lib.versions.length;
+      el.libraryLayout.classList.toggle("hidden", empty);
+      const working = !!s && s.enabled && s.available !== false;
+      el.libraryEmpty.classList.toggle("hidden", !empty || !working);
+      if (empty) {
+        lib.index = -1;
+        el.libraryHint.textContent = "";
+        el.libraryEmpty.textContent = "No versions yet. Notes saves one a moment after you change a note.";
+        return;
+      }
+      el.libraryHint.textContent = lib.versions.length + (lib.versions.length === 1 ? " version" : " versions") + (lib.more ? " shown" : "");
+      const now = Date.now();
+      let day = "";
+      lib.versions.forEach((v, i) => {
+        const label = dayLabel(v.at, now);
+        if (label !== day) {
+          day = label;
+          const head = document.createElement("li");
+          head.className = "history-day";
+          head.setAttribute("role", "presentation");
+          head.textContent = label;
+          el.libraryList.append(head);
+        }
+        const li = document.createElement("li");
+        li.id = "library-v" + i;
+        li.setAttribute("role", "option");
+        li.dataset.index = String(i);
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const what = document.createElement("span");
+        what.className = "first";
+        what.textContent = changedSummary(v);
+        li.append(when, what);
+        li.addEventListener("click", () => showVersion(i));
+        el.libraryList.append(li);
+      });
+      const again = keep ? lib.versions.findIndex((v) => v.hash === keep) : -1;
+      showVersion(again >= 0 ? again : 0);
+    }
+    function showVersion(i) {
+      const v = lib.versions[i];
+      if (!v) return;
+      lib.index = i;
+      for (const li of el.libraryList.children) {
+        if (!(li instanceof HTMLElement) || li.dataset.index === void 0) continue;
+        const on = Number(li.dataset.index) === i;
+        li.classList.toggle("is-active", on);
+        li.setAttribute("aria-selected", String(on));
+        if (on) li.scrollIntoView({ block: "nearest" });
+      }
+      el.libraryList.setAttribute("aria-activedescendant", "library-v" + i);
+      el.libraryChanges.innerHTML = "";
+      const head = document.createElement("p");
+      head.className = "library-changes-head";
+      const day = dayLabel(v.at, Date.now());
+      head.textContent = "Changed " + (day === "Today" || day === "Yesterday" ? day.toLowerCase() : "on " + day) + " at " + new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const list = document.createElement("ul");
+      list.className = "library-change-list";
+      for (const c of v.changes) {
+        const row = document.createElement("li");
+        const text = document.createElement("span");
+        text.className = "change-text";
+        const title = document.createElement("span");
+        title.className = "change-title";
+        title.textContent = c.title;
+        title.title = c.path;
+        const kind = document.createElement("span");
+        kind.className = "change-kind";
+        kind.textContent = KIND_WORDS[c.kind];
+        text.append(title, kind);
+        row.append(text);
+        const action = changeAction(v, c);
+        if (action) row.append(action);
+        list.append(row);
+      }
+      el.libraryChanges.append(head, list);
+    }
+    function changeAction(v, c) {
+      const noteId = c.noteId;
+      if (!noteId && !c.canBringBack) return null;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn btn-small";
+      if (noteId) {
+        b.textContent = "Open this version";
+        b.title = "Show this note as it was then, with a way to restore it";
+        b.addEventListener("click", () => {
+          el.libraryDialog.close();
+          openNoteHistory(noteId, { hash: v.hash, at: v.at });
+        });
+      } else {
+        b.textContent = "Bring back";
+        b.addEventListener("click", () => bringBack(v, c));
+      }
+      return b;
+    }
+    async function bringBack(v, c) {
+      let r;
+      try {
+        r = await api.git.bringBack(v.hash, c.path);
+      } catch (err) {
+        toast("Could not bring it back: " + ipcErrorText(err));
+        return;
+      }
+      if (!r.ok) {
+        toast(r.error);
+        return;
+      }
+      el.libraryDialog.close();
+      toast('Brought back "' + truncate(c.title, 30) + '" from ' + new Date(v.at).toLocaleString() + ".");
+      if (r.noteId) await openNote(r.noteId);
+    }
+    function moveSelection(e) {
+      if (!lib.versions.length) return;
+      const last = lib.versions.length - 1;
+      if (e.key === "Enter") {
+        const first = el.libraryChanges.querySelector("button");
+        if (first instanceof HTMLButtonElement) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      const step = LIST_STEPS[e.key];
+      const to = step !== void 0 ? Math.max(0, Math.min(last, lib.index + step)) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      showVersion(to);
+    }
+    async function primaryAction() {
+      const s = lib.status;
+      if (!s) return;
+      if (!s.enabled) {
+        await updateSettings({ gitEnabled: true });
+        renderStatus(await api.git.status());
+        await loadVersions();
+        return;
+      }
+      if (s.available === false) {
+        api.app.openExternal(GIT_DOWNLOAD);
+        return;
+      }
+      if (!s.remote || needsSignIn(s)) {
+        await goToGithub();
+        return;
+      }
+      await syncNow();
+    }
+    async function githubAction() {
+      if (lib.status && needsSignIn(lib.status)) await syncNow();
+      else await goToGithub();
+    }
+    async function syncNow() {
+      const s = lib.status || await api.git.status();
+      if (!s.enabled || !s.remote) {
+        await openLibrary();
+        return;
+      }
+      await flushSave();
+      const synced = await api.git.sync();
+      const after = await api.git.status();
+      renderStatus(after);
+      if (el.libraryDialog.open) await loadVersions();
+      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (synced.ok ? null : gitErrorText(synced.error || synced.skipped || "sync failed"));
+      if (!problem) toast("Synced with " + remoteName(after.remote));
+      else toast(problem.text, { label: "Details", run: () => {
+        openLibrary();
+      } });
+    }
+    async function saveVersionNow() {
+      await flushSave();
+      const r = await api.git.commit();
+      const after = await api.git.status();
+      renderStatus(after);
+      if (el.libraryDialog.open) await loadVersions();
+      if (!r.ok && r.skipped === "disabled") {
+        toast("History is off.");
+        return;
+      }
+      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
+      if (problem) {
+        toast(problem.text, { label: "Details", run: () => {
+          openLibrary();
+        } });
+        return;
+      }
+      toast(r.ok && r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
+    }
+    function bind() {
+      el.historyStatusBtn.addEventListener("click", () => {
+        openLibrary();
+      });
+      el.libraryPrimaryBtn.addEventListener("click", () => {
+        primaryAction();
+      });
+      el.librarySaveBtn.addEventListener("click", () => {
+        saveVersionNow();
+      });
+      el.libraryGithubBtn.addEventListener("click", () => {
+        githubAction();
+      });
+      el.libraryCloseBtn.addEventListener("click", () => el.libraryDialog.close());
+      el.libraryMoreBtn.addEventListener("click", () => {
+        lib.limit += PAGE;
+        loadVersions();
+      });
+      el.libraryList.addEventListener("keydown", moveSelection);
+      setInterval(() => {
+        if (lib.status) renderStatus(lib.status);
+      }, 6e4);
+    }
+    function noticePulled(pulled) {
+      if (el.libraryDialog.open) loadVersions();
+      if (!pulled.copies.length) return;
+      const n = pulled.copies.length;
+      toast(n === 1 ? "A note was changed on both computers. The other version is saved beside it as a conflict copy." : n + " notes were changed on both computers. The other versions are saved beside them as conflict copies.", { label: "Show", run: () => {
+        openLibrary();
+      } });
+    }
+    return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+  }
+
   // src/renderer/github-dialog.ts
   var NEW_REPO = "";
   var DEFAULT_NAME = "notes";
@@ -21271,13 +21622,6 @@
   var CODE_HINT = "Enter this code on github.com, then come back here. The code is copied for you when you open the page.";
   function minutesLeft(expiresAt) {
     return Math.max(1, Math.round((expiresAt - Date.now()) / 6e4));
-  }
-  function githubButtonLabel(status, remote) {
-    if (!status || !status.signedIn) return "Sign in with GitHub\u2026";
-    return remote ? "Change repository\u2026" : "Choose a repository\u2026";
-  }
-  function accountSentence(status) {
-    return status && status.signedIn ? "Signed in to GitHub as " + status.login + "." : "Not signed in to GitHub.";
   }
   var sameRepo = (a, b) => a.trim().replace(/(\.git)?\/*$/i, "").toLowerCase() === b.trim().replace(/(\.git)?\/*$/i, "").toLowerCase();
   function createGithubDialog({ api, updateSettings, afterRepoSet }) {
@@ -21510,339 +21854,6 @@
       });
     }
     return { bind, open, signOut, renderStatus, remoteChanged, statusNow: () => gh.status };
-  }
-
-  // src/renderer/library-dialog.ts
-  var PAGE = 100;
-  var LIST_STEPS = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
-  var GIT_DOWNLOAD = "https://git-scm.com/download/win";
-  var KIND_WORDS = { added: "added", changed: "changed", renamed: "renamed", removed: "removed" };
-  function historyLook(s, now) {
-    if (!s.enabled) return { icon: "history", label: "History is off", error: false };
-    if (s.available === false) return { icon: "circle-alert", label: "History needs git", error: true };
-    if (s.lastError) return { icon: "cloud-alert", label: /^(push|sync) failed/.test(s.lastError) ? "Sync failed" : "History needs attention", error: true };
-    if (s.pending) return { icon: "cloud-upload", label: "Saving a version\u2026", error: false };
-    if (!s.commits) return { icon: "history", label: "No versions yet", error: false };
-    if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Synced " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not synced yet", error: false };
-    return { icon: "history", label: "Saved " + relativeTime(s.lastCommitAt ?? 0, now) + ", this PC only", error: false };
-  }
-  function remoteName(url) {
-    const m = /github\.com[:/]([^/]+\/[^/]+?)(\.git)?$/i.exec(url.trim());
-    return m ? "github.com/" + m[1] : url.trim();
-  }
-  function statusSentence(s) {
-    if (!s.enabled) return "History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.";
-    if (s.available === false) return "Notes keeps history with git, but could not start it. Run npm install in the Notes folder again, or install Git for Windows, then restart Notes.";
-    const saved = s.commits ? "The last version was saved " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
-    if (!s.remote) return saved + " They are on this PC only. Sync with a GitHub repository to keep a copy somewhere else and to have your notes on another computer.";
-    return saved + " " + (s.lastPushAt ? "Synced " + relativeTime(s.lastPushAt) + " with " + remoteName(s.remote) + "." : "Not synced with " + remoteName(s.remote) + " yet.");
-  }
-  function dayLabel(at, now) {
-    const day = new Date(at);
-    day.setHours(0, 0, 0, 0);
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const days = Math.round((today.getTime() - day.getTime()) / 864e5);
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
-    return new Date(at).toLocaleDateString(void 0, { weekday: "long", day: "numeric", month: "long", year: day.getFullYear() === today.getFullYear() ? void 0 : "numeric" });
-  }
-  function changedSummary(v) {
-    const titles = Array.from(new Set(v.changes.map((c) => c.title)));
-    const shown2 = titles.slice(0, 2).join(", ");
-    return titles.length > 2 ? shown2 + " and " + (titles.length - 2) + " more" : shown2;
-  }
-  function createLibraryDialog({ api, flushSave, updateSettings, openGithub, githubStatus, openNoteHistory, openNote }) {
-    const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
-    function renderStatus(s) {
-      lib.status = s;
-      const look = historyLook(s);
-      setLabel(el.historyStatusBtn, look.label);
-      setIcon(el.historyStatusBtn, look.icon);
-      el.historyStatusBtn.classList.toggle("is-error", look.error);
-      if (el.libraryDialog.open) renderDialogStatus(s);
-    }
-    function renderDialogStatus(s) {
-      const problem = s.enabled && s.available !== false ? gitErrorText(s.lastError) : null;
-      const working = s.enabled && s.available !== false;
-      const withRemote = working && !!s.remote;
-      const account = githubStatus();
-      const sayAccount = withRemote && (/github\.com/i.test(s.remote) || !!(account && account.signedIn));
-      el.libraryStatusText.textContent = (problem ? problem.text : statusSentence(s)) + (sayAccount ? " " + accountSentence(account) : "");
-      el.libraryStatusText.classList.toggle("is-error", !!problem || s.available === false);
-      el.libraryDetails.classList.toggle("hidden", !problem);
-      el.libraryDetailsText.textContent = problem ? problem.details : "";
-      el.librarySaveBtn.classList.toggle("hidden", !working);
-      el.libraryGithubBtn.classList.toggle("hidden", !withRemote);
-      setLabel(el.libraryGithubBtn, githubButtonLabel(account, s.remote));
-      setLabel(el.libraryPrimaryBtn, !s.enabled ? "Turn on history" : s.available === false ? "How to get git" : !s.remote ? "Sync with GitHub\u2026" : problem ? "Try again" : "Sync now");
-    }
-    function refreshStatus() {
-      if (lib.status) renderStatus(lib.status);
-    }
-    async function goToGithub() {
-      el.libraryDialog.close();
-      await openGithub();
-    }
-    async function openLibrary() {
-      await flushSave();
-      lib.limit = PAGE;
-      el.libraryList.innerHTML = "";
-      el.libraryChanges.innerHTML = "";
-      el.libraryHint.textContent = "Loading versions\u2026";
-      el.libraryMoreBtn.classList.add("hidden");
-      const s = await api.git.status();
-      renderStatus(s);
-      renderDialogStatus(s);
-      if (!el.libraryDialog.open) el.libraryDialog.showModal();
-      el.libraryPrimaryBtn.focus();
-      await loadVersions();
-    }
-    async function loadVersions() {
-      const s = lib.status;
-      const load = ++lib.loads;
-      if (!s || !s.enabled || s.available === false) {
-        lib.versions = [];
-        lib.more = false;
-        renderVersions();
-        return;
-      }
-      let r;
-      try {
-        r = await api.git.versions(lib.limit);
-      } catch (err) {
-        if (load === lib.loads) el.libraryHint.textContent = "Could not list the versions: " + ipcErrorText(err);
-        return;
-      }
-      if (load !== lib.loads) return;
-      lib.versions = r.versions;
-      lib.more = r.more;
-      renderVersions();
-    }
-    function renderVersions() {
-      const keep = lib.index >= 0 && lib.versions[lib.index] ? lib.versions[lib.index].hash : null;
-      el.libraryList.innerHTML = "";
-      el.libraryList.removeAttribute("aria-activedescendant");
-      el.libraryChanges.innerHTML = "";
-      el.libraryMoreBtn.classList.toggle("hidden", !lib.more);
-      const s = lib.status;
-      const empty = !lib.versions.length;
-      el.libraryLayout.classList.toggle("hidden", empty);
-      const working = !!s && s.enabled && s.available !== false;
-      el.libraryEmpty.classList.toggle("hidden", !empty || !working);
-      if (empty) {
-        lib.index = -1;
-        el.libraryHint.textContent = "";
-        el.libraryEmpty.textContent = "No versions yet. Notes saves one a moment after you change a note.";
-        return;
-      }
-      el.libraryHint.textContent = lib.versions.length + (lib.versions.length === 1 ? " version" : " versions") + (lib.more ? " shown" : "");
-      const now = Date.now();
-      let day = "";
-      lib.versions.forEach((v, i) => {
-        const label = dayLabel(v.at, now);
-        if (label !== day) {
-          day = label;
-          const head = document.createElement("li");
-          head.className = "history-day";
-          head.setAttribute("role", "presentation");
-          head.textContent = label;
-          el.libraryList.append(head);
-        }
-        const li = document.createElement("li");
-        li.id = "library-v" + i;
-        li.setAttribute("role", "option");
-        li.dataset.index = String(i);
-        const when = document.createElement("span");
-        when.className = "when";
-        when.textContent = new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        const what = document.createElement("span");
-        what.className = "first";
-        what.textContent = changedSummary(v);
-        li.append(when, what);
-        li.addEventListener("click", () => showVersion(i));
-        el.libraryList.append(li);
-      });
-      const again = keep ? lib.versions.findIndex((v) => v.hash === keep) : -1;
-      showVersion(again >= 0 ? again : 0);
-    }
-    function showVersion(i) {
-      const v = lib.versions[i];
-      if (!v) return;
-      lib.index = i;
-      for (const li of el.libraryList.children) {
-        if (!(li instanceof HTMLElement) || li.dataset.index === void 0) continue;
-        const on = Number(li.dataset.index) === i;
-        li.classList.toggle("is-active", on);
-        li.setAttribute("aria-selected", String(on));
-        if (on) li.scrollIntoView({ block: "nearest" });
-      }
-      el.libraryList.setAttribute("aria-activedescendant", "library-v" + i);
-      el.libraryChanges.innerHTML = "";
-      const head = document.createElement("p");
-      head.className = "library-changes-head";
-      const day = dayLabel(v.at, Date.now());
-      head.textContent = "Changed " + (day === "Today" || day === "Yesterday" ? day.toLowerCase() : "on " + day) + " at " + new Date(v.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      const list = document.createElement("ul");
-      list.className = "library-change-list";
-      for (const c of v.changes) {
-        const row = document.createElement("li");
-        const text = document.createElement("span");
-        text.className = "change-text";
-        const title = document.createElement("span");
-        title.className = "change-title";
-        title.textContent = c.title;
-        title.title = c.path;
-        const kind = document.createElement("span");
-        kind.className = "change-kind";
-        kind.textContent = KIND_WORDS[c.kind];
-        text.append(title, kind);
-        row.append(text);
-        const action = changeAction(v, c);
-        if (action) row.append(action);
-        list.append(row);
-      }
-      el.libraryChanges.append(head, list);
-    }
-    function changeAction(v, c) {
-      const noteId = c.noteId;
-      if (!noteId && !c.canBringBack) return null;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "btn btn-small";
-      if (noteId) {
-        b.textContent = "Open this version";
-        b.title = "Show this note as it was then, with a way to restore it";
-        b.addEventListener("click", () => {
-          el.libraryDialog.close();
-          openNoteHistory(noteId, { hash: v.hash, at: v.at });
-        });
-      } else {
-        b.textContent = "Bring back";
-        b.addEventListener("click", () => bringBack(v, c));
-      }
-      return b;
-    }
-    async function bringBack(v, c) {
-      let r;
-      try {
-        r = await api.git.bringBack(v.hash, c.path);
-      } catch (err) {
-        toast("Could not bring it back: " + ipcErrorText(err));
-        return;
-      }
-      if (!r.ok) {
-        toast(r.error);
-        return;
-      }
-      el.libraryDialog.close();
-      toast('Brought back "' + truncate(c.title, 30) + '" from ' + new Date(v.at).toLocaleString() + ".");
-      if (r.noteId) await openNote(r.noteId);
-    }
-    function moveSelection(e) {
-      if (!lib.versions.length) return;
-      const last = lib.versions.length - 1;
-      if (e.key === "Enter") {
-        const first = el.libraryChanges.querySelector("button");
-        if (first instanceof HTMLButtonElement) {
-          e.preventDefault();
-          first.focus();
-        }
-        return;
-      }
-      const step = LIST_STEPS[e.key];
-      const to = step !== void 0 ? Math.max(0, Math.min(last, lib.index + step)) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
-      if (to < 0) return;
-      e.preventDefault();
-      showVersion(to);
-    }
-    async function primaryAction() {
-      const s = lib.status;
-      if (!s) return;
-      if (!s.enabled) {
-        await updateSettings({ gitEnabled: true });
-        renderStatus(await api.git.status());
-        await loadVersions();
-        return;
-      }
-      if (s.available === false) {
-        api.app.openExternal(GIT_DOWNLOAD);
-        return;
-      }
-      if (!s.remote) {
-        await goToGithub();
-        return;
-      }
-      await syncNow();
-    }
-    async function syncNow() {
-      const s = lib.status || await api.git.status();
-      if (!s.enabled || !s.remote) {
-        await openLibrary();
-        return;
-      }
-      await flushSave();
-      const synced = await api.git.sync();
-      const after = await api.git.status();
-      renderStatus(after);
-      if (el.libraryDialog.open) await loadVersions();
-      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (synced.ok ? null : gitErrorText(synced.error || synced.skipped || "sync failed"));
-      if (!problem) toast("Synced with " + remoteName(after.remote));
-      else toast(problem.text, { label: "Details", run: () => {
-        openLibrary();
-      } });
-    }
-    async function saveVersionNow() {
-      await flushSave();
-      const r = await api.git.commit();
-      const after = await api.git.status();
-      renderStatus(after);
-      if (el.libraryDialog.open) await loadVersions();
-      if (!r.ok && r.skipped === "disabled") {
-        toast("History is off.");
-        return;
-      }
-      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
-      if (problem) {
-        toast(problem.text, { label: "Details", run: () => {
-          openLibrary();
-        } });
-        return;
-      }
-      toast(r.ok && r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
-    }
-    function bind() {
-      el.historyStatusBtn.addEventListener("click", () => {
-        openLibrary();
-      });
-      el.libraryPrimaryBtn.addEventListener("click", () => {
-        primaryAction();
-      });
-      el.librarySaveBtn.addEventListener("click", () => {
-        saveVersionNow();
-      });
-      el.libraryGithubBtn.addEventListener("click", () => {
-        goToGithub();
-      });
-      el.libraryCloseBtn.addEventListener("click", () => el.libraryDialog.close());
-      el.libraryMoreBtn.addEventListener("click", () => {
-        lib.limit += PAGE;
-        loadVersions();
-      });
-      el.libraryList.addEventListener("keydown", moveSelection);
-      setInterval(() => {
-        if (lib.status) renderStatus(lib.status);
-      }, 6e4);
-    }
-    function noticePulled(pulled) {
-      if (el.libraryDialog.open) loadVersions();
-      if (!pulled.copies.length) return;
-      const n = pulled.copies.length;
-      toast(n === 1 ? "A note was changed on both computers. The other version is saved beside it as a conflict copy." : n + " notes were changed on both computers. The other versions are saved beside them as conflict copies.", { label: "Show", run: () => {
-        openLibrary();
-      } });
-    }
-    return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
   }
 
   // src/renderer/speech.ts

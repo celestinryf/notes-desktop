@@ -1,4 +1,4 @@
-import { isRecord, repoNameProblem, GITHUB_CANCELLED } from './shared/helpers.mts';
+import { isRecord, repoNameProblem, GITHUB_CANCELLED, isGitHubHttps } from './shared/helpers.mts';
 
 const DEFAULT_CLIENT_ID = 'Ov23linEmloxI2IlHYcD';
 const SCOPE = 'repo';
@@ -51,10 +51,6 @@ function apiMessage(body: Record<string, unknown> | null, fallback: string) {
 }
 
 const rejected = () => ({ ok: false as const, error: REJECTED, rejected: true as const });
-
-function isGitHubHttps(url: string) {
-  return /^https:\/\/github\.com\//i.test(url.trim());
-}
 
 function gitAuthEnv(token: string): Record<string, string> {
   return {
@@ -181,4 +177,4 @@ class GitHub {
 }
 
 export type { DeviceCode, CodeResult, SignInOutcome, LoginResult, Repo, RepoResult, ReposResult, FetchLike, Hooks };
-export { GitHub, gitAuthEnv, isGitHubHttps, DEFAULT_CLIENT_ID };
+export { GitHub, gitAuthEnv, DEFAULT_CLIENT_ID };

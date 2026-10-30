@@ -2,7 +2,6 @@ import { el, setLabel, setIcon } from './dom.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { ipcErrorText } from './text.ts';
-import { githubButtonLabel, accountSentence } from './github-dialog.ts';
 
 const PAGE = 100;
 const LIST_STEPS: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
@@ -72,19 +71,27 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
   }
 
   function renderDialogStatus(s: GitState) {
-    const problem = s.enabled && s.available !== false ? H.gitErrorText(s.lastError) : null;
     const working = s.enabled && s.available !== false;
-    const withRemote = working && !!s.remote;
+    const problem = working ? H.gitErrorText(s.lastError) : null;
     const account = githubStatus();
-    const sayAccount = withRemote && (/github\.com/i.test(s.remote) || !!(account && account.signedIn));
-    el.libraryStatusText.textContent = (problem ? problem.text : statusSentence(s)) + (sayAccount ? ' ' + accountSentence(account) : '');
+    const showAccount = working && !!s.remote && account !== null && (H.isGitHubHttps(s.remote) || account.signedIn);
+    const signInFirst = needsSignIn(s);
+    const syncLabel = problem ? 'Try again' : 'Sync now';
+    el.libraryStatusText.textContent = problem ? problem.text : statusSentence(s);
     el.libraryStatusText.classList.toggle('is-error', !!problem || s.available === false);
+    el.libraryAccountText.textContent = showAccount ? H.accountSentence(account) : '';
+    el.libraryAccountText.classList.toggle('hidden', !showAccount);
     el.libraryDetails.classList.toggle('hidden', !problem);
     el.libraryDetailsText.textContent = problem ? problem.details : '';
     el.librarySaveBtn.classList.toggle('hidden', !working);
-    el.libraryGithubBtn.classList.toggle('hidden', !withRemote);
-    setLabel(el.libraryGithubBtn, githubButtonLabel(account, s.remote));
-    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote ? 'Sync with GitHub…' : problem ? 'Try again' : 'Sync now');
+    el.libraryGithubBtn.classList.toggle('hidden', !showAccount);
+    setLabel(el.libraryGithubBtn, signInFirst ? syncLabel : H.githubButtonLabel(account, s.remote));
+    setLabel(el.libraryPrimaryBtn, !s.enabled ? 'Turn on history' : s.available === false ? 'How to get git' : !s.remote || signInFirst ? H.githubButtonLabel(account, s.remote) : syncLabel);
+  }
+
+  function needsSignIn(s: GitState) {
+    const account = githubStatus();
+    return s.enabled && s.available !== false && H.isGitHubHttps(s.remote) && account !== null && !account.signedIn;
   }
 
   function refreshStatus() {
@@ -252,8 +259,13 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     if (!s) return;
     if (!s.enabled) { await updateSettings({ gitEnabled: true }); renderStatus(await api.git.status()); await loadVersions(); return; }
     if (s.available === false) { api.app.openExternal(GIT_DOWNLOAD); return; }
-    if (!s.remote) { await goToGithub(); return; }
+    if (!s.remote || needsSignIn(s)) { await goToGithub(); return; }
     await syncNow();
+  }
+
+  async function githubAction() {
+    if (lib.status && needsSignIn(lib.status)) await syncNow();
+    else await goToGithub();
   }
 
   async function syncNow() {
@@ -285,7 +297,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     el.historyStatusBtn.addEventListener('click', () => { openLibrary(); });
     el.libraryPrimaryBtn.addEventListener('click', () => { primaryAction(); });
     el.librarySaveBtn.addEventListener('click', () => { saveVersionNow(); });
-    el.libraryGithubBtn.addEventListener('click', () => { goToGithub(); });
+    el.libraryGithubBtn.addEventListener('click', () => { githubAction(); });
     el.libraryCloseBtn.addEventListener('click', () => el.libraryDialog.close());
     el.libraryMoreBtn.addEventListener('click', () => { lib.limit += PAGE; loadVersions(); });
     el.libraryList.addEventListener('keydown', moveSelection);

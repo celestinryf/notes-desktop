@@ -1,8 +1,8 @@
-import { GitHub, gitAuthEnv, isGitHubHttps } from './github.mts';
+import { GitHub, gitAuthEnv } from './github.mts';
 import type { DeviceCode, Repo, RepoResult, ReposResult } from './github.mts';
 import { TokenStore, CANNOT_KEEP } from './github-token.mts';
 import type { SignIn } from './github-token.mts';
-import { GITHUB_CANCELLED } from './shared/helpers.mts';
+import { GITHUB_CANCELLED, isGitHubHttps } from './shared/helpers.mts';
 
 type DryMode = '' | 'code' | 'signed-in';
 type Options = { store: TokenStore, github: GitHub, dry?: DryMode, onChange?: (s: GithubStatus) => void };

@@ -434,8 +434,8 @@
                 <span class="field-help" id="gitStatus"></span>
                 <span class="field-help" id="githubAccount"></span>
                 <div class="dialog-actions">
-                  <button type="button" class="btn btn-small" id="gitCommitBtn">Save a version now</button>
                   <button type="button" class="btn btn-small" id="gitPushBtn">Sync now</button>
+                  <button type="button" class="btn btn-small" id="gitCommitBtn">Save a version now</button>
                   <button type="button" class="btn btn-small" id="githubSettingsBtn"><span class="lbl">Sign in with GitHub…</span></button>
                 </div>
               </div>
@@ -542,7 +542,8 @@
       <form method="dialog" class="dialog-form" id="libraryForm">
         <h2 class="dialog-title" id="libraryTitle">History and sync</h2>
         <div class="library-status">
-          <p class="library-status-text" id="libraryStatusText"></p>
+          <p class="library-status-text" id="libraryStatusText" role="status"></p>
+          <p class="library-status-text hidden" id="libraryAccountText" role="status"></p>
           <details class="library-details hidden" id="libraryDetails"><summary data-icon="chevron-right">Show details</summary><pre id="libraryDetailsText"></pre></details>
           <div class="library-actions">
             <button type="button" class="btn btn-primary btn-small" id="libraryPrimaryBtn"><span class="lbl">Sync now</span></button>
