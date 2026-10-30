@@ -1,9 +1,10 @@
-import { isRecord } from './shared/helpers.mts';
+import { isRecord, repoNameProblem, GITHUB_CANCELLED } from './shared/helpers.mts';
 
 const DEFAULT_CLIENT_ID = 'Ov23linEmloxI2IlHYcD';
 const SCOPE = 'repo';
 const MAX_INTERVAL_MS = 60000;
-const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+const MAX_POLL_FAILURES = 3;
+const REQUEST_TIMEOUT_MS = 15000;
 const MADE_BY_NOTES = 'Notes, synced by the Notes app';
 
 type DeviceCode = { deviceCode: string, userCode: string, verificationUri: string, expiresAt: number, intervalMs: number };
@@ -14,7 +15,7 @@ type Repo = GithubRepo;
 type RepoResult = GithubRepoResult;
 type ReposResult = GithubReposResult;
 type Response = { status: number, text: () => Promise<string> };
-type FetchLike = (url: string, init: { method: string, headers: Record<string, string>, body?: string }) => Promise<Response>;
+type FetchLike = (url: string, init: { method: string, headers: Record<string, string>, body?: string, signal?: AbortSignal }) => Promise<Response>;
 type Hooks = { fetch?: FetchLike, sleep?: (ms: number) => Promise<void>, now?: () => number, clientId?: string, webBase?: string, apiBase?: string };
 
 const UNREACHABLE = 'Notes could not reach GitHub. Check the connection and try again.';
@@ -45,9 +46,11 @@ function parseRepo(v: unknown): Repo | null {
 }
 
 function apiMessage(body: Record<string, unknown> | null, fallback: string) {
-  const message = body ? str(body, 'message') : '';
+  const message = body ? str(body, 'message') || str(body, 'error_description') : '';
   return message ? 'GitHub said: ' + message : fallback;
 }
+
+const rejected = () => ({ ok: false as const, error: REJECTED, rejected: true as const });
 
 function isGitHubHttps(url: string) {
   return /^https:\/\/github\.com\//i.test(url.trim());
@@ -62,10 +65,6 @@ function gitAuthEnv(token: string): Record<string, string> {
     GIT_CONFIG_VALUE_1: '',
     GIT_TERMINAL_PROMPT: '0',
   };
-}
-
-function validRepoName(name: string) {
-  return REPO_NAME.test(name) && name !== '.' && name !== '..';
 }
 
 class GitHub {
@@ -89,7 +88,7 @@ class GitHub {
   async _post(url: string, form: Record<string, string>): Promise<{ status: number, body: Record<string, unknown> | null } | null> {
     const headers = { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' };
     try {
-      const r = await this.fetch(url, { method: 'POST', headers, body: new URLSearchParams(form).toString() });
+      const r = await this.fetch(url, { method: 'POST', headers, body: new URLSearchParams(form).toString(), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       return { status: r.status, body: parseJson(await r.text()) };
     } catch (_) { return null; }
   }
@@ -98,7 +97,7 @@ class GitHub {
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'notes-desktop' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     try {
-      const r = await this.fetch(this.apiBase + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const r = await this.fetch(this.apiBase + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       return { status: r.status, text: await r.text() };
     } catch (_) { return null; }
   }
@@ -115,15 +114,18 @@ class GitHub {
   }
 
   async waitForToken(code: DeviceCode, cancelled: () => boolean): Promise<SignInOutcome> {
-    let intervalMs = code.intervalMs;
+    let intervalMs = code.intervalMs, failures = 0;
     while (!cancelled()) {
       if (this.now() >= code.expiresAt) return { ok: false, error: EXPIRED };
       await this.sleep(intervalMs);
       if (cancelled()) break;
       const r = await this._post(this.webBase + '/login/oauth/access_token', { client_id: this.clientId, device_code: code.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });
-      if (!r) return { ok: false, error: UNREACHABLE };
-      const b = r.body;
-      if (!b) return { ok: false, error: 'GitHub gave an unreadable answer (' + r.status + ').' };
+      const b = r ? r.body : null;
+      if (!b) {
+        if (++failures >= MAX_POLL_FAILURES) return { ok: false, error: r ? 'GitHub gave an unreadable answer (' + r.status + ').' : UNREACHABLE };
+        continue;
+      }
+      failures = 0;
       const token = str(b, 'access_token');
       if (token) {
         const who = await this.whoAmI(token);
@@ -134,9 +136,9 @@ class GitHub {
       if (error === 'slow_down') { intervalMs = Math.min(MAX_INTERVAL_MS, intervalMs + 5000); continue; }
       if (error === 'expired_token') return { ok: false, error: EXPIRED };
       if (error === 'access_denied') return { ok: false, error: DENIED };
-      return { ok: false, error: apiMessage(b, 'GitHub refused the sign-in (' + (error || r.status) + ').') };
+      return { ok: false, error: apiMessage(b, 'GitHub refused the sign-in (' + (error || (r ? r.status : 'no answer')) + ').') };
     }
-    return { ok: false, error: 'The sign-in was cancelled.' };
+    return { ok: false, error: GITHUB_CANCELLED };
   }
 
   async whoAmI(token: string): Promise<LoginResult> {
@@ -154,7 +156,7 @@ class GitHub {
     for (let page = 1; page <= 5; page++) {
       const r = await this._api(token, 'GET', '/user/repos?affiliation=owner&visibility=private&sort=pushed&per_page=100&page=' + page);
       if (!r) return { ok: false, error: UNREACHABLE };
-      if (r.status === 401) return { ok: false, error: REJECTED };
+      if (r.status === 401) return rejected();
       let list: unknown;
       try { list = JSON.parse(r.text); } catch (_) { list = null; }
       if (r.status !== 200 || !Array.isArray(list)) return { ok: false, error: apiMessage(parseJson(r.text), 'GitHub did not list the repositories (' + r.status + ').') };
@@ -165,10 +167,11 @@ class GitHub {
   }
 
   async createPrivateRepo(token: string, name: string): Promise<RepoResult> {
-    if (!validRepoName(name)) return { ok: false, error: 'A repository name uses letters, digits, dots, dashes and underscores.' };
+    const problem = repoNameProblem(name);
+    if (problem) return { ok: false, error: problem };
     const r = await this._api(token, 'POST', '/user/repos', { name, private: true, auto_init: false, description: MADE_BY_NOTES });
     if (!r) return { ok: false, error: UNREACHABLE };
-    if (r.status === 401) return { ok: false, error: REJECTED };
+    if (r.status === 401) return rejected();
     const body = parseJson(r.text);
     if (r.status === 422 && /already exists/i.test(r.text)) return { ok: false, error: 'You already have a repository called ' + name + '. Pick it from the list or choose another name.' };
     const repo = r.status === 201 ? parseRepo(body) : null;
@@ -178,4 +181,4 @@ class GitHub {
 }
 
 export type { DeviceCode, CodeResult, SignInOutcome, LoginResult, Repo, RepoResult, ReposResult, FetchLike, Hooks };
-export { GitHub, gitAuthEnv, isGitHubHttps, validRepoName, DEFAULT_CLIENT_ID };
+export { GitHub, gitAuthEnv, isGitHubHttps, DEFAULT_CLIENT_ID };

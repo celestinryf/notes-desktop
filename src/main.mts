@@ -1141,7 +1141,7 @@ function main() {
   handle('github:cancelSignIn', () => { github.cancelSignIn(); });
   handle('github:signOut', () => { github.signOut(); });
   handle('github:repos', () => github.repos());
-  handle('github:createRepo', (_e, name) => github.createRepo(String(name || '').trim()));
+  handle('github:createRepo', (_e, name) => github.createRepo(typeof name === 'string' ? name.trim() : ''));
 
   const CHANGE_KINDS: Record<string, VersionChangeKind> = { A: 'added', M: 'changed', R: 'renamed', D: 'removed' };
   const bringsBack = (rel: string) => TEXT_EXT.has(extOf(rel)) || extOf(rel) === 'mdlock';

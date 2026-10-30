@@ -3,7 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { GitHub, gitAuthEnv, isGitHubHttps, validRepoName, DEFAULT_CLIENT_ID } = require('../../src/github.mts');
+const { GitHub, gitAuthEnv, isGitHubHttps, DEFAULT_CLIENT_ID } = require('../../src/github.mts');
+const { validRepoName } = require('../../src/shared/helpers.mts');
 const { TokenStore, CANNOT_KEEP } = require('../../src/github-token.mts');
 const { GitHubSession } = require('../../src/github-session.mts');
 const { tmpDir } = require('../helpers/tmp');
@@ -73,8 +74,12 @@ test('waitForToken polls through pending and slow_down, then fetches the login',
 test('waitForToken: expiry, denial, cancel, an unknown error and going offline all stop with their own words', async () => {
   assert.equal((await client([{ status: 200, body: { error: 'expired_token' } }]).gh.waitForToken(code(), () => false)).error, 'The code expired before it was entered. Try again for a new code.');
   assert.equal((await client([{ status: 200, body: { error: 'access_denied' } }]).gh.waitForToken(code(), () => false)).error, 'The sign-in was cancelled on github.com. Nothing changed.');
-  assert.equal((await client([{ status: 200, body: { error: 'incorrect_device_code', error_description: 'bad' } }]).gh.waitForToken(code(), () => false)).error, 'GitHub refused the sign-in (incorrect_device_code).');
-  assert.equal((await client([{ throws: true }]).gh.waitForToken(code(), () => false)).error, 'Notes could not reach GitHub. Check the connection and try again.');
+  assert.equal((await client([{ status: 200, body: { error: 'incorrect_device_code', error_description: 'bad' } }]).gh.waitForToken(code(), () => false)).error, 'GitHub said: bad');
+  assert.equal((await client([{ status: 200, body: { error: 'incorrect_device_code' } }]).gh.waitForToken(code(), () => false)).error, 'GitHub refused the sign-in (incorrect_device_code).');
+  const flaky = client([{ throws: true }, { status: 502, body: '<html>' }, { status: 200, body: { access_token: 'tok' } }, { status: 200, body: { login: 'me' } }]);
+  assert.deepEqual(await flaky.gh.waitForToken(code(), () => false), { ok: true, token: 'tok', login: 'me' }, 'two failed polls are ridden out');
+  assert.equal((await client([{ throws: true }, { throws: true }, { throws: true }]).gh.waitForToken(code(), () => false)).error, 'Notes could not reach GitHub. Check the connection and try again.');
+  assert.equal((await client([{ status: 200, body: { error: 'device_flow_disabled', error_description: 'Device Flow must be explicitly enabled for this App' } }]).gh.waitForToken(code(), () => false)).error, 'GitHub said: Device Flow must be explicitly enabled for this App');
   const c = client([]);
   c.tick(900001);
   assert.equal((await c.gh.waitForToken(code(), () => false)).error, 'The code expired before it was entered. Try again for a new code.');
@@ -88,8 +93,10 @@ test('waitForToken: expiry, denial, cancel, an unknown error and going offline a
 test('a token GitHub no longer accepts is reported as such by whoAmI, repos and createRepo', async () => {
   const rejected = 'GitHub no longer accepts this sign-in. Sign in again.';
   assert.equal((await client([{ status: 401, body: { message: 'Bad credentials' } }]).gh.whoAmI('t')).error, rejected);
-  assert.equal((await client([{ status: 401, body: {} }]).gh.privateRepos('t')).error, rejected);
-  assert.equal((await client([{ status: 401, body: {} }]).gh.createPrivateRepo('t', 'notes')).error, rejected);
+  const repos = await client([{ status: 401, body: {} }]).gh.privateRepos('t');
+  assert.equal(repos.error, rejected);
+  assert.equal(repos.rejected, true);
+  assert.equal((await client([{ status: 401, body: {} }]).gh.createPrivateRepo('t', 'notes')).rejected, true);
 });
 
 test('privateRepos asks for owned private repositories by last push and follows pages', async () => {
@@ -117,7 +124,8 @@ test('createPrivateRepo validates the name, posts private, and explains a taken 
   const taken = await client([{ status: 422, body: { message: 'Repository creation failed.', errors: [{ message: 'name already exists on this account' }] } }]).gh.createPrivateRepo('t', 'notes');
   assert.equal(taken.error, 'You already have a repository called notes. Pick it from the list or choose another name.');
   const bad = await client([]).gh.createPrivateRepo('t', 'my notes');
-  assert.equal(bad.error, 'A repository name uses letters, digits, dots, dashes and underscores.');
+  assert.equal(bad.error, 'A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.');
+  assert.equal((await client([]).gh.createPrivateRepo('t', '')).error, 'Give the repository a name.');
   assert.equal((await client([{ status: 403, body: { message: 'Resource not accessible' } }]).gh.createPrivateRepo('t', 'ok')).error, 'GitHub said: Resource not accessible');
 });
 
@@ -127,6 +135,7 @@ test('validRepoName and isGitHubHttps', () => {
   assert.equal(validRepoName('..'), false);
   assert.equal(validRepoName(''), false);
   assert.equal(validRepoName('a/b'), false);
+  assert.equal(validRepoName('notes.git'), false);
   assert.equal(isGitHubHttps('https://github.com/me/notes.git'), true);
   assert.equal(isGitHubHttps('  https://github.com/me/notes'), true);
   assert.equal(isGitHubHttps('git@github.com:me/notes.git'), false);
@@ -242,12 +251,30 @@ test('GitHubSession: cancelling a wait ends it, and a second start replaces the 
   assert.equal(s.pending, null);
 });
 
-test('GitHubSession: the session reads a kept sign-in at start and signs out when GitHub rejects the token', async () => {
+test('GitHubSession: a cancel that lands while a poll is in flight keeps nothing', async () => {
+  let held = null;
+  const { s, store } = session([
+    { status: 200, body: { device_code: 'dc', user_code: 'C', verification_uri: 'u', expires_in: 900, interval: 5 } },
+    { status: 200, body: { access_token: 'tok' }, expect: () => { held = s.pending.done; s.cancelSignIn(); } },
+    { status: 200, body: { login: 'me' } },
+  ]);
+  assert.equal((await s.startSignIn()).ok, true);
+  assert.ok(held, 'the poll ran');
+  assert.equal((await held).error, 'The sign-in was cancelled.');
+  assert.equal(s.status().signedIn, false);
+  assert.equal(store.read(), null);
+});
+
+test('GitHubSession: the kept sign-in is read lazily, not in the constructor, and GitHub rejecting the token signs out', async () => {
   const file = path.join(tmpDir('notes-session-'), 'github-token.bin');
-  const store = new TokenStore(file, fakeSafe());
+  let reads = 0;
+  const safe = fakeSafe();
+  const counting = Object.assign({}, safe, { decryptString: (b) => { reads++; return safe.decryptString(b); } });
+  const store = new TokenStore(file, counting);
   store.write({ token: 'old', login: 'me' });
   const c = client([{ status: 401, body: {} }]);
   const s = new GitHubSession({ store, github: c.gh });
+  assert.equal(reads, 0, 'nothing is decrypted before the first use');
   assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true });
   const r = await s.repos();
   assert.equal(r.ok, false);

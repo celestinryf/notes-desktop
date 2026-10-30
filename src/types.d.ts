@@ -149,8 +149,8 @@ interface GithubStatus { signedIn: boolean; login: string | null; canKeep: boole
 type GithubCodeResult = { ok: true; userCode: string; verificationUri: string; expiresAt: number } | { ok: false; error: string };
 type GithubSignInResult = { ok: true; login: string } | { ok: false; error: string };
 interface GithubRepo { name: string; fullName: string; cloneUrl: string; fromNotes: boolean }
-type GithubRepoResult = { ok: true; repo: GithubRepo } | { ok: false; error: string };
-type GithubReposResult = { ok: true; repos: GithubRepo[] } | { ok: false; error: string };
+type GithubRepoResult = { ok: true; repo: GithubRepo } | { ok: false; error: string; rejected?: boolean };
+type GithubReposResult = { ok: true; repos: GithubRepo[] } | { ok: false; error: string; rejected?: boolean };
 type FileResult = { ok: true; filePath: string } | { ok: false; error?: string; canceled?: boolean };
 type PrintResult = { ok: boolean; error?: string | null; dry?: boolean };
 type EmailResult = { ok: true; truncated: boolean } | { ok: false; error: string };

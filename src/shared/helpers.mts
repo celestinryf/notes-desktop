@@ -573,6 +573,10 @@ function fuzzyScore(query: string | null | undefined, text: string | null | unde
 }
 
 const isObjectLike = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
+const GITHUB_CANCELLED = 'The sign-in was cancelled.';
+const GITHUB_REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+const validRepoName = (name: string) => GITHUB_REPO_NAME.test(name) && name !== '.' && name !== '..' && !/\.git$/i.test(name);
+const repoNameProblem = (name: string) => !name ? 'Give the repository a name.' : validRepoName(name) ? '' : 'A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.';
 const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
 const stringItems = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
@@ -603,7 +607,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
+  isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
