@@ -1958,6 +1958,8 @@ test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancel
   await page.keyboard.press('Control+Shift+b');
   await page.waitForSelector('#libraryDialog[open]');
   await waitForDom(() => /Sync with GitHub/.test(document.getElementById('libraryPrimaryBtn').textContent));
+  assert.equal(await page.$eval('#libraryGithubBtn', (b) => b.classList.contains('hidden')), true, 'no second GitHub button while the primary is Sync with GitHub');
+  assert.doesNotMatch(await page.textContent('#libraryStatusText'), /signed in/i, 'no account sentence without a repository');
   await page.click('#libraryPrimaryBtn');
   await page.waitForSelector('#githubDialog[open]');
   assert.equal(await page.$eval('#libraryDialog', (d) => d.open), false, 'the History dialog closed');

@@ -21,9 +21,13 @@ function minutesLeft(expiresAt: number) {
   return Math.max(1, Math.round((expiresAt - Date.now()) / 60000));
 }
 
-function settingsLabel(status: GithubStatus | null, remote: string) {
+export function githubButtonLabel(status: GithubStatus | null, remote: string) {
   if (!status || !status.signedIn) return 'Sign in with GitHub…';
   return remote ? 'Change repository…' : 'Choose a repository…';
+}
+
+export function accountSentence(status: GithubStatus | null) {
+  return status && status.signedIn ? 'Signed in to GitHub as ' + status.login + '.' : 'Not signed in to GitHub.';
 }
 
 const sameRepo = (a: string, b: string) => a.trim().replace(/(\.git)?\/*$/i, '').toLowerCase() === b.trim().replace(/(\.git)?\/*$/i, '').toLowerCase();
@@ -188,8 +192,8 @@ export function createGithubDialog({ api, updateSettings, afterRepoSet }: Github
 
   function renderSettings() {
     const s = gh.status;
-    el.githubAccount.textContent = s && s.signedIn ? 'Signed in to GitHub as ' + s.login + '.' : 'Not signed in to GitHub.';
-    setLabel(el.githubSettingsBtn, settingsLabel(s, gh.remote));
+    el.githubAccount.textContent = accountSentence(s);
+    setLabel(el.githubSettingsBtn, githubButtonLabel(s, gh.remote));
   }
 
   function renderStatus(s: GithubStatus) {

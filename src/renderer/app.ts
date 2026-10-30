@@ -1841,8 +1841,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
-    openSettingsAt: (sectionId) => openSettings(sectionId),
     openGithub: () => github.open(),
+    githubStatus: () => github.statusNow(),
     openNoteHistory: async (id, pick) => { await selectNote(id); if (state.currentId === id) openHistory(pick); else toast('That note could not be opened right now.'); },
     openNote: (id) => selectNote(id),
   });
@@ -3062,8 +3062,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.gitPushBtn.addEventListener('click', () => { library.syncNow(); });
     fromMain('gitPulled', api.on.gitPulled, (pulled) => library.noticePulled(pulled));
     fromMain('gitStatus', api.on.gitStatus, (s) => renderGitStatus(s));
-    fromMain('githubStatus', api.on.githubStatus, (s) => github.renderStatus(s));
-    api.github.status().then((s) => github.renderStatus(s)).catch(() => {});
+    const githubStatusChanged = (s: GithubStatus) => { github.renderStatus(s); library.refreshStatus(); };
+    fromMain('githubStatus', api.on.githubStatus, githubStatusChanged);
+    api.github.status().then(githubStatusChanged).catch(() => {});
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
     el.splitBtn.addEventListener('click', openSplitDialog);
