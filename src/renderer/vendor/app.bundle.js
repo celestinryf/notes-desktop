@@ -15337,7 +15337,7 @@
     [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, "GitHub did not accept the sign-in for this backup."],
     [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes."],
     [/\[rejected\]|fetch first|non-fast-forward/i, "GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync."],
-    [/too old to merge/i, "Syncing needs git 2.41 or newer. Update Git for Windows, then restart Notes."],
+    [/too old to merge/i, "Syncing needs git 2.41 or newer. Run npm install in the Notes folder again, or update the git on this PC, then restart Notes."],
     [/^Files outside the notes folder were not saved to history/, "Some files outside the notes folder were not saved to history."]
   ];
   var isLinkedNotice = (raw) => !!raw && raw.startsWith("Files outside the notes folder were not saved to history");

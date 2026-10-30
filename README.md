@@ -19,7 +19,7 @@ A notes app for Windows that opens from anywhere with **Ctrl+Alt+N**. It keeps y
 
 ## Install and run
 
-You need Windows and [Node.js](https://nodejs.org) 24 with npm (the version Notes is developed with). Notes brings its own git (through [dugite](https://github.com/desktop/dugite), which `npm install` downloads) for version history and sync, so you do not need git installed.
+You need Windows and [Node.js](https://nodejs.org) 24 with npm (the version Notes is developed with). Notes brings its own git (through [dugite](https://github.com/desktop/dugite), which `npm install` downloads, about 50 MB, so the install needs the network) for version history and sync, so you do not need git installed.
 
 ```
 git clone https://github.com/celestinryf/notes-desktop.git
