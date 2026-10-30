@@ -2,6 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
+const { execFileSync } = require('child_process');
+const { gitBinary } = require('../src/git-binary.mts');
 
 const root = path.join(__dirname, '..');
 const BUNDLES = {
@@ -15,6 +17,7 @@ const BUNDLES = {
 const STORED_LICENCES = { '@tiptap/': 'scripts/licenses/tiptap.txt' };
 const LICENCE_FILE = /^(licen[sc]e|copying)(-mit)?(\.(md|markdown|txt))?$/i;
 const NOTICE_FILE = /^notice(\.(md|txt))?$/i;
+const DUGITE_DIR = path.join(root, 'node_modules', 'dugite');
 
 async function bundledPackages() {
   const found = new Map();
@@ -28,6 +31,7 @@ async function bundledPackages() {
     }
   }
   found.set('lucide-static', new Set(['src/renderer/icons.js']));
+  found.set('dugite', new Set(['src/git-binary.mts (the main process)']));
   return found;
 }
 
@@ -42,6 +46,29 @@ function licenceOf(name) {
   return {
     text: fs.readFileSync(textFile, 'utf8').replace(/\r\n/g, '\n').trim(),
     notice: notice ? fs.readFileSync(path.join(dir, notice), 'utf8').replace(/\r\n/g, '\n').trim() : '',
+  };
+}
+
+function bundledGit() {
+  const git = gitBinary();
+  if (!git.bundled) throw new Error('the bundled git is missing; run npm install');
+  const gitDir = path.join(DUGITE_DIR, 'git');
+  const version = execFileSync(git.file, ['--version'], { env: git.env, encoding: 'utf8' }).trim().replace(/^git version /, '');
+  const downloads = JSON.parse(fs.readFileSync(path.join(DUGITE_DIR, 'script', 'embedded-git.json'), 'utf8'));
+  const url = downloads['win32-x64'].url;
+  const release = url.slice(0, url.lastIndexOf('/')).replace('/download/', '/tag/');
+  const components = fs.readFileSync(path.join(gitDir, 'etc', 'package-versions.txt'), 'utf8').replace(/\r\n/g, '\n').trim().split('\n');
+  return {
+    lines: [
+      `git ${version} (GPL-2.0), the git program Notes runs, in node_modules/dugite/git`,
+      `Source: https://github.com/git-for-windows/git/releases/tag/v${version}`,
+      `Build: ${release} (downloaded by dugite's npm install)`,
+      'This MinGit build also carries the components listed in node_modules/dugite/git/etc/package-versions.txt,',
+      'each under its own licence; the texts are in node_modules/dugite/git/ucrt64/share/licenses and',
+      'node_modules/dugite/git/ucrt64/doc/git-credential-manager/LICENSE. They are:',
+      ...components.map((c) => '  ' + c),
+    ],
+    text: fs.readFileSync(path.join(gitDir, 'LICENSE.txt'), 'utf8').replace(/\r\n/g, '\n').trim(),
   };
 }
 
@@ -63,6 +90,8 @@ async function main() {
     'packages below. Each entry gives the package, its version, its licence and where it is',
     'included, followed by the licence text. The fonts in assets/fonts are under the SIL Open',
     'Font License; their texts are in assets/fonts/OFL-Fraunces.txt and assets/fonts/OFL-Geist.txt.',
+    'The main process runs the git program that the dugite package downloads into',
+    'node_modules/dugite/git; its entry, with git\'s GPL-2.0 licence and where its source is, comes last.',
     'Regenerate this file with: npm run notices',
   ];
   for (const group of groups.values()) {
@@ -71,8 +100,10 @@ async function main() {
     parts.push(rule, '', group.text);
     if (group.notice) parts.push('', 'NOTICE', '', group.notice);
   }
+  const git = bundledGit();
+  parts.push('', rule, ...git.lines, rule, '', git.text);
   fs.writeFileSync(path.join(root, 'THIRD_PARTY_NOTICES.txt'), parts.join('\n') + '\n');
-  console.log('wrote THIRD_PARTY_NOTICES.txt: ' + packages.length + ' packages in ' + groups.size + ' licence texts');
+  console.log('wrote THIRD_PARTY_NOTICES.txt: ' + packages.length + ' packages in ' + groups.size + ' licence texts, plus git');
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

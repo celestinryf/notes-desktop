@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { run, runBytes, AUTHOR } from './git-run.mts';
+import { run, runBytes, spawnGit, AUTHOR } from './git-run.mts';
 import type { GitRun } from './git-run.mts';
 import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
@@ -56,7 +55,7 @@ function lookAt(filePath: string): Promise<fs.Stats | 'gone' | 'unsure'> {
 
 function eachBlob(specs: string[], cwd: string, timeoutMs: number, visit: (index: number, text: string | null) => void): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn('git', ['cat-file', '--batch'], { cwd, windowsHide: true });
+    const child = spawnGit(['cat-file', '--batch'], cwd);
     const timer = setTimeout(() => child.kill(), timeoutMs);
     let pending: Buffer[] = [], have = 0, need = -1, index = 0, done = false;
     const joined = () => { const all = pending.length === 1 ? pending[0] : Buffer.concat(pending, have); pending = [all]; return all; };
@@ -307,7 +306,7 @@ class GitSync {
     this.state.enabled = !!settings.gitEnabled;
     const wantedRemote = String(settings.gitRemote || '').trim();
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
-    if (!(await this.available())) { this._set({ lastError: 'git is not installed or not on PATH.' }); return this.status(); }
+    if (!(await this.available())) { this._set({ lastError: 'Notes could not start git.' }); return this.status(); }
     await this.ensureRepo();
     if (wantedRemote && /^-/.test(wantedRemote)) { this._set({ remote: '', lastError: 'That does not look like a repository URL.' }); await this.syncRemote(''); }
     else await this.syncRemote(wantedRemote);

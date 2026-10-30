@@ -1,22 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { run, AUTHOR } from './git-run.mts';
+import type { GitRun } from './git-run.mts';
 import type { Store } from './store.mts';
 
 type VaultTimers = { rescan?: NodeJS.Timeout, commit?: NodeJS.Timeout, pull?: NodeJS.Timeout };
 
-type GitRun = { ok: true, stdout: string, stderr: string, error: null } | { ok: false, stdout: string, stderr: string, error: string };
-
-function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> {
-  return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs || 60000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-      const out = { stdout: String(stdout || ''), stderr: String(stderr || '') };
-      resolve(err ? { ok: false, ...out, error: String(stderr || err.message).trim() } : { ok: true, ...out, error: null });
-    });
-  });
-}
-
-const AUTHOR = ['-c', 'user.name=Notes', '-c', 'user.email=notes@localhost'];
+const git = (args: string[], cwd: string, timeoutMs?: number): Promise<GitRun> => run(args, cwd, timeoutMs || 60000);
 
 class VaultManager {
   store: Store;

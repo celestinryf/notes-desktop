@@ -27,7 +27,7 @@ function remoteName(url: string) {
 
 export function statusSentence(s: GitState) {
   if (!s.enabled) return 'History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.';
-  if (s.available === false) return 'Notes keeps history with git, and git is not installed on this PC. Install Git for Windows, then restart Notes.';
+  if (s.available === false) return 'Notes keeps history with git, but could not start it. Run npm install in the Notes folder again, or install Git for Windows, then restart Notes.';
   const saved = s.commits ? 'The last version was saved ' + H.relativeTime(s.lastCommitAt ?? 0) + '.' : 'No versions yet.';
   if (!s.remote) return saved + ' They are on this PC only. Sync with a GitHub repository to keep a copy somewhere else and to have your notes on another computer.';
   return saved + ' ' + (s.lastPushAt ? 'Synced ' + H.relativeTime(s.lastPushAt) + ' with ' + remoteName(s.remote) + '.' : 'Not synced with ' + remoteName(s.remote) + ' yet.');
