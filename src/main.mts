@@ -494,8 +494,22 @@ function main() {
   async function recycleFileOf(id: string) {
     const note = store.get(id);
     if (!USE_RECYCLE_BIN || !note || note.trashedAt || !note.vaultId || !note.filePath || !fs.existsSync(note.filePath)) return undefined;
+    store.recycling.add(id);
     return recycle(note.filePath, (p) => shell.trashItem(p));
   }
+
+  async function trashNote(id: string) {
+    live.stop(id);
+    try {
+      const n = store.trash(id, await recycleFileOf(id));
+      stickies.close(id);
+      return store.publicNote(n);
+    } finally {
+      store.recycling.delete(id);
+    }
+  }
+
+  const trashing = new Map<string, Promise<PublicNote | null>>();
 
   let trayRefreshTimer: NodeJS.Timeout | undefined;
   function refreshTraySoon() { clearTimeout(trayRefreshTimer); trayRefreshTimer = setTimeout(refreshTray, 1000); }
@@ -533,17 +547,12 @@ function main() {
     for (const id of r.removedIds) { live.stop(id); stickies.close(id); }
     return r;
   });
-  handle('notes:trash', async (_e, id) => {
-    if (store.recycling.has(id)) return store.publicNote(store.get(id));
-    live.stop(id);
-    store.recycling.add(id);
-    try {
-      const n = store.trash(id, await recycleFileOf(id));
-      stickies.close(id);
-      return store.publicNote(n);
-    } finally {
-      store.recycling.delete(id);
-    }
+  handle('notes:trash', (_e, id) => {
+    const running = trashing.get(id);
+    if (running) return running;
+    const job = trashNote(id).finally(() => trashing.delete(id));
+    trashing.set(id, job);
+    return job;
   });
   handle('notes:restore', (_e, id) => store.publicNote(store.restore(id)));
   handle('notes:destroy', (_e, id) => { live.stop(id); stickies.close(id); return store.destroy(id); });
