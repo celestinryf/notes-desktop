@@ -14726,6 +14726,7 @@
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
     isLinkedFile: () => isLinkedFile,
+    isLinkedNotice: () => isLinkedNotice,
     isNonMarkdownFile: () => isNonMarkdownFile,
     isObjectLike: () => isObjectLike,
     isOoxmlWordFile: () => isOoxmlWordFile,
@@ -15338,6 +15339,7 @@
     [/\[rejected\]|fetch first|non-fast-forward/i, "The backup on GitHub has versions this PC does not have, because another computer backed up to it. Syncing two computers comes in a later update."],
     [/^Files outside the notes folder were not saved to history/, "Some files outside the notes folder were not saved to history."]
   ];
+  var isLinkedNotice = (raw) => !!raw && raw.startsWith("Files outside the notes folder were not saved to history");
   function gitErrorText(raw) {
     if (!raw) return null;
     const known = GIT_ERRORS.find(([re]) => re.test(raw));
@@ -21163,7 +21165,7 @@
       el.historyStatus.textContent = "Loading\u2026";
       renderDialogKeepOut(false);
       el.historyDialog.showModal();
-      const r = await api.app.historyVersions(note.id, 80);
+      const r = await api.app.historyVersions(note.id, pick ? 200 : 80);
       if (!r.ok) {
         el.historyStatus.textContent = r.error;
         return;
@@ -21188,14 +21190,18 @@
         li.addEventListener("click", () => showVersion(i));
         el.historyList.append(li);
       });
-      if (hist.versions.length) showVersion(pickIndex(pick));
+      if (hist.versions.length) {
+        const at = pickIndex(pick);
+        showVersion(at);
+        if (pick && hist.versions[at].hash !== pick.hash) el.historyStatus.textContent = hist.versions[at].at <= pick.at ? "The version you picked has the same text as the note now, so the one before it is shown." : "The version you picked is older than the ones listed, so the oldest listed is shown.";
+      }
     }
     function pickIndex(pick) {
       if (!pick) return 0;
       const exact = hist.versions.findIndex((v) => v.hash === pick.hash);
       if (exact >= 0) return exact;
       const before = hist.versions.findIndex((v) => v.at <= pick.at);
-      return before >= 0 ? before : 0;
+      return before >= 0 ? before : hist.versions.length - 1;
     }
     function showVersion(i) {
       hist.index = i;
@@ -21493,7 +21499,7 @@
       const after = await api.git.status();
       renderStatus(after);
       if (el.libraryDialog.open) await loadVersions();
-      const problem = gitErrorText(after.lastError) || (pushed.ok ? null : gitErrorText(pushed.error || pushed.skipped || "push failed"));
+      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (pushed.ok ? null : gitErrorText(pushed.error || pushed.skipped || "push failed"));
       if (!problem) toast("Backed up to " + remoteName(after.remote));
       else toast(problem.text, { label: "Details", run: () => {
         openLibrary();
@@ -21509,7 +21515,7 @@
         toast("History is off.");
         return;
       }
-      const problem = gitErrorText(after.lastError) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
+      const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
       if (problem) {
         toast(problem.text, { label: "Details", run: () => {
           openLibrary();

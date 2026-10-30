@@ -584,6 +584,8 @@ const GIT_ERRORS: [RegExp, string][] = [
   [/^Files outside the notes folder were not saved to history/, 'Some files outside the notes folder were not saved to history.'],
 ];
 
+const isLinkedNotice = (raw: string | null) => !!raw && raw.startsWith('Files outside the notes folder were not saved to history');
+
 function gitErrorText(raw: string | null) {
   if (!raw) return null;
   const known = GIT_ERRORS.find(([re]) => re.test(raw));
@@ -600,7 +602,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText,
+  isObjectLike, isRecord, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

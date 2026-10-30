@@ -248,7 +248,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     const after = await api.git.status();
     renderStatus(after);
     if (el.libraryDialog.open) await loadVersions();
-    const problem = H.gitErrorText(after.lastError) || (pushed.ok ? null : H.gitErrorText(pushed.error || pushed.skipped || 'push failed'));
+    const problem = (H.isLinkedNotice(after.lastError) ? null : H.gitErrorText(after.lastError)) || (pushed.ok ? null : H.gitErrorText(pushed.error || pushed.skipped || 'push failed'));
     if (!problem) toast('Backed up to ' + remoteName(after.remote));
     else toast(problem.text, { label: 'Details', run: () => { openLibrary(); } });
   }
@@ -260,7 +260,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openSettin
     renderStatus(after);
     if (el.libraryDialog.open) await loadVersions();
     if (!r.ok && r.skipped === 'disabled') { toast('History is off.'); return; }
-    const problem = H.gitErrorText(after.lastError) || (r.ok ? null : H.gitErrorText(r.error || 'commit failed'));
+    const problem = (H.isLinkedNotice(after.lastError) ? null : H.gitErrorText(after.lastError)) || (r.ok ? null : H.gitErrorText(r.error || 'commit failed'));
     if (problem) { toast(problem.text, { label: 'Details', run: () => { openLibrary(); } }); return; }
     toast(r.ok && r.nothingToCommit ? 'Nothing new to save. The last version has every change.' : 'Saved a version');
   }

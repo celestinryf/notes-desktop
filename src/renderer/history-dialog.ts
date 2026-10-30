@@ -75,7 +75,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyStatus.textContent = 'Loading…';
     renderDialogKeepOut(false);
     el.historyDialog.showModal();
-    const r = await api.app.historyVersions(note.id, 80);
+    const r = await api.app.historyVersions(note.id, pick ? 200 : 80);
     if (!r.ok) { el.historyStatus.textContent = r.error; return; }
     hist.noteId = note.id;
     renderDialogKeepOut(r.keptOut);
@@ -97,7 +97,11 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
       li.addEventListener('click', () => showVersion(i));
       el.historyList.append(li);
     });
-    if (hist.versions.length) showVersion(pickIndex(pick));
+    if (hist.versions.length) {
+      const at = pickIndex(pick);
+      showVersion(at);
+      if (pick && hist.versions[at].hash !== pick.hash) el.historyStatus.textContent = hist.versions[at].at <= pick.at ? 'The version you picked has the same text as the note now, so the one before it is shown.' : 'The version you picked is older than the ones listed, so the oldest listed is shown.';
+    }
   }
 
   function pickIndex(pick?: { hash: string, at: number }) {
@@ -105,7 +109,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     const exact = hist.versions.findIndex((v) => v.hash === pick.hash);
     if (exact >= 0) return exact;
     const before = hist.versions.findIndex((v) => v.at <= pick.at);
-    return before >= 0 ? before : 0;
+    return before >= 0 ? before : hist.versions.length - 1;
   }
 
   function showVersion(i: number) {

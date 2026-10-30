@@ -1139,11 +1139,12 @@ function main() {
   handle('git:versions', async (_e, limit) => {
     const wanted = Math.min(5000, Math.max(1, typeof limit === 'number' ? Math.floor(limit) : 100));
     const versions: LibraryVersion[] = [];
+    const seen = new Set<string>();
     for (let skip = 0; versions.length <= wanted && skip < VERSION_SCAN_LIMIT; skip += VERSION_BATCH) {
       const raw = await git.versions(VERSION_BATCH, skip);
       for (const v of raw) {
         const changes = v.files.map(versionChange).filter((c): c is VersionChange => !!c);
-        if (changes.length) versions.push({ hash: v.hash, at: v.at, changes });
+        if (changes.length && !seen.has(v.hash)) { seen.add(v.hash); versions.push({ hash: v.hash, at: v.at, changes }); }
       }
       if (raw.length < VERSION_BATCH) break;
     }
@@ -1160,8 +1161,14 @@ function main() {
     const blob = await git.blobBefore(hash, parts.join('/'), H.MAX_TEXT_BYTES);
     if (!blob.ok) return { ok: false, error: blob.reason === 'too large' ? 'That note is too large to bring back here.' : 'That version of the note could not be read.' };
     if (blob.data.includes(0) || !isUtf8(blob.data)) return { ok: false, error: 'That file is not plain text, so it was not brought back.' };
-    fs.mkdirSync(dir, { recursive: true });
-    const written = convert.writeNew(dir, H.stemOf(name), extOf(name), blob.data);
+    let written: string;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      if (!convert.isInside(fs.realpathSync(dir), fs.realpathSync(home.path))) return { ok: false, error: 'That note cannot be brought back.' };
+      written = convert.writeNew(dir, H.stemOf(name), extOf(name), blob.data);
+    } catch (err) {
+      return { ok: false, error: 'Could not write the note back: ' + (err instanceof Error ? err.message : String(err)) };
+    }
     await store.scanVault(home.id);
     fanReloaded({ reason: 'vault' });
     const note = store.findByPath(written);
