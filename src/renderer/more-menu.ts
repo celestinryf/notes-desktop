@@ -1,9 +1,11 @@
 import { el } from './dom.ts';
 import { state } from './state.ts';
 import { placePopover } from './popover.ts';
+import { syncFoldedMenu } from './band.ts';
 
 export function openMoreMenu() {
   if (!state.current) return;
+  syncFoldedMenu();
   placePopover(el.moreMenu, el.moreBtn);
   el.moreBtn.setAttribute('aria-expanded', 'true');
 }

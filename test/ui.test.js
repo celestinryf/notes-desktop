@@ -1989,6 +1989,57 @@ test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancel
   await waitForDom(() => !document.getElementById('settingsDialog').open);
 });
 
+test('the top band matches the window buttons and never runs under them or the other side, at any width or zoom', { timeout: 60000 }, async () => {
+  await page.mouse.move(600, 400);
+  const band = () => {
+    const probe = document.getElementById('captionProbe').getBoundingClientRect();
+    const wco = navigator.windowControlsOverlay.getTitlebarAreaRect();
+    const bar = document.querySelector('.tab-bar').getBoundingClientRect();
+    const peer = document.querySelector('.pane-peer');
+    const peerLeft = peer && peer.offsetParent ? peer.getBoundingClientRect().left : null;
+    const rights = [...document.querySelectorAll('.tab-bar button')].filter((b) => b.offsetParent && !b.closest('.tab')).map((b) => b.getBoundingClientRect().right);
+    return { captionLeft: innerWidth - probe.width, captionH: wco.height, barH: bar.height, limit: peerLeft ?? innerWidth - probe.width, right: Math.max(0, ...rights) };
+  };
+  const guestRight = () => Math.max(0, ...[...document.querySelectorAll('.tab-bar button')].filter((b) => b.offsetParent && !b.closest('.tab')).map((b) => b.getBoundingClientRect().right));
+  const setZoom = (level) => app.evaluate(({ BrowserWindow }, l) => BrowserWindow.getAllWindows()[0].webContents.setZoomLevel(l), level);
+  const setWidth = (w) => app.evaluate(({ BrowserWindow }, width) => { const win = BrowserWindow.getAllWindows()[0]; if (win.isMaximized()) win.unmaximize(); win.setContentSize(width, 800); }, w);
+  const guest = () => page.frames().find((f) => /pane=right/.test(f.url()));
+  const openSplit = async () => {
+    if (await page.isVisible('#splitViewBtn')) { await page.click('#splitViewBtn'); return; }
+    await page.click('#moreBtn');
+    await page.click('#moreSplitViewBtn');
+  };
+  await page.locator('.note-row').nth(0).click();
+  await page.keyboard.press('Control+t');
+  await page.locator('.note-row').nth(1).click();
+  try {
+    for (const zoom of [0, 1]) {
+      await setZoom(zoom);
+      for (const width of [1600, 1000, 760]) {
+        await setWidth(width);
+        await sleep(500);
+        const m = await page.evaluate(band);
+        assert.ok(m.captionH > 0, 'the window buttons are measured');
+        assert.ok(Math.abs(m.barH - m.captionH - 1) < 0.5, `zoom ${zoom}, ${width}px: the band (${m.barH}) is the window buttons (${m.captionH}) and its 1px line below them`);
+        assert.ok(m.right <= m.limit + 0.5, `zoom ${zoom}, ${width}px: band buttons end at ${m.right}, before the window buttons at ${m.limit}`);
+        await openSplit();
+        await waitFor('the second side', async () => { const g = guest(); return !!g && (await g.evaluate(() => !!document.querySelector('.tab-bar')).catch(() => false)); });
+        await sleep(800);
+        const s = await page.evaluate(band);
+        assert.ok(s.right <= s.limit + 0.5, `zoom ${zoom}, ${width}px split: the left side's buttons end at ${s.right}, before the right side at ${s.limit}`);
+        const peerRight = s.limit + await guest().evaluate(guestRight);
+        assert.ok(peerRight <= s.captionLeft + 0.5, `zoom ${zoom}, ${width}px split: the right side's buttons end at ${peerRight}, before the window buttons at ${s.captionLeft}`);
+        await guest().click('#paneCloseBtn');
+        await waitForDom(() => !document.querySelector('.pane-peer') || !document.querySelector('.pane-peer').offsetParent);
+      }
+    }
+  } finally {
+    await setZoom(0);
+    await setWidth(1100);
+    await sleep(300);
+  }
+});
+
 test('no renderer errors were logged during the run', () => {
   assert.deepEqual(rendererErrors, []);
 });

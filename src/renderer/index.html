@@ -55,6 +55,8 @@
       <p class="hotkey-hint hidden">Bring Notes back from anywhere with <span id="hotkeyHint"></span></p>
       <div class="resizer" id="sidebarResizer" title="Drag to resize. Double-click to reset."></div>
     </aside>
+    <nav class="sidebar-rail" id="sidebarRail" aria-label="Sidebar and note list"></nav>
+    <div class="band-probe" aria-hidden="true"><span id="captionProbe"></span><span id="cellProbe"></span></div>
 
     <div class="sidebar-edge" id="sidebarEdge" aria-hidden="true"></div>
 
@@ -96,12 +98,13 @@
         <button class="tool-btn icon-only tab-add" id="tabAddBtn" data-icon="plus" title="New tab (Ctrl+T). Ctrl+click a note to open it in a new tab." aria-label="New tab"></button>
         <span class="spacer"></span>
         <div class="note-actions" id="noteActions">
-          <button class="tool-btn" id="restoreBtn" data-icon="rotate-ccw" title="Restore from trash"><span>Restore</span></button>
-          <button class="tool-btn tool-danger" id="destroyBtn" data-icon="trash-2" title="Delete forever"><span>Delete forever</span></button>
+          <button class="tool-btn" id="restoreBtn" data-icon="rotate-ccw" title="Restore from trash" aria-label="Restore from trash"><span>Restore</span></button>
+          <button class="tool-btn tool-danger" id="destroyBtn" data-icon="trash-2" title="Delete forever" aria-label="Delete forever"><span>Delete forever</span></button>
           <button class="tool-btn" id="sourceBtn" data-icon="code-xml" title="Show Markdown source (Ctrl+E)" aria-label="Show Markdown source" aria-pressed="false"><span class="lbl">Source</span></button>
           <button class="tool-btn icon-only" id="pinBtn" data-icon="star" title="Pin this note to the top of your lists (Ctrl+D)" aria-label="Pin this note" aria-pressed="false"></button>
+          <button class="tool-btn icon-only" id="versionsBtn" data-icon="history" title="Earlier versions of this note (Ctrl+Shift+H)" aria-label="Earlier versions"></button>
           <button class="tool-btn icon-only" id="splitViewBtn" data-icon="columns-2" title="Split view: open a second side to the right" aria-label="Split view"></button>
-          <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-haspopup="menu"><span>Share</span></button>
+          <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-label="Share" aria-haspopup="menu"><span>Share</span></button>
           <button class="tool-btn icon-only" id="moreBtn" data-icon="ellipsis" title="More actions for this note" aria-label="More actions" aria-haspopup="menu" aria-expanded="false"></button>
         </div>
         <button class="tool-btn hidden" id="paneCloseBtn" data-icon="x" title="Close this side and its tabs" aria-label="Close this side"><span>Close side</span></button>
@@ -123,6 +126,12 @@
 
       <div class="editor hidden" id="editor">
         <div class="popover menu hidden" id="moreMenu" role="menu" aria-label="More actions">
+          <div class="menu-group" role="group" aria-label="From the toolbar">
+            <button role="menuitem" class="menu-item hidden" id="moreSourceBtn" data-icon="code-xml"><span class="lbl">Show Markdown source</span><span class="keys">Ctrl+E</span></button>
+            <button role="menuitem" class="menu-item hidden" id="morePinBtn" data-icon="star"><span class="lbl">Pin this note</span><span class="keys">Ctrl+D</span></button>
+            <button role="menuitem" class="menu-item hidden" id="moreSplitViewBtn" data-icon="columns-2"><span class="lbl">Split view</span></button>
+            <button role="menuitem" class="menu-item hidden" id="moreShareBtn" data-icon="share-2"><span class="lbl">Share…</span><span class="keys">Ctrl+Shift+S</span></button>
+          </div>
           <div class="menu-group" role="group" aria-label="This note">
             <button role="menuitem" class="menu-item" id="remindBtn" data-icon="alarm-clock"><span class="lbl">Remind me…</span><span class="keys">Ctrl+Shift+M</span></button>
             <button role="menuitem" class="menu-item" id="lockBtn" data-icon="lock"><span class="lbl">Lock</span><span class="keys">Ctrl+L</span></button>

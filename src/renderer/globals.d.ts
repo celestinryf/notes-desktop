@@ -1,13 +1,6 @@
 type RichEditor = ReturnType<typeof import('../editor/index.ts').create>;
 type CodeEditor = ReturnType<typeof import('../code/index.ts').create>;
 
-interface WindowControlsOverlay extends EventTarget {
-  visible: boolean;
-  getTitlebarAreaRect(): DOMRect;
-  addEventListener(type: 'geometrychange', listener: () => void): void;
-}
-interface Navigator { windowControlsOverlay?: WindowControlsOverlay }
-
 interface Window {
   notesApi: NotesApi;
   NotesEditor?: typeof import('../editor/index.ts');

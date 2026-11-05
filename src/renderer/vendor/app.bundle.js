@@ -16269,8 +16269,16 @@
     wordcraftFrame: pageElement("#wordcraftFrame", HTMLIFrameElement),
     gridcraftFrame: pageElement("#gridcraftFrame", HTMLIFrameElement),
     sidebarTop: pageElement("#sidebarTop", HTMLDivElement),
+    sidebarRail: pageElement("#sidebarRail", HTMLElement),
+    captionProbe: pageElement("#captionProbe", HTMLSpanElement),
+    cellProbe: pageElement("#cellProbe", HTMLSpanElement),
     barToggles: pageElement("#barToggles", HTMLDivElement),
     sidebarEdge: pageElement("#sidebarEdge", HTMLDivElement),
+    versionsBtn: pageElement("#versionsBtn", HTMLButtonElement),
+    moreSourceBtn: pageElement("#moreSourceBtn", HTMLButtonElement),
+    morePinBtn: pageElement("#morePinBtn", HTMLButtonElement),
+    moreSplitViewBtn: pageElement("#moreSplitViewBtn", HTMLButtonElement),
+    moreShareBtn: pageElement("#moreShareBtn", HTMLButtonElement),
     noteTree: pageElement("#noteTree", HTMLDivElement),
     noteActions: pageElement("#noteActions", HTMLDivElement),
     tagsFold: pageElement("#tagsFold", HTMLButtonElement),
@@ -16458,9 +16466,74 @@
     if (first) first.focus();
   }
 
+  // src/renderer/band.ts
+  var FRAME_ROUNDING_PX = 1;
+  var foldOrder = () => [el.splitViewBtn, el.shareBtn, el.sourceBtn, el.versionsBtn, el.pinBtn, el.tabAddBtn];
+  var foldedItems = () => [
+    [el.moreSourceBtn, el.sourceBtn],
+    [el.morePinBtn, el.pinBtn],
+    [el.moreSplitViewBtn, el.splitViewBtn],
+    [el.moreShareBtn, el.shareBtn]
+  ];
+  function overflowing(bar) {
+    const limit = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+    return [...bar.children].some((child) => child instanceof HTMLElement && child.offsetParent !== null && child.getBoundingClientRect().right > limit + 0.5);
+  }
+  function foldToFit(bar) {
+    const buttons = foldOrder();
+    bar.classList.remove("is-cramped");
+    for (const b of buttons) b.classList.remove("is-folded");
+    for (const b of buttons) {
+      if (!overflowing(bar)) return;
+      if (!b.classList.contains("hidden")) b.classList.add("is-folded");
+    }
+    if (overflowing(bar)) bar.classList.add("is-cramped");
+  }
+  function markTabScroll() {
+    const strip = el.tabList;
+    const end = strip.scrollWidth - strip.clientWidth;
+    strip.classList.toggle("fade-start", strip.scrollLeft > 1);
+    strip.classList.toggle("fade-end", strip.scrollLeft < end - 1);
+  }
+  function fitBand() {
+    foldToFit(el.tabBar);
+    markTabScroll();
+  }
+  function captionSize() {
+    const r = el.captionProbe.getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  }
+  var cellWidth = () => el.cellProbe.getBoundingClientRect().width;
+  function watchBand(onCaption) {
+    const observer = new ResizeObserver(() => {
+      fitBand();
+      onCaption();
+    });
+    observer.observe(el.captionProbe);
+    observer.observe(el.tabBar);
+    el.tabList.addEventListener("scroll", markTabScroll, { passive: true });
+  }
+  function applyPeerCaption(w, h) {
+    const root = document.documentElement.style;
+    root.setProperty("--caption-w", (w > 0 ? Math.ceil(w) + FRAME_ROUNDING_PX : 0) + "px");
+    if (h > 0) root.setProperty("--bar-h", h + "px");
+  }
+  var isShown = (b) => b.offsetParent !== null;
+  function syncFoldedMenu() {
+    for (const [item, tool] of foldedItems()) {
+      const folded = tool.classList.contains("is-folded") && !tool.classList.contains("hidden");
+      item.classList.toggle("hidden", !folded);
+      item.classList.toggle("is-on", tool.getAttribute("aria-pressed") === "true");
+      const label = item.querySelector(".lbl");
+      const name = tool.getAttribute("aria-label");
+      if (label && name && tool !== el.shareBtn) label.textContent = name;
+    }
+  }
+
   // src/renderer/more-menu.ts
   function openMoreMenu() {
     if (!state.current) return;
+    syncFoldedMenu();
     placePopover(el.moreMenu, el.moreBtn);
     el.moreBtn.setAttribute("aria-expanded", "true");
   }
@@ -17174,7 +17247,7 @@
     function openShareMenu() {
       if (!state.current || state.current.trashedAt) return;
       syncShareMenu();
-      placePopover(el.shareMenu, el.shareBtn);
+      placePopover(el.shareMenu, isShown(el.shareBtn) ? el.shareBtn : el.moreBtn);
     }
     function closeShareMenu() {
       el.shareMenu.classList.add("hidden");
@@ -24849,18 +24922,26 @@
       const css = getComputedStyle(document.documentElement);
       const color = css.getPropertyValue("--base").trim();
       const symbol = css.getPropertyValue("--fg").trim();
-      const wco = navigator.windowControlsOverlay;
-      const rect = wco && wco.visible ? wco.getTitlebarAreaRect() : null;
-      const w = rect ? Math.max(0, Math.round(window.innerWidth - rect.x - rect.width)) : 0;
-      const key = color + symbol + w + hasPeer();
+      shareCaption();
+      const key = color + symbol;
       if (key === titleBarKey) return;
       titleBarKey = key;
       if (api.app.titleBar) api.app.titleBar({ color, symbol }).catch(() => {
       });
-      document.documentElement.style.setProperty("--caption-w", w + "px");
-      if (hasPeer()) toPeer({ type: "caption", w });
     }
     let titleBarKey = "";
+    function shareCaption() {
+      if (GUEST || !hasPeer()) {
+        peerCaptionKey = "";
+        return;
+      }
+      const { w, h } = captionSize();
+      const key = w + "x" + h;
+      if (key === peerCaptionKey) return;
+      peerCaptionKey = key;
+      toPeer({ type: "caption", w, h });
+    }
+    let peerCaptionKey = "";
     function applyEditorLayout(settings) {
       el.editorColumn.classList.remove("align-left", "align-center", "align-right");
       el.editorColumn.classList.add("align-" + settings.editorAlign);
@@ -24868,7 +24949,6 @@
       el.editorColumn.style.setProperty("--editor-col-width", (settings.editorWidth || 760) + "px");
     }
     const NARROW_W = 1e3;
-    const PEEK_EDGE_PX = 24;
     let treeActiveKey = null;
     let sidebarPeek = null;
     let peekTimer;
@@ -24888,7 +24968,7 @@
       el.app.classList.toggle("sidebar-peek", layout === "float" && !!sidebarPeek);
       el.toggleSidebarBtn.classList.toggle("is-on", layout === "docked");
       el.toggleSidebarBtn.title = layout === "docked" ? "Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back." : "Show the sidebar (Ctrl+\\)";
-      const home = layout === "docked" ? el.sidebarTop : el.tabBar;
+      const home = layout === "docked" ? el.sidebarTop : el.sidebarRail;
       if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
     }
     function peekSidebar(how) {
@@ -24952,8 +25032,9 @@
         }, 350);
       };
       document.addEventListener("mousemove", (e) => {
-        const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
-        const near = e.clientX <= PEEK_EDGE_PX;
+        const target = e.target instanceof Element ? e.target : null;
+        const overSidebar = !!target && el.sidebar.contains(target);
+        const near = !!target && (el.sidebarEdge.contains(target) || el.sidebarRail.contains(target) && !target.closest("button"));
         if (near && !sidebarPeek) {
           clearTimeout(peekTimer);
           peekTimer = setTimeout(() => peekSidebar("hover"), 90);
@@ -24965,6 +25046,7 @@
         else if (!sidebarPeek) clearTimeout(peekTimer);
       });
       el.sidebarEdge.addEventListener("dragenter", () => peekSidebar("hover"));
+      el.sidebarRail.addEventListener("dragenter", () => peekSidebar("hover"));
       el.sidebar.addEventListener("mouseenter", () => {
         if (sidebarPeek === "hover") clearTimeout(peekTimer);
       });
@@ -24973,7 +25055,7 @@
       });
       document.addEventListener("pointerdown", (e) => {
         const target = e.target instanceof Node ? e.target : null;
-        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.barToggles.contains(target) || el.folderMenu.contains(target)) return;
+        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
         unpeekSidebar();
       }, true);
     }
@@ -24984,7 +25066,8 @@
       sidebar = clampPane("sidebarWidth", sidebar);
       list = clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
-      const over2 = sidebarShown + list - paneBudget();
+      const rail = sidebarHidden() ? cellWidth() : 0;
+      const over2 = sidebarShown + rail + list - paneBudget();
       if (over2 > 0) {
         const listGive = Math.min(over2, list - PANE_LIMITS.listWidth.min);
         list -= listGive;
@@ -26011,6 +26094,7 @@
       syncTitleBar();
       el.splitViewBtn.classList.toggle("hidden", GUEST || tabs.split);
       el.paneCloseBtn.classList.toggle("hidden", !GUEST);
+      fitBand();
       const missing = openIds().filter((id) => id !== state.currentId && !tabs.titles.has(id));
       if (missing.length) loadTabTitles(missing);
     }
@@ -26283,7 +26367,7 @@
           applySettings(m.settings, { fromPeer: true });
           return;
         case "caption":
-          if (GUEST) document.documentElement.style.setProperty("--caption-w", (Number(m.w) || 0) + "px");
+          if (GUEST) applyPeerCaption(Number(m.w) || 0, Number(m.h) || 0);
           return;
         case "focus":
           setActiveSide("right");
@@ -26595,11 +26679,13 @@
       el.attachBtn.classList.toggle("hidden", inTrash || fileReadOnly);
       el.recordBtn.classList.toggle("hidden", inTrash || fileReadOnly);
       el.historyBtn.classList.toggle("hidden", inTrash);
+      el.versionsBtn.classList.toggle("hidden", inTrash);
       el.duplicateBtn.classList.toggle("hidden", inTrash);
       el.splitBtn.classList.toggle("hidden", inTrash);
       el.restoreBtn.classList.toggle("hidden", !inTrash);
       el.destroyBtn.classList.toggle("hidden", !inTrash);
       renderPinButton(note.pinned);
+      fitBand();
       el.folderSelect.disabled = inTrash;
       renderFolderSelect();
       el.editorEmpty.classList.add("hidden");
@@ -27682,7 +27768,7 @@
         if (!el.shareMenu.classList.contains("hidden")) {
           e.preventDefault();
           closeShareMenu();
-          el.shareBtn.focus();
+          (isShown(el.shareBtn) ? el.shareBtn : el.moreBtn).focus();
           return;
         }
         if (!el.convertMenu.classList.contains("hidden")) {
@@ -27943,6 +28029,14 @@
         if (el.moreMenu.classList.contains("hidden")) openMoreMenu();
         else closeMoreMenu();
       });
+      const fromMore = (run) => () => {
+        closeMoreMenu();
+        run();
+      };
+      el.moreSourceBtn.addEventListener("click", fromMore(() => el.sourceBtn.click()));
+      el.morePinBtn.addEventListener("click", fromMore(() => el.pinBtn.click()));
+      el.moreSplitViewBtn.addEventListener("click", fromMore(() => el.splitViewBtn.click()));
+      el.moreShareBtn.addEventListener("click", fromMore(() => openShareMenu()));
       el.moreMenu.addEventListener("click", (e) => {
         if (closestTo(e, ".menu-item")) closeMoreMenu();
       });
@@ -28166,6 +28260,7 @@
       el.attachBtn.addEventListener("click", attachFiles);
       el.recordBtn.addEventListener("click", toggleRecording);
       el.historyBtn.addEventListener("click", () => openHistory());
+      el.versionsBtn.addEventListener("click", () => openHistory());
       el.historyKeepBtn.addEventListener("click", toggleKeepOut);
       el.historyRecordBtn.addEventListener("click", recordAgain);
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());
@@ -28583,7 +28678,7 @@
     }
     async function init() {
       import_icons5.default.hydrate(document);
-      if (navigator.windowControlsOverlay) navigator.windowControlsOverlay.addEventListener("geometrychange", syncTitleBar);
+      watchBand(shareCaption);
       const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
       if (GUEST) document.body.classList.add("pane-guest");
       createRichEditor();
