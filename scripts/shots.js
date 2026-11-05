@@ -315,6 +315,8 @@ const SCENES = {
     await page.mouse.move(x + 80, y); await sleep(500);
   } },
   'two-tabs': { about: 'Two tabs open: the tabs show (with one, they do not)', run: steps(openNote('Q4 planning'), key('Control+t'), openNote('Groceries')) },
+  'band-zoomed': { about: 'Zoomed to 120% with four tabs open: the top band against the window buttons', settings: { zoomLevel: 1 }, run: steps(openNote('Q4 planning'), key('Control+t'), openNote('Groceries'), key('Control+t'), openNote('Reading list'), key('Control+t'), openNote('Notes on writing tools')) },
+  'band-folded': { about: 'A narrow window in split view: the actions that do not fit fold into More, shown open', size: { width: 900, height: 640 }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('#splitViewBtn'); await sleep(1500); await page.click('#moreBtn'); await sleep(400); }) },
   'scheme-custom': { about: 'A custom colour scheme (test colours), derived from three seeds per mode', settings: { colorScheme: 'custom', customColors: {
     light: { background: '#f2f5f7', text: '#1b2530', accent: '#2b6cb0' }, dark: { background: '#141a21', text: '#e3e9ef', accent: '#5b9bd5' } } }, run: openNote('Q4 planning') },
   word: { about: 'A Word document open in WordCraft (needs its web build)', word: true, run: steps(openNote('Trail report.docx'), async () => { await sleep(8000); }) },
@@ -365,6 +367,7 @@ async function shoot(theme, name, opts) {
   });
   try {
     const page = await app.firstWindow();
+    if (!opts.screen) await app.evaluate(({ BrowserWindow, screen }) => { const w = BrowserWindow.getAllWindows()[0]; const left = Math.min(...screen.getAllDisplays().map((d) => d.bounds.x)); w.setPosition(left - w.getBounds().width - 2000, 0); });
     await page.waitForSelector('#app');
     await app.evaluate(({ BrowserWindow }, size) => { BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height); }, SCENES[name].size || opts.size);
     await page.evaluate(() => { window.confirm = () => true; return document.fonts && document.fonts.ready.then(() => true); });

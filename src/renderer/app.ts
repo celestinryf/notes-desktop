@@ -11,6 +11,7 @@ import { toast } from './toast.ts';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.ts';
 import { placePopover } from './popover.ts';
 import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.ts';
+import { fitBand, captionSize, cellWidth, watchBand, applyPeerCaption, isShown } from './band.ts';
 import { createBooks } from './books.ts';
 import { createRelated } from './related.ts';
 import { createReminders } from './reminders.ts';
@@ -54,7 +55,7 @@ type PeerMessage =
   | { type: 'tabs'; ids: string[]; current: string | null }
   | { type: 'open'; id: string; newTab?: boolean; focus?: OpenFocus | null }
   | { type: 'settings'; settings: Settings }
-  | { type: 'caption'; w: number }
+  | { type: 'caption'; w: number; h: number }
   | { type: 'active'; on: boolean }
   | { type: 'event'; name: MainEventName; args: MainEventArgs<MainEventName> }
   | { type: 'flush'; seq: number; leave: boolean }
@@ -123,17 +124,23 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const css = getComputedStyle(document.documentElement);
     const color = css.getPropertyValue('--base').trim();
     const symbol = css.getPropertyValue('--fg').trim();
-    const wco = navigator.windowControlsOverlay;
-    const rect = wco && wco.visible ? wco.getTitlebarAreaRect() : null;
-    const w = rect ? Math.max(0, Math.round(window.innerWidth - rect.x - rect.width)) : 0;
-    const key = color + symbol + w + hasPeer();
+    shareCaption();
+    const key = color + symbol;
     if (key === titleBarKey) return;
     titleBarKey = key;
     if (api.app.titleBar) api.app.titleBar({ color, symbol }).catch(() => {});
-    document.documentElement.style.setProperty('--caption-w', w + 'px');
-    if (hasPeer()) toPeer({ type: 'caption', w });
   }
   let titleBarKey = '';
+
+  function shareCaption() {
+    if (GUEST || !hasPeer()) { peerCaptionKey = ''; return; }
+    const { w, h } = captionSize();
+    const key = w + 'x' + h;
+    if (key === peerCaptionKey) return;
+    peerCaptionKey = key;
+    toPeer({ type: 'caption', w, h });
+  }
+  let peerCaptionKey = '';
 
   function applyEditorLayout(settings: Settings) {
     el.editorColumn.classList.remove('align-left', 'align-center', 'align-right');
@@ -143,7 +150,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   const NARROW_W = 1000;
-  const PEEK_EDGE_PX = 24;
   let treeActiveKey: string | null = null;
   let sidebarPeek: 'hover' | 'sticky' | null = null;
   let peekTimer: ReturnType<typeof setTimeout> | undefined;
@@ -161,7 +167,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.app.classList.toggle('sidebar-peek', layout === 'float' && !!sidebarPeek);
     el.toggleSidebarBtn.classList.toggle('is-on', layout === 'docked');
     el.toggleSidebarBtn.title = layout === 'docked' ? 'Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back.' : 'Show the sidebar (Ctrl+\\)';
-    const home = layout === 'docked' ? el.sidebarTop : el.tabBar;
+    const home = layout === 'docked' ? el.sidebarTop : el.sidebarRail;
     if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
   }
   function peekSidebar(how: 'hover' | 'sticky') {
@@ -214,8 +220,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       }, 350);
     };
     document.addEventListener('mousemove', (e) => {
-      const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
-      const near = e.clientX <= PEEK_EDGE_PX;
+      const target = e.target instanceof Element ? e.target : null;
+      const overSidebar = !!target && el.sidebar.contains(target);
+      const near = !!target && el.sidebarRail.contains(target) && !target.closest('button');
       if (near && !sidebarPeek) { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); }
       if (near === nearEdge) return;
       nearEdge = near;
@@ -223,12 +230,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (sidebarPeek === 'hover') leaveSoon();
       else if (!sidebarPeek) clearTimeout(peekTimer);
     });
-    el.sidebarEdge.addEventListener('dragenter', () => peekSidebar('hover'));
+    el.sidebarRail.addEventListener('dragenter', () => peekSidebar('hover'));
     el.sidebar.addEventListener('mouseenter', () => { if (sidebarPeek === 'hover') clearTimeout(peekTimer); });
     el.sidebar.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); });
     document.addEventListener('pointerdown', (e) => {
       const target = e.target instanceof Node ? e.target : null;
-      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.barToggles.contains(target) || el.folderMenu.contains(target)) return;
+      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
       unpeekSidebar();
     }, true);
   }
@@ -241,7 +248,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     sidebar = H.clampPane('sidebarWidth', sidebar);
     list = H.clampPane('listWidth', list);
     const sidebarShown = sidebarHidden() ? 0 : sidebar;
-    const over = sidebarShown + list - paneBudget();
+    const rail = sidebarHidden() ? cellWidth() : 0;
+    const over = sidebarShown + rail + list - paneBudget();
     if (over > 0) {
       const listGive = Math.min(over, list - H.PANE_LIMITS.listWidth.min);
       list -= listGive;
@@ -1225,6 +1233,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     syncTitleBar();
     el.splitViewBtn.classList.toggle('hidden', GUEST || tabs.split);
     el.paneCloseBtn.classList.toggle('hidden', !GUEST);
+    fitBand();
     const missing = openIds().filter((id) => id !== state.currentId && !tabs.titles.has(id));
     if (missing.length) loadTabTitles(missing);
   }
@@ -1459,6 +1468,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         toPeer({ type: 'active', on: tabs.active === 'right' });
         toPeer({ type: 'tabs', ids: openIds(), current: state.currentId });
         queued.forEach(toPeer);
+        peerCaptionKey = '';
+        shareCaption();
         return;
       }
       case 'tabs':
@@ -1477,7 +1488,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         applySettings(m.settings, { fromPeer: true });
         return;
       case 'caption':
-        if (GUEST) document.documentElement.style.setProperty('--caption-w', (Number(m.w) || 0) + 'px');
+        if (GUEST) applyPeerCaption(Number(m.w) || 0, Number(m.h) || 0);
         return;
       case 'focus': setActiveSide('right'); return;
       case 'active':
@@ -1734,6 +1745,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.attachBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.recordBtn.classList.toggle('hidden', inTrash || fileReadOnly);
     el.historyBtn.classList.toggle('hidden', inTrash);
+    el.versionsBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
     el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
@@ -1743,6 +1755,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     renderFolderSelect();
     el.editorEmpty.classList.add('hidden');
     el.editor.classList.remove('hidden');
+    fitBand();
     markActiveRow(id);
     revealInTree(note);
     revealInSidebar(note);
@@ -2671,7 +2684,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
       cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
-      ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].map((b) => fromButton(b, 'This note')),
+      ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
       ...[...el.shareMenu.querySelectorAll<HTMLButtonElement>('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action ?? '') })),
@@ -2736,7 +2749,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (el.pdfEditor.contains(document.activeElement)) return;
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.moreMenu.classList.contains('hidden')) { e.preventDefault(); closeMoreMenu(); el.moreBtn.focus(); return; }
-      if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); el.shareBtn.focus(); return; }
+      if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); (isShown(el.shareBtn) ? el.shareBtn : el.moreBtn).focus(); return; }
       if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.fileConvertBtn.focus(); return; }
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
@@ -2830,6 +2843,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.emptyNewNoteBtn.addEventListener('click', () => newNote());
     el.paletteBtn.addEventListener('click', () => openPalette());
     el.moreBtn.addEventListener('click', () => { if (el.moreMenu.classList.contains('hidden')) openMoreMenu(); else closeMoreMenu(); });
+    const fromMore = (run: () => void) => () => { closeMoreMenu(); run(); };
+    el.moreSourceBtn.addEventListener('click', fromMore(() => el.sourceBtn.click()));
+    el.morePinBtn.addEventListener('click', fromMore(() => el.pinBtn.click()));
+    el.moreSplitViewBtn.addEventListener('click', fromMore(() => el.splitViewBtn.click()));
+    el.moreShareBtn.addEventListener('click', fromMore(() => openShareMenu()));
     el.moreMenu.addEventListener('click', (e) => { if (closestTo(e, '.menu-item')) closeMoreMenu(); });
     bindMenuKeys();
     bindSettingsNav();
@@ -2950,6 +2968,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.attachBtn.addEventListener('click', attachFiles);
     el.recordBtn.addEventListener('click', toggleRecording);
     el.historyBtn.addEventListener('click', () => openHistory());
+    el.versionsBtn.addEventListener('click', () => openHistory());
     el.historyKeepBtn.addEventListener('click', toggleKeepOut);
     el.historyRecordBtn.addEventListener('click', recordAgain);
     el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
@@ -3206,7 +3225,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function init() {
     NotesIcons.hydrate(document);
-    if (navigator.windowControlsOverlay) navigator.windowControlsOverlay.addEventListener('geometrychange', syncTitleBar);
+    watchBand(shareCaption);
     const [settings, info] = await Promise.all([api.settings.get(), api.app.info()]);
     if (GUEST) document.body.classList.add('pane-guest');
     createRichEditor();

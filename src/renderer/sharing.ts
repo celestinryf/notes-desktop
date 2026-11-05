@@ -6,6 +6,7 @@ import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 import { toast } from './toast.ts';
 import { placePopover } from './popover.ts';
+import { isShown } from './band.ts';
 
 interface SharingDeps {
   api: NotesApi;
@@ -31,7 +32,7 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
   function openShareMenu() {
     if (!state.current || state.current.trashedAt) return;
     syncShareMenu();
-    placePopover(el.shareMenu, el.shareBtn);
+    placePopover(el.shareMenu, isShown(el.shareBtn) ? el.shareBtn : el.moreBtn);
   }
 
   function closeShareMenu() {

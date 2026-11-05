@@ -5,6 +5,7 @@ import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitHub } from './github.mts';
+import { needsAppId } from './start-menu.mts';
 import { TokenStore } from './github-token.mts';
 import { GitHubSession, dryMode } from './github-session.mts';
 import { GitSync, LINKED_DIR } from './gitSync.mts';
@@ -44,12 +45,13 @@ const SYNC_EVERY_MS = 5 * 60 * 1000;
 const SYNC_ON_SHOW_MS = 60 * 1000;
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
-const TITLE_BAR_H = 40;
+const TITLE_BAR_H = 39;
+const APP_ID = 'com.celestinryf.notes';
 const FIRST_PAGE_ROWS = 120;
 
 app.setName('Notes');
 crafts.registerSchemes(protocol);
-app.setAppUserModelId('com.celestinryf.notes');
+app.setAppUserModelId(APP_ID);
 app.setPath('userData', DATA_DIR);
 
 if (!app.requestSingleInstanceLock()) {
@@ -394,6 +396,15 @@ function main() {
         args: app.isPackaged ? ['--hidden'] : [APP_ROOT, '--hidden'],
       });
     } catch (_) {  }
+  }
+
+  function applyStartMenuShortcut() {
+    if (!MANAGE_LOGIN_ITEM || process.platform !== 'win32' || app.isPackaged) return;
+    const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Notes.lnk');
+    let now: Electron.ShortcutDetails;
+    try { now = shell.readShortcutLink(link); } catch (_) { return; }
+    if (!needsAppId(now, process.execPath, APP_ROOT, APP_ID)) return;
+    if (!shell.writeShortcutLink(link, 'update', { ...now, appUserModelId: APP_ID })) console.error('[startup] could not add the app ID to the Start Menu shortcut', link);
   }
 
   function applyTheme() {
@@ -1624,6 +1635,7 @@ function main() {
     step('tray', createTray);
     step('hotkey', () => registerHotkey(store.settings.hotkey));
     step('login item', applyLoginItem);
+    step('start menu shortcut', applyStartMenuShortcut);
     step('recycle bin', forgetEmptiedBin);
     git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
