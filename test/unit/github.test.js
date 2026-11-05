@@ -4,10 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { GitHub, gitAuthEnv, DEFAULT_CLIENT_ID } = require('../../src/github.mts');
-const { isGitHubHttps, githubButtonLabel, accountSentence } = require('../../src/shared/helpers.mts');
+const { isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, gitErrorText } = require('../../src/shared/helpers.mts');
 const { validRepoName } = require('../../src/shared/helpers.mts');
 const { TokenStore, CANNOT_KEEP } = require('../../src/github-token.mts');
-const { GitHubSession } = require('../../src/github-session.mts');
+const { GitHubSession, dryMode } = require('../../src/github-session.mts');
 const { tmpDir } = require('../helpers/tmp');
 
 const reply = (status, body) => ({ status, text: async () => typeof body === 'string' ? body : JSON.stringify(body) });
@@ -146,8 +146,8 @@ test('validRepoName and isGitHubHttps', () => {
 });
 
 test('githubButtonLabel and accountSentence follow the sign-in state, with no status as signed out', () => {
-  const out = { signedIn: false, login: null, canKeep: true };
-  const on = { signedIn: true, login: 'celes', canKeep: true };
+  const out = { signedIn: false, login: null, canKeep: true, rejectedLogin: null };
+  const on = { signedIn: true, login: 'celes', canKeep: true, rejectedLogin: null };
   assert.equal(githubButtonLabel(null, ''), 'Sync with GitHub…');
   assert.equal(githubButtonLabel(out, ''), 'Sync with GitHub…');
   assert.equal(githubButtonLabel(null, 'https://github.com/me/notes.git'), 'Sign in with GitHub…');
@@ -219,21 +219,21 @@ test('GitHubSession: a sign-in keeps the token, reports the login, and gives git
     { status: 200, body: { access_token: 'tok' } },
     { status: 200, body: { login: 'me' } },
   ]);
-  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true });
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: null });
   assert.equal(s.authEnvFor('https://github.com/me/notes.git'), undefined);
   const started = await s.startSignIn();
   assert.equal(started.ok, true);
   assert.equal(started.userCode, 'ABCD-1234');
   assert.equal(started.verificationUri, 'https://web.test/login/device');
   assert.deepEqual(await s.waitSignIn(), { ok: true, login: 'me' });
-  assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true });
+  assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true, rejectedLogin: null });
   assert.deepEqual(store.read(), { token: 'tok', login: 'me' });
-  assert.deepEqual(changes, [{ signedIn: true, login: 'me', canKeep: true }]);
+  assert.deepEqual(changes, [{ signedIn: true, login: 'me', canKeep: true, rejectedLogin: null }]);
   assert.equal(s.authEnvFor('https://github.com/me/notes.git').GIT_CONFIG_VALUE_0, 'Authorization: Basic ' + Buffer.from('x-access-token:tok').toString('base64'));
   assert.equal(s.authEnvFor('git@github.com:me/notes.git'), undefined);
   assert.equal(s.authEnvFor(''), undefined);
   s.signOut();
-  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true });
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: null });
   assert.equal(store.read(), null);
   assert.equal(s.authEnvFor('https://github.com/me/notes.git'), undefined);
   assert.deepEqual(await s.waitSignIn(), { ok: false, error: 'No sign-in is waiting.' });
@@ -281,7 +281,7 @@ test('GitHubSession: a cancel that lands while a poll is in flight keeps nothing
   assert.equal(store.read(), null);
 });
 
-test('GitHubSession: the kept sign-in is read lazily, not in the constructor, and GitHub rejecting the token signs out', async () => {
+test('GitHubSession: the kept sign-in is read lazily, not in the constructor, and GitHub rejecting the token drops it and names the account', async () => {
   const file = path.join(tmpDir('notes-session-'), 'github-token.bin');
   let reads = 0;
   const safe = fakeSafe();
@@ -291,10 +291,10 @@ test('GitHubSession: the kept sign-in is read lazily, not in the constructor, an
   const c = client([{ status: 401, body: {} }]);
   const s = new GitHubSession({ store, github: c.gh });
   assert.equal(reads, 0, 'nothing is decrypted before the first use');
-  assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true });
+  assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true, rejectedLogin: null });
   const r = await s.repos();
   assert.equal(r.ok, false);
-  assert.equal(s.status().signedIn, false);
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: 'me' });
   assert.equal(store.read(), null);
   assert.deepEqual(await s.createRepo('x'), { ok: false, error: 'Sign in with GitHub first.' });
 });
@@ -308,7 +308,7 @@ test('GitHubSession dry modes: a fixed code that waits, and a signed-in account 
   assert.equal((await waited).ok, false);
   assert.equal(coded.calls.length, 0);
   const signed = session([], { dry: 'signed-in' });
-  assert.deepEqual(signed.s.status(), { signedIn: true, login: 'you', canKeep: true });
+  assert.deepEqual(signed.s.status(), { signedIn: true, login: 'you', canKeep: true, rejectedLogin: null });
   const repos = await signed.s.repos();
   assert.equal(repos.ok, true);
   assert.deepEqual(repos.repos.map((r) => r.name), ['notes', 'journal']);
@@ -316,4 +316,132 @@ test('GitHubSession dry modes: a fixed code that waits, and a signed-in account 
   assert.equal(signed.s.authEnvFor('https://github.com/you/mine.git'), undefined, 'dry mode never builds a real header');
   assert.equal(signed.store.read(), null, 'dry mode writes nothing');
   assert.equal(signed.calls.length, 0);
+});
+
+const REMOTE = 'https://github.com/me/notes.git';
+
+function keptSession(script) {
+  const made = session(script);
+  made.store.write({ token: 'old', login: 'me' });
+  return made;
+}
+
+test('recheck: a token GitHub refuses is dropped, names the account, and is not checked again', async () => {
+  const { s, store, changes, calls } = keptSession([{ status: 401, body: { message: 'Bad credentials' }, expect: (url, init) => { assert.equal(url, 'https://api.test/user'); assert.equal(init.headers.Authorization, 'Bearer old'); } }]);
+  assert.equal(await s.recheck(REMOTE), true);
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: 'me' });
+  assert.equal(store.read(), null);
+  assert.deepEqual(changes, [{ signedIn: false, login: null, canKeep: true, rejectedLogin: 'me' }]);
+  assert.equal(s.authEnvFor(REMOTE), undefined, 'git falls back to the credentials it has');
+  assert.equal(await s.recheck(REMOTE), false);
+  assert.equal(calls.length, 1);
+});
+
+test('recheck keeps the sign-in when GitHub accepts it, cannot be reached, or answers with another error', async () => {
+  for (const answer of [{ status: 200, body: { login: 'me' } }, { throws: true }, { status: 500, body: {} }, { status: 403, body: { message: 'rate limited' } }]) {
+    const { s, store, changes } = keptSession([answer]);
+    assert.equal(await s.recheck(REMOTE), false, JSON.stringify(answer));
+    assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true, rejectedLogin: null });
+    assert.deepEqual(store.read(), { token: 'old', login: 'me' });
+    assert.equal(changes.length, 0);
+  }
+});
+
+test('recheck asks GitHub only for an https github.com remote while a sign-in is kept', async () => {
+  for (const remote of ['git@github.com:me/notes.git', 'https://gitlab.com/me/notes.git', 'C:\\backups\\notes.git', '']) {
+    const { s, calls } = keptSession([]);
+    assert.equal(await s.recheck(remote), false, remote);
+    assert.equal(s.status().signedIn, true);
+    assert.equal(calls.length, 0);
+  }
+  const none = session([]);
+  assert.equal(await none.s.recheck(REMOTE), false);
+  assert.equal(none.calls.length, 0);
+});
+
+test('recheck never drops a sign-in that changed while GitHub was answering', async () => {
+  let s;
+  const made = keptSession([{ status: 401, body: {}, expect: () => { s.signOut(); } }]);
+  s = made.s;
+  assert.equal(await s.recheck(REMOTE), false);
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: null }, 'a deliberate sign-out is not reported as a refusal');
+});
+
+test('signing in again or signing out clears the refused account', async () => {
+  const { s, store } = keptSession([
+    { status: 401, body: {} },
+    { status: 200, body: { device_code: 'dc', user_code: 'C', verification_uri: 'u', expires_in: 900, interval: 5 } },
+    { status: 200, body: { access_token: 'new' } },
+    { status: 200, body: { login: 'me' } },
+    { status: 401, body: {} },
+  ]);
+  await s.recheck(REMOTE);
+  assert.equal(s.status().rejectedLogin, 'me');
+  assert.equal((await s.startSignIn()).ok, true);
+  assert.deepEqual(await s.waitSignIn(), { ok: true, login: 'me' });
+  assert.deepEqual(s.status(), { signedIn: true, login: 'me', canKeep: true, rejectedLogin: null });
+  assert.deepEqual(store.read(), { token: 'new', login: 'me' });
+  assert.equal(await s.recheck(REMOTE), true);
+  s.signOut();
+  assert.equal(s.status().rejectedLogin, null);
+});
+
+test('repos and createRepo report a refused token the same way recheck does', async () => {
+  const listed = keptSession([{ status: 401, body: {} }]);
+  assert.equal((await listed.s.repos()).rejected, true);
+  assert.equal(listed.s.status().rejectedLogin, 'me');
+  const created = keptSession([{ status: 401, body: {} }]);
+  assert.equal((await created.s.createRepo('notes')).rejected, true);
+  assert.equal(created.s.status().rejectedLogin, 'me');
+  assert.equal((await client([{ status: 401, body: {} }]).gh.whoAmI('t')).rejected, true);
+});
+
+test('the rejected dry mode refuses the fake account on the first recheck without a request', async () => {
+  const { s, store, calls } = session([], { dry: 'rejected' });
+  assert.deepEqual(s.status(), { signedIn: true, login: 'you', canKeep: true, rejectedLogin: null });
+  assert.equal(await s.recheck('https://github.com/you/notes.git'), true);
+  assert.deepEqual(s.status(), { signedIn: false, login: null, canKeep: true, rejectedLogin: 'you' });
+  assert.equal(store.read(), null);
+  assert.equal(calls.length, 0);
+});
+
+test('dryMode reads only the known modes', () => {
+  assert.equal(dryMode('code'), 'code');
+  assert.equal(dryMode('signed-in'), 'signed-in');
+  assert.equal(dryMode('rejected'), 'rejected');
+  assert.equal(dryMode('Rejected'), '');
+  assert.equal(dryMode('yes'), '');
+  assert.equal(dryMode(''), '');
+  assert.equal(dryMode(undefined), '');
+});
+
+test('isAuthFailure matches git refusing the credentials, and nothing else', () => {
+  const refused = [
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "remote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/me/notes.git/'",
+    "fatal: unable to access 'https://github.com/me/notes.git/': The requested URL returned error: 401",
+    'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.',
+  ];
+  for (const raw of refused) assert.equal(isAuthFailure(raw), true, raw);
+  const other = [
+    "remote: Permission to me/notes.git denied to someone.\nfatal: unable to access 'https://github.com/me/notes.git/': The requested URL returned error: 403",
+    "fatal: unable to access 'https://github.com/me/notes.git/': Could not resolve host: github.com",
+    "error: unable to create 'C:/Users/me/history/.git/index.lock': Permission denied",
+    ' ! [rejected]        HEAD -> main (fetch first)',
+    '',
+    null,
+  ];
+  for (const raw of other) assert.equal(isAuthFailure(raw), false, String(raw));
+});
+
+test('gitErrorText tells a refused sign-in from an account that cannot write, and a local permission error from both', () => {
+  assert.equal(gitErrorText("push failed: fatal: could not read Username for 'https://github.com': terminal prompts disabled").text, 'GitHub did not accept the sign-in, so Notes could not sync.');
+  assert.match(gitErrorText('push failed: remote: Permission to me/notes.git denied to someone.').text, /^GitHub did not let this account write to the repository\./);
+  assert.match(gitErrorText('push failed: The requested URL returned error: 403').text, /did not let this account write/);
+  assert.doesNotMatch(gitErrorText("commit failed: unable to create '.git/index.lock': Permission denied").text, /GitHub/);
+});
+
+test('accountSentence names the account whose sign-in GitHub stopped accepting', () => {
+  assert.equal(accountSentence({ signedIn: false, login: null, canKeep: true, rejectedLogin: 'celes' }), 'Sign in again as celes to keep syncing.');
+  assert.equal(githubButtonLabel({ signedIn: false, login: null, canKeep: true, rejectedLogin: 'celes' }, REMOTE), 'Sign in with GitHub…');
 });

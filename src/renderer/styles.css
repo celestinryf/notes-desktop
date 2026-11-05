@@ -1159,7 +1159,7 @@ button.book-name:hover { background: var(--hover); }
   z-index: 40;
 }
 .toast:not(:has(button)) { padding-right: var(--s4); }
-.toast button { height: var(--control-h); padding: 0 10px; border: none; border-radius: var(--r-sm); background: var(--pressed); color: var(--fg); font-weight: 600; }
+.toast button { flex-shrink: 0; white-space: nowrap; height: var(--control-h); padding: 0 10px; border: none; border-radius: var(--r-sm); background: var(--pressed); color: var(--fg); font-weight: 600; }
 .toast button:hover { background: var(--selected); color: var(--selected-fg); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }

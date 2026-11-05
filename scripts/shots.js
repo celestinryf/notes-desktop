@@ -5,6 +5,7 @@ const path = require('path');
 const { _electron: electron } = require('playwright-core');
 const { tmpDir } = require('../test/helpers/tmp');
 const { execFileSync } = require('child_process');
+const http = require('http');
 
 const ROOT = path.resolve(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -227,7 +228,30 @@ const typeAtEnd = (text, newLine) => async (page) => {
   await sleep(400);
 };
 const key = (combo) => async (page) => { await page.keyboard.press(combo); await sleep(350); };
-const steps = (...fns) => async (page) => { for (const fn of fns) await fn(page); };
+const steps = (...fns) => async (page, app) => { for (const fn of fns) await fn(page, app); };
+const untilStatus = (label) => async (page) => {
+  for (let i = 0; i < 60; i++) {
+    if (await page.evaluate(() => document.getElementById('historyStatusBtn').textContent.trim()) === label) return;
+    await sleep(250);
+  }
+  throw new Error('the sidebar never read ' + label);
+};
+const realFocus = async (page) => { const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }); };
+const firstWindow = (app, action) => app.evaluate(({ BrowserWindow }, act) => { const w = BrowserWindow.getAllWindows()[0]; if (act === 'hide') { w.hide(); return; } w.showInactive(); w.webContents.send('app:shown'); }, action);
+
+function refusingGitHub() {
+  const server = http.createServer((req, res) => { req.resume(); res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="GitHub"' }); res.end(); });
+  server.unref();
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
+    const env = {
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'url.http://127.0.0.1:' + server.address().port + '/.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/',
+      GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '',
+      GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never',
+    };
+    resolve({ env, close: () => new Promise((done) => server.close(done)) });
+  }));
+}
 
 const SCENES = {
   empty: { about: 'No note open (the last tab closed)', run: key('Control+w') },
@@ -249,6 +273,12 @@ const SCENES = {
   'github-repo': { about: 'Sync with GitHub, step 2: signed in, choosing a new private repository or an existing one', settings: { gitEnabled: true }, env: { NOTES_APP_DRY_GITHUB: 'signed-in' }, run: steps(key('Control+Shift+b'), async () => { await sleep(600); }, async (page) => { await page.click('#libraryPrimaryBtn'); await sleep(800); }) },
   'settings-history': { about: 'Settings › History with the GitHub account line and its button', settings: { gitEnabled: true }, env: { NOTES_APP_DRY_GITHUB: 'signed-in' }, run: steps(key('Control+,'), async (page) => { await page.click('a[href="#set-history"]'); await sleep(500); }) },
   'library-off': { about: 'History and backup with history off: the way to turn it on', run: steps(key('Control+Shift+b'), async () => { await sleep(600); }) },
+  'sync-sign-in-rejected': { about: 'Started hidden, as at login: GitHub refuses the kept sign-in in the first sync, the toast with Sign in waits until the window is shown, and the sidebar reads Sign in to sync', settings: { gitEnabled: true }, refusingRemote: true, env: { NOTES_APP_START_HIDDEN: '1', NOTES_APP_DRY_GITHUB: 'rejected', NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(realFocus, untilStatus('Sign in to sync'), async (page, app) => {
+    if (await page.evaluate(() => !document.getElementById('toast').classList.contains('hidden'))) throw new Error('the sign-in toast showed while the window was hidden');
+    await firstWindow(app, 'show');
+    await sleep(1200);
+  }) },
+  'library-sign-in-rejected': { about: 'History and sync after GitHub refused the kept sign-in: the reason, the account line, Sign in with GitHub… as the primary and Try again', settings: { gitEnabled: true }, refusingRemote: true, env: { NOTES_APP_DRY_GITHUB: 'rejected', NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(openNote('Groceries'), typeAtEnd('Lemons', true), async () => { await sleep(4000); }, key('Control+Shift+b'), async () => { await sleep(1200); }) },
   'library-error': { about: 'History and backup when the backup fails: the plain reason, details, and the status row in the sidebar', settings: { gitEnabled: true, gitRemote: 'https://github.invalid/you/notes-backup.git' }, env: { NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(openNote('Groceries'), typeAtEnd('Lemons', true), async () => { await sleep(4000); }, key('Control+Shift+b'), async () => { await sleep(1200); }) },
   'trashed-toast': { about: 'A note moved to the trash from the More menu: the toast with Undo (the shots cannot reach the Recycle Bin, so this is the fallback wording)', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#deleteBtn'); await sleep(500); }) },
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
@@ -321,6 +351,8 @@ async function shoot(theme, name, opts) {
   if (SCENES[name].office) data.notes.push(sampleOfficeNote(dataDir, SCENES[name].office));
   if (SCENES[name].vault) data.vaults.push(sampleVault(dataDir));
   if (SCENES[name].syncRemote) { const bare = path.join(dataDir, 'remote.git'); execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]); data.settings.gitRemote = bare; }
+  const refusing = SCENES[name].refusingRemote ? await refusingGitHub() : null;
+  if (refusing) data.settings.gitRemote = 'https://github.com/you/notes.git';
   fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify(data));
   const app = await electron.launch({
     executablePath: require('electron'),
@@ -329,7 +361,7 @@ async function shoot(theme, name, opts) {
       NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1',
       NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_DRY_TERMINAL: '1', NOTES_APP_NO_RECYCLE_BIN: '1',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
-    }, SCENES[name].env || {}),
+    }, SCENES[name].env || {}, refusing ? refusing.env : {}),
   });
   try {
     const page = await app.firstWindow();
@@ -338,7 +370,7 @@ async function shoot(theme, name, opts) {
     await page.evaluate(() => { window.confirm = () => true; return document.fonts && document.fonts.ready.then(() => true); });
     await sleep(900);
     if (opts.css) await page.addStyleTag({ content: fs.readFileSync(opts.css, 'utf8') });
-    await SCENES[name].run(page);
+    await SCENES[name].run(page, app);
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);
     await page.screenshot({ path: file });
@@ -365,6 +397,7 @@ async function shoot(theme, name, opts) {
     const gone = new Promise((resolve) => { if (proc.exitCode !== null) resolve(); else proc.once('exit', resolve); });
     await app.evaluate(({ app: a }) => a.exit(0)).catch(() => {});
     await Promise.race([gone, sleep(10000)]);
+    if (refusing) await refusing.close();
     try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) {  }
   }
 }

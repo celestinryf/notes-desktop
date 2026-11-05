@@ -153,9 +153,9 @@
     }
   });
 
-  // node_modules/react/cjs/react.production.js
+  // ../notes-app/node_modules/react/cjs/react.production.js
   var require_react_production = __commonJS({
-    "node_modules/react/cjs/react.production.js"(exports) {
+    "../notes-app/node_modules/react/cjs/react.production.js"(exports) {
       "use strict";
       var REACT_ELEMENT_TYPE = /* @__PURE__ */ Symbol.for("react.transitional.element");
       var REACT_PORTAL_TYPE = /* @__PURE__ */ Symbol.for("react.portal");
@@ -605,9 +605,9 @@
     }
   });
 
-  // node_modules/react/index.js
+  // ../notes-app/node_modules/react/index.js
   var require_react = __commonJS({
-    "node_modules/react/index.js"(exports, module) {
+    "../notes-app/node_modules/react/index.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_react_production();
@@ -617,9 +617,9 @@
     }
   });
 
-  // node_modules/react-dom/cjs/react-dom.production.js
+  // ../notes-app/node_modules/react-dom/cjs/react-dom.production.js
   var require_react_dom_production = __commonJS({
-    "node_modules/react-dom/cjs/react-dom.production.js"(exports) {
+    "../notes-app/node_modules/react-dom/cjs/react-dom.production.js"(exports) {
       "use strict";
       var React2 = require_react();
       function formatProdErrorMessage(code2) {
@@ -774,9 +774,9 @@
     }
   });
 
-  // node_modules/react-dom/index.js
+  // ../notes-app/node_modules/react-dom/index.js
   var require_react_dom = __commonJS({
-    "node_modules/react-dom/index.js"(exports, module) {
+    "../notes-app/node_modules/react-dom/index.js"(exports, module) {
       "use strict";
       function checkDCE() {
         if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ === "undefined" || typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE !== "function") {
@@ -800,9 +800,9 @@
     }
   });
 
-  // node_modules/scheduler/cjs/scheduler.production.js
+  // ../notes-app/node_modules/scheduler/cjs/scheduler.production.js
   var require_scheduler_production = __commonJS({
-    "node_modules/scheduler/cjs/scheduler.production.js"(exports) {
+    "../notes-app/node_modules/scheduler/cjs/scheduler.production.js"(exports) {
       "use strict";
       function push(heap, node) {
         var index = heap.length;
@@ -1073,9 +1073,9 @@
     }
   });
 
-  // node_modules/scheduler/index.js
+  // ../notes-app/node_modules/scheduler/index.js
   var require_scheduler = __commonJS({
-    "node_modules/scheduler/index.js"(exports, module) {
+    "../notes-app/node_modules/scheduler/index.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_scheduler_production();
@@ -1085,9 +1085,9 @@
     }
   });
 
-  // node_modules/react-dom/cjs/react-dom-client.production.js
+  // ../notes-app/node_modules/react-dom/cjs/react-dom-client.production.js
   var require_react_dom_client_production = __commonJS({
-    "node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
+    "../notes-app/node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
       "use strict";
       var Scheduler = require_scheduler();
       var React2 = require_react();
@@ -14629,9 +14629,9 @@
     }
   });
 
-  // node_modules/react-dom/client.js
+  // ../notes-app/node_modules/react-dom/client.js
   var require_client = __commonJS({
-    "node_modules/react-dom/client.js"(exports, module) {
+    "../notes-app/node_modules/react-dom/client.js"(exports, module) {
       "use strict";
       function checkDCE() {
         if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ === "undefined" || typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE !== "function") {
@@ -14655,9 +14655,9 @@
     }
   });
 
-  // node_modules/react/cjs/react-jsx-runtime.production.js
+  // ../notes-app/node_modules/react/cjs/react-jsx-runtime.production.js
   var require_react_jsx_runtime_production = __commonJS({
-    "node_modules/react/cjs/react-jsx-runtime.production.js"(exports) {
+    "../notes-app/node_modules/react/cjs/react-jsx-runtime.production.js"(exports) {
       "use strict";
       var REACT_ELEMENT_TYPE = /* @__PURE__ */ Symbol.for("react.transitional.element");
       var REACT_FRAGMENT_TYPE = /* @__PURE__ */ Symbol.for("react.fragment");
@@ -14685,9 +14685,9 @@
     }
   });
 
-  // node_modules/react/jsx-runtime.js
+  // ../notes-app/node_modules/react/jsx-runtime.js
   var require_jsx_runtime = __commonJS({
-    "node_modules/react/jsx-runtime.js"(exports, module) {
+    "../notes-app/node_modules/react/jsx-runtime.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_react_jsx_runtime_production();
@@ -14730,6 +14730,7 @@
     githubButtonLabel: () => githubButtonLabel,
     headingTitle: () => headingTitle,
     imageBaseFor: () => imageBaseFor,
+    isAuthFailure: () => isAuthFailure,
     isGitHubHttps: () => isGitHubHttps,
     isLinkedFile: () => isLinkedFile,
     isLinkedNotice: () => isLinkedNotice,
@@ -15344,12 +15345,16 @@
   var repoNameProblem = (name) => !name ? "Give the repository a name." : validRepoName(name) ? "" : "A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.";
   var isGitHubHttps = (url) => /^https:\/\/github\.com\//i.test(url.trim());
   var githubButtonLabel = (status, remote) => !status || !status.signedIn ? remote ? "Sign in with GitHub\u2026" : "Sync with GitHub\u2026" : remote ? "Change repository\u2026" : "Choose a repository\u2026";
-  var accountSentence = (status) => status && status.signedIn ? "Signed in to GitHub as " + status.login + "." : "Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.";
+  var accountSentence = (status) => status && status.signedIn ? "Signed in to GitHub as " + status.login + "." : status && status.rejectedLogin ? "Sign in again as " + status.rejectedLogin + " to keep syncing." : "Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.";
   var isRecord = (v) => isObjectLike(v) && !Array.isArray(v);
   var stringItems = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  var GIT_AUTH_FAILED = /Authentication failed|could not read Username|Invalid username or (password|token)|returned error: 401|Permission denied \(publickey\)/i;
+  var GIT_FORBIDDEN = /Permission to \S+ denied|returned error: 403/i;
+  var isAuthFailure = (raw) => !!raw && GIT_AUTH_FAILED.test(raw);
   var GIT_ERRORS = [
     [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
-    [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, "GitHub did not accept the sign-in for this backup."],
+    [GIT_AUTH_FAILED, "GitHub did not accept the sign-in, so Notes could not sync."],
+    [GIT_FORBIDDEN, "GitHub did not let this account write to the repository. Choose a repository the account owns, or sign in with the account that owns this one."],
     [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes."],
     [/\[rejected\]|fetch first|non-fast-forward/i, "GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync."],
     [/too old to merge/i, "Syncing needs git 2.41 or newer. Run npm install in the Notes folder again, or update the git on this PC, then restart Notes."],
@@ -17253,11 +17258,11 @@
   // src/renderer/virtual-rows.tsx
   var import_react = __toESM(require_react());
 
-  // node_modules/@tanstack/react-virtual/dist/esm/index.js
+  // ../notes-app/node_modules/@tanstack/react-virtual/dist/esm/index.js
   var React = __toESM(require_react(), 1);
   var import_react_dom = __toESM(require_react_dom(), 1);
 
-  // node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js
+  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js
   function getMeasurementKey(item) {
     return typeof item === "object" ? item.key : item;
   }
@@ -17292,7 +17297,7 @@
     });
   }
 
-  // node_modules/@tanstack/virtual-core/dist/esm/utils.js
+  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/utils.js
   function memo(getDeps, fn, opts) {
     let deps = opts.initialDeps ?? [];
     let result;
@@ -17371,7 +17376,7 @@
     );
   };
 
-  // node_modules/@tanstack/virtual-core/dist/esm/scroll-classifier.js
+  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/scroll-classifier.js
   function classifyScrollEvent({
     offset,
     isScrolling,
@@ -17450,7 +17455,7 @@
     return Math.abs(last.offset - from.offset) / (last.t - from.t) >= 0.05;
   }
 
-  // node_modules/@tanstack/virtual-core/dist/esm/ios-gesture.js
+  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/ios-gesture.js
   var _isIOSResult;
   var isIOSWebKit = () => {
     if (_isIOSResult !== void 0) return _isIOSResult;
@@ -17570,7 +17575,7 @@
     }
   };
 
-  // node_modules/@tanstack/virtual-core/dist/esm/index.js
+  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/index.js
   var getRect = (element) => {
     const { clientWidth, clientHeight } = element;
     return { width: clientWidth, height: clientHeight };
@@ -19159,7 +19164,7 @@
     return { startIndex, endIndex };
   }
 
-  // node_modules/@tanstack/react-virtual/dist/esm/index.js
+  // ../notes-app/node_modules/@tanstack/react-virtual/dist/esm/index.js
   var useIsomorphicLayoutEffect = typeof document !== "undefined" ? React.useLayoutEffect : React.useEffect;
   function useVirtualizerBase({
     useFlushSync = true,
@@ -21275,10 +21280,10 @@
   var LIST_STEPS = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
   var GIT_DOWNLOAD = "https://git-scm.com/download/win";
   var KIND_WORDS = { added: "added", changed: "changed", renamed: "renamed", removed: "removed" };
-  function historyLook(s, now) {
+  function historyLook(s, now, signInNeeded) {
     if (!s.enabled) return { icon: "history", label: "History is off", error: false };
     if (s.available === false) return { icon: "circle-alert", label: "History needs git", error: true };
-    if (s.lastError) return { icon: "cloud-alert", label: /^(push|sync) failed/.test(s.lastError) ? "Sync failed" : "History needs attention", error: true };
+    if (s.lastError) return { icon: "cloud-alert", label: signInNeeded && isAuthFailure(s.lastError) ? "Sign in to sync" : /^(push|sync) failed/.test(s.lastError) ? "Sync failed" : "History needs attention", error: true };
     if (s.pending) return { icon: "cloud-upload", label: "Saving a version\u2026", error: false };
     if (!s.commits) return { icon: "history", label: "No versions yet", error: false };
     if (s.remote) return s.lastPushAt ? { icon: "cloud-check", label: "Synced " + relativeTime(s.lastPushAt, now), error: false } : { icon: "cloud-upload", label: "Not synced yet", error: false };
@@ -21314,7 +21319,7 @@
     const lib = { status: null, versions: [], index: -1, limit: PAGE, more: false, loads: 0 };
     function renderStatus(s) {
       lib.status = s;
-      const look = historyLook(s);
+      const look = historyLook(s, void 0, needsSignIn(s));
       setLabel(el.historyStatusBtn, look.label);
       setIcon(el.historyStatusBtn, look.icon);
       el.historyStatusBtn.classList.toggle("is-error", look.error);
@@ -21557,9 +21562,14 @@
       if (el.libraryDialog.open) await loadVersions();
       const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (synced.ok ? null : gitErrorText(synced.error || synced.skipped || "sync failed"));
       if (!problem) toast("Synced with " + remoteName(after.remote));
-      else toast(problem.text, { label: "Details", run: () => {
+      else toast(problem.text, problemAction(after, problem.details));
+    }
+    function problemAction(s, raw) {
+      return needsSignIn(s) && isAuthFailure(raw) ? { label: "Sign in", run: () => {
+        goToGithub();
+      } } : { label: "Details", run: () => {
         openLibrary();
-      } });
+      } };
     }
     async function saveVersionNow() {
       await flushSave();
@@ -21573,9 +21583,7 @@
       }
       const problem = (isLinkedNotice(after.lastError) ? null : gitErrorText(after.lastError)) || (r.ok ? null : gitErrorText(r.error || "commit failed"));
       if (problem) {
-        toast(problem.text, { label: "Details", run: () => {
-          openLibrary();
-        } });
+        toast(problem.text, problemAction(after, problem.details));
         return;
       }
       toast(r.ok && r.nothingToCommit ? "Nothing new to save. The last version has every change." : "Saved a version");
@@ -21611,7 +21619,7 @@
         openLibrary();
       } });
     }
-    return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+    return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, goToGithub, statusNow: () => lib.status };
   }
 
   // src/renderer/github-dialog.ts
@@ -28345,8 +28353,20 @@
       fromMain("gitPulled", api.on.gitPulled, (pulled) => library.noticePulled(pulled));
       fromMain("gitStatus", api.on.gitStatus, (s) => renderGitStatus(s));
       const githubStatusChanged = (s) => {
+        const before = github.statusNow();
         github.renderStatus(s);
         library.refreshStatus();
+        if (!s.rejectedLogin || before && before.rejectedLogin || el.githubDialog.open) return;
+        if (document.hasFocus()) noticeRejectedSignIn();
+        else rejectedNoticePending = true;
+      };
+      let rejectedNoticePending = false;
+      const noticeRejectedSignIn = () => {
+        rejectedNoticePending = false;
+        if (!github.statusNow()?.rejectedLogin || el.githubDialog.open) return;
+        toast("The GitHub sign-in on this PC stopped working. Sign in again to keep syncing.", { label: "Sign in", run: () => {
+          library.goToGithub();
+        } });
       };
       fromMain("githubStatus", api.on.githubStatus, githubStatusChanged);
       api.github.status().then(githubStatusChanged).catch(() => {
@@ -28484,6 +28504,7 @@
           await state.initDone;
           warmWordCraftSoon();
           noticeFilesMove();
+          if (rejectedNoticePending) noticeRejectedSignIn();
           if (el.settingsDialog.open) return;
           if (state.current) {
             if (state.current.title || state.current.body) focusBody();

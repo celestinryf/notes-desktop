@@ -4,7 +4,7 @@ import { run, runBytes, spawnGit, AUTHOR } from './git-run.mts';
 import type { GitRun } from './git-run.mts';
 import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
-import { MAX_TEXT_BYTES, isRecord } from './shared/helpers.mts';
+import { MAX_TEXT_BYTES, isRecord, isAuthFailure } from './shared/helpers.mts';
 
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
@@ -118,8 +118,9 @@ class GitSync {
   discardFile: (absPath: string) => Promise<void>;
   onPulled: (pulled: Pulled) => void | Promise<void>;
   remoteEnv: (url: string) => Record<string, string> | undefined;
+  onAuthFailed: (url: string) => Promise<unknown>;
   lastSyncTry: number;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined, onAuthFailed?: (url: string) => Promise<unknown> }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
@@ -141,6 +142,7 @@ class GitSync {
     this.discardFile = opts.discardFile || (async (absPath) => { fs.rmSync(absPath, { force: true }); });
     this.onPulled = opts.onPulled || (() => {});
     this.remoteEnv = opts.remoteEnv || (() => undefined);
+    this.onAuthFailed = opts.onAuthFailed || (async () => false);
     this.lastSyncTry = 0;
   }
 
@@ -448,9 +450,14 @@ class GitSync {
 
   async _pushNow(): Promise<GitResult> {
     const r = await run(['push', '-q', '-u', 'origin', 'HEAD:main'], this.dir, 60000, undefined, this.remoteEnv(this.state.remote));
-    if (!r.ok) { this._set({ lastError: 'push failed: ' + r.error }); return { ok: false, error: r.error }; }
+    if (!r.ok) { this._set({ lastError: 'push failed: ' + r.error }); await this._checkAuth(r.error); return { ok: false, error: r.error }; }
     this._set({ lastPushAt: this.now(), lastError: this._linkedNotice() });
     return { ok: true };
+  }
+
+  async _checkAuth(error: string | null) {
+    if (!isAuthFailure(error)) return;
+    try { await this.onAuthFailed(this.state.remote); } catch (err) { console.error('[sync] checking the sign-in', err); }
   }
 
   async _pushOrSync(): Promise<GitResult> {
@@ -470,7 +477,7 @@ class GitSync {
     let r: PullResult;
     try { r = await pullInto({ dir: this.dir, gitDir: this.gitDir, tree, now: this.now, discard: this.discardFile, env: this.remoteEnv(this.state.remote) }); }
     catch (err) { r = { ok: false, error: err instanceof Error ? err.message : String(err) }; }
-    if (!r.ok) { this._set({ lastError: 'sync failed: ' + r.error }); return { ok: false, error: r.error }; }
+    if (!r.ok) { this._set({ lastError: 'sync failed: ' + r.error }); await this._checkAuth(r.error); return { ok: false, error: r.error }; }
     if (r.changed.length || r.copies.length || r.merged) {
       await this.refreshCounts();
       try { await this.onPulled({ changed: r.changed, copies: r.copies }); } catch (err) { console.error('[sync] after a pull', err); }

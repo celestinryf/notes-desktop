@@ -6,7 +6,7 @@ import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitHub } from './github.mts';
 import { TokenStore } from './github-token.mts';
-import { GitHubSession } from './github-session.mts';
+import { GitHubSession, dryMode } from './github-session.mts';
 import { GitSync, LINKED_DIR } from './gitSync.mts';
 import { VaultPictures } from './vault-pictures.mts';
 import type { FileCommit } from './gitSync.mts';
@@ -116,11 +116,15 @@ function main() {
   const github = new GitHubSession({
     store: new TokenStore(path.join(DATA_DIR, 'github-token.bin'), safeStorage),
     github: new GitHub(),
-    dry: process.env.NOTES_APP_DRY_GITHUB === 'code' || process.env.NOTES_APP_DRY_GITHUB === 'signed-in' ? process.env.NOTES_APP_DRY_GITHUB : '',
-    onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('github:status', s); },
+    dry: dryMode(process.env.NOTES_APP_DRY_GITHUB),
+    onChange: (s) => {
+      if (win && !win.isDestroyed()) win.webContents.send('github:status', s);
+      if (s.signedIn) syncInBackground(0);
+    },
   });
   const git = new GitSync(DATA_DIR, {
     remoteEnv: (url) => github.authEnvFor(url),
+    onAuthFailed: (url) => github.recheck(url),
     debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
