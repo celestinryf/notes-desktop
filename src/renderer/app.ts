@@ -3066,7 +3066,15 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       const before = github.statusNow();
       github.renderStatus(s);
       library.refreshStatus();
-      if (s.rejectedLogin && !(before && before.rejectedLogin) && !el.githubDialog.open) toast('The GitHub sign-in on this PC stopped working. Sign in again to keep syncing.', { label: 'Sign in', run: () => { github.open(); } });
+      if (!s.rejectedLogin || (before && before.rejectedLogin) || el.githubDialog.open) return;
+      if (document.hasFocus()) noticeRejectedSignIn();
+      else rejectedNoticePending = true;
+    };
+    let rejectedNoticePending = false;
+    const noticeRejectedSignIn = () => {
+      rejectedNoticePending = false;
+      if (!github.statusNow()?.rejectedLogin || el.githubDialog.open) return;
+      toast('The GitHub sign-in on this PC stopped working. Sign in again to keep syncing.', { label: 'Sign in', run: () => { library.goToGithub(); } });
     };
     fromMain('githubStatus', api.on.githubStatus, githubStatusChanged);
     api.github.status().then(githubStatusChanged).catch(() => {});
@@ -3149,6 +3157,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         await state.initDone;
         warmWordCraftSoon();
         noticeFilesMove();
+        if (rejectedNoticePending) noticeRejectedSignIn();
         if (el.settingsDialog.open) return;
         if (state.current) {
           if (state.current.title || state.current.body) focusBody(); else el.titleInput.focus();

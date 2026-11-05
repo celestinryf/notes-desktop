@@ -315,5 +315,5 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     toast(n === 1 ? 'A note was changed on both computers. The other version is saved beside it as a conflict copy.' : n + ' notes were changed on both computers. The other versions are saved beside them as conflict copies.', { label: 'Show', run: () => { openLibrary(); } });
   }
 
-  return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, statusNow: () => lib.status };
+  return { bind, openLibrary, renderStatus, refreshStatus, syncNow, saveVersionNow, noticePulled, goToGithub, statusNow: () => lib.status };
 }

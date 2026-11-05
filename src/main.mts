@@ -117,7 +117,10 @@ function main() {
     store: new TokenStore(path.join(DATA_DIR, 'github-token.bin'), safeStorage),
     github: new GitHub(),
     dry: dryMode(process.env.NOTES_APP_DRY_GITHUB),
-    onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('github:status', s); },
+    onChange: (s) => {
+      if (win && !win.isDestroyed()) win.webContents.send('github:status', s);
+      if (s.signedIn) syncInBackground(0);
+    },
   });
   const git = new GitSync(DATA_DIR, {
     remoteEnv: (url) => github.authEnvFor(url),
