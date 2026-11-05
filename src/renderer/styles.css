@@ -335,8 +335,6 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .sidebar-rail .bar-toggles { flex-direction: column; align-items: stretch; }
 .sidebar-rail .bar-toggles .tool-btn { height: var(--bar-h); }
 
-.sidebar-edge { display: none; position: fixed; z-index: 27; left: 0; top: 0; bottom: 0; width: var(--s2); }
-.app.sidebar-float .sidebar-edge { display: block; }
 .sidebar-actions { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s1) var(--s2); }
 .sidebar-actions .btn-primary { justify-content: flex-start; padding: 0 var(--s3); }
 .app.sidebar-float .app-sidebar {
@@ -565,6 +563,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .tab-bar.is-solo .tabs, .tab-bar.is-solo .tab-add { display: none; }
 .tabs { display: flex; gap: 2px; flex: 0 1 auto; min-width: min(calc(var(--tab-min) + 2 * var(--s2)), 100%); padding: 0 var(--s2); align-self: center; align-items: center; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; scroll-padding-inline: var(--s2); }
 .tab-bar.is-cramped .tabs { min-width: 0; }
+.tab.is-clipped .tab-close { visibility: hidden; }
 .tabs.fade-start { mask-image: linear-gradient(to right, transparent, currentColor var(--s6)); }
 .tabs.fade-end { mask-image: linear-gradient(to left, transparent, currentColor var(--s6)); }
 .tabs.fade-start.fade-end { mask-image: linear-gradient(to right, transparent, currentColor var(--s6), currentColor calc(100% - var(--s6)), transparent); }
@@ -587,7 +586,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .editor-pane:not(.is-split) .tab-bar, body.pane-guest .tab-bar { padding-right: var(--caption-w); }
 
 body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
-body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-edge, body.pane-guest .sidebar-rail, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
+body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-rail, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
 
 .editor-empty { position: relative; flex: 1; display: grid; place-items: center; padding: var(--s5); }
 .editor-empty-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s3); max-width: 360px; text-align: center; }
@@ -993,7 +992,7 @@ button.book-name:hover { background: var(--hover); }
 @media print {
   .body-input.uses-code:not(.hidden) { display: block !important; }
   .code-host { display: none !important; }
-  .app-sidebar, .list-pane, .sidebar-edge, .sidebar-rail, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app-sidebar, .list-pane, .sidebar-rail, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; }
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }

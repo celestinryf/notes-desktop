@@ -222,7 +222,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     document.addEventListener('mousemove', (e) => {
       const target = e.target instanceof Element ? e.target : null;
       const overSidebar = !!target && el.sidebar.contains(target);
-      const near = !!target && (el.sidebarEdge.contains(target) || (el.sidebarRail.contains(target) && !target.closest('button')));
+      const near = !!target && el.sidebarRail.contains(target) && !target.closest('button');
       if (near && !sidebarPeek) { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); }
       if (near === nearEdge) return;
       nearEdge = near;
@@ -230,13 +230,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (sidebarPeek === 'hover') leaveSoon();
       else if (!sidebarPeek) clearTimeout(peekTimer);
     });
-    el.sidebarEdge.addEventListener('dragenter', () => peekSidebar('hover'));
     el.sidebarRail.addEventListener('dragenter', () => peekSidebar('hover'));
     el.sidebar.addEventListener('mouseenter', () => { if (sidebarPeek === 'hover') clearTimeout(peekTimer); });
     el.sidebar.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); });
     document.addEventListener('pointerdown', (e) => {
       const target = e.target instanceof Node ? e.target : null;
-      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
+      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
       unpeekSidebar();
     }, true);
   }
@@ -1469,6 +1468,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         toPeer({ type: 'active', on: tabs.active === 'right' });
         toPeer({ type: 'tabs', ids: openIds(), current: state.currentId });
         queued.forEach(toPeer);
+        peerCaptionKey = '';
+        shareCaption();
         return;
       }
       case 'tabs':
@@ -1750,11 +1751,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
     renderPinButton(note.pinned);
-    fitBand();
     el.folderSelect.disabled = inTrash;
     renderFolderSelect();
     el.editorEmpty.classList.add('hidden');
     el.editor.classList.remove('hidden');
+    fitBand();
     markActiveRow(id);
     revealInTree(note);
     revealInSidebar(note);
@@ -2683,7 +2684,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
       cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
-      ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].map((b) => fromButton(b, 'This note')),
+      ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
       ...[...el.shareMenu.querySelectorAll<HTMLButtonElement>('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action ?? '') })),

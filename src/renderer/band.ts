@@ -32,10 +32,16 @@ export function markTabScroll() {
   const end = strip.scrollWidth - strip.clientWidth;
   strip.classList.toggle('fade-start', strip.scrollLeft > 1);
   strip.classList.toggle('fade-end', strip.scrollLeft < end - 1);
+  const box = strip.getBoundingClientRect();
+  for (const tab of strip.children) {
+    const r = tab.getBoundingClientRect();
+    tab.classList.toggle('is-clipped', r.left < box.left - 0.5 || r.right > box.right + 0.5);
+  }
 }
 
 export function fitBand() {
   foldToFit(el.tabBar);
+  syncFoldedMenu();
   markTabScroll();
 }
 

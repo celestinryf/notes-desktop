@@ -41,6 +41,7 @@
       (function() {
         const PATHS = {
           "panel-left": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />',
+          "panel-right-close": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M15 3v18" /><path d="m8 9 3 3-3 3" />',
           "list": '<path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />',
           "folder-tree": '<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M3 5a2 2 0 0 0 2 2h3" /><path d="M3 3v13a2 2 0 0 0 2 2h3" />',
           "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M12 3v18" />',
@@ -16273,8 +16274,8 @@
     captionProbe: pageElement("#captionProbe", HTMLSpanElement),
     cellProbe: pageElement("#cellProbe", HTMLSpanElement),
     barToggles: pageElement("#barToggles", HTMLDivElement),
-    sidebarEdge: pageElement("#sidebarEdge", HTMLDivElement),
     versionsBtn: pageElement("#versionsBtn", HTMLButtonElement),
+    moreFolded: pageElement("#moreFolded", HTMLDivElement),
     moreSourceBtn: pageElement("#moreSourceBtn", HTMLButtonElement),
     morePinBtn: pageElement("#morePinBtn", HTMLButtonElement),
     moreSplitViewBtn: pageElement("#moreSplitViewBtn", HTMLButtonElement),
@@ -16494,9 +16495,15 @@
     const end = strip.scrollWidth - strip.clientWidth;
     strip.classList.toggle("fade-start", strip.scrollLeft > 1);
     strip.classList.toggle("fade-end", strip.scrollLeft < end - 1);
+    const box = strip.getBoundingClientRect();
+    for (const tab of strip.children) {
+      const r = tab.getBoundingClientRect();
+      tab.classList.toggle("is-clipped", r.left < box.left - 0.5 || r.right > box.right + 0.5);
+    }
   }
   function fitBand() {
     foldToFit(el.tabBar);
+    syncFoldedMenu();
     markTabScroll();
   }
   function captionSize() {
@@ -25034,7 +25041,7 @@
       document.addEventListener("mousemove", (e) => {
         const target = e.target instanceof Element ? e.target : null;
         const overSidebar = !!target && el.sidebar.contains(target);
-        const near = !!target && (el.sidebarEdge.contains(target) || el.sidebarRail.contains(target) && !target.closest("button"));
+        const near = !!target && el.sidebarRail.contains(target) && !target.closest("button");
         if (near && !sidebarPeek) {
           clearTimeout(peekTimer);
           peekTimer = setTimeout(() => peekSidebar("hover"), 90);
@@ -25045,7 +25052,6 @@
         if (sidebarPeek === "hover") leaveSoon();
         else if (!sidebarPeek) clearTimeout(peekTimer);
       });
-      el.sidebarEdge.addEventListener("dragenter", () => peekSidebar("hover"));
       el.sidebarRail.addEventListener("dragenter", () => peekSidebar("hover"));
       el.sidebar.addEventListener("mouseenter", () => {
         if (sidebarPeek === "hover") clearTimeout(peekTimer);
@@ -25055,7 +25061,7 @@
       });
       document.addEventListener("pointerdown", (e) => {
         const target = e.target instanceof Node ? e.target : null;
-        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
+        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
         unpeekSidebar();
       }, true);
     }
@@ -26346,6 +26352,8 @@
           toPeer({ type: "active", on: tabs.active === "right" });
           toPeer({ type: "tabs", ids: openIds(), current: state.currentId });
           queued.forEach(toPeer);
+          peerCaptionKey = "";
+          shareCaption();
           return;
         }
         case "tabs":
@@ -26685,11 +26693,11 @@
       el.restoreBtn.classList.toggle("hidden", !inTrash);
       el.destroyBtn.classList.toggle("hidden", !inTrash);
       renderPinButton(note.pinned);
-      fitBand();
       el.folderSelect.disabled = inTrash;
       renderFolderSelect();
       el.editorEmpty.classList.add("hidden");
       el.editor.classList.remove("hidden");
+      fitBand();
       markActiveRow(id);
       revealInTree(note);
       revealInSidebar(note);
@@ -27684,7 +27692,7 @@
           if (!find.open) openFind();
           toggleReplace(true);
         }, canFindInNote()),
-        ...[...el.moreMenu.querySelectorAll(".menu-item")].map((b) => fromButton(b, "This note")),
+        ...[...el.moreMenu.querySelectorAll(".menu-item")].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, "This note")),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
         ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action ?? "") })),

@@ -58,7 +58,6 @@
     <nav class="sidebar-rail" id="sidebarRail" aria-label="Sidebar and note list"></nav>
     <div class="band-probe" aria-hidden="true"><span id="captionProbe"></span><span id="cellProbe"></span></div>
 
-    <div class="sidebar-edge" id="sidebarEdge" aria-hidden="true"></div>
 
     <section class="list-pane" aria-label="Note list">
       <div class="list-head drag-region">
@@ -107,7 +106,7 @@
           <button class="tool-btn" id="shareBtn" data-icon="share-2" title="Share: copy, email, PDF, HTML, live (Ctrl+Shift+S)" aria-label="Share" aria-haspopup="menu"><span>Share</span></button>
           <button class="tool-btn icon-only" id="moreBtn" data-icon="ellipsis" title="More actions for this note" aria-label="More actions" aria-haspopup="menu" aria-expanded="false"></button>
         </div>
-        <button class="tool-btn hidden" id="paneCloseBtn" data-icon="x" title="Close this side and its tabs" aria-label="Close this side"><span>Close side</span></button>
+        <button class="tool-btn hidden" id="paneCloseBtn" data-icon="panel-right-close" title="Close this side and its tabs" aria-label="Close this side"><span>Close side</span></button>
       </div>
       <div class="editor-empty" id="editorEmpty">
         <div class="editor-empty-inner">
@@ -126,7 +125,7 @@
 
       <div class="editor hidden" id="editor">
         <div class="popover menu hidden" id="moreMenu" role="menu" aria-label="More actions">
-          <div class="menu-group" role="group" aria-label="From the toolbar">
+          <div class="menu-group" role="group" aria-label="From the toolbar" id="moreFolded">
             <button role="menuitem" class="menu-item hidden" id="moreSourceBtn" data-icon="code-xml"><span class="lbl">Show Markdown source</span><span class="keys">Ctrl+E</span></button>
             <button role="menuitem" class="menu-item hidden" id="morePinBtn" data-icon="star"><span class="lbl">Pin this note</span><span class="keys">Ctrl+D</span></button>
             <button role="menuitem" class="menu-item hidden" id="moreSplitViewBtn" data-icon="columns-2"><span class="lbl">Split view</span></button>

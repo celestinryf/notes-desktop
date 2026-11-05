@@ -5,6 +5,7 @@ import { Store, isFileNote, MOVING_MARKER } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitHub } from './github.mts';
+import { needsAppId } from './start-menu.mts';
 import { TokenStore } from './github-token.mts';
 import { GitHubSession, dryMode } from './github-session.mts';
 import { GitSync, LINKED_DIR } from './gitSync.mts';
@@ -400,12 +401,10 @@ function main() {
   function applyStartMenuShortcut() {
     if (!MANAGE_LOGIN_ITEM || process.platform !== 'win32' || app.isPackaged) return;
     const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Notes.lnk');
-    const want = { target: process.execPath, args: '"' + APP_ROOT + '"', cwd: APP_ROOT, appUserModelId: APP_ID, icon: path.join(APP_ROOT, 'assets', 'icon.ico'), iconIndex: 0, description: 'Notes (toggle with the global hotkey)' };
-    try {
-      const now = shell.readShortcutLink(link);
-      if (now.target === want.target && now.args === want.args && now.appUserModelId === want.appUserModelId && now.icon === want.icon) return;
-    } catch (_) {  }
-    if (!shell.writeShortcutLink(link, 'create', want)) console.error('[startup] could not write the Start Menu shortcut', link);
+    let now: Electron.ShortcutDetails;
+    try { now = shell.readShortcutLink(link); } catch (_) { return; }
+    if (!needsAppId(now, process.execPath, APP_ROOT, APP_ID)) return;
+    if (!shell.writeShortcutLink(link, 'update', { ...now, appUserModelId: APP_ID })) console.error('[startup] could not add the app ID to the Start Menu shortcut', link);
   }
 
   function applyTheme() {

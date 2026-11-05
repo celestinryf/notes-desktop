@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const NAMES = [
-  'panel-left', 'list', 'folder-tree', 'columns-2', 'ellipsis', 'search', 'command', 'x', 'plus', 'minus',
+  'panel-left', 'panel-right-close', 'list', 'folder-tree', 'columns-2', 'ellipsis', 'search', 'command', 'x', 'plus', 'minus',
   'chevron-right', 'chevron-left', 'chevron-down', 'arrow-up', 'arrow-down', 'external-link',
   'square-pen', 'folder-open', 'notebook-text', 'star', 'bell', 'trash-2', 'folder', 'folder-plus', 'book-open',
   'book-plus', 'hash', 'file-text', 'copy', 'rotate-ccw', 'history', 'link', 'pin',
