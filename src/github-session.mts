@@ -4,7 +4,9 @@ import { TokenStore, CANNOT_KEEP } from './github-token.mts';
 import type { SignIn } from './github-token.mts';
 import { GITHUB_CANCELLED, isGitHubHttps } from './shared/helpers.mts';
 
-type DryMode = '' | 'code' | 'signed-in';
+type DryMode = '' | 'code' | 'signed-in' | 'rejected';
+const DRY_MODES: DryMode[] = ['code', 'signed-in', 'rejected'];
+const dryMode = (value: string | undefined): DryMode => DRY_MODES.find((m) => m === value) || '';
 type Options = { store: TokenStore, github: GitHub, dry?: DryMode, onChange?: (s: GithubStatus) => void };
 type Pending = { code: DeviceCode, cancelled: boolean, done: Promise<GithubSignInResult> };
 
@@ -24,16 +26,18 @@ class GitHubSession {
   loaded: boolean;
   pending: Pending | null;
   generation: number;
+  rejectedLogin: string | null;
 
   constructor(opts: Options) {
     this.store = opts.store;
     this.github = opts.github;
     this.dry = opts.dry || '';
     this.onChange = opts.onChange || (() => {});
-    this.signIn = this.dry === 'signed-in' ? { token: 'dry', login: 'you' } : null;
+    this.signIn = this.dry === 'signed-in' || this.dry === 'rejected' ? { token: 'dry', login: 'you' } : null;
     this.loaded = !!this.dry;
     this.pending = null;
     this.generation = 0;
+    this.rejectedLogin = null;
   }
 
   _current(): SignIn | null {
@@ -43,7 +47,7 @@ class GitHubSession {
 
   status(): GithubStatus {
     const signIn = this._current();
-    return { signedIn: !!signIn, login: signIn ? signIn.login : null, canKeep: this.dry ? true : this.store.canKeep() };
+    return { signedIn: !!signIn, login: signIn ? signIn.login : null, canKeep: this.dry ? true : this.store.canKeep(), rejectedLogin: signIn ? null : this.rejectedLogin };
   }
 
   token() {
@@ -88,6 +92,7 @@ class GitHubSession {
     if (!kept.ok) return kept;
     this.signIn = signIn;
     this.loaded = true;
+    this.rejectedLogin = null;
     this.onChange(this.status());
     return { ok: true, login: signIn.login };
   }
@@ -106,7 +111,25 @@ class GitHubSession {
     if (!this.dry) this.store.clear();
     this.signIn = null;
     this.loaded = true;
+    this.rejectedLogin = null;
     this.onChange(this.status());
+  }
+
+  async recheck(remoteUrl: string): Promise<boolean> {
+    const signIn = this._current();
+    if (!signIn || !isGitHubHttps(remoteUrl)) return false;
+    if (this.dry) return this.dry === 'rejected' && this._rejected(signIn);
+    const r = await this.github.whoAmI(signIn.token);
+    return !r.ok && !!r.rejected && this._rejected(signIn);
+  }
+
+  _rejected(signIn: SignIn) {
+    if (this.signIn !== signIn) return false;
+    if (!this.dry) this.store.clear();
+    this.signIn = null;
+    this.rejectedLogin = signIn.login;
+    this.onChange(this.status());
+    return true;
   }
 
   async repos(): Promise<ReposResult> {
@@ -114,7 +137,7 @@ class GitHubSession {
     if (!signIn) return { ok: false, error: 'Sign in with GitHub first.' };
     if (this.dry) return { ok: true, repos: DRY_REPOS.slice() };
     const r = await this.github.privateRepos(signIn.token);
-    if (!r.ok && r.rejected) this.signOut();
+    if (!r.ok && r.rejected) this._rejected(signIn);
     return r;
   }
 
@@ -123,10 +146,10 @@ class GitHubSession {
     if (!signIn) return { ok: false, error: 'Sign in with GitHub first.' };
     if (this.dry) return { ok: true, repo: { name, fullName: 'you/' + name, cloneUrl: 'https://github.com/you/' + name + '.git', fromNotes: true } };
     const r = await this.github.createPrivateRepo(signIn.token, name);
-    if (!r.ok && r.rejected) this.signOut();
+    if (!r.ok && r.rejected) this._rejected(signIn);
     return r;
   }
 }
 
 export type { DryMode, Options };
-export { GitHubSession };
+export { GitHubSession, dryMode };

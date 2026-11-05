@@ -10,7 +10,7 @@ const MADE_BY_NOTES = 'Notes, synced by the Notes app';
 type DeviceCode = { deviceCode: string, userCode: string, verificationUri: string, expiresAt: number, intervalMs: number };
 type CodeResult = { ok: true, code: DeviceCode } | { ok: false, error: string };
 type SignInOutcome = { ok: true, token: string, login: string } | { ok: false, error: string };
-type LoginResult = { ok: true, login: string } | { ok: false, error: string };
+type LoginResult = { ok: true, login: string } | { ok: false, error: string, rejected?: true };
 type Repo = GithubRepo;
 type RepoResult = GithubRepoResult;
 type ReposResult = GithubReposResult;
@@ -141,7 +141,7 @@ class GitHub {
     const r = await this._api(token, 'GET', '/user');
     if (!r) return { ok: false, error: UNREACHABLE };
     const b = parseJson(r.text);
-    if (r.status === 401) return { ok: false, error: REJECTED };
+    if (r.status === 401) return rejected();
     const login = b ? str(b, 'login') : '';
     if (r.status !== 200 || !login) return { ok: false, error: apiMessage(b, 'GitHub did not say who signed in (' + r.status + ').') };
     return { ok: true, login };

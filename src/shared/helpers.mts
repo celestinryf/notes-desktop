@@ -579,13 +579,18 @@ const validRepoName = (name: string) => GITHUB_REPO_NAME.test(name) && name !== 
 const repoNameProblem = (name: string) => !name ? 'Give the repository a name.' : validRepoName(name) ? '' : 'A repository name uses letters, digits, dots, dashes and underscores, and does not end in .git.';
 const isGitHubHttps = (url: string) => /^https:\/\/github\.com\//i.test(url.trim());
 const githubButtonLabel = (status: GithubStatus | null, remote: string) => !status || !status.signedIn ? (remote ? 'Sign in with GitHub…' : 'Sync with GitHub…') : remote ? 'Change repository…' : 'Choose a repository…';
-const accountSentence = (status: GithubStatus | null) => status && status.signedIn ? 'Signed in to GitHub as ' + status.login + '.' : 'Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.';
+const accountSentence = (status: GithubStatus | null) => status && status.signedIn ? 'Signed in to GitHub as ' + status.login + '.' : status && status.rejectedLogin ? 'Sign in again as ' + status.rejectedLogin + ' to keep syncing.' : 'Not signed in to GitHub. Sign in so Notes can sync with your account and choose the repository.';
 const isRecord = (v: unknown): v is Record<string, unknown> => isObjectLike(v) && !Array.isArray(v);
 const stringItems = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+const GIT_AUTH_FAILED = /Authentication failed|could not read Username|Invalid username or (password|token)|returned error: 401|Permission denied \(publickey\)/i;
+const GIT_FORBIDDEN = /Permission to \S+ denied|returned error: 403/i;
+const isAuthFailure = (raw: string | null) => !!raw && GIT_AUTH_FAILED.test(raw);
+
 const GIT_ERRORS: [RegExp, string][] = [
   [/GH001|exceeds GitHub's file size limit/i, "A file is over GitHub's 100 MB limit, so GitHub refused the backup. Make the file smaller or move it out of the notes folder."],
-  [/Authentication failed|Permission denied|could not read Username|returned error: 40[13]/i, 'GitHub did not accept the sign-in for this backup.'],
+  [GIT_AUTH_FAILED, 'GitHub did not accept the sign-in, so Notes could not sync.'],
+  [GIT_FORBIDDEN, 'GitHub did not let this account write to the repository. Choose a repository the account owns, or sign in with the account that owns this one.'],
   [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, 'Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes.'],
   [/\[rejected\]|fetch first|non-fast-forward/i, 'GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync.'],
   [/too old to merge/i, 'Syncing needs git 2.41 or newer. Run npm install in the Notes folder again, or update the git on this PC, then restart Notes.'],
@@ -610,7 +615,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
+  isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

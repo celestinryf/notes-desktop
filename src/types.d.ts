@@ -145,7 +145,7 @@ interface VersionChange { kind: VersionChangeKind; title: string; path: string; 
 interface LibraryVersion { hash: string; at: number; changes: VersionChange[] }
 interface LibraryVersions { versions: LibraryVersion[]; more: boolean }
 type BringBackResult = { ok: true; noteId: string | null } | { ok: false; error: string };
-interface GithubStatus { signedIn: boolean; login: string | null; canKeep: boolean }
+interface GithubStatus { signedIn: boolean; login: string | null; canKeep: boolean; rejectedLogin: string | null }
 type GithubCodeResult = { ok: true; userCode: string; verificationUri: string; expiresAt: number } | { ok: false; error: string };
 type GithubSignInResult = { ok: true; login: string } | { ok: false; error: string };
 interface GithubRepo { name: string; fullName: string; cloneUrl: string; fromNotes: boolean }

@@ -3062,7 +3062,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.gitPushBtn.addEventListener('click', () => { library.syncNow(); });
     fromMain('gitPulled', api.on.gitPulled, (pulled) => library.noticePulled(pulled));
     fromMain('gitStatus', api.on.gitStatus, (s) => renderGitStatus(s));
-    const githubStatusChanged = (s: GithubStatus) => { github.renderStatus(s); library.refreshStatus(); };
+    const githubStatusChanged = (s: GithubStatus) => {
+      const before = github.statusNow();
+      github.renderStatus(s);
+      library.refreshStatus();
+      if (s.rejectedLogin && !(before && before.rejectedLogin) && !el.githubDialog.open) toast('The GitHub sign-in on this PC stopped working. Sign in again to keep syncing.', { label: 'Sign in', run: () => { github.open(); } });
+    };
     fromMain('githubStatus', api.on.githubStatus, githubStatusChanged);
     api.github.status().then(githubStatusChanged).catch(() => {});
     el.exportBtn.addEventListener('click', exportCurrent);

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const http = require('http');
 const { GitSync } = require('../../src/gitSync.mts');
 
 let gitAvailable = true;
@@ -98,6 +99,67 @@ test('pushes to a remote after committing and reports push failures', { skip: !g
 
   await sync.configure({ gitEnabled: true, gitRemote: '' });
   assert.throws(() => git(sync.dir, ['remote', 'get-url', 'origin']), 'remote removed when cleared');
+});
+
+function refusingServer() {
+  const server = http.createServer((req, res) => { req.resume(); res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="GitHub"' }); res.end(); });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+const pointGitHubAt = (base) => () => ({
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'url.' + base + '/.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/',
+  GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '',
+  GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never',
+});
+
+test('a push or sync that GitHub refuses for the sign-in asks for the sign-in to be checked, once per attempt', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const server = await refusingServer();
+  try {
+    const dir = tmp();
+    const tree = tmp();
+    fs.writeFileSync(path.join(tree, 'Groceries.md'), 'Lemons\n');
+    const checked = [];
+    const remote = 'https://github.com/me/notes.git';
+    const sync = new GitSync(dir, { debounceMs: 10, workTree: () => tree, remoteEnv: pointGitHubAt('http://127.0.0.1:' + server.address().port), onAuthFailed: async (url) => { checked.push(url); return true; } });
+    await sync.configure({ gitEnabled: true, gitRemote: remote });
+    await sync.commit(undefined, { pull: false });
+    assert.match(sync.status().lastError || '', /^push failed: .*could not read Username/s);
+    assert.deepEqual(checked, [remote]);
+    const synced = await sync.sync();
+    assert.equal(synced.ok, false);
+    assert.match(sync.status().lastError || '', /^sync failed: /);
+    assert.deepEqual(checked, [remote, remote]);
+  } finally {
+    await new Promise((done) => server.close(done));
+  }
+});
+
+test('a push that fails for any other reason does not check the sign-in, and a failing check never breaks the sync', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const closed = await refusingServer();
+  const port = closed.address().port;
+  await new Promise((done) => closed.close(done));
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  let checks = 0;
+  const sync = new GitSync(dir, { debounceMs: 10, remoteEnv: pointGitHubAt('http://127.0.0.1:' + port), onAuthFailed: async () => { checks++; throw new Error('the check itself failed'); } });
+  await sync.configure({ gitEnabled: true, gitRemote: 'https://github.com/me/notes.git' });
+  await sync.commit(undefined, { pull: false });
+  assert.match(sync.status().lastError || '', /^push failed: /);
+  assert.equal(checks, 0, 'an unreachable remote is not a refused sign-in');
+
+  const server = await refusingServer();
+  try {
+    const other = tmp();
+    fs.writeFileSync(path.join(other, 'notes.json'), '{"v":2}');
+    const refusing = new GitSync(other, { debounceMs: 10, remoteEnv: pointGitHubAt('http://127.0.0.1:' + server.address().port), onAuthFailed: async () => { checks++; throw new Error('the check itself failed'); } });
+    await refusing.configure({ gitEnabled: true, gitRemote: 'https://github.com/me/notes.git' });
+    assert.deepEqual(await refusing.commit(undefined, { pull: false }), { ok: true }, 'the version is still saved on this PC');
+    assert.equal(checks, 1);
+    assert.match(refusing.status().lastError || '', /^push failed: .*could not read Username/s);
+  } finally {
+    await new Promise((done) => server.close(done));
+  }
 });
 
 test('with a notes folder, history commits its files instead of a copy of notes.json, and follows renames', { skip: !gitAvailable && 'git not installed' }, async () => {

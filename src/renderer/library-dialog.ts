@@ -10,10 +10,10 @@ const KIND_WORDS: Record<VersionChangeKind, string> = { added: 'added', changed:
 
 type HistoryLook = { icon: string, label: string, error: boolean };
 
-export function historyLook(s: GitState, now?: number): HistoryLook {
+export function historyLook(s: GitState, now?: number, signInNeeded?: boolean): HistoryLook {
   if (!s.enabled) return { icon: 'history', label: 'History is off', error: false };
   if (s.available === false) return { icon: 'circle-alert', label: 'History needs git', error: true };
-  if (s.lastError) return { icon: 'cloud-alert', label: /^(push|sync) failed/.test(s.lastError) ? 'Sync failed' : 'History needs attention', error: true };
+  if (s.lastError) return { icon: 'cloud-alert', label: signInNeeded && H.isAuthFailure(s.lastError) ? 'Sign in to sync' : /^(push|sync) failed/.test(s.lastError) ? 'Sync failed' : 'History needs attention', error: true };
   if (s.pending) return { icon: 'cloud-upload', label: 'Saving a version…', error: false };
   if (!s.commits) return { icon: 'history', label: 'No versions yet', error: false };
   if (s.remote) return s.lastPushAt ? { icon: 'cloud-check', label: 'Synced ' + H.relativeTime(s.lastPushAt, now), error: false } : { icon: 'cloud-upload', label: 'Not synced yet', error: false };
@@ -63,7 +63,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
 
   function renderStatus(s: GitState) {
     lib.status = s;
-    const look = historyLook(s);
+    const look = historyLook(s, undefined, needsSignIn(s));
     setLabel(el.historyStatusBtn, look.label);
     setIcon(el.historyStatusBtn, look.icon);
     el.historyStatusBtn.classList.toggle('is-error', look.error);
@@ -278,7 +278,11 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     if (el.libraryDialog.open) await loadVersions();
     const problem = (H.isLinkedNotice(after.lastError) ? null : H.gitErrorText(after.lastError)) || (synced.ok ? null : H.gitErrorText(synced.error || synced.skipped || 'sync failed'));
     if (!problem) toast('Synced with ' + remoteName(after.remote));
-    else toast(problem.text, { label: 'Details', run: () => { openLibrary(); } });
+    else toast(problem.text, problemAction(after, problem.details));
+  }
+
+  function problemAction(s: GitState, raw: string) {
+    return needsSignIn(s) && H.isAuthFailure(raw) ? { label: 'Sign in', run: () => { goToGithub(); } } : { label: 'Details', run: () => { openLibrary(); } };
   }
 
   async function saveVersionNow() {
@@ -289,7 +293,7 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     if (el.libraryDialog.open) await loadVersions();
     if (!r.ok && r.skipped === 'disabled') { toast('History is off.'); return; }
     const problem = (H.isLinkedNotice(after.lastError) ? null : H.gitErrorText(after.lastError)) || (r.ok ? null : H.gitErrorText(r.error || 'commit failed'));
-    if (problem) { toast(problem.text, { label: 'Details', run: () => { openLibrary(); } }); return; }
+    if (problem) { toast(problem.text, problemAction(after, problem.details)); return; }
     toast(r.ok && r.nothingToCommit ? 'Nothing new to save. The last version has every change.' : 'Saved a version');
   }
 
