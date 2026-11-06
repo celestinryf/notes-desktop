@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   alwaysOnTop: false,
   sort: 'updated',
   sidebarCollapsed: false,
+  hintsShown: [],
   listCollapsed: false,
   listMode: 'tree',
   listLayout: 1,
@@ -303,7 +304,7 @@ function restoreFields<T extends object>(target: T, copy: T) {
 }
 
 const copyNote = (n: Note): Note => Object.assign({}, n, { tags: n.tags.slice() });
-const copySettings = (s: Settings): Settings => Object.assign({}, s, { expandedFolders: s.expandedFolders.slice(), treeExpanded: s.treeExpanded.slice() });
+const copySettings = (s: Settings): Settings => Object.assign({}, s, { expandedFolders: s.expandedFolders.slice(), treeExpanded: s.treeExpanded.slice(), hintsShown: s.hintsShown.slice() });
 const touchesContent = (c: Change) => !!((c.notes && c.notes.length) || (c.dropped && c.dropped.length) || c.folders);
 const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -473,6 +474,7 @@ function sanitizeSettings(input: unknown) {
   s.sidebarWidth = H.clampPane('sidebarWidth', s.sidebarWidth);
   s.listWidth = H.clampPane('listWidth', s.listWidth);
   s.expandedFolders = Array.isArray(s.expandedFolders) ? s.expandedFolders.filter((x) => typeof x === 'string').slice(0, 5000) : [];
+  s.hintsShown = Array.isArray(s.hintsShown) ? s.hintsShown.filter((x) => typeof x === 'string').slice(0, 100) : [];
   s.editorMode = s.editorMode === 'source' ? 'source' : 'rendered';
   s.editorAlign = ['left', 'center', 'right'].includes(s.editorAlign) ? s.editorAlign : DEFAULT_SETTINGS.editorAlign;
   s.editorWidth = clampEditorWidth(s.editorWidth);

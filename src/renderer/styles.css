@@ -270,7 +270,7 @@ select option:disabled { opacity: 0.45; cursor: default; }
 input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--ember); }
 :root[data-theme="dark"] input[type="range"], :root[data-theme="dark"] input[type="checkbox"] { accent-color: var(--tangerine); }
 
-.popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .palette, .toast {
+.popover, .app.sidebar-float .app-sidebar, .find-bar, .modal, .palette, .toast, .hint-pop {
   border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow);
   background: var(--raised); color: var(--fg);
 }
@@ -634,6 +634,8 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 
 .activity { position: absolute; z-index: 9; right: var(--s4); bottom: calc(28px + var(--s3)); display: flex; flex-direction: column; align-items: flex-end; gap: var(--s2); }
 .activity:empty { display: none; }
+.hint-pop { position: absolute; z-index: 9; right: var(--s4); bottom: calc(28px + var(--s3) + 32px + var(--s2)); max-width: 320px; padding: var(--s2) var(--s3); font-size: var(--t-sm); font-weight: 500; line-height: 1.4; color: var(--fg-2); cursor: pointer; animation: pop var(--dur-2) var(--ease) both; }
+.hint-pop:hover { color: var(--fg); }
 .activity-chip {
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 var(--s2) 0 var(--s3);
@@ -1003,7 +1005,7 @@ button.book-name:hover { background: var(--hover); }
 @media print {
   .body-input.uses-code:not(.hidden) { display: block !important; }
   .code-host { display: none !important; }
-  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .hint-pop, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; }
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }

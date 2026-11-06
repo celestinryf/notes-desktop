@@ -2120,6 +2120,62 @@ test('the folder view shows ten notes of a long folder and a "See N more" row; i
   }
 });
 
+test('tips: a small pop in the corner shows once for hiding the sidebar and for find, closes on click, and "Show the tips again" resets them', { timeout: 60000 }, async () => {
+  await page.click('.nav-item[data-view="all"]');
+  await page.keyboard.press('Control+p');
+  await page.waitForSelector('#palette[open]');
+  await page.keyboard.type('>Show the tips again');
+  await sleep(300);
+  if (await page.$('.palette-item.is-active:has-text("Show the tips again")')) { await page.keyboard.press('Enter'); await waitFor('tips reset', () => readNotes().settings.hintsShown.length === 0); }
+  else { await page.keyboard.press('Escape'); await waitForDom(() => !document.getElementById('palette').open); }
+  const sample = await typeNote('Tips sample', 'A note to find in.');
+  const pop = () => page.evaluate(() => { const p = document.getElementById('hintPop'); return p.classList.contains('hidden') ? null : p.textContent; });
+  const docked = () => page.evaluate(() => !document.getElementById('app').classList.contains('sidebar-collapsed'));
+  try {
+    await page.mouse.move(600, 400);
+    await page.keyboard.press('Control+\\');
+    await waitFor('sidebar hidden', async () => !(await docked()));
+    await waitFor('the sidebar tip shows', async () => /left edge/.test((await pop()) || ''));
+    const box = await page.evaluate(() => { const p = document.getElementById('hintPop').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return { right: e.right - p.right, bottom: e.bottom - p.bottom, width: p.width, scrim: !!document.querySelector('.modal[open], dialog[open]') }; });
+    assert.ok(box.right >= 8 && box.right <= 40 && box.bottom >= 40 && box.bottom <= 100, 'the tip sits in the bottom-right corner of the editor, above the status line: ' + JSON.stringify(box));
+    assert.ok(box.width <= 320, 'the tip is small');
+    assert.equal(box.scrim, false, 'nothing dims the screen');
+    await page.click('#hintPop', { timeout: 4000 });
+    await waitFor('a click closes it', async () => (await pop()) === null);
+    await waitFor('remembered', () => readNotes().settings.hintsShown.includes('sidebar-hidden'));
+    await page.keyboard.press('Control+\\');
+    await waitFor('sidebar docked', docked);
+    await page.keyboard.press('Control+\\');
+    await waitFor('sidebar hidden again', async () => !(await docked()));
+    await sleep(400);
+    assert.equal(await pop(), null, 'the tip does not show twice');
+    await page.keyboard.press('Control+\\');
+    await waitFor('sidebar docked', docked);
+
+    await page.keyboard.press('Control+f');
+    await page.waitForSelector('#findBar:not(.hidden)');
+    await waitFor('the find tip shows', async () => /Alt\+C/.test((await pop()) || ''));
+    await page.keyboard.press('Escape');
+    await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+    assert.notEqual(await pop(), null, 'Esc closed find first, the tip is still there');
+    await page.keyboard.press('Escape');
+    await waitFor('Esc closes the tip before hiding the window', async () => (await pop()) === null);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'the window stayed');
+
+    await page.keyboard.press('Control+p');
+    await page.waitForSelector('#palette[open]');
+    await page.keyboard.type('>Show the tips again');
+    await page.waitForSelector('.palette-item.is-active:has-text("Show the tips again")');
+    await page.keyboard.press('Enter');
+    await waitFor('tips forgotten', () => readNotes().settings.hintsShown.length === 0);
+  } finally {
+    await page.evaluate(() => document.getElementById('hintPop').classList.add('hidden'));
+    if (!(await docked())) { await page.keyboard.press('Control+\\'); await waitFor('sidebar docked', docked); }
+    await page.evaluate(() => window.notesApi.settings.set({ hintsShown: ['palette', 'sidebar-hidden', 'find-options'] }));
+    await page.evaluate((id) => window.notesApi.notes.destroy(id), sample.id);
+  }
+});
+
 test('folders move up, down, in and out: by drag in the sidebar and the note list, by Alt+arrows, and from the folder menu', async () => {
   const names = ['Alpha', 'Beta', 'Gamma'];
   const ids = {};

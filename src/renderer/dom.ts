@@ -69,7 +69,7 @@ export const el = {
   openAtLoginInput: pageElement('#openAtLoginInput', HTMLInputElement), alwaysOnTopInput: pageElement('#alwaysOnTopInput', HTMLInputElement),
   importBtn: pageElement('#importBtn', HTMLButtonElement), exportAllBtn: pageElement('#exportAllBtn', HTMLButtonElement), dataFolderBtn: pageElement('#dataFolderBtn', HTMLButtonElement),
   settingsInfo: pageElement('#settingsInfo', HTMLParagraphElement),
-  toast: pageElement('#toast', HTMLDivElement),
+  toast: pageElement('#toast', HTMLDivElement), hintPop: pageElement('#hintPop', HTMLDivElement),
   sidebarResizer: pageElement('#sidebarResizer', HTMLDivElement), listResizer: pageElement('#listResizer', HTMLDivElement),
   newFolderBtn: pageElement('#newFolderBtn', HTMLButtonElement), folderTree: pageElement('#folderTree', HTMLElement), folderSelect: pageElement('#folderSelect', HTMLSelectElement), folderMenu: pageElement('#folderMenu', HTMLDivElement),
   navAll: pageElement('.nav-item[data-view="all"]', HTMLButtonElement),

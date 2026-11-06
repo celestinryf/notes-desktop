@@ -16168,6 +16168,7 @@
     dataFolderBtn: pageElement("#dataFolderBtn", HTMLButtonElement),
     settingsInfo: pageElement("#settingsInfo", HTMLParagraphElement),
     toast: pageElement("#toast", HTMLDivElement),
+    hintPop: pageElement("#hintPop", HTMLDivElement),
     sidebarResizer: pageElement("#sidebarResizer", HTMLDivElement),
     listResizer: pageElement("#listResizer", HTMLDivElement),
     newFolderBtn: pageElement("#newFolderBtn", HTMLButtonElement),
@@ -22105,6 +22106,33 @@
     return { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation };
   }
 
+  // src/renderer/hints.ts
+  var HINT_MS = 5e3;
+  function createHints(deps) {
+    let timer;
+    const shownNow = /* @__PURE__ */ new Set();
+    function hint(id, message) {
+      const seen = deps.shown();
+      if (!seen || seen.includes(id) || shownNow.has(id)) return false;
+      if (deps.canShow && !deps.canShow()) return false;
+      shownNow.add(id);
+      deps.show(message);
+      clearTimeout(timer);
+      timer = setTimeout(deps.hide, HINT_MS);
+      deps.remember(Array.from(/* @__PURE__ */ new Set([...seen, ...shownNow])));
+      return true;
+    }
+    function dismiss() {
+      clearTimeout(timer);
+      deps.hide();
+    }
+    function forget() {
+      shownNow.clear();
+      deps.remember([]);
+    }
+    return { hint, dismiss, forget };
+  }
+
   // src/renderer/find-text.ts
   var WORD_EDGE_BEFORE = "(?<![\\p{L}\\p{N}_])";
   var WORD_EDGE_AFTER = "(?![\\p{L}\\p{N}_])";
@@ -22151,7 +22179,7 @@
   function canFindInNote() {
     return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
   }
-  function createFindBar({ api, flushSave, GUEST }) {
+  function createFindBar({ api, flushSave, GUEST, onOpen }) {
     const opts = () => ({ matchCase: find.matchCase, wholeWord: find.wholeWord });
     const findKey = (q) => q + (find.matchCase ? "" : "") + (find.wholeWord ? "" : "");
     function toggleFindOption(which) {
@@ -22178,6 +22206,7 @@
       el.findInput.focus();
       el.findInput.select();
       runFind(true, true);
+      if (onOpen) onOpen();
     }
     function toggleReplace(force) {
       const on = typeof force === "boolean" ? force : el.replaceRow.classList.contains("hidden");
@@ -25119,6 +25148,7 @@
       const collapsed = !!settingsNow().sidebarCollapsed;
       sidebarPeek = null;
       updateSettings({ sidebarCollapsed: !collapsed });
+      if (!collapsed) hints.hint("sidebar-hidden", TIPS.sidebar);
     }
     function bindSidebarFloat() {
       if (GUEST) return;
@@ -25823,6 +25853,11 @@
       treeShowAll.add(levelKey(folderId));
       renderNoteTree();
       if (at >= 0) noteTree.focusAt(at);
+    }
+    function firstTip() {
+      const soon = (ms) => setTimeout(() => hints.hint("palette", TIPS.palette), ms);
+      if (document.hasFocus()) soon(1200);
+      else window.addEventListener("focus", () => soon(600), { once: true });
     }
     function treeRowHtml(item, override) {
       if (item.kind === "note") return treeNoteInner(override || item.note, item.away);
@@ -27033,7 +27068,27 @@
     }
     const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
-    const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
+    const hints = createHints({
+      shown: () => GUEST || !state.settings ? null : state.settings.hintsShown,
+      remember: (ids) => updateSettings({ hintsShown: ids }),
+      show: (message) => {
+        el.hintPop.classList.remove("hidden");
+        requestAnimationFrame(() => {
+          el.hintPop.textContent = message;
+        });
+      },
+      hide: () => {
+        el.hintPop.classList.add("hidden");
+        el.hintPop.textContent = "";
+      },
+      canShow: () => !document.querySelector("dialog[open]")
+    });
+    const TIPS = {
+      palette: "Ctrl+P finds any note and runs any command.",
+      sidebar: "Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ docks it again.",
+      find: "Alt+C matches the case, Alt+W whole words only."
+    };
+    const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
@@ -27995,6 +28050,11 @@
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
         cmd("tree-show-all", "View", "Show every note in this folder", "list", "", () => showWholeLevel(state.view === "folder" ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === "folder" ? state.folderId : null), "see more"),
+        cmd("tips-again", "App", "Show the tips again", "message-square", "", () => {
+          hints.dismiss();
+          hints.forget();
+          toast("The tips will show again as you go.");
+        }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, "hints help"),
         cmd("list-mode", "View", settingsNow().listMode === "tree" ? "Note list: show as a list" : "Note list: show folders with their notes", settingsNow().listMode === "tree" ? "list" : "folder-open", "", () => updateSettings({ listMode: settingsNow().listMode === "tree" ? "list" : "tree" }).then(() => refresh({ keepEditor: true })), !GUEST, "tree outline view"),
         cmd("focus", "View", "Focus: hide the sidebar and the list", "eye", "", () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), "zen distraction free writing"),
         cmd("width", "View", settingsNow().editorWidth ? "Writing column: full width" : "Writing column: readable width", "columns-2", "", () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, "measure line length narrow wide"),
@@ -28112,6 +28172,11 @@
           el.searchInput.value = "";
           clearTimeout(searchTimer);
           endSearchStep();
+          return;
+        }
+        if (!el.hintPop.classList.contains("hidden")) {
+          e.preventDefault();
+          hints.dismiss();
           return;
         }
         e.preventDefault();
@@ -28552,6 +28617,7 @@
         if (b) shareAction(b.dataset.action ?? "");
       });
       el.findNextBtn.addEventListener("click", () => runFind(true));
+      el.hintPop.addEventListener("click", () => hints.dismiss());
       el.findCaseBtn.addEventListener("click", () => toggleFindOption("matchCase"));
       el.findWordBtn.addEventListener("click", () => toggleFindOption("wholeWord"));
       el.findReplaceToggle.addEventListener("click", () => toggleReplace());
@@ -29032,7 +29098,10 @@
     init().catch((err) => {
       console.error(err);
       toast("Something went wrong starting Notes: " + err.message);
-    }).finally(() => markInitDone());
+    }).finally(() => {
+      markInitDone();
+      firstTip();
+    });
   })();
 })();
 /*! Bundled license information:
