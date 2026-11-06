@@ -1031,6 +1031,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     toast(name ? 'Moved to ' + H.truncate(name, 30) : 'Moved out of folders');
   }
 
+  async function copyFileInfo(what: 'name' | 'path') {
+    const file = state.current ? state.current.filePath : null;
+    if (!file) return;
+    const text = what === 'path' ? file : H.fileNameOf(file);
+    await api.app.copy({ text });
+    toast('Copied ' + text);
+  }
+
   async function moveFolderTo(folderId: string, parentId: string | null) {
     const node = folderNode(folderId);
     const was = placeBefore(folderId);
@@ -1893,6 +1901,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.historyBtn.classList.toggle('hidden', inTrash);
     el.versionsBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
+    el.copyNameBtn.classList.toggle('hidden', !note.filePath);
+    el.copyPathBtn.classList.toggle('hidden', !note.filePath);
     el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
@@ -3252,6 +3262,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     api.github.status().then(githubStatusChanged).catch(() => {});
     el.exportBtn.addEventListener('click', exportCurrent);
     el.duplicateBtn.addEventListener('click', duplicateCurrent);
+    el.copyNameBtn.addEventListener('click', () => copyFileInfo('name'));
+    el.copyPathBtn.addEventListener('click', () => copyFileInfo('path'));
     el.splitBtn.addEventListener('click', openSplitDialog);
     el.splitForm.addEventListener('submit', (e) => { e.preventDefault(); applySplit(); });
     el.splitCancelBtn.addEventListener('click', () => { state.splitNoteId = null; el.splitDialog.close(); });
