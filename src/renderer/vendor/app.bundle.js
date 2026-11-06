@@ -14860,7 +14860,9 @@
     const body = splitFrontMatter(note && note.body).body.slice(0, Math.max(600, max * 8));
     const title = String(note && note.title || "").trim();
     const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
+    const first = lines[0] || "";
+    const repeatsTitle = !!title && first.replace(/^#+\s*/, "").trim() === title;
+    const start = lines.length && (!title && !/^```/.test(first) || repeatsTitle) ? 1 : 0;
     const kept = lines.slice(start);
     const isItem = (l) => /^([-*+]|\d+[.)])\s/.test(l);
     const listed = kept.map((l, i) => isItem(l) && isItem(kept[i + 1] || "") && !/[.,;:!?]$/.test(l) ? l + "," : l);
@@ -14961,10 +14963,11 @@
     };
   }
   function listRow(p, query, home) {
-    const row = Object.assign(outlineRow(p, home), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+    const row = Object.assign(outlineRow(p, home), { tags: p.tags.slice(), trashedAt: p.trashedAt || null, snippet: snippet(p, SNIPPET_LENGTH) });
     if (query) row.excerpt = matchExcerpt(p, query);
     return row;
   }
+  var SNIPPET_LENGTH = 120;
   var EXCERPT_BEFORE = 30;
   var EXCERPT_LENGTH = 80;
   var collapseSpace = (s) => s.replace(/\s+/g, " ");
@@ -19449,7 +19452,7 @@
   // src/renderer/note-list.tsx
   var import_jsx_runtime2 = __toESM(require_jsx_runtime());
   var import_react3 = __toESM(require_react());
-  var LIST_SIZES = { short: 28, tall: 42 };
+  var LIST_SIZES = { short: 68, tall: 88 };
   var PREFETCH = 60;
   var rowKey = (id, size) => id + (size === "tall" ? ":tall" : "");
   function NoteList({ layout, activeId, scroller, deps, handle, shown: shown2 }) {
@@ -25420,13 +25423,23 @@
       const overdue = n.remindAt <= Date.now();
       return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(formatWhen(n.remindAt)) + "</span>";
     }
-    function rowInner(n, q, where = whereMark(n, q)) {
+    function rowTitleLine(n, q, where) {
       const title = n.body === void 0 ? n.title : deriveTitle(n);
       const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + "</span>" : "";
       const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I("star") + "</span>" : "";
       const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I("sticky-note") + "</span>" : "") + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? "Locked (unlocked for now)" : "Locked") + '">' + I(n.unlocked ? "lock-open" : "lock") + "</span>" : "") + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? " (" + n.live.role + ")" : "") + '">' + I("radio") + "</span>" : "");
+      return '<span class="row-name">' + highlight(title, q) + "</span>" + where + marks + fileMark + reminderMark(n) + pin;
+    }
+    function rowInner(n, q, where = whereMark(n, q)) {
       const why = rowHasExcerpt(n, q) ? '<span class="row-meta match">' + highlight(n.excerpt ?? matchExcerpt(n, q), q) + "</span>" : "";
-      return '<span class="row-name">' + highlight(title, q) + "</span>" + why + where + marks + fileMark + reminderMark(n) + pin;
+      return rowTitleLine(n, q, where) + why;
+    }
+    function cardInner(n, q, lead) {
+      const snippet2 = n.locked && !n.unlocked ? '<span class="card-snippet is-locked">Locked note</span>' : rowHasExcerpt(n, q) ? '<span class="card-snippet">' + highlight(n.excerpt ?? matchExcerpt(n, q), q) + "</span>" : n.snippet ? '<span class="card-snippet">' + highlight(n.snippet, q) + "</span>" : "";
+      const when = n.trashedAt || n.updatedAt;
+      const tags = (n.tags || []).map((t) => '<span class="tag">#' + escapeHtml(t) + "</span>").join("");
+      const meta = (when ? "<span>" + escapeHtml(relativeTime(when)) + "</span>" : "") + whereMark(n, q) + tags;
+      return '<span class="card-title">' + lead + rowTitleLine(n, q, "") + "</span>" + snippet2 + (meta ? '<span class="card-meta">' + meta + "</span>" : "");
     }
     function rowHasExcerpt(n, q) {
       if (!q || n.locked && !n.unlocked) return false;
@@ -26997,7 +27010,7 @@
         rowCache.fetch(ids).then((got) => noteList.changed(got)).catch(() => {
         });
       },
-      html: (n, i, q) => (listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + "</span>" : "") + rowInner(n, q),
+      html: (n, i, q) => cardInner(n, q, listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + "</span>" : ""),
       title: (n) => deriveTitle(n),
       tall: (n, q) => rowHasExcerpt(n, q),
       draggable: (n) => !n.trashedAt,

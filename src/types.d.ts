@@ -115,7 +115,7 @@ type IndexReply =
   | { type: 'answer'; seq: number; ids: string[] | null }
   | { type: 'purged'; seq: number }
   | { type: 'failed'; seq: number; error: string };
-interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; excerpt?: string }
+interface ListRow extends OutlineRow { tags: string[]; trashedAt: number | null; snippet: string; excerpt?: string }
 interface RowPage { ids: string[]; rows: ListRow[] }
 interface TreeOutline { notes: Record<string, OutlineRow[]>; pinned: OutlineRow[] }
 interface Counts { all: number; pinned: number; trash: number; reminders: number; overdue: number }

@@ -21,6 +21,9 @@ test('snippet skips the first line only when it became the title', () => {
   assert.equal(H.snippet({ title: 'T', body: 'First\nSecond line' }), 'First Second line');
   assert.equal(H.snippet({ title: '', body: '- [ ] task **bold**' }), '');
   assert.equal(H.snippet({ title: 'T', body: 'a'.repeat(200) }, 20).length, 20);
+  assert.equal(H.snippet({ title: 'Plan', body: '# Plan\n\nThe text.' }), 'The text.', 'a heading that repeats the title is not the snippet');
+  assert.equal(H.snippet({ title: 'Plan', body: 'Plan\nThe text.' }), 'The text.');
+  assert.equal(H.snippet({ title: 'Plan', body: '# Planning\n\nThe text.' }), 'Planning. The text.');
 });
 
 test('relativeTime buckets', () => {
@@ -178,6 +181,14 @@ test('file kind helpers: Markdown files render, other text files are plain, ever
   assert.equal(H.isNonMarkdownFile(plain), false);
   assert.equal(H.isNonMarkdownFile(null), false);
   assert.equal(H.isNonMarkdownFile({ filePath: 'C:/v/x.MARKDOWN', fileKind: 'text' }), false);
+});
+
+test('listRow carries a snippet of the body for the cards, at most 120 characters, and none for a note without text', () => {
+  const base = { id: 'n', title: 'Plan', folderId: null, pinned: false, lock: null, sticky: null, fileKind: null, filePath: null, remindAt: null, live: null, createdAt: 1, updatedAt: 2, vaultId: null, tags: ['work'], trashedAt: null };
+  assert.equal(H.listRow({ ...base, body: '# Plan\n\nShip the **sync** rewrite before the freeze.' }).snippet, 'Ship the sync rewrite before the freeze.');
+  assert.equal(H.listRow({ ...base, body: '' }).snippet, '');
+  assert.ok(H.listRow({ ...base, body: 'word '.repeat(100) }).snippet.length <= 120);
+  assert.deepEqual(H.listRow({ ...base, body: 'x' }).tags, ['work']);
 });
 
 test('fileNameOf takes the last segment of a path with either slash, and nothing from nothing', () => {

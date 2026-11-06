@@ -5,7 +5,7 @@ import { Gap, useVirtualRows } from './virtual-rows.tsx';
 import type { Reveal } from './virtual-rows.tsx';
 
 type ListSize = 'short' | 'tall';
-const LIST_SIZES: Record<ListSize, number> = { short: 28, tall: 42 };
+const LIST_SIZES: Record<ListSize, number> = { short: 68, tall: 88 };
 const PREFETCH = 60;
 
 type Row = { id: string };
