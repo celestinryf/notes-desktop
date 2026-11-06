@@ -16414,7 +16414,10 @@
       const row = e.target.closest(".tree-row");
       if (!row || !root.contains(row) || e.target !== row) return;
       if (e.altKey) {
-        if (altArrow && altArrow(row, e.key)) e.preventDefault();
+        if (altArrow && altArrow(row, e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         return;
       }
       const rows = visibleRows(root);
@@ -19742,10 +19745,7 @@
               marks.drag(item.key);
               deps.dragFolderStart(id2, e.nativeEvent);
             },
-            onDragEnd: () => {
-              marks.drag(null);
-              deps.dragEnd();
-            },
+            onDragEnd: () => marks.drag(null),
             onDragOver: (e) => {
               const zone = deps.dropZone(e.nativeEvent, e.currentTarget);
               if (zone) marks.drop(item.key, zone);
@@ -19846,8 +19846,10 @@
       drag(key) {
         if (key === dragKey) return;
         dragKey = key;
-        if (key === null) dropKey = null;
-        else document.addEventListener("pointermove", () => marks.drag(null), { once: true });
+        if (key === null) {
+          dropKey = null;
+          dropZone = null;
+        } else document.addEventListener("pointermove", () => marks.drag(null), { once: true });
         paint();
       },
       drop(key, zone, leaving) {
@@ -19874,7 +19876,10 @@
       if (i < 0) return;
       const item = layout.items[i];
       if (e.altKey) {
-        if (item.kind === "folder" && deps.nudgeFolder(item.node.id, e.key)) e.preventDefault();
+        if (item.kind === "folder" && deps.nudgeFolder(item.node.id, e.key)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         return;
       }
       const go = (j) => {
@@ -25615,7 +25620,10 @@
           startFolderDrag(node.id, e);
           row.classList.add("is-dragging");
         });
-        row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
+        row.addEventListener("dragend", () => {
+          row.classList.remove("is-dragging");
+          endFolderDrag();
+        });
         into.append(row);
         const creatingHere = editing && editing.mode === "create" && editing.parentId === node.id;
         if (isOpen || creatingHere) {
@@ -25911,6 +25919,8 @@
       toast(name ? "Moved to " + truncate(name, 30) : "Moved out of folders");
     }
     async function moveFolderTo(folderId, parentId) {
+      const node = folderNode(folderId);
+      const was = placeBefore(folderId);
       const res = await api.folders.move(folderId, parentId || null);
       if (res && "error" in res) {
         toast(res.error);
@@ -25918,6 +25928,8 @@
       }
       if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
       await refresh({ keepEditor: true });
+      const into = folderNode(parentId);
+      if (node) toast("Moved " + node.name + (into ? " into " + into.name : " to the top level"), undoMove(folderId, was));
     }
     function allowNoteDrop(e) {
       if (!e.dataTransfer || !(e.dataTransfer.types.includes("text/x-note-id") || e.dataTransfer.types.includes("text/x-folder-id"))) return false;
@@ -25925,12 +25937,26 @@
       e.dataTransfer.dropEffect = "move";
       return true;
     }
+    const DROP_EDGE_MIN = 9;
+    let draggingFolderId = null;
     function dropZoneFor(e, row, beside = true) {
       if (!allowNoteDrop(e)) return null;
       if (!beside || !e.dataTransfer || !e.dataTransfer.types.includes("text/x-folder-id")) return "into";
+      if (draggingFolderId && row.dataset.id && folderIsWithin(row.dataset.id, draggingFolderId)) return null;
       const r = row.getBoundingClientRect();
       const y = e.clientY - r.top;
-      return y < r.height / 4 ? "before" : y > r.height * 3 / 4 ? "after" : "into";
+      const edge = Math.max(DROP_EDGE_MIN, r.height / 4);
+      if (y < edge) return "before";
+      if (y <= r.height - edge) return "into";
+      return row.getAttribute("aria-expanded") === "true" ? "first" : "after";
+    }
+    function folderIsWithin(id, ancestorId) {
+      for (let node = folderNode(id); node; node = folderNode(node.parentId)) if (node.id === ancestorId) return true;
+      return false;
+    }
+    function folderCanHold(parent, node) {
+      if (node.isVaultRoot) return parent === null;
+      return node.vaultId ? !!parent && parent.vaultId === node.vaultId : !parent || !parent.vaultId;
     }
     function folderNode(id) {
       return id ? flattenTree(state.tree).find((n) => n.id === id) || null : null;
@@ -25946,8 +25972,25 @@
       const next = siblings[siblings.findIndex((n) => n.id === id) + 1];
       return next ? next.id : null;
     }
+    function placeBefore(id) {
+      const node = folderNode(id);
+      return node ? { parentId: node.parentId, beforeId: folderAfter(id) } : null;
+    }
+    function movedWhere(name, to) {
+      const before = folderNode(to.beforeId);
+      if (before) return "Moved " + name + " above " + before.name;
+      const parent = folderNode(to.parentId);
+      return "Moved " + name + (parent ? " to the end of " + parent.name : " to the top level");
+    }
+    function undoMove(id, was) {
+      return was ? { label: "Undo", run: () => {
+        placeFolder(id, was.parentId, was.beforeId);
+      } } : void 0;
+    }
     async function placeFolder(id, parentId, beforeId) {
       if (beforeId === id) return;
+      const node = folderNode(id);
+      const was = placeBefore(id);
       const res = await api.folders.place(id, parentId, beforeId);
       if ("error" in res) {
         toast(res.error);
@@ -25955,20 +25998,56 @@
       }
       if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
       await refresh({ keepEditor: true });
+      if (node) toast(movedWhere(node.name, { parentId, beforeId }), undoMove(id, was));
     }
-    function nudgeFolder(id, key) {
+    function nudgeTarget(id, key) {
       const node = folderNode(id);
-      if (!node) return false;
+      if (!node) return null;
       const siblings = folderSiblings(node.parentId);
       const i = siblings.findIndex((n) => n.id === id);
-      if (key === "ArrowUp" && i > 0) placeFolder(id, node.parentId, siblings[i - 1].id);
-      else if (key === "ArrowDown" && i >= 0 && i < siblings.length - 1) placeFolder(id, node.parentId, siblings[i + 2] ? siblings[i + 2].id : null);
+      let to = null;
+      if (key === "ArrowUp" && i > 0) to = { parentId: node.parentId, beforeId: siblings[i - 1].id };
+      else if (key === "ArrowDown" && i >= 0 && i < siblings.length - 1) to = { parentId: node.parentId, beforeId: siblings[i + 2] ? siblings[i + 2].id : null };
       else if (key === "ArrowLeft" && node.parentId) {
         const parent = folderNode(node.parentId);
-        placeFolder(id, parent ? parent.parentId : null, folderAfter(node.parentId));
-      } else if (key === "ArrowRight" && i > 0) placeFolder(id, siblings[i - 1].id, null);
-      else return false;
+        to = { parentId: parent ? parent.parentId : null, beforeId: folderAfter(node.parentId) };
+      } else if (key === "ArrowRight" && i > 0) to = { parentId: siblings[i - 1].id, beforeId: null };
+      return to && folderCanHold(folderNode(to.parentId), node) ? to : null;
+    }
+    function nudgeFolder(id, key) {
+      const to = nudgeTarget(id, key);
+      if (!to) return false;
+      placeFolder(id, to.parentId, to.beforeId);
       return true;
+    }
+    function moveLabel(key, to, node) {
+      if (key === "ArrowUp") return "Move up";
+      if (key === "ArrowDown") return "Move down";
+      const into = folderNode(to.parentId);
+      if (key === "ArrowRight") return "Move into " + (into ? into.name : "the folder above");
+      const from = folderNode(node.parentId);
+      return "Move out of " + (from ? from.name : "its folder");
+    }
+    const FOLDER_FOCUS_HINT = "Alt+arrows move this folder";
+    function folderFocusHint(on) {
+      if (on) {
+        el.statusCode.textContent = FOLDER_FOCUS_HINT;
+        el.statusCode.classList.remove("hidden");
+        return;
+      }
+      if (el.statusCode.textContent === FOLDER_FOCUS_HINT) {
+        el.statusCode.textContent = "";
+        el.statusCode.classList.add("hidden");
+      }
+    }
+    function bindFolderFocusHint(root) {
+      const isFolderRow = (t) => t instanceof Element && !!t.closest(".folder-row[data-id], .tree-folder[data-id]");
+      root.addEventListener("focusin", (e) => {
+        if (isFolderRow(e.target)) folderFocusHint(true);
+      });
+      root.addEventListener("focusout", (e) => {
+        if (!isFolderRow(e.relatedTarget)) folderFocusHint(false);
+      });
     }
     function dropAt(folderId, zone, e) {
       if (!e.dataTransfer) return;
@@ -25985,6 +26064,10 @@
       const beside = zone === "into" ? null : folderNode(folderId);
       if (!beside) {
         moveFolderTo(movingFolder, folderId);
+        return;
+      }
+      if (zone === "first") {
+        placeFolder(movingFolder, beside.id, beside.children[0] ? beside.children[0].id : null);
         return;
       }
       placeFolder(movingFolder, beside.parentId, zone === "before" ? beside.id : folderAfter(beside.id));
@@ -26011,6 +26094,11 @@
         e.dataTransfer.setData("text/x-folder-id", id);
         e.dataTransfer.effectAllowed = "move";
       }
+      draggingFolderId = id;
+    }
+    function endFolderDrag() {
+      draggingFolderId = null;
+      for (const marked of document.querySelectorAll("#folderTree [data-drop], #folderTree .is-drop-target, #navAll.is-drop-target")) markDrop(marked, null);
     }
     function startNoteDrag(id, e) {
       if (e.dataTransfer) {
@@ -26054,12 +26142,13 @@
       el.folderMenuOpen.classList.toggle("hidden", !node.vaultId);
       const deleteItem = menu.querySelector('[data-action="delete"]');
       if (deleteItem) deleteItem.textContent = node.isVaultRoot ? "Remove vault (keeps files)" : "Delete folder";
-      const siblings = folderSiblings(node.parentId || null);
-      const at = siblings.findIndex((n) => n.id === id);
-      el.folderMenuUp.classList.toggle("hidden", at <= 0);
-      el.folderMenuDown.classList.toggle("hidden", at < 0 || at >= siblings.length - 1);
-      el.folderMenuIn.classList.toggle("hidden", at <= 0);
-      el.folderMenuOut.classList.toggle("hidden", !node.parentId || !!node.isVaultRoot);
+      const full = folderNode(id);
+      for (const [btn, key] of [[el.folderMenuUp, "ArrowUp"], [el.folderMenuDown, "ArrowDown"], [el.folderMenuIn, "ArrowRight"], [el.folderMenuOut, "ArrowLeft"]]) {
+        const to = nudgeTarget(id, key);
+        btn.classList.toggle("hidden", !to || !full);
+        const label = btn.querySelector(".lbl");
+        if (label && to && full) label.textContent = moveLabel(key, to, full);
+      }
       placePopover(menu, anchor, ev);
     }
     function closeFolderMenu() {
@@ -27778,9 +27867,9 @@
         cmd("open-file", "Create", "Open a file as a note\u2026", "folder-open", "Ctrl+O", side("openFiles", () => openFiles()), true, "markdown pdf word docx txt"),
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
-        ...[["up", "Move this folder up", "arrow-up", "Alt+Up", "ArrowUp"], ["down", "Move this folder down", "arrow-down", "Alt+Down", "ArrowDown"], ["in", "Move this folder into the folder above", "arrow-right", "Alt+Right", "ArrowRight"], ["out", "Move this folder out of its folder", "arrow-left", "Alt+Left", "ArrowLeft"]].map(([what, title, icon, keys, key]) => cmd("folder-" + what, "Folders", title, icon, keys, () => {
+        ...[["up", "Move this folder up", "arrow-up", "Alt+Up", "ArrowUp"], ["down", "Move this folder down", "arrow-down", "Alt+Down", "ArrowDown"], ["in", "Move this folder into the folder above", "arrow-right", "Alt+Right", "ArrowRight"], ["out", "Move this folder out of its folder", "arrow-left", "Alt+Left", "ArrowLeft"]].map(([what, title, icon, keys, key]) => cmd("folder-" + what, "Folders", title, icon, "", () => {
           if (state.folderId) nudgeFolder(state.folderId, key);
-        }, !GUEST && state.view === "folder" && !!state.folderId, "reorder drag sort")),
+        }, !GUEST && state.view === "folder" && !!state.folderId && !!nudgeTarget(state.folderId, key), "reorder drag sort " + keys)),
         cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
         cmd("library", "Go to", "History and sync", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
         cmd("sync", "Go to", "Sync now", "refresh-cw", "", () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push pull github backup another computer"),
@@ -28482,6 +28571,9 @@
         if (!el.lockMenu.classList.contains("hidden") && !el.lockMenu.contains(target) && !el.lockBtn.contains(target)) el.lockMenu.classList.add("hidden");
       });
       wireDropTarget(el.navAll, null, false);
+      document.addEventListener("dragend", endFolderDrag);
+      bindFolderFocusHint(el.folderTree);
+      bindFolderFocusHint(el.noteTree);
       window.addEventListener("resize", () => {
         if (!state.settings) return;
         applySidebar();

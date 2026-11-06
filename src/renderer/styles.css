@@ -1181,6 +1181,8 @@ button.book-name:hover { background: var(--hover); }
 }
 .note-tree .tree-folder.is-dragging { opacity: 0.5; }
 .folder-row, .note-tree .tree-folder { position: relative; }
-.folder-row[data-drop]::after, .note-tree .tree-folder[data-drop]::after { content: ''; position: absolute; left: calc(var(--s1) + var(--depth, 0) * var(--indent)); right: var(--s1); height: 2px; background: var(--accent); pointer-events: none; }
+.folder-row[data-drop]::after, .note-tree .tree-folder[data-drop]::after { content: ''; position: absolute; left: calc(var(--s1) + var(--depth, 0) * var(--indent)); right: var(--s1); height: 2px; background: var(--accent-text); pointer-events: none; }
 .folder-row[data-drop="before"]::after, .note-tree .tree-folder[data-drop="before"]::after { top: -1px; }
-.folder-row[data-drop="after"]::after, .note-tree .tree-folder[data-drop="after"]::after { bottom: -1px; }
+.folder-row[data-drop="after"]::after, .folder-row[data-drop="first"]::after, .note-tree .tree-folder[data-drop="after"]::after, .note-tree .tree-folder[data-drop="first"]::after { bottom: -1px; }
+.folder-row[data-drop="first"]::after, .note-tree .tree-folder[data-drop="first"]::after { left: calc(var(--s1) + (var(--depth, 0) + 1) * var(--indent)); }
+.folder-row.is-dragging + .tree-children, .note-tree .tree-folder.is-dragging + .tree-children { opacity: 0.5; }

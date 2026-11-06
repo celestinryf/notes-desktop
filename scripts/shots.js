@@ -328,6 +328,18 @@ const SCENES = {
     await page.waitForSelector('#folderMenu:not(.hidden)');
     await sleep(300);
   } },
+  'folder-drop-line-first': { about: 'Dragging Field guide to the bottom of the open Work folder: the line sits at the children\u2019s indent, so it will become the first folder inside Work', run: async (page) => {
+    await page.evaluate(() => {
+      const byName = (n) => [...document.querySelectorAll('.folder-row')].find((r) => r.querySelector('.row-name')?.textContent === n);
+      const from = byName('Field guide'), to = byName('Work');
+      const dt = new DataTransfer();
+      dt.setData('text/x-folder-id', from.dataset.id);
+      from.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+      const r = to.getBoundingClientRect();
+      to.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.bottom - 2 }));
+    });
+    await sleep(200);
+  } },
   'folder-drop-line-list': { about: 'Dragging the Field guide folder below Home in the note list: the same line, at the row’s indent', run: async (page) => {
     await page.evaluate(() => {
       const byName = (n) => [...document.querySelectorAll('.note-tree .tree-folder')].find((r) => r.querySelector('.row-name')?.textContent === n);

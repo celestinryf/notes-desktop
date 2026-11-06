@@ -1944,28 +1944,54 @@ test('folders move up, down, in and out: by drag in the sidebar and the note lis
   for (const name of names) ids[name] = (await page.evaluate((n) => window.notesApi.folders.create({ name: n }), name)).id;
   const row = (name) => `.folder-row:has(.row-name:text-is("${name}"))`;
   const listRow = (name) => `.note-tree .tree-folder[data-id="${ids[name]}"]`;
+  const dragTo = async (from, to, where) => {
+    const box = await page.locator(to).boundingBox();
+    const y = { before: 3, into: box.height / 2, after: box.height - 3 }[where];
+    await page.dragAndDrop(from, to, { targetPosition: { x: 60, y }, timeout: 8000 });
+  };
   const shape = () => page.evaluate(async (ns) => {
     const mine = (nodes) => nodes.filter((f) => ns.includes(f.name)).map((f) => f.name + (f.children.length ? '(' + mine(f.children).join(',') + ')' : ''));
     return mine(await window.notesApi.folders.tree()).join(' ');
   }, names);
   const expectShape = (want) => waitFor('folders read ' + want, async () => (await shape()) === want);
   const savedOrder = (name) => readNotes().folders.find((f) => f.name === name).order;
+  const focusedName = () => page.evaluate(() => { const a = document.activeElement; const n = a && a.querySelector('.row-name'); return n ? n.textContent : null; });
+  const toastText = () => page.$eval('#toast', (t) => t.textContent);
+  const noMarks = async (scope, label) => assert.equal(await page.$$eval(scope + ' [data-drop], ' + scope + ' .is-drop-target', (r) => r.length), 0, label);
   let wasTree = null;
   try {
     await page.click('.nav-item[data-view="all"]');
     await page.waitForSelector(row('Gamma'));
     assert.equal(await shape(), 'Alpha Beta Gamma');
 
-    await page.dragAndDrop(row('Gamma'), row('Alpha'), { targetPosition: { x: 60, y: 3 }, timeout: 8000 });
+    await dragTo(row('Gamma'), row('Alpha'), 'before');
     await expectShape('Gamma Alpha Beta');
     assert.ok(savedOrder('Gamma') < savedOrder('Alpha') && savedOrder('Alpha') < savedOrder('Beta'), 'the order is saved');
-    assert.equal(await page.$$eval('.folder-row[data-drop], .folder-row.is-drop-target', (r) => r.length), 0, 'no drop mark left behind');
+    await noMarks('#folderTree', 'no drop mark left behind');
+    assert.match(await toastText(), /^Moved Gamma above Alpha/);
+    await page.click('#toast button');
+    await expectShape('Alpha Beta Gamma');
+    await dragTo(row('Gamma'), row('Alpha'), 'before');
+    await expectShape('Gamma Alpha Beta');
 
-    await page.dragAndDrop(row('Beta'), row('Gamma'), { targetPosition: { x: 60, y: 16 }, timeout: 8000 });
+    await dragTo(row('Beta'), row('Gamma'), 'into');
     await expectShape('Gamma(Beta) Alpha');
     await page.waitForSelector(row('Beta'), { state: 'visible' });
+    assert.match(await toastText(), /^Moved Beta into Gamma/);
 
+    await dragTo(row('Alpha'), row('Gamma'), 'after');
+    await expectShape('Gamma(Alpha,Beta)', 'the bottom edge of an open folder puts it first inside');
+    await page.waitForSelector(row('Alpha'), { state: 'visible' });
+
+    const openTitle = await page.inputValue('#titleInput');
     await page.focus(row('Alpha'));
+    assert.equal(await page.$eval('#statusCode', (s) => s.textContent), 'Alt+arrows move this folder', 'the status line says what Alt+arrows do');
+    await page.keyboard.press('Alt+ArrowDown');
+    await expectShape('Gamma(Beta,Alpha)');
+    assert.equal(await focusedName(), 'Alpha', 'the moved row keeps the focus');
+    assert.equal(await page.inputValue('#titleInput'), openTitle, 'Alt+Down on a folder row does not change the open note');
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expectShape('Gamma(Beta) Alpha');
     await page.keyboard.press('Alt+ArrowUp');
     await expectShape('Alpha Gamma(Beta)');
     await page.focus(row('Beta'));
@@ -1973,27 +1999,35 @@ test('folders move up, down, in and out: by drag in the sidebar and the note lis
     await expectShape('Alpha Gamma Beta');
     await page.keyboard.press('Alt+ArrowRight');
     await expectShape('Alpha Gamma(Beta)');
-    assert.equal(await page.evaluate(() => { const a = document.activeElement; const n = a && a.querySelector('.row-name'); return n ? n.textContent : null; }), 'Beta', 'the moved row keeps the focus');
+    assert.equal(await focusedName(), 'Beta');
+    await page.focus('#searchInput');
+    assert.equal(await page.$eval('#statusCode', (s) => s.classList.contains('hidden')), true, 'the hint goes when the focus leaves the tree');
 
     await page.click(row('Beta'), { button: 'right' });
     await page.waitForSelector('#folderMenu:not(.hidden)');
     assert.deepEqual(await page.$$eval('#folderMenu button:not(.hidden)', (b) => b.map((x) => x.dataset.action)), ['new-note', 'new-subfolder', 'rename', 'move-out', 'toggle-book', 'delete'], 'an only child can move out, not up, down or in');
+    assert.equal(await page.$eval('#folderMenuOut .lbl', (l) => l.textContent), 'Move out of Gamma');
     await page.click('#folderMenu [data-action="move-out"]');
     await expectShape('Alpha Gamma Beta');
+    await page.click(row('Beta'), { button: 'right' });
+    await page.waitForSelector('#folderMenu:not(.hidden)');
+    assert.equal(await page.$eval('#folderMenuIn .lbl', (l) => l.textContent), 'Move into Gamma');
+    await page.keyboard.press('Escape');
 
     await page.click('.nav-item[data-view="all"]');
     wasTree = await page.$eval('#listModeSeg button[data-mode="tree"]', (b) => b.classList.contains('is-on'));
     if (!wasTree) await page.click('#listModeSeg button[data-mode="tree"]');
     await page.waitForSelector(listRow('Alpha'));
-    await page.dragAndDrop(listRow('Alpha'), listRow('Beta'), { targetPosition: { x: 60, y: 26 }, timeout: 8000 });
+    await dragTo(listRow('Alpha'), listRow('Beta'), 'after');
     await expectShape('Gamma Beta Alpha');
     await page.waitForSelector(listRow('Alpha'));
     await page.focus(listRow('Alpha'));
     await page.keyboard.press('Alt+ArrowUp');
     await expectShape('Gamma Alpha Beta');
-    await page.dragAndDrop(listRow('Beta'), listRow('Gamma'), { targetPosition: { x: 60, y: 14 }, timeout: 8000 });
+    await waitFor('the moved list row keeps the focus', async () => (await focusedName()) === 'Alpha');
+    await dragTo(listRow('Beta'), listRow('Gamma'), 'into');
     await expectShape('Gamma(Beta) Alpha');
-    assert.equal(await page.$$eval('.note-tree [data-drop], .note-tree .is-drop-target', (r) => r.length), 0, 'no drop mark left behind in the list');
+    await noMarks('.note-tree', 'no drop mark left behind in the list');
   } finally {
     for (const name of ['Beta', 'Gamma', 'Alpha']) await page.evaluate((id) => window.notesApi.folders.delete(id), ids[name]);
     if (wasTree === false) await page.click('#listModeSeg button[data-mode="list"]');

@@ -7,7 +7,7 @@ import type { Reveal } from './virtual-rows.tsx';
 import { chooseActive } from './tree-items.ts';
 import type { FolderItem, TreeItem } from './tree-items.ts';
 
-export type DropZone = 'before' | 'into' | 'after';
+export type DropZone = 'before' | 'into' | 'first' | 'after';
 
 declare module 'react' {
   interface CSSProperties { '--depth'?: number }
@@ -106,7 +106,7 @@ function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, dropZone, ma
           draggable
           onContextMenu={(e) => { e.preventDefault(); deps.folderMenu(id, e.currentTarget, e.nativeEvent); }}
           onDragStart={(e) => { marks.drag(item.key); deps.dragFolderStart(id, e.nativeEvent); }}
-          onDragEnd={() => { marks.drag(null); deps.dragEnd(); }}
+          onDragEnd={() => marks.drag(null)}
           onDragOver={(e) => { const zone = deps.dropZone(e.nativeEvent, e.currentTarget); if (zone) marks.drop(item.key, zone); }}
           onDragLeave={() => marks.drop(null, null, item.key)}
           onDrop={(e) => { const zone = dropZone; marks.drop(null, null); if (zone) deps.drop(id, zone, e.nativeEvent); }}
@@ -184,7 +184,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     drag(key) {
       if (key === dragKey) return;
       dragKey = key;
-      if (key === null) dropKey = null;
+      if (key === null) { dropKey = null; dropZone = null; }
       else document.addEventListener('pointermove', () => marks.drag(null), { once: true });
       paint();
     },
@@ -212,7 +212,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     const i = key === undefined || key === null ? -1 : indexOf.get(key) ?? -1;
     if (i < 0) return;
     const item = layout.items[i];
-    if (e.altKey) { if (item.kind === 'folder' && deps.nudgeFolder(item.node.id, e.key)) e.preventDefault(); return; }
+    if (e.altKey) { if (item.kind === 'folder' && deps.nudgeFolder(item.node.id, e.key)) { e.preventDefault(); e.stopPropagation(); } return; }
     const go = (j: number) => { if (j >= 0 && j < layout.items.length) { e.preventDefault(); focusIndex(j); } };
     if (e.key === 'ArrowDown') go(i + 1);
     else if (e.key === 'ArrowUp') go(i - 1);

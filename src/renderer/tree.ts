@@ -38,7 +38,7 @@ export function bindTreeKeys(root: HTMLElement, altArrow?: (row: HTMLElement, ke
     if (!(e.target instanceof Element) || e.target.closest('input, select, textarea') || e.ctrlKey || e.metaKey) return;
     const row = e.target.closest<HTMLElement>('.tree-row');
     if (!row || !root.contains(row) || e.target !== row) return;
-    if (e.altKey) { if (altArrow && altArrow(row, e.key)) e.preventDefault(); return; }
+    if (e.altKey) { if (altArrow && altArrow(row, e.key)) { e.preventDefault(); e.stopPropagation(); } return; }
     const rows = visibleRows(root);
     const i = rows.indexOf(row);
     const go = (j: number) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };

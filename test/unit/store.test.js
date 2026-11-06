@@ -278,6 +278,20 @@ test('folders: placing one before a sibling gives that level a manual order; a m
 
   const again = new Store(store.dir, { now: () => 2_000_000 }).load();
   assert.deepEqual(again.folderTree().map((f) => [f.name, f.children.map((x) => x.name)]), [['C', ['A', 'B']], ['D', []]], 'the order is saved');
+
+  assert.deepEqual(store.deleteFolder(c.id), { movedNotes: 0, movedFolders: 2, parentId: null });
+  assert.deepEqual(orders(), { D: 1, A: null, B: null }, 'folders lifted out of a deleted folder lose its order and join the end');
+  assert.deepEqual(names(), ['D', 'A', 'B']);
+});
+
+test('folders: a saved order that is not a number reads as none', () => {
+  const { store } = makeStore();
+  const a = store.createFolder({ name: 'A' });
+  const file = path.join(store.dir, 'notes.json');
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  raw.folders.find((f) => f.id === a.id).order = 'first';
+  fs.writeFileSync(file, JSON.stringify(raw));
+  assert.equal(new Store(store.dir, { now: () => 2_000_000 }).load().getFolder(a.id).order, null);
 });
 
 test('folders: rename, move with cycle protection, delete lifts contents to parent', () => {
