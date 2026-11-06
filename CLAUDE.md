@@ -6,8 +6,8 @@ Before doing any work, read from that folder:
 
 1. `Notes App - Current Status.md` (it ends with the prompt for the next session)
 2. `Notes App Project.md`
-4. The note your task touches: Architecture, Features, Decisions and Findings, or Testing and Gotchas
-5. For any change a person can see (layout, styles, a button, a menu, a dialog, copy): `Notes App - Design System.md`
+3. The note your task touches: Architecture, Features, Decisions and Findings, or Testing and Gotchas
+4. For any change a person can see (layout, styles, a button, a menu, a dialog, copy): `Notes App - Design System.md`
 
 Write decisions and findings back to that folder (there are no handoff notes: the day's record goes into `Notes App - Decisions and Findings.md`). Update `Notes App - Current Status.md` at the end of every prompt: overwrite it with where things stand, what is in progress, what is next, and the decisions waiting on the user.
 
