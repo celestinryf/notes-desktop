@@ -25470,7 +25470,10 @@
     function reminderMark(n) {
       if (!n.remindAt || n.trashedAt) return "";
       const overdue = n.remindAt <= Date.now();
-      return '<span class="row-meta remind-mark' + (overdue ? " is-overdue" : "") + '" title="' + (overdue ? "Reminder went off" : "Reminder") + '">' + I("bell") + escapeHtml(formatWhen(n.remindAt)) + "</span>";
+      return metaMark("remind-mark" + (overdue ? " is-overdue" : ""), overdue ? "Reminder went off" : "Reminder", "bell", formatWhen(n.remindAt));
+    }
+    function metaMark(kind, title, icon, text) {
+      return '<span class="row-meta ' + kind + '" title="' + escapeHtml(title) + '">' + I(icon) + '<span class="row-meta-text">' + escapeHtml(text) + "</span></span>";
     }
     function rowTitleLine(n, q, where, withPin = true) {
       const title = n.body === void 0 ? n.title : deriveTitle(n);
@@ -25503,7 +25506,7 @@
       if (!f) return "";
       const names = [];
       for (let x = f; x && names.length < 200; x = x.parentId ? byId.get(x.parentId) : void 0) names.unshift(x.name);
-      return '<span class="row-meta where" title="' + escapeHtml(names.join(" / ")) + '">' + I(f.book ? "book-open" : "folder") + escapeHtml(f.name) + "</span>";
+      return metaMark("where", names.join(" / "), f.book ? "book-open" : "folder", f.name);
     }
     function treeNoteInner(n, awayFromFolder) {
       return '<span class="tree-spacer" aria-hidden="true"></span>' + rowTitleLine(n, "", awayFromFolder ? folderMark(n) : "");
@@ -26247,7 +26250,7 @@
     function renderFolderSelect() {
       const sel = el.folderSelect;
       const current = state.current ? state.current.folderId || "" : "";
-      sel.innerHTML = "";
+      sel.options.length = 0;
       const none = document.createElement("option");
       none.value = "";
       none.textContent = "No folder";
