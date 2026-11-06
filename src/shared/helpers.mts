@@ -85,10 +85,14 @@ function snippet(note: TitleSource, max?: number) {
   const body = splitFrontMatter(note && note.body).body.slice(0, Math.max(600, max * 8));
   const title = String((note && note.title) || '').trim();
   const lines = body.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const start = !title && lines.length && !/^```/.test(lines[0]) ? 1 : 0;
+  const first = lines[0] || '';
+  const repeatsTitle = !!title && first.replace(/^#+\s*/, '').trim() === title;
+  const start = lines.length && ((!title && !/^```/.test(first)) || repeatsTitle) ? 1 : 0;
   const kept = lines.slice(start);
+  const prose = kept.filter((l) => !/^#{1,6}\s/.test(l));
+  const shown = prose.length ? prose : kept;
   const isItem = (l: string) => /^([-*+]|\d+[.)])\s/.test(l);
-  const listed = kept.map((l, i) => (isItem(l) && isItem(kept[i + 1] || '') && !/[.,;:!?]$/.test(l) ? l + ',' : l));
+  const listed = shown.map((l, i) => (isItem(l) && isItem(shown[i + 1] || '') && !/[.,;:!?]$/.test(l) ? l + ',' : l));
   const text = plainTextFromMarkdown(listed.join('\n')).replace(/\bcode block omitted\.\s*/g, '').replace(/\s+/g, ' ').trim();
   return truncate(text, max);
 }
@@ -186,12 +190,14 @@ function outlineRow(p: RowView, home?: boolean): OutlineRow {
     fileKind: p.fileKind || null, filePath: p.filePath || null, remindAt: p.remindAt || null, live: p.live || null, createdAt: p.createdAt, updatedAt: p.updatedAt };
 }
 
-function listRow(p: RowView & Pick<PublicNote, 'tags' | 'trashedAt'>, query?: string, home?: boolean): ListRow {
+function listRow(p: RowView & Pick<PublicNote, 'tags' | 'trashedAt'>, query?: string, home?: boolean, forCards?: boolean): ListRow {
   const row: ListRow = Object.assign(outlineRow(p, home), { tags: p.tags.slice(), trashedAt: p.trashedAt || null });
+  if (forCards) row.snippet = snippet(p, SNIPPET_LENGTH);
   if (query) row.excerpt = matchExcerpt(p, query);
   return row;
 }
 
+const SNIPPET_LENGTH = 120;
 const EXCERPT_BEFORE = 30;
 const EXCERPT_LENGTH = 80;
 const collapseSpace = (s: string) => s.replace(/\s+/g, ' ');
@@ -211,7 +217,7 @@ function clipAround(text: string, at: number, longer: boolean) {
 }
 
 function matchExcerpt(note: TitleSource & { tags?: string[] }, query: string) {
-  const raw = String((note && note.body) || '');
+  const raw = plainTextFromMarkdown(splitFrontMatter(String((note && note.body) || '')).body);
   const words = tokenize(query);
   const noMatch = () => ((note && note.tags) || []).filter((t) => words.some((w) => t.toLowerCase().includes(w))).map((t) => '#' + t).join(' ') || snippet(note, EXCERPT_LENGTH);
   const rawLow = raw.toLowerCase();
