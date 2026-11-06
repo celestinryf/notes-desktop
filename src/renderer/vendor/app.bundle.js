@@ -56,6 +56,8 @@
           "chevron-down": '<path d="m6 9 6 6 6-6" />',
           "arrow-up": '<path d="m5 12 7-7 7 7" /><path d="M12 19V5" />',
           "arrow-down": '<path d="M12 5v14" /><path d="m19 12-7 7-7-7" />',
+          "arrow-left": '<path d="m12 19-7-7 7-7" /><path d="M19 12H5" />',
+          "arrow-right": '<path d="M5 12h14" /><path d="m12 5 7 7-7 7" />',
           "external-link": '<path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
           "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />',
           "folder-open": '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />',
@@ -16042,6 +16044,10 @@
     relatedIn: pageElement("#relatedIn", HTMLDivElement),
     relatedTags: pageElement("#relatedTags", HTMLDivElement),
     folderMenuBook: pageElement("#folderMenuBook", HTMLButtonElement),
+    folderMenuUp: pageElement("#folderMenuUp", HTMLButtonElement),
+    folderMenuDown: pageElement("#folderMenuDown", HTMLButtonElement),
+    folderMenuIn: pageElement("#folderMenuIn", HTMLButtonElement),
+    folderMenuOut: pageElement("#folderMenuOut", HTMLButtonElement),
     lockScreen: pageElement("#lockScreen", HTMLFormElement),
     lockScreenPassword: pageElement("#lockScreenPassword", HTMLInputElement),
     lockScreenBtn: pageElement("#lockScreenBtn", HTMLButtonElement),
@@ -16402,11 +16408,15 @@
     const first = all.find((r) => r.classList.contains("is-active")) || all[0];
     if (first) first.tabIndex = 0;
   }
-  function bindTreeKeys(root) {
+  function bindTreeKeys(root, altArrow) {
     root.addEventListener("keydown", (e) => {
-      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey) return;
       const row = e.target.closest(".tree-row");
       if (!row || !root.contains(row) || e.target !== row) return;
+      if (e.altKey) {
+        if (altArrow && altArrow(row, e.key)) e.preventDefault();
+        return;
+      }
       const rows = visibleRows(root);
       const i = rows.indexOf(row);
       const go = (j) => {
@@ -19677,7 +19687,7 @@
     keys: items.map((item) => item.key),
     sizes: items.map((item) => item.kind === "heading" ? "heading" : "row")
   });
-  function NoteTree({ layout, activeKey, tabKey, dragKey, dropKey, marks, overrides, scroller, deps, handle, painted }) {
+  function NoteTree({ layout, activeKey, tabKey, dragKey, dropKey, dropZone, marks, overrides, scroller, deps, handle, painted }) {
     const { items: rows, before, after, total, measureElement: measureElement2 } = useVirtualRows(layout, scroller, TREE_SIZES, handle);
     (0, import_react4.useLayoutEffect)(() => painted());
     const refs = (0, import_react4.useRef)(/* @__PURE__ */ new Map());
@@ -19719,20 +19729,32 @@
           "div",
           {
             ...shared,
-            className: "tree-row tree-folder" + (item.here ? " is-here" : "") + (item.key === dropKey ? " is-drop-target" : ""),
+            className: "tree-row tree-folder" + (item.here ? " is-here" : "") + (item.key === dropKey && dropZone === "into" ? " is-drop-target" : "") + (item.key === dragKey ? " is-dragging" : ""),
             "data-id": id2,
+            "data-drop": item.key === dropKey && dropZone && dropZone !== "into" ? dropZone : void 0,
             "aria-expanded": item.kids ? item.open : void 0,
+            draggable: true,
             onContextMenu: (e) => {
               e.preventDefault();
               deps.folderMenu(id2, e.currentTarget, e.nativeEvent);
             },
-            onDragOver: (e) => {
-              if (deps.allowDrop(e.nativeEvent)) marks.drop(item.key);
+            onDragStart: (e) => {
+              marks.drag(item.key);
+              deps.dragFolderStart(id2, e.nativeEvent);
             },
-            onDragLeave: () => marks.drop(null, item.key),
+            onDragEnd: () => {
+              marks.drag(null);
+              deps.dragEnd();
+            },
+            onDragOver: (e) => {
+              const zone = deps.dropZone(e.nativeEvent, e.currentTarget);
+              if (zone) marks.drop(item.key, zone);
+            },
+            onDragLeave: () => marks.drop(null, null, item.key),
             onDrop: (e) => {
-              marks.drop(null);
-              deps.drop(id2, e.nativeEvent);
+              const zone = dropZone;
+              marks.drop(null, null);
+              if (zone) deps.drop(id2, zone, e.nativeEvent);
             }
           },
           item.key
@@ -19803,6 +19825,7 @@
     let focusKey = null;
     let dragKey = null;
     let dropKey = null;
+    let dropZone = null;
     const overrides = /* @__PURE__ */ new Map();
     root.tabIndex = -1;
     const rowElement = (key) => root.querySelector('.tree-row[data-key="' + CSS.escape(key) + '"]');
@@ -19827,13 +19850,14 @@
         else document.addEventListener("pointermove", () => marks.drag(null), { once: true });
         paint();
       },
-      drop(key, leaving) {
-        if (leaving !== void 0 && dropKey !== leaving || key === dropKey) return;
+      drop(key, zone, leaving) {
+        if (leaving !== void 0 && dropKey !== leaving || key === dropKey && zone === dropZone) return;
         dropKey = key;
+        dropZone = key === null ? null : zone;
         paint();
       }
     };
-    const paint = () => (0, import_react_dom3.flushSync)(() => reactRoot.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoteTree, { layout, activeKey, tabKey: rovingKey(), dragKey, dropKey, marks, overrides, scroller: root, deps, handle, painted })));
+    const paint = () => (0, import_react_dom3.flushSync)(() => reactRoot.render(/* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoteTree, { layout, activeKey, tabKey: rovingKey(), dragKey, dropKey, dropZone, marks, overrides, scroller: root, deps, handle, painted })));
     const focusIndex = (index) => {
       tabKey = layout.keys[index];
       focusKey = tabKey;
@@ -19841,7 +19865,7 @@
       paint();
     };
     root.addEventListener("keydown", (e) => {
-      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (!(e.target instanceof Element) || e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey) return;
       const onRoot = e.target === root;
       const rowEl = onRoot ? null : e.target.closest(".tree-row");
       if (!onRoot && (!rowEl || e.target !== rowEl || !root.contains(rowEl))) return;
@@ -19849,6 +19873,10 @@
       const i = key === void 0 || key === null ? -1 : indexOf.get(key) ?? -1;
       if (i < 0) return;
       const item = layout.items[i];
+      if (e.altKey) {
+        if (item.kind === "folder" && deps.nudgeFolder(item.node.id, e.key)) e.preventDefault();
+        return;
+      }
       const go = (j) => {
         if (j >= 0 && j < layout.items.length) {
           e.preventDefault();
@@ -25584,10 +25612,7 @@
         });
         wireDropTarget(row, node.id);
         row.addEventListener("dragstart", (e) => {
-          if (e.dataTransfer) {
-            e.dataTransfer.setData("text/x-folder-id", node.id);
-            e.dataTransfer.effectAllowed = "move";
-          }
+          startFolderDrag(node.id, e);
           row.classList.add("is-dragging");
         });
         row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
@@ -25900,25 +25925,92 @@
       e.dataTransfer.dropEffect = "move";
       return true;
     }
-    function dropInto(folderId, e) {
+    function dropZoneFor(e, row, beside = true) {
+      if (!allowNoteDrop(e)) return null;
+      if (!beside || !e.dataTransfer || !e.dataTransfer.types.includes("text/x-folder-id")) return "into";
+      const r = row.getBoundingClientRect();
+      const y = e.clientY - r.top;
+      return y < r.height / 4 ? "before" : y > r.height * 3 / 4 ? "after" : "into";
+    }
+    function folderNode(id) {
+      return id ? flattenTree(state.tree).find((n) => n.id === id) || null : null;
+    }
+    function folderSiblings(parentId) {
+      const parent = folderNode(parentId);
+      return parent ? parent.children : state.tree;
+    }
+    function folderAfter(id) {
+      const node = folderNode(id);
+      if (!node) return null;
+      const siblings = folderSiblings(node.parentId);
+      const next = siblings[siblings.findIndex((n) => n.id === id) + 1];
+      return next ? next.id : null;
+    }
+    async function placeFolder(id, parentId, beforeId) {
+      if (beforeId === id) return;
+      const res = await api.folders.place(id, parentId, beforeId);
+      if ("error" in res) {
+        toast(res.error);
+        return;
+      }
+      if (parentId && !expandedSet().has(parentId)) await setExpanded(parentId, true);
+      await refresh({ keepEditor: true });
+    }
+    function nudgeFolder(id, key) {
+      const node = folderNode(id);
+      if (!node) return false;
+      const siblings = folderSiblings(node.parentId);
+      const i = siblings.findIndex((n) => n.id === id);
+      if (key === "ArrowUp" && i > 0) placeFolder(id, node.parentId, siblings[i - 1].id);
+      else if (key === "ArrowDown" && i >= 0 && i < siblings.length - 1) placeFolder(id, node.parentId, siblings[i + 2] ? siblings[i + 2].id : null);
+      else if (key === "ArrowLeft" && node.parentId) {
+        const parent = folderNode(node.parentId);
+        placeFolder(id, parent ? parent.parentId : null, folderAfter(node.parentId));
+      } else if (key === "ArrowRight" && i > 0) placeFolder(id, siblings[i - 1].id, null);
+      else return false;
+      return true;
+    }
+    function dropAt(folderId, zone, e) {
       if (!e.dataTransfer) return;
       const noteId = e.dataTransfer.getData("text/x-note-id");
       const movingFolder = e.dataTransfer.getData("text/x-folder-id");
       if (!noteId && !movingFolder) return;
       e.preventDefault();
       e.stopPropagation();
-      if (noteId) moveNoteToFolder(noteId, folderId);
-      else if (movingFolder && movingFolder !== folderId) moveFolderTo(movingFolder, folderId);
+      if (noteId) {
+        moveNoteToFolder(noteId, folderId);
+        return;
+      }
+      if (movingFolder === folderId) return;
+      const beside = zone === "into" ? null : folderNode(folderId);
+      if (!beside) {
+        moveFolderTo(movingFolder, folderId);
+        return;
+      }
+      placeFolder(movingFolder, beside.parentId, zone === "before" ? beside.id : folderAfter(beside.id));
     }
-    function wireDropTarget(target, folderId) {
+    function markDrop(target, zone) {
+      target.classList.toggle("is-drop-target", zone === "into");
+      if (zone && zone !== "into") target.dataset.drop = zone;
+      else delete target.dataset.drop;
+    }
+    function wireDropTarget(target, folderId, beside = true) {
+      let zone = null;
       target.addEventListener("dragover", (e) => {
-        if (allowNoteDrop(e)) target.classList.add("is-drop-target");
+        zone = dropZoneFor(e, target, beside);
+        markDrop(target, zone);
       });
-      target.addEventListener("dragleave", () => target.classList.remove("is-drop-target"));
+      target.addEventListener("dragleave", () => markDrop(target, null));
       target.addEventListener("drop", (e) => {
-        target.classList.remove("is-drop-target");
-        dropInto(folderId, e);
+        markDrop(target, null);
+        if (zone) dropAt(folderId, zone, e);
       });
+    }
+    function startFolderDrag(id, e) {
+      if (e.dataTransfer) {
+        e.dataTransfer.setData("text/x-folder-id", id);
+        e.dataTransfer.effectAllowed = "move";
+      }
     }
     function startNoteDrag(id, e) {
       if (e.dataTransfer) {
@@ -25962,6 +26054,12 @@
       el.folderMenuOpen.classList.toggle("hidden", !node.vaultId);
       const deleteItem = menu.querySelector('[data-action="delete"]');
       if (deleteItem) deleteItem.textContent = node.isVaultRoot ? "Remove vault (keeps files)" : "Delete folder";
+      const siblings = folderSiblings(node.parentId || null);
+      const at = siblings.findIndex((n) => n.id === id);
+      el.folderMenuUp.classList.toggle("hidden", at <= 0);
+      el.folderMenuDown.classList.toggle("hidden", at < 0 || at >= siblings.length - 1);
+      el.folderMenuIn.classList.toggle("hidden", at <= 0);
+      el.folderMenuOut.classList.toggle("hidden", !node.parentId || !!node.isVaultRoot);
       placePopover(menu, anchor, ev);
     }
     function closeFolderMenu() {
@@ -25978,6 +26076,10 @@
         await newNote();
       } else if (action === "new-subfolder") startCreateFolder(id);
       else if (action === "rename") startRename(id);
+      else if (action === "move-up") nudgeFolder(id, "ArrowUp");
+      else if (action === "move-down") nudgeFolder(id, "ArrowDown");
+      else if (action === "move-in") nudgeFolder(id, "ArrowRight");
+      else if (action === "move-out") nudgeFolder(id, "ArrowLeft");
       else if (action === "toggle-book") toggleBook(id, !node.book);
       else if (action === "sync" && node.vaultId) syncVault(node.vaultId);
       else if (action === "open-folder" && node.vaultId) api.vaults.openFolder(node.vaultId);
@@ -26774,10 +26876,12 @@
       },
       toggle: (item, on) => setTreeOpen(item.node.id, on),
       folderMenu: (id, row, e) => openFolderMenu(id, row, e),
-      allowDrop: allowNoteDrop,
-      drop: dropInto,
+      dropZone: dropZoneFor,
+      drop: dropAt,
       dragStart: startNoteDrag,
-      dragEnd: endNoteDrag
+      dragFolderStart: startFolderDrag,
+      dragEnd: endNoteDrag,
+      nudgeFolder
     });
     const { renderLockState, onLockButton, submitLockDialog, unlockFromScreen, applyLockedNote, lockMenuAction } = createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow });
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
@@ -27674,6 +27778,9 @@
         cmd("open-file", "Create", "Open a file as a note\u2026", "folder-open", "Ctrl+O", side("openFiles", () => openFiles()), true, "markdown pdf word docx txt"),
         cmd("new-folder", "Create", "New folder", "folder-plus", "Ctrl+Shift+N", () => startCreateFolder(state.view === "folder" ? state.folderId : null), !GUEST),
         cmd("new-book", "Create", "New book", "book-plus", "", () => startCreateFolder(null, true), !GUEST),
+        ...[["up", "Move this folder up", "arrow-up", "Alt+Up", "ArrowUp"], ["down", "Move this folder down", "arrow-down", "Alt+Down", "ArrowDown"], ["in", "Move this folder into the folder above", "arrow-right", "Alt+Right", "ArrowRight"], ["out", "Move this folder out of its folder", "arrow-left", "Alt+Left", "ArrowLeft"]].map(([what, title, icon, keys, key]) => cmd("folder-" + what, "Folders", title, icon, keys, () => {
+          if (state.folderId) nudgeFolder(state.folderId, key);
+        }, !GUEST && state.view === "folder" && !!state.folderId, "reorder drag sort")),
         cmd("filter-list", "Go to", "Filter the note list", "search", "Ctrl+Shift+F", searchList, true, "search notes title text tags"),
         cmd("library", "Go to", "History and sync", "history", "Ctrl+Shift+B", () => library.openLibrary(), !GUEST, "versions git backup github restore earlier deleted bring back"),
         cmd("sync", "Go to", "Sync now", "refresh-cw", "", () => library.syncNow(), !GUEST && !!library.statusNow()?.enabled && !!library.statusNow()?.remote, "git push pull github backup another computer"),
@@ -28050,7 +28157,7 @@
       bindSettingsNav();
       bindSidebarFloat();
       el.tagsFold.addEventListener("click", () => updateSettings({ tagsCollapsed: !settingsNow().tagsCollapsed }));
-      bindTreeKeys(el.folderTree);
+      bindTreeKeys(el.folderTree, (row, key) => !!row.dataset.id && row.classList.contains("folder-row") && nudgeFolder(row.dataset.id, key));
       el.listModeSeg.addEventListener("click", (e) => {
         const b = closestTo(e, "[data-mode]");
         const mode = b && b.dataset.mode;
@@ -28374,7 +28481,7 @@
         if (!el.convertMenu.classList.contains("hidden") && !el.convertMenu.contains(target) && !el.fileConvertBtn.contains(target)) closeConvertMenu();
         if (!el.lockMenu.classList.contains("hidden") && !el.lockMenu.contains(target) && !el.lockBtn.contains(target)) el.lockMenu.classList.add("hidden");
       });
-      wireDropTarget(el.navAll, null);
+      wireDropTarget(el.navAll, null, false);
       window.addEventListener("resize", () => {
         if (!state.settings) return;
         applySidebar();

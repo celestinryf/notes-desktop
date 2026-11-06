@@ -240,6 +240,46 @@ test('folders: create, nest, tree with recursive counts, path', () => {
   assert.deepEqual(store.list({ folderId: null }).map((n) => n.title), ['loose']);
 });
 
+test('folders: placing one before a sibling gives that level a manual order; a move into another folder drops it', () => {
+  const { store } = makeStore();
+  const a = store.createFolder({ name: 'A' });
+  const b = store.createFolder({ name: 'B' });
+  const c = store.createFolder({ name: 'C' });
+  const names = () => store.folderTree().map((f) => f.name);
+  const orders = () => Object.fromEntries(store.folders.map((f) => [f.name, f.order]));
+  assert.deepEqual(names(), ['A', 'B', 'C'], 'by name until a level is arranged');
+  assert.deepEqual(orders(), { A: null, B: null, C: null });
+
+  assert.equal(store.placeFolder(c.id, null, a.id).folder.id, c.id);
+  assert.deepEqual(names(), ['C', 'A', 'B']);
+  assert.deepEqual(orders(), { C: 0, A: 1, B: 2 });
+  store.placeFolder(a.id, null, null);
+  assert.deepEqual(names(), ['C', 'B', 'A'], 'no folder to place before means the end');
+  const d = store.createFolder({ name: 'D' });
+  assert.deepEqual(names(), ['C', 'B', 'A', 'D'], 'a new folder joins at the end of an arranged level');
+  store.placeFolder(d.id, null, b.id);
+  assert.deepEqual(names(), ['C', 'D', 'B', 'A']);
+
+  assert.ok(store.placeFolder(a.id, null, a.id).error, 'not before itself');
+  assert.ok(store.placeFolder(a.id, null, 'nope').error);
+  assert.ok(store.placeFolder(a.id, c.id, b.id).error, 'the folder to place before must be in the target folder');
+  assert.ok(store.placeFolder(a.id, 'nope', null).error);
+  assert.deepEqual(names(), ['C', 'D', 'B', 'A'], 'a refused placement changes nothing');
+
+  store.placeFolder(b.id, c.id, null);
+  assert.deepEqual(store.folderTree().map((f) => [f.name, f.children.map((x) => x.name)]), [['C', ['B']], ['D', []], ['A', []]]);
+  assert.equal(store.getFolder(b.id).order, 0);
+  store.placeFolder(a.id, c.id, b.id);
+  assert.deepEqual(store.folderTree()[0].children.map((x) => x.name), ['A', 'B']);
+  assert.equal(store.moveFolder(a.id, null).folder.order, null, 'a plain move into another level has no manual place');
+  assert.deepEqual(names(), ['C', 'D', 'A'], 'an unplaced folder sorts after the placed ones');
+  assert.equal(store.placeFolder(a.id, c.id, b.id).folder.parentId, c.id);
+  assert.deepEqual(store.folderTree()[0].children.map((x) => x.name), ['A', 'B']);
+
+  const again = new Store(store.dir, { now: () => 2_000_000 }).load();
+  assert.deepEqual(again.folderTree().map((f) => [f.name, f.children.map((x) => x.name)]), [['C', ['A', 'B']], ['D', []]], 'the order is saved');
+});
+
 test('folders: rename, move with cycle protection, delete lifts contents to parent', () => {
   const { store } = makeStore();
   const a = store.createFolder({ name: 'A' });

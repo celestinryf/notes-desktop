@@ -7,6 +7,8 @@ import type { Reveal } from './virtual-rows.tsx';
 import { chooseActive } from './tree-items.ts';
 import type { FolderItem, TreeItem } from './tree-items.ts';
 
+export type DropZone = 'before' | 'into' | 'after';
+
 declare module 'react' {
   interface CSSProperties { '--depth'?: number }
 }
@@ -23,14 +25,16 @@ interface NoteTreeDeps<N> {
   openInTab: (id: string) => void;
   toggle: (item: FolderItem, open: boolean) => void;
   folderMenu: (id: string, row: HTMLDivElement, e: MouseEvent) => void;
-  allowDrop: (e: DragEvent) => boolean;
-  drop: (folderId: string, e: DragEvent) => void;
+  dropZone: (e: DragEvent, row: HTMLElement) => DropZone | null;
+  drop: (folderId: string, zone: DropZone, e: DragEvent) => void;
   dragStart: (id: string, e: DragEvent) => void;
+  dragFolderStart: (id: string, e: DragEvent) => void;
   dragEnd: () => void;
+  nudgeFolder: (id: string, key: string) => boolean;
 }
 
 type Layout = { items: readonly TreeItem[]; keys: readonly string[]; sizes: readonly TreeSize[] };
-type Marks = { drag: (key: string | null) => void; drop: (key: string | null, leaving?: string) => void };
+type Marks = { drag: (key: string | null) => void; drop: (key: string | null, zone: DropZone | null, leaving?: string) => void };
 
 interface TreeProps<N> {
   layout: Layout;
@@ -38,6 +42,7 @@ interface TreeProps<N> {
   tabKey: string | null;
   dragKey: string | null;
   dropKey: string | null;
+  dropZone: DropZone | null;
   marks: Marks;
   overrides: ReadonlyMap<string, TreeOverride<N>>;
   scroller: HTMLDivElement;
@@ -52,7 +57,7 @@ const layoutOf = (items: readonly TreeItem[]): Layout => ({
   sizes: items.map((item) => (item.kind === 'heading' ? 'heading' : 'row')),
 });
 
-function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, marks, overrides, scroller, deps, handle, painted }: TreeProps<N>) {
+function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, dropZone, marks, overrides, scroller, deps, handle, painted }: TreeProps<N>) {
   const { items: rows, before, after, total, measureElement } = useVirtualRows<HTMLDivElement, TreeSize>(layout, scroller, TREE_SIZES, handle);
   useLayoutEffect(() => painted());
   const refs = useRef(new Map<string, RefCallback<HTMLDivElement>>());
@@ -94,13 +99,17 @@ function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, marks, overr
         <div
           key={item.key}
           {...shared}
-          className={'tree-row tree-folder' + (item.here ? ' is-here' : '') + (item.key === dropKey ? ' is-drop-target' : '')}
+          className={'tree-row tree-folder' + (item.here ? ' is-here' : '') + (item.key === dropKey && dropZone === 'into' ? ' is-drop-target' : '') + (item.key === dragKey ? ' is-dragging' : '')}
           data-id={id}
+          data-drop={item.key === dropKey && dropZone && dropZone !== 'into' ? dropZone : undefined}
           aria-expanded={item.kids ? item.open : undefined}
+          draggable
           onContextMenu={(e) => { e.preventDefault(); deps.folderMenu(id, e.currentTarget, e.nativeEvent); }}
-          onDragOver={(e) => { if (deps.allowDrop(e.nativeEvent)) marks.drop(item.key); }}
-          onDragLeave={() => marks.drop(null, item.key)}
-          onDrop={(e) => { marks.drop(null); deps.drop(id, e.nativeEvent); }}
+          onDragStart={(e) => { marks.drag(item.key); deps.dragFolderStart(id, e.nativeEvent); }}
+          onDragEnd={() => { marks.drag(null); deps.dragEnd(); }}
+          onDragOver={(e) => { const zone = deps.dropZone(e.nativeEvent, e.currentTarget); if (zone) marks.drop(item.key, zone); }}
+          onDragLeave={() => marks.drop(null, null, item.key)}
+          onDrop={(e) => { const zone = dropZone; marks.drop(null, null); if (zone) deps.drop(id, zone, e.nativeEvent); }}
         />
       );
     }
@@ -157,6 +166,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
   let focusKey: string | null = null;
   let dragKey: string | null = null;
   let dropKey: string | null = null;
+  let dropZone: DropZone | null = null;
   const overrides = new Map<string, TreeOverride<N>>();
   root.tabIndex = -1;
   const rowElement = (key: string) => root.querySelector<HTMLElement>('.tree-row[data-key="' + CSS.escape(key) + '"]');
@@ -178,13 +188,14 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
       else document.addEventListener('pointermove', () => marks.drag(null), { once: true });
       paint();
     },
-    drop(key, leaving) {
-      if ((leaving !== undefined && dropKey !== leaving) || key === dropKey) return;
+    drop(key, zone, leaving) {
+      if ((leaving !== undefined && dropKey !== leaving) || (key === dropKey && zone === dropZone)) return;
       dropKey = key;
+      dropZone = key === null ? null : zone;
       paint();
     },
   };
-  const paint = () => flushSync(() => reactRoot.render(<NoteTree layout={layout} activeKey={activeKey} tabKey={rovingKey()} dragKey={dragKey} dropKey={dropKey} marks={marks} overrides={overrides} scroller={root} deps={deps} handle={handle} painted={painted} />));
+  const paint = () => flushSync(() => reactRoot.render(<NoteTree layout={layout} activeKey={activeKey} tabKey={rovingKey()} dragKey={dragKey} dropKey={dropKey} dropZone={dropZone} marks={marks} overrides={overrides} scroller={root} deps={deps} handle={handle} painted={painted} />));
   const focusIndex = (index: number) => {
     tabKey = layout.keys[index];
     focusKey = tabKey;
@@ -193,7 +204,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
   };
 
   root.addEventListener('keydown', (e) => {
-    if (!(e.target instanceof Element) || e.target.closest('input, select, textarea') || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!(e.target instanceof Element) || e.target.closest('input, select, textarea') || e.ctrlKey || e.metaKey) return;
     const onRoot = e.target === root;
     const rowEl = onRoot ? null : e.target.closest<HTMLElement>('.tree-row');
     if (!onRoot && (!rowEl || e.target !== rowEl || !root.contains(rowEl))) return;
@@ -201,6 +212,7 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     const i = key === undefined || key === null ? -1 : indexOf.get(key) ?? -1;
     if (i < 0) return;
     const item = layout.items[i];
+    if (e.altKey) { if (item.kind === 'folder' && deps.nudgeFolder(item.node.id, e.key)) e.preventDefault(); return; }
     const go = (j: number) => { if (j >= 0 && j < layout.items.length) { e.preventDefault(); focusIndex(j); } };
     if (e.key === 'ArrowDown') go(i + 1);
     else if (e.key === 'ArrowUp') go(i - 1);

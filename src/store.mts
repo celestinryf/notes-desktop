@@ -105,12 +105,16 @@ function sanitizeFolder(raw: unknown, now: number): Folder | null {
   return folderFrom(raw, now);
 }
 
+const folderOrder = (f: Folder) => (f.order === null ? Number.MAX_SAFE_INTEGER : f.order);
+const compareFolders = (a: Folder, b: Folder) => folderOrder(a) - folderOrder(b) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt;
+
 function folderFrom(raw: Record<string, unknown>, now: number): Folder {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name),
     parentId: typeof raw.parentId === 'string' && raw.parentId ? raw.parentId : null,
     createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
+    order: isFiniteNumber(raw.order) ? raw.order : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
     book: !!raw.book,
@@ -1694,7 +1698,7 @@ class Store {
     const folderByKey = this._vaultFoldersByKey(id);
     let root = home ? null : this.vaultRootFolder(id);
     if (!home && !root) {
-      root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
+      root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, order: null, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
       this.folders.push(root);
       change.folders = true;
     }
@@ -1710,11 +1714,12 @@ class Store {
       let sub = folderByKey.get(d.key);
       if (!sub) {
         if (this.revision !== readAtRevision && !fs.existsSync(d.full)) continue;
-        sub = { id: crypto.randomUUID(), name: d.name, parentId, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
+        sub = { id: crypto.randomUUID(), name: d.name, parentId, createdAt: now, order: null, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
         this.folders.push(sub);
         folderByKey.set(d.key, sub);
         change.folders = true;
       } else if (sub.parentId !== parentId || sub.name !== d.name) {
+        if (sub.parentId !== parentId) sub.order = null;
         sub.parentId = parentId;
         sub.name = d.name;
         change.folders = true;
@@ -2263,7 +2268,7 @@ class Store {
     }
     const build = (pid: string | null, depth: number): FolderNode[] => (byParent.get(pid) || [])
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt)
+      .sort(compareFolders)
       .map((f) => {
         const children = build(f.id, depth + 1);
         const count = direct.get(f.id) || 0;
@@ -2356,8 +2361,28 @@ class Store {
     } else if (parentId && this.getFolder(parentId)?.vaultId) {
       return { error: 'Plain folders cannot move into a vault. Create the folder inside the vault instead.' };
     }
-    this._change({ notes: moved, folders: true }, () => { f.parentId = parentId; });
+    this._change({ notes: moved, folders: true }, () => { f.parentId = parentId; f.order = null; });
     return { folder: f };
+  }
+
+  siblingFolders(parentId: string | null) {
+    return this.folders.filter((f) => (f.parentId || null) === (parentId || null)).sort(compareFolders);
+  }
+
+  placeFolder(id: string, parentId: string | null, beforeId: string | null) {
+    parentId = parentId || null;
+    beforeId = beforeId || null;
+    if (beforeId) {
+      const before = this.getFolder(beforeId);
+      if (!before || beforeId === id) return { error: 'Target folder not found.' };
+      if ((before.parentId || null) !== parentId) return { error: 'The folder to place it before is in another folder.' };
+    }
+    const moved = this.moveFolder(id, parentId);
+    if ('error' in moved) return moved;
+    const siblings = this.siblingFolders(parentId).filter((f) => f.id !== id);
+    siblings.splice(beforeId ? siblings.findIndex((f) => f.id === beforeId) : siblings.length, 0, moved.folder);
+    this._change({ folders: true }, () => siblings.forEach((f, i) => { f.order = i; }));
+    return moved;
   }
 
   deleteFolder(id: string) {

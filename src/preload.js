@@ -143,6 +143,7 @@ const notesApi = {
     setBook: invoke('folders:setBook'),
     reorderPages: invoke('folders:reorderPages'),
     move: invoke('folders:move'),
+    place: invoke('folders:place'),
     delete: invoke('folders:delete'),
   },
   settings: {

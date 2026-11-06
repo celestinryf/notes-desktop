@@ -306,6 +306,40 @@ const SCENES = {
   'settings-unsaved': { about: 'Settings with an unsaved change (the theme previewed on the page) and the Save changes button live', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('#settingsNav a[href="#set-appearance"]'); await page.click('.scheme-swatch[data-scheme="slate"]'); await sleep(400); } },
   'settings-save-prompt': { about: 'Closing Settings with unsaved changes: the Save your changes? question', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('.scheme-swatch[data-scheme="forest"]'); await page.keyboard.press('Escape'); await sleep(400); } },
   'settings-search-none': { about: 'A settings search with no match', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('zzqx'); await sleep(400); } },
+  'folder-drop-line': { about: 'Dragging the Work folder above Home in the sidebar: the accent line says where it lands', run: async (page) => {
+    await page.evaluate(() => {
+      const byName = (n) => [...document.querySelectorAll('.folder-row')].find((r) => r.querySelector('.row-name')?.textContent === n);
+      const from = byName('Work'), to = byName('Home');
+      const dt = new DataTransfer();
+      dt.setData('text/x-folder-id', from.dataset.id);
+      from.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+      const r = to.getBoundingClientRect();
+      to.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.top + 2 }));
+    });
+    await sleep(200);
+  } },
+  'folder-menu': { about: 'The folder menu on Project Atlas, an only child: Move out shows, Move up, down and in do not', run: async (page) => {
+    await page.click('.folder-row:has(.row-name:text-is("Project Atlas"))', { button: 'right' });
+    await page.waitForSelector('#folderMenu:not(.hidden)');
+    await sleep(300);
+  } },
+  'folder-menu-sibling': { about: 'The folder menu on Home, the middle root folder: every move item shows with its shortcut', run: async (page) => {
+    await page.click('.folder-row:has(.row-name:text-is("Home"))', { button: 'right' });
+    await page.waitForSelector('#folderMenu:not(.hidden)');
+    await sleep(300);
+  } },
+  'folder-drop-line-list': { about: 'Dragging the Field guide folder below Home in the note list: the same line, at the row’s indent', run: async (page) => {
+    await page.evaluate(() => {
+      const byName = (n) => [...document.querySelectorAll('.note-tree .tree-folder')].find((r) => r.querySelector('.row-name')?.textContent === n);
+      const from = byName('Field guide'), to = byName('Home');
+      const dt = new DataTransfer();
+      dt.setData('text/x-folder-id', from.dataset.id);
+      from.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+      const r = to.getBoundingClientRect();
+      to.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.bottom - 2 }));
+    });
+    await sleep(200);
+  } },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
   'sidebar-hidden': { about: 'The sidebar hidden with a note open: no rail, the note list at the window edge', settings: { sidebarCollapsed: true }, run: steps(openNote('Q4 planning'), async (page) => { await page.mouse.move(700, 400); await sleep(400); }) },
   'sidebar-float-toggles': { about: 'The hidden sidebar floated in, the pointer on its sidebar toggle: the same header as when docked', settings: { sidebarCollapsed: true }, run: steps(openNote('Q4 planning'), async (page) => { await page.mouse.move(2, 400); await sleep(600); await page.hover('#toggleSidebarBtn'); await sleep(300); }) },

@@ -1938,6 +1938,69 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   step('persisted across reload');
 });
 
+test('folders move up, down, in and out: by drag in the sidebar and the note list, by Alt+arrows, and from the folder menu', async () => {
+  const names = ['Alpha', 'Beta', 'Gamma'];
+  const ids = {};
+  for (const name of names) ids[name] = (await page.evaluate((n) => window.notesApi.folders.create({ name: n }), name)).id;
+  const row = (name) => `.folder-row:has(.row-name:text-is("${name}"))`;
+  const listRow = (name) => `.note-tree .tree-folder[data-id="${ids[name]}"]`;
+  const shape = () => page.evaluate(async (ns) => {
+    const mine = (nodes) => nodes.filter((f) => ns.includes(f.name)).map((f) => f.name + (f.children.length ? '(' + mine(f.children).join(',') + ')' : ''));
+    return mine(await window.notesApi.folders.tree()).join(' ');
+  }, names);
+  const expectShape = (want) => waitFor('folders read ' + want, async () => (await shape()) === want);
+  const savedOrder = (name) => readNotes().folders.find((f) => f.name === name).order;
+  let wasTree = null;
+  try {
+    await page.click('.nav-item[data-view="all"]');
+    await page.waitForSelector(row('Gamma'));
+    assert.equal(await shape(), 'Alpha Beta Gamma');
+
+    await page.dragAndDrop(row('Gamma'), row('Alpha'), { targetPosition: { x: 60, y: 3 }, timeout: 8000 });
+    await expectShape('Gamma Alpha Beta');
+    assert.ok(savedOrder('Gamma') < savedOrder('Alpha') && savedOrder('Alpha') < savedOrder('Beta'), 'the order is saved');
+    assert.equal(await page.$$eval('.folder-row[data-drop], .folder-row.is-drop-target', (r) => r.length), 0, 'no drop mark left behind');
+
+    await page.dragAndDrop(row('Beta'), row('Gamma'), { targetPosition: { x: 60, y: 16 }, timeout: 8000 });
+    await expectShape('Gamma(Beta) Alpha');
+    await page.waitForSelector(row('Beta'), { state: 'visible' });
+
+    await page.focus(row('Alpha'));
+    await page.keyboard.press('Alt+ArrowUp');
+    await expectShape('Alpha Gamma(Beta)');
+    await page.focus(row('Beta'));
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expectShape('Alpha Gamma Beta');
+    await page.keyboard.press('Alt+ArrowRight');
+    await expectShape('Alpha Gamma(Beta)');
+    assert.equal(await page.evaluate(() => { const a = document.activeElement; const n = a && a.querySelector('.row-name'); return n ? n.textContent : null; }), 'Beta', 'the moved row keeps the focus');
+
+    await page.click(row('Beta'), { button: 'right' });
+    await page.waitForSelector('#folderMenu:not(.hidden)');
+    assert.deepEqual(await page.$$eval('#folderMenu button:not(.hidden)', (b) => b.map((x) => x.dataset.action)), ['new-note', 'new-subfolder', 'rename', 'move-out', 'toggle-book', 'delete'], 'an only child can move out, not up, down or in');
+    await page.click('#folderMenu [data-action="move-out"]');
+    await expectShape('Alpha Gamma Beta');
+
+    await page.click('.nav-item[data-view="all"]');
+    wasTree = await page.$eval('#listModeSeg button[data-mode="tree"]', (b) => b.classList.contains('is-on'));
+    if (!wasTree) await page.click('#listModeSeg button[data-mode="tree"]');
+    await page.waitForSelector(listRow('Alpha'));
+    await page.dragAndDrop(listRow('Alpha'), listRow('Beta'), { targetPosition: { x: 60, y: 26 }, timeout: 8000 });
+    await expectShape('Gamma Beta Alpha');
+    await page.waitForSelector(listRow('Alpha'));
+    await page.focus(listRow('Alpha'));
+    await page.keyboard.press('Alt+ArrowUp');
+    await expectShape('Gamma Alpha Beta');
+    await page.dragAndDrop(listRow('Beta'), listRow('Gamma'), { targetPosition: { x: 60, y: 14 }, timeout: 8000 });
+    await expectShape('Gamma(Beta) Alpha');
+    assert.equal(await page.$$eval('.note-tree [data-drop], .note-tree .is-drop-target', (r) => r.length), 0, 'no drop mark left behind in the list');
+  } finally {
+    for (const name of ['Beta', 'Gamma', 'Alpha']) await page.evaluate((id) => window.notesApi.folders.delete(id), ids[name]);
+    if (wasTree === false) await page.click('#listModeSeg button[data-mode="list"]');
+    await page.click('.nav-item[data-view="all"]');
+  }
+});
+
 test('drag handles resize the sidebar and list, persist, clamp, and reset on double-click', async () => {
   const widths = () => page.evaluate(() => {
     const s = getComputedStyle(document.getElementById('app')).gridTemplateColumns.split(' ').map((v) => parseFloat(v));
