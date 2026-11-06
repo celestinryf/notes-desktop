@@ -41,6 +41,21 @@ test('whole word needs a non-word character or an edge on both sides, with lette
   assert.deepEqual(findOffsets('日本 日本語', '日本', { wholeWord: true }), [0]);
 });
 
+test('whole word asks for an edge only on a side where the query itself starts or ends with a word character', () => {
+  assert.deepEqual(findOffsets('the cat sat', 'the ', { wholeWord: true }), [0]);
+  assert.deepEqual(findOffsets('the cat sat', ' cat', { wholeWord: true }), [3]);
+  assert.deepEqual(findOffsets('a+1 b +1c', '+1', { wholeWord: true }), [1]);
+  assert.deepEqual(findOffsets('x-ray xray', '-ray', { wholeWord: true }), [1]);
+  assert.deepEqual(findOffsets('a. b.c', '.', { wholeWord: true }), [1, 4]);
+  assert.equal(isQueryText('the ', 'the ', { wholeWord: true }), true);
+});
+
+test('a query too long for a regular expression finds nothing instead of throwing', () => {
+  const huge = 'a'.repeat(200000);
+  assert.deepEqual(findOffsets(huge, huge), []);
+  assert.equal(isQueryText(huge, huge), false);
+});
+
 test('queryRegExp is case-insensitive by default, Unicode-aware, and global only when asked', () => {
   assert.equal(queryRegExp('a.b').flags, 'iu');
   assert.equal(queryRegExp('a.b', { matchCase: true }, true).flags, 'gu');

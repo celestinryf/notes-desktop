@@ -2832,8 +2832,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
-      cmd('find-case', 'This note', (find.matchCase ? 'Find: any case' : 'Find: match case'), 'case-sensitive', 'Alt+C', () => toggleFindOption('matchCase'), find.open, 'case sensitive'),
-      cmd('find-word', 'This note', (find.wholeWord ? 'Find: part of a word too' : 'Find: whole word only'), 'whole-word', 'Alt+W', () => toggleFindOption('wholeWord'), find.open, 'whole word'),
+      cmd('find-case', 'This note', 'Find: match case' + (find.matchCase ? ' (on)' : ''), 'case-sensitive', 'Alt+C', () => toggleFindOption('matchCase'), find.open, 'case sensitive'),
+      cmd('find-word', 'This note', 'Find: whole word' + (find.wholeWord ? ' (on)' : ''), 'whole-word', 'Alt+W', () => toggleFindOption('wholeWord'), find.open, 'whole word'),
       cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
       ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
@@ -2976,7 +2976,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
     if (e.key === 'F3' && find.open) { e.preventDefault(); runFind(!e.shiftKey); return; }
-    if (find.open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.code === 'KeyC' || e.code === 'KeyW')) { e.preventDefault(); toggleFindOption(e.code === 'KeyC' ? 'matchCase' : 'wholeWord'); return; }
+    if (find.open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'w' || e.key === 'W')) { e.preventDefault(); toggleFindOption(e.key === 'c' || e.key === 'C' ? 'matchCase' : 'wholeWord'); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
     if (e.altKey && !ctrl && !e.shiftKey && e.key === 'Enter' && !state.sourceMode && el.richEditor.contains(document.activeElement)) {
       e.preventDefault();
