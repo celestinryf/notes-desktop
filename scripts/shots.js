@@ -294,6 +294,8 @@ const SCENES = {
   'table-aligned': { about: 'A table with left, right and centred columns, and a picture alone in a cell, rendered', bodies: { 'n-groceries': 'Times on the ridge loop this month.\n\n| Day     | Distance | Time  | Note        |\n| :------ | -------: | ----: | :---------: |\n| Monday  |   6.2 km | 41:10 |    easy     |\n| Friday  |  11.8 km | 79:45 | ![ridge](ridge.png) |\n| Sunday  |   8.0 km | 52:03 |   windy     |' }, run: openNote('Groceries') },
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
   'list-view-small': { about: 'The cards in a small window (820x560)', size: { width: 820, height: 560 }, settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
+  'list-marks-narrow': { about: 'The cards in the narrowest note list with a long folder name: the folder mark ends in an ellipsis', folderNames: { 'f-proj': 'Project Atlas and the storage rewrite' }, settings: { listMode: 'list', listLayout: 1, listWidth: 220 }, run: openNote('Q4 planning') },
+  'tree-marks-narrow': { about: 'The folder tree in the narrowest note list: a pinned note from a long-named folder, whose mark ends in an ellipsis', folderNames: { 'f-proj': 'Project Atlas and the storage rewrite' }, pin: ['n-retro'], settings: { listWidth: 220 }, run: openNote('Q4 planning') },
   'list-search': { about: 'Search results: two-line rows with the matching words under each title', run: steps(openNote('Q4 planning'), async (page) => { await page.fill('#searchInput', 'the'); await sleep(800); }) },
   'tree-see-more': { about: 'An open folder with twelve notes in the folder view: ten, then a "See 2 more" row', run: async (page) => {
     const folderId = await page.evaluate(async () => {
@@ -409,6 +411,7 @@ async function shoot(theme, name, opts) {
   Object.assign(data.settings, SCENES[name].settings || {});
   for (const id of SCENES[name].pin || []) data.notes.find((n) => n.id === id).pinned = true;
   for (const id of SCENES[name].keepOut || []) data.notes.find((n) => n.id === id).keepOutOfHistory = true;
+  for (const [id, folderName] of Object.entries(SCENES[name].folderNames || {})) data.folders.find((f) => f.id === id).name = folderName;
   for (const [id, body] of Object.entries(SCENES[name].bodies || {})) data.notes.find((n) => n.id === id).body = body;
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));

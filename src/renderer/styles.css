@@ -504,6 +504,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .note-row.is-active .file-mark { color: var(--selected-fg); }
 .row-meta { flex: none; display: inline-flex; align-items: center; gap: var(--s1); max-width: 40%; margin-left: var(--s2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); font-weight: 500; color: var(--fg-3); }
 .row-meta .icon { width: 12px; height: 12px; flex: none; }
+.row-meta-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .note-row.is-active .row-meta { color: inherit; opacity: 0.8; }
 .note-row .page-no { flex: none; margin-right: var(--s2); }
 .note-list .note-row { position: relative; display: flex; flex-direction: column; align-items: stretch; min-height: 0; padding: 10px var(--s3); border-radius: var(--r-md); }
@@ -620,9 +621,10 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
   border: none; border-radius: var(--r-sm);
   background-color: transparent; color: var(--fg-2);
   font-size: var(--t-sm); font-weight: 500;
-  text-overflow: ellipsis;
   cursor: pointer;
 }
+.folder-select-button { display: flex; align-items: center; align-self: stretch; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: inherit; }
+.folder-select selectedcontent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-select:hover { background-color: var(--hover); color: var(--fg); }
 .folder-select:focus-visible { outline: 2px solid var(--focus); }
 

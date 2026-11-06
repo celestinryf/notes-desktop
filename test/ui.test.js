@@ -2003,6 +2003,15 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await waitFor('Gamma moved to Clients', () => findNote('Gamma').folderId === folderByName('Clients').id);
   step('moved via select');
 
+  const crumbShows = () => page.evaluate(() => { const s = document.getElementById('folderSelect'); return { shown: s.querySelector('selectedcontent').textContent, chosen: s.selectedOptions[0].textContent }; });
+  await waitForDom(() => document.querySelector('#folderSelect selectedcontent').textContent === 'Work / Clients');
+  await clickRow('Imported note');
+  await waitForDom(() => document.getElementById('titleInput').value !== 'Gamma');
+  const crumb = await crumbShows();
+  assert.equal(crumb.shown, crumb.chosen);
+  assert.notEqual(crumb.shown, 'Work / Clients');
+  step('the crumb follows the open note');
+
   await page.dragAndDrop('.note-row:has-text("Imported note")', row('Work'), { timeout: 8000 });
   await waitFor('Imported note dragged into Work', () => findNote('Imported note').folderId === folderByName('Work').id);
   step('moved via drag');
