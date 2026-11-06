@@ -97,7 +97,11 @@ function snippet(note: TitleSource, max?: number) {
   return truncate(text, max);
 }
 
+const MAX_TIME = 8.64e15;
+const isValidTime = (ts: number) => Number.isFinite(ts) && Math.abs(ts) <= MAX_TIME;
+
 function relativeTime(ts: number, now?: number) {
+  if (!isValidTime(ts)) return '';
   now = now == null ? Date.now() : now;
   const diff = Math.max(0, now - ts);
   const s = Math.floor(diff / 1000);
@@ -120,8 +124,11 @@ const DATE_STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
   clock: { hour: '2-digit', minute: '2-digit' },
 };
 const dateFormatters = new Map<DateStyle, Intl.DateTimeFormat>();
+let dateFormattersOffset = new Date().getTimezoneOffset();
 
 function formatDate(style: DateStyle, date: Date) {
+  const offset = new Date().getTimezoneOffset();
+  if (offset !== dateFormattersOffset) { dateFormatters.clear(); dateFormattersOffset = offset; }
   let formatter = dateFormatters.get(style);
   if (!formatter) { formatter = new Intl.DateTimeFormat(undefined, DATE_STYLES[style]); dateFormatters.set(style, formatter); }
   return formatter.format(date);
@@ -325,6 +332,7 @@ function clampPane(name: PaneName, value: number) {
 }
 
 function formatWhen(ts: number, now?: number) {
+  if (!isValidTime(ts)) return '';
   now = now == null ? Date.now() : now;
   const d = new Date(ts), n = new Date(now);
   const time = formatDate('clock', d);

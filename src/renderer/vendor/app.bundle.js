@@ -14871,7 +14871,10 @@
     const text = plainTextFromMarkdown(listed.join("\n")).replace(/\bcode block omitted\.\s*/g, "").replace(/\s+/g, " ").trim();
     return truncate(text, max);
   }
+  var MAX_TIME = 864e13;
+  var isValidTime = (ts) => Number.isFinite(ts) && Math.abs(ts) <= MAX_TIME;
   function relativeTime(ts, now) {
+    if (!isValidTime(ts)) return "";
     now = now == null ? Date.now() : now;
     const diff = Math.max(0, now - ts);
     const s = Math.floor(diff / 1e3);
@@ -14892,7 +14895,13 @@
     clock: { hour: "2-digit", minute: "2-digit" }
   };
   var dateFormatters = /* @__PURE__ */ new Map();
+  var dateFormattersOffset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
   function formatDate(style, date) {
+    const offset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
+    if (offset !== dateFormattersOffset) {
+      dateFormatters.clear();
+      dateFormattersOffset = offset;
+    }
     let formatter = dateFormatters.get(style);
     if (!formatter) {
       formatter = new Intl.DateTimeFormat(void 0, DATE_STYLES[style]);
@@ -15086,6 +15095,7 @@
     return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
   }
   function formatWhen(ts, now) {
+    if (!isValidTime(ts)) return "";
     now = now == null ? Date.now() : now;
     const d = new Date(ts), n = new Date(now);
     const time = formatDate("clock", d);

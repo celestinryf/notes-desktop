@@ -49,14 +49,39 @@ test('relativeTime past a week prints exactly what toLocaleDateString prints, in
   }
 });
 
-test('relativeTime stays within a few milliseconds per thousand dates', () => {
+test('relativeTime with a kept formatter is many times faster than toLocaleDateString', () => {
   const now = new Date(2026, 9, 13, 12, 0).getTime();
-  const dates = Array.from({ length: 20000 }, (_, i) => now - (8 + i) * 86400e3);
-  H.relativeTime(dates[0], now);
-  const started = process.hrtime.bigint();
-  for (const ts of dates) H.relativeTime(ts, now);
-  const ms = Number(process.hrtime.bigint() - started) / 1e6;
-  assert.ok(ms < 400, '20,000 dates took ' + ms.toFixed(0) + ' ms');
+  const dates = Array.from({ length: 5000 }, (_, i) => now - (8 + i) * 86400e3);
+  const timed = (fn) => { fn(dates[0]); const started = process.hrtime.bigint(); for (const ts of dates) fn(ts); return Number(process.hrtime.bigint() - started) / 1e6; };
+  const kept = timed((ts) => H.relativeTime(ts, now));
+  const fresh = timed((ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  assert.ok(kept * 5 < fresh, 'kept ' + kept.toFixed(1) + ' ms, toLocaleDateString ' + fresh.toFixed(1) + ' ms');
+});
+
+test('relativeTime and formatWhen follow a change of time zone while the process runs', () => {
+  const before = process.env.TZ;
+  const ts = Date.UTC(2026, 0, 10, 2, 0);
+  const now = Date.UTC(2026, 9, 13, 12, 0);
+  try {
+    process.env.TZ = 'America/New_York';
+    const there = H.relativeTime(ts, now);
+    assert.equal(there, new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    const clockThere = H.formatWhen(ts, now);
+    process.env.TZ = 'Asia/Tokyo';
+    const here = H.relativeTime(ts, now);
+    assert.equal(here, new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    assert.notEqual(here, there, 'the day moves with the zone');
+    assert.notEqual(H.formatWhen(ts, now), clockThere, 'so does the clock');
+  } finally {
+    if (before === undefined) delete process.env.TZ; else process.env.TZ = before;
+  }
+});
+
+test('relativeTime and formatWhen print nothing for a time that is not a number', () => {
+  for (const bad of [NaN, Infinity, 9e15]) {
+    assert.equal(H.relativeTime(bad, Date.UTC(2026, 9, 13)), '');
+    assert.equal(H.formatWhen(bad, Date.UTC(2026, 9, 13)), '');
+  }
 });
 
 test('parseTags normalizes, dedupes, strips #, accepts arrays and strings', () => {
