@@ -179,3 +179,14 @@ test('file kind helpers: Markdown files render, other text files are plain, ever
   assert.equal(H.isNonMarkdownFile(null), false);
   assert.equal(H.isNonMarkdownFile({ filePath: 'C:/v/x.MARKDOWN', fileKind: 'text' }), false);
 });
+
+test('fileNameOf takes the last segment of a path with either slash, and nothing from nothing', () => {
+  assert.equal(H.fileNameOf('C:\\Users\\x\\Notes\\My note.md'), 'My note.md');
+  assert.equal(H.fileNameOf('/home/x/notes/a.b.md'), 'a.b.md');
+  assert.equal(H.fileNameOf('C:\\Users\\x\\mixed/slashes\\last.txt'), 'last.txt');
+  assert.equal(H.fileNameOf('plain.md'), 'plain.md');
+  assert.equal(H.fileNameOf('C:\\Users\\x\\'), '');
+  assert.equal(H.fileNameOf(''), '');
+  assert.equal(H.fileNameOf(null), '');
+  assert.equal(H.fileNameOf(undefined), '');
+});

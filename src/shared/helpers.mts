@@ -446,8 +446,10 @@ function isViewerOnlyFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind !== 'text');
 }
 
+const fileNameOf = (filePath: string | null | undefined) => String(filePath || '').split(/[\\/]/).pop() || '';
+
 function extOf(filePath: string | null | undefined) {
-  const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
+  const base = fileNameOf(filePath).toLowerCase();
   if (!base.includes('.')) return base;
   return base.slice(base.lastIndexOf('.') + 1);
 }
@@ -617,7 +619,7 @@ export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
   isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
   fuzzyScore,
-  splitAtHeadings, headingTitle, extOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
+  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,

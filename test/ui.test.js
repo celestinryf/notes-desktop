@@ -1158,6 +1158,44 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   void id;
 });
 
+test('the More menu copies the file name or the path of the open note, from the menu and from the palette', async () => {
+  await clickRow("Gamma (copy)");
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  const file = findNote('Gamma (copy)').filePath;
+  assert.ok(file, 'the note has a file');
+  const readClipboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  await app.evaluate(({ clipboard }) => clipboard.writeText(''));
+  await page.click('#moreBtn');
+  await page.waitForSelector('#moreMenu:not(.hidden)');
+  assert.equal(await page.isVisible('#copyNameBtn'), true);
+  assert.equal(await page.isVisible('#copyPathBtn'), true);
+  await page.click('#copyNameBtn');
+  await waitFor('file name on the clipboard', async () => (await readClipboard()) === path.basename(file));
+  await waitForDom(() => document.getElementById('moreMenu').classList.contains('hidden'));
+  assert.equal(await page.$eval('#toast', (t) => t.textContent), 'Copied ' + path.basename(file));
+
+  await page.keyboard.press('Control+p');
+  await page.waitForSelector('#palette[open]');
+  await page.keyboard.type('>Copy path');
+  await page.waitForSelector('.palette-item.is-active:has-text("Copy path")');
+  await page.keyboard.press('Enter');
+  await waitFor('path on the clipboard', async () => (await readClipboard()) === file);
+
+  const throwaway = await typeNote('Throwaway for copy', 'x');
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('throwaway trashed', () => findNote('Throwaway for copy').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await clickRow('Throwaway for copy');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Throwaway for copy');
+  await page.click('#moreBtn');
+  await page.waitForSelector('#moreMenu:not(.hidden)');
+  assert.equal(await page.isVisible('#copyNameBtn'), false, 'no file name to copy for a note in the trash');
+  assert.equal(await page.isVisible('#copyPathBtn'), false);
+  await page.keyboard.press('Escape');
+  await page.evaluate((id) => window.notesApi.notes.destroy(id), throwaway.id);
+  await page.click('.nav-item[data-view="all"]');
+});
+
 test('live share: the app hosts a note; another participant over HTTP sees edits as they happen and can edit back', { timeout: 60000 }, async () => {
   const http = require('http');
   await clickRow("Gamma (copy)");
