@@ -295,6 +295,17 @@ const SCENES = {
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
   'list-view-small': { about: 'The cards in a small window (820x560)', size: { width: 820, height: 560 }, settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
   'list-search': { about: 'Search results: two-line rows with the matching words under each title', run: steps(openNote('Q4 planning'), async (page) => { await page.fill('#searchInput', 'the'); await sleep(800); }) },
+  'tree-see-more': { about: 'An open folder with twelve notes in the folder view: ten, then a "See 2 more" row', run: async (page) => {
+    const folderId = await page.evaluate(async () => {
+      const f = await window.notesApi.folders.create({ name: 'Long folder' });
+      for (let i = 1; i <= 12; i++) await window.notesApi.notes.create({ title: 'Entry ' + i, body: 'Line ' + i, folderId: f.id });
+      return f.id;
+    });
+    await page.click('.nav-item[data-view="all"]');
+    await sleep(400);
+    await page.click('.note-tree .tree-folder[data-id="' + folderId + '"]');
+    await sleep(500);
+  } },
   'tree-pinned': { about: 'All notes as a folder tree: every pinned note first (one from a folder carries its name), and an open folder lists its own pinned notes first', pin: ['n-reading', 'n-retro', 'b2'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: openNote('Q4 planning') },
   'tree-pinned-in-folder': { about: 'The in-folder copy of a pinned note clicked: it alone is selected, with the headings under it', pin: ['n-reading', 'n-retro'], settings: { treeExpanded: ['f-work', 'f-proj'] }, run: steps(openNote('Q4 planning'), async (page) => { await page.click('.tree-note[data-key="n:n-plan"]'); await sleep(600); }) },
   'tree-pinned-folder': { about: 'A folder (Work) as a tree: its own pinned notes above its subfolders', pin: ['n-retro', 'n-1on1'], settings: { lastFolderId: 'f-work', treeExpanded: ['f-proj'] }, run: openNote('1:1 with Sam') },

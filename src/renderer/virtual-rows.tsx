@@ -44,6 +44,7 @@ export function useVirtualRows<E extends HTMLElement, K extends string>(rows: Ro
     getItemKey,
     measureElement: measure,
     overscan: OVERSCAN,
+    useAnimationFrameWithResizeObserver: true,
   });
   useLayoutEffect(() => { handle.reveal = (index) => list.scrollToIndex(index, { align: 'auto' }); });
   const items = list.getVirtualItems();

@@ -114,6 +114,7 @@ function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, dropZone, ma
       );
     }
     if (item.kind === 'heading') return <div key={item.key} {...shared} className="tree-row tree-heading" />;
+    if (item.kind === 'more') return <div key={item.key} {...shared} className="tree-row tree-more" aria-setsize={undefined} aria-posinset={undefined} aria-label={deps.title(item)} />;
     const id = item.note.id;
     const active = item.key === activeKey;
     return (
@@ -269,6 +270,9 @@ export function createNoteTree<N>(root: HTMLDivElement, deps: NoteTreeDeps<N>) {
     revealActive() {
       const index = activeKey === null ? -1 : indexOf.get(activeKey) ?? -1;
       if (index >= 0) handle.reveal(index);
+    },
+    focusAt(index: number) {
+      if (index >= 0 && index < layout.items.length) focusIndex(index);
     },
     replace(id: string, note: N, title: string) {
       if (!layout.items.some((item) => item.kind === 'note' && item.note.id === id)) return;
