@@ -954,6 +954,55 @@ test('find in note counts and steps through matches; print asks the system to pr
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
+test('find in note: match case and whole word narrow the matches by button, Alt+C and Alt+W, in both views, and replace follows them', async () => {
+  await clickRow("Gamma (copy)");
+  await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await useSourceMode(true);
+  const body = 'Needle needle needles NEEDLE\n';
+  await page.fill('#bodyInput', body);
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === body);
+  const total = (n) => waitFor('find total ' + n, async () => (await page.$eval('#findCount', (e) => e.textContent)).endsWith('/' + n));
+  const pressed = (sel) => page.$eval(sel, (b) => b.getAttribute('aria-pressed') === 'true' && b.classList.contains('is-on'));
+  await page.keyboard.press('Control+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'needle');
+  await total(4);
+  try {
+    await page.click('#findCaseBtn');
+    await total(2);
+    assert.equal(await pressed('#findCaseBtn'), true, 'the button shows it is on');
+    await page.keyboard.press('Alt+w');
+    await total(1);
+    assert.equal(await pressed('#findWordBtn'), true);
+    await page.keyboard.press('Alt+c');
+    await total(3);
+    assert.equal(await pressed('#findCaseBtn'), false);
+    await page.focus('#findInput');
+    await page.keyboard.press('Alt+w');
+    await total(4);
+
+    await page.keyboard.press('Control+e');
+    await page.waitForSelector('#richEditor:not(.hidden)');
+    await total(4);
+    await page.click('#findCaseBtn');
+    await total(2);
+    await page.click('#findCaseBtn');
+    await total(4);
+    await page.click('#findWordBtn');
+    await total(3);
+
+    await page.keyboard.press('Control+h');
+    await page.waitForSelector('#replaceRow:not(.hidden)');
+    await page.fill('#replaceInput', 'pin');
+    await page.click('#replaceAllBtn');
+    await waitFor('whole words replaced', () => findNote('Gamma (copy)').body.replace(/\s+$/, '') === 'pin pin needles pin');
+  } finally {
+    for (const sel of ['#findCaseBtn', '#findWordBtn']) if (await pressed(sel)) await page.click(sel);
+    await page.keyboard.press('Escape');
+    await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+  }
+});
+
 test('reminders: set from the dialog, shown on the card and in the Reminders view, fired by the scheduler, cleared', { timeout: 30000 }, async () => {
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

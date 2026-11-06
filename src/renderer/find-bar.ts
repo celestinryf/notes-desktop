@@ -7,6 +7,7 @@ import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 import { toast } from './toast.ts';
 import { findOffsets, isQueryText } from './find-text.ts';
+import type { FindOptions } from './find-text.ts';
 import { tableShown, focusBody } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
@@ -18,6 +19,22 @@ export function canFindInNote() {
 }
 
 export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
+  const opts = (): FindOptions => ({ matchCase: find.matchCase, wholeWord: find.wholeWord });
+  const findKey = (q: string) => q + (find.matchCase ? '\u0001' : '') + (find.wholeWord ? '\u0002' : '');
+
+  function toggleFindOption(which: 'matchCase' | 'wholeWord') {
+    find[which] = !find[which];
+    syncFindOptions();
+    if (find.open) runFind(true, true);
+  }
+
+  function syncFindOptions() {
+    for (const [btn, on] of [[el.findCaseBtn, find.matchCase], [el.findWordBtn, find.wholeWord]] as const) {
+      btn.setAttribute('aria-pressed', String(on));
+      btn.classList.toggle('is-on', on);
+    }
+  }
+
   function openFind() {
     if (!canFindInNote()) return;
     find.open = true;
@@ -52,7 +69,7 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
       const at = find.sourceHits[find.active];
       const ta = src;
       if (ta.readOnly) return;
-      if (!isQueryText(ta.value.slice(at, at + q.length), q)) { showActiveMatch(); return; }
+      if (!isQueryText(ta.value.slice(at, at + q.length), q, opts())) { showActiveMatch(); return; }
       ta.value = ta.value.slice(0, at) + text + ta.value.slice(at + q.length);
       ta.setSelectionRange(at + text.length, at + text.length);
       ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -67,10 +84,10 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     if (!find.ranges.length) { runFind(true, true); return; }
     find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
     const idx = find.active;
-    if (!isQueryText(String(find.ranges[idx]), q)) { showActiveMatch(); return; }
+    if (!isQueryText(String(find.ranges[idx]), q, opts())) { showActiveMatch(); return; }
     state.rich.replaceRanges([find.ranges[idx]], text);
     runFind(true, true, true);
-    const inside = findOffsets(text, q).length;
+    const inside = findOffsets(text, q, opts()).length;
     if (find.ranges.length) { find.active = (idx + inside) % find.ranges.length; showActiveMatch(); }
   }
 
@@ -99,7 +116,7 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     if (state.sourceMode) {
       const ta = src;
       if (ta.readOnly) return;
-      const hits = findOffsets(ta.value, q);
+      const hits = findOffsets(ta.value, q, opts());
       n = hits.length;
       if (!n) { toast('No matches'); return; }
       let out = '', last = 0;
@@ -151,7 +168,7 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
       const node = nodes[lo].node;
       return { node, offset: Math.min(pos - nodes[lo].start, (node.nodeValue || '').length) };
     };
-    return findOffsets(text, q).map((pos) => {
+    return findOffsets(text, q, opts()).map((pos) => {
       const s = locate(pos), e = locate(pos + q.length);
       if (!s || !e) return null;
       const r = document.createRange();
@@ -164,12 +181,12 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
 
   function runFind(forward?: boolean, fresh?: boolean, quiet?: boolean) {
     const q = el.findInput.value;
-    const sameQuery = q === find.query;
-    find.query = q;
+    const sameQuery = findKey(q) === find.query;
+    find.query = findKey(q);
     if (!q) { clearFindHighlights(); el.findCount.textContent = ''; return; }
     if (state.sourceMode) {
       if (fresh || !sameQuery || !find.sourceHits.length) {
-        find.sourceHits = findOffsets(el.bodyInput.value, q);
+        find.sourceHits = findOffsets(el.bodyInput.value, q, opts());
         const caret = src.selectionStart || 0;
         const idx = find.sourceHits.findIndex((h) => h >= caret);
         find.active = find.sourceHits.length ? (idx === -1 ? 0 : idx) : -1;
@@ -240,5 +257,5 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     return { name: H.deriveTitle(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() };
   }
 
-  return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
+  return { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
 }

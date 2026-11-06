@@ -58,6 +58,8 @@
           "arrow-down": '<path d="M12 5v14" /><path d="m19 12-7 7-7-7" />',
           "arrow-left": '<path d="m12 19-7-7 7-7" /><path d="M19 12H5" />',
           "arrow-right": '<path d="M5 12h14" /><path d="m12 5 7 7-7 7" />',
+          "case-sensitive": '<path d="m2 16 4.039-9.69a.5.5 0 0 1 .923 0L11 16" /><path d="M22 9v7" /><path d="M3.304 13h6.392" /><circle cx="18.5" cy="12.5" r="3.5" />',
+          "whole-word": '<circle cx="7" cy="12" r="3" /><path d="M10 9v6" /><circle cx="17" cy="12" r="3" /><path d="M14 7v8" /><path d="M22 17v1c0 .5-.5 1-1 1H3c-.5 0-1-.5-1-1v-1" />',
           "external-link": '<path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />',
           "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />',
           "folder-open": '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />',
@@ -16226,6 +16228,8 @@
     printBtn: pageElement("#printBtn", HTMLButtonElement),
     findBar: pageElement("#findBar", HTMLDivElement),
     findInput: pageElement("#findInput", HTMLInputElement),
+    findCaseBtn: pageElement("#findCaseBtn", HTMLButtonElement),
+    findWordBtn: pageElement("#findWordBtn", HTMLButtonElement),
     findCount: pageElement("#findCount", HTMLSpanElement),
     findPrevBtn: pageElement("#findPrevBtn", HTMLButtonElement),
     findNextBtn: pageElement("#findNextBtn", HTMLButtonElement),
@@ -16337,7 +16341,7 @@
   };
 
   // src/renderer/find-state.ts
-  var find = { open: false, query: "", ranges: [], active: -1, sourceHits: [] };
+  var find = { open: false, query: "", matchCase: false, wholeWord: false, ranges: [], active: -1, sourceHits: [] };
 
   // src/renderer/toast.ts
   var toastTimer;
@@ -22081,19 +22085,44 @@
   }
 
   // src/renderer/find-text.ts
-  function isQueryText(text, q) {
-    return new RegExp("^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i").test(text);
-  }
-  function findOffsets(text, q) {
-    const hits = [];
-    if (!q) return hits;
-    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      hits.push(m.index);
-      if (m[0].length === 0) re.lastIndex++;
+  var WORD_EDGE_BEFORE = "(?<![\\p{L}\\p{N}_])";
+  var WORD_EDGE_AFTER = "(?![\\p{L}\\p{N}_])";
+  var STARTS_WITH_WORD = /^[\p{L}\p{N}_]/u;
+  var ENDS_WITH_WORD = /[\p{L}\p{N}_]$/u;
+  var escapeRegExp = (q) => q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  function queryRegExp(q, opts, global) {
+    let body = escapeRegExp(q);
+    if (opts && opts.wholeWord) {
+      if (STARTS_WITH_WORD.test(q)) body = WORD_EDGE_BEFORE + body;
+      if (ENDS_WITH_WORD.test(q)) body = body + WORD_EDGE_AFTER;
     }
-    return hits;
+    return new RegExp(body, "u" + (global ? "g" : "") + (opts && opts.matchCase ? "" : "i"));
+  }
+  function unlessTooLarge(fallback, run) {
+    try {
+      return run();
+    } catch (_) {
+      return fallback;
+    }
+  }
+  function isQueryText(text, q, opts) {
+    return unlessTooLarge(false, () => {
+      const inner = queryRegExp(q, opts);
+      return new RegExp("^(?:" + inner.source + ")$", inner.flags).test(text);
+    });
+  }
+  function findOffsets(text, q, opts) {
+    if (!q) return [];
+    return unlessTooLarge([], () => {
+      const hits = [];
+      const re = queryRegExp(q, opts, true);
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        hits.push(m.index);
+        if (m[0].length === 0) re.lastIndex++;
+      }
+      return hits;
+    });
   }
 
   // src/renderer/find-bar.ts
@@ -22102,6 +22131,19 @@
     return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
   }
   function createFindBar({ api, flushSave, GUEST }) {
+    const opts = () => ({ matchCase: find.matchCase, wholeWord: find.wholeWord });
+    const findKey = (q) => q + (find.matchCase ? "" : "") + (find.wholeWord ? "" : "");
+    function toggleFindOption(which) {
+      find[which] = !find[which];
+      syncFindOptions();
+      if (find.open) runFind(true, true);
+    }
+    function syncFindOptions() {
+      for (const [btn, on] of [[el.findCaseBtn, find.matchCase], [el.findWordBtn, find.wholeWord]]) {
+        btn.setAttribute("aria-pressed", String(on));
+        btn.classList.toggle("is-on", on);
+      }
+    }
     function openFind() {
       if (!canFindInNote()) return;
       find.open = true;
@@ -22137,7 +22179,7 @@
         const at = find.sourceHits[find.active];
         const ta = src;
         if (ta.readOnly) return;
-        if (!isQueryText(ta.value.slice(at, at + q.length), q)) {
+        if (!isQueryText(ta.value.slice(at, at + q.length), q, opts())) {
           showActiveMatch();
           return;
         }
@@ -22165,13 +22207,13 @@
       }
       find.active = Math.min(Math.max(wantedIdx, 0), find.ranges.length - 1);
       const idx = find.active;
-      if (!isQueryText(String(find.ranges[idx]), q)) {
+      if (!isQueryText(String(find.ranges[idx]), q, opts())) {
         showActiveMatch();
         return;
       }
       state.rich.replaceRanges([find.ranges[idx]], text);
       runFind(true, true, true);
-      const inside = findOffsets(text, q).length;
+      const inside = findOffsets(text, q, opts()).length;
       if (find.ranges.length) {
         find.active = (idx + inside) % find.ranges.length;
         showActiveMatch();
@@ -22204,7 +22246,7 @@
       if (state.sourceMode) {
         const ta = src;
         if (ta.readOnly) return;
-        const hits = findOffsets(ta.value, q);
+        const hits = findOffsets(ta.value, q, opts());
         n = hits.length;
         if (!n) {
           toast("No matches");
@@ -22283,7 +22325,7 @@
         const node = nodes[lo].node;
         return { node, offset: Math.min(pos - nodes[lo].start, (node.nodeValue || "").length) };
       };
-      return findOffsets(text, q).map((pos) => {
+      return findOffsets(text, q, opts()).map((pos) => {
         const s = locate(pos), e = locate(pos + q.length);
         if (!s || !e) return null;
         const r = document.createRange();
@@ -22296,8 +22338,8 @@
     }
     function runFind(forward, fresh, quiet) {
       const q = el.findInput.value;
-      const sameQuery = q === find.query;
-      find.query = q;
+      const sameQuery = findKey(q) === find.query;
+      find.query = findKey(q);
       if (!q) {
         clearFindHighlights();
         el.findCount.textContent = "";
@@ -22305,7 +22347,7 @@
       }
       if (state.sourceMode) {
         if (fresh || !sameQuery || !find.sourceHits.length) {
-          find.sourceHits = findOffsets(el.bodyInput.value, q);
+          find.sourceHits = findOffsets(el.bodyInput.value, q, opts());
           const caret = src.selectionStart || 0;
           const idx = find.sourceHits.findIndex((h) => h >= caret);
           find.active = find.sourceHits.length ? idx === -1 ? 0 : idx : -1;
@@ -22377,7 +22419,7 @@
       if (!note) return { name: "Note", html: "" };
       return { name: deriveTitle(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() };
     }
-    return { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
+    return { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }
 
   // src/renderer/pdf-editor.ts
@@ -26946,7 +26988,7 @@
     }
     const { book, bookOf, renderBookStrip, stepPage, addPage, toggleBook, openSplitDialog, applySplit, openBookMenu, closeAllBookMenus, pageMenuAction, bookMenuAction, exportBook, reader, closeReader, readerOpen } = createBooks({ api, flattenTree, selectNote, selectNoteNow, refresh, flushSave, clearEditor, setView, trashCurrent, syncTitleBar });
     const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
-    const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
+    const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
@@ -27894,6 +27936,8 @@
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
         cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), canFindInNote()),
+        cmd("find-case", "This note", "Find: match case" + (find.matchCase ? " (on)" : ""), "case-sensitive", "Alt+C", () => toggleFindOption("matchCase"), find.open, "case sensitive"),
+        cmd("find-word", "This note", "Find: whole word" + (find.wholeWord ? " (on)" : ""), "whole-word", "Alt+W", () => toggleFindOption("wholeWord"), find.open, "whole word"),
         cmd("image-size", "This note", "Image: actual size, or fitted to the pane", "zoom-in", "Enter on the picture", () => toggleImageSize(), !!(state.current && state.current.fileKind === "image"), "zoom 100% fit picture"),
         cmd("replace", "This note", "Find and replace", "replace", "Ctrl+H", () => {
           if (!find.open) openFind();
@@ -28219,6 +28263,11 @@
         runFind(!e.shiftKey);
         return;
       }
+      if (find.open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === "c" || e.key === "C" || e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        toggleFindOption(e.key === "c" || e.key === "C" ? "matchCase" : "wholeWord");
+        return;
+      }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         startDictation();
@@ -28457,6 +28506,8 @@
         if (b) shareAction(b.dataset.action ?? "");
       });
       el.findNextBtn.addEventListener("click", () => runFind(true));
+      el.findCaseBtn.addEventListener("click", () => toggleFindOption("matchCase"));
+      el.findWordBtn.addEventListener("click", () => toggleFindOption("wholeWord"));
       el.findReplaceToggle.addEventListener("click", () => toggleReplace());
       el.replaceOneBtn.addEventListener("click", replaceCurrent);
       el.replaceAllBtn.addEventListener("click", replaceAll);

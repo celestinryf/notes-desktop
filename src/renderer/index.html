@@ -290,6 +290,8 @@
 
         <div class="find-bar hidden" id="findBar" role="search" aria-label="Find in note">
           <input id="findInput" class="input find-input" type="text" placeholder="Find in this note" title="Enter or F3: next. Shift+Enter: previous. Esc: close." autocomplete="off" spellcheck="false" />
+          <button class="tool-btn icon-only" id="findCaseBtn" data-icon="case-sensitive" title="Match case (Alt+C)" aria-label="Match case" aria-pressed="false"></button>
+          <button class="tool-btn icon-only" id="findWordBtn" data-icon="whole-word" title="Whole word (Alt+W)" aria-label="Whole word" aria-pressed="false"></button>
           <span class="find-count" id="findCount"></span>
           <button class="tool-btn icon-only" id="findPrevBtn" data-icon="arrow-up" title="Previous (Shift+Enter)" aria-label="Previous match"></button>
           <button class="tool-btn icon-only" id="findNextBtn" data-icon="arrow-down" title="Next (Enter)" aria-label="Next match"></button>
