@@ -1,3 +1,4 @@
+import * as H from '../shared/helpers.mts';
 import { el } from './dom.ts';
 import { state } from './state.ts';
 import { NotesPdfEditor, requireChild } from './pdf-editor.ts';
@@ -116,7 +117,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
 
   function reportFileSaved(target: PdfOnShow, r: SavedFile, explicit: boolean, what: string) {
     if (savedAsCopy(r)) {
-      if (r.newCopy || explicit) toast('This ' + what + ' changed on disk while you edited it, so your changes were saved as ' + r.savedAs.split(/[\\/]/).pop() + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
+      if (r.newCopy || explicit) toast('This ' + what + ' changed on disk while you edited it, so your changes were saved as ' + H.fileNameOf(r.savedAs) + '.', { label: 'Open', run: () => openFiles([r.savedAs]) });
       return false;
     }
     noteFileWritten(target, r.mtime);

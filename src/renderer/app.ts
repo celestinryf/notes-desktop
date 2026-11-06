@@ -1036,7 +1036,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (!file) return;
     const text = what === 'path' ? file : H.fileNameOf(file);
     await api.app.copy({ text });
-    toast('Copied ' + text);
+    toast('Copied ' + H.truncate(text, 80));
   }
 
   async function moveFolderTo(folderId: string, parentId: string | null) {
@@ -1901,8 +1901,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.historyBtn.classList.toggle('hidden', inTrash);
     el.versionsBtn.classList.toggle('hidden', inTrash);
     el.duplicateBtn.classList.toggle('hidden', inTrash);
-    el.copyNameBtn.classList.toggle('hidden', !note.filePath);
-    el.copyPathBtn.classList.toggle('hidden', !note.filePath);
+    el.copyNameBtn.classList.toggle('hidden', inTrash || !note.filePath);
+    el.copyPathBtn.classList.toggle('hidden', inTrash || !note.filePath);
     el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);

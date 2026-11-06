@@ -1,3 +1,4 @@
+import * as H from '../shared/helpers.mts';
 import { el } from './dom.ts';
 import { state } from './state.ts';
 import { ipcErrorText } from './text.ts';
@@ -45,7 +46,7 @@ export function createConvertMenu({ api, flushSave, openFiles }: ConvertMenuDeps
       toast('Converting…');
       const r = await api.files.convert(note.id, to);
       if (!r.ok) { toast('Could not convert: ' + r.error); return; }
-      const name = r.filePath.split(/[\\/]/).pop();
+      const name = H.fileNameOf(r.filePath);
       toast('Saved ' + name + ' next to the original.' + (r.warning ? ' ' + r.warning : ''), { label: 'Open', run: () => openFiles([r.filePath]) });
     } catch (err) {
       toast('Could not convert: ' + ipcErrorText(err));

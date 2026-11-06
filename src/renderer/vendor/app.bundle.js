@@ -15211,7 +15211,7 @@
   }
   var fileNameOf = (filePath) => String(filePath || "").split(/[\\/]/).pop() || "";
   function extOf(filePath) {
-    const base = (String(filePath || "").split(/[\\/]/).pop() || "").toLowerCase();
+    const base = fileNameOf(filePath).toLowerCase();
     if (!base.includes(".")) return base;
     return base.slice(base.lastIndexOf(".") + 1);
   }
@@ -23386,7 +23386,7 @@
     const savedAsCopy = (r) => !!r.savedAs;
     function reportFileSaved(target, r, explicit, what) {
       if (savedAsCopy(r)) {
-        if (r.newCopy || explicit) toast("This " + what + " changed on disk while you edited it, so your changes were saved as " + r.savedAs.split(/[\\/]/).pop() + ".", { label: "Open", run: () => openFiles([r.savedAs]) });
+        if (r.newCopy || explicit) toast("This " + what + " changed on disk while you edited it, so your changes were saved as " + fileNameOf(r.savedAs) + ".", { label: "Open", run: () => openFiles([r.savedAs]) });
         return false;
       }
       noteFileWritten(target, r.mtime);
@@ -23837,10 +23837,6 @@
 
   // src/renderer/craft-notes.ts
   var WARM_LIMIT_MS = 2e4;
-  var baseName = (path) => {
-    const parts = path.split(/[\\/]/);
-    return parts[parts.length - 1];
-  };
   function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile }) {
     const CRAFT_UI = {
       wordcraft: { label: "WordCraft", what: "Word document", frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: "Word", without: "Word documents open in the simple editor for now." },
@@ -23903,7 +23899,7 @@
         trace("bytes", { id: n.id, bytes: bytes.byteLength, ms: msSince(asked) });
         if (s !== seq || !wanted()) return;
         if (!n.filePath) throw new Error("the note has no file");
-        note = { id: n.id, fileMtime: n.fileMtime, name: baseName(n.filePath) };
+        note = { id: n.id, fileMtime: n.fileMtime, name: fileNameOf(n.filePath) };
         controller().open(note.name, bytes, note);
       }
       function setWarming(k) {
@@ -24025,7 +24021,7 @@
         try {
           const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
           if ("exported" in r) {
-            const copy = baseName(r.exported);
+            const copy = fileNameOf(r.exported);
             toast(r.own ? "Saved as " + copy + " beside this file, which is unchanged." : "Saved " + copy + " next to the " + ui.what + ".", { label: "Open", run: () => openFiles([r.exported]) });
             return { ok: true, own: !!r.own };
           }
@@ -24046,7 +24042,7 @@
       }
       function movedTo(target, r) {
         target.fileMtime = r.mtime;
-        toast("Saved as " + baseName(r.relinked) + " beside the original, which is unchanged. This note is that file now.");
+        toast("Saved as " + fileNameOf(r.relinked) + " beside the original, which is unchanged. This note is that file now.");
         setTimeout(async () => {
           const fresh = await api.notes.get(target.id);
           await refresh({ keepEditor: true });
@@ -24877,7 +24873,7 @@
           toast("Could not convert: " + r.error);
           return;
         }
-        const name = r.filePath.split(/[\\/]/).pop();
+        const name = fileNameOf(r.filePath);
         toast("Saved " + name + " next to the original." + (r.warning ? " " + r.warning : ""), { label: "Open", run: () => openFiles([r.filePath]) });
       } catch (err) {
         toast("Could not convert: " + ipcErrorText(err));
@@ -25969,7 +25965,7 @@
       if (!file) return;
       const text = what === "path" ? file : fileNameOf(file);
       await api.app.copy({ text });
-      toast("Copied " + text);
+      toast("Copied " + truncate(text, 80));
     }
     async function moveFolderTo(folderId, parentId) {
       const node = folderNode(folderId);
@@ -26931,8 +26927,8 @@
       el.historyBtn.classList.toggle("hidden", inTrash);
       el.versionsBtn.classList.toggle("hidden", inTrash);
       el.duplicateBtn.classList.toggle("hidden", inTrash);
-      el.copyNameBtn.classList.toggle("hidden", !note.filePath);
-      el.copyPathBtn.classList.toggle("hidden", !note.filePath);
+      el.copyNameBtn.classList.toggle("hidden", inTrash || !note.filePath);
+      el.copyPathBtn.classList.toggle("hidden", inTrash || !note.filePath);
       el.splitBtn.classList.toggle("hidden", inTrash);
       el.restoreBtn.classList.toggle("hidden", !inTrash);
       el.destroyBtn.classList.toggle("hidden", !inTrash);

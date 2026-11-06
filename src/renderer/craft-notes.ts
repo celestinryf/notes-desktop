@@ -24,11 +24,6 @@ type CraftNotesDeps = {
 
 const WARM_LIMIT_MS = 20000;
 
-const baseName = (path: string) => {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1];
-};
-
 export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile }: CraftNotesDeps) {
   const CRAFT_UI: Record<CraftKey, CraftUi> = {
     wordcraft: { label: 'WordCraft', what: 'Word document', frame: () => el.wordcraftFrame, bytes: (id) => api.files.docxBytes(id), openWith: 'Word', without: 'Word documents open in the simple editor for now.' },
@@ -84,7 +79,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       trace('bytes', { id: n.id, bytes: bytes.byteLength, ms: H.msSince(asked) });
       if (s !== seq || !wanted()) return;
       if (!n.filePath) throw new Error('the note has no file');
-      note = { id: n.id, fileMtime: n.fileMtime, name: baseName(n.filePath) };
+      note = { id: n.id, fileMtime: n.fileMtime, name: H.fileNameOf(n.filePath) };
       controller().open(note.name, bytes, note);
     }
     function setWarming(k: string | null) {
@@ -187,7 +182,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       try {
         const r = await api.files.saveCraft(target.id, bytes, name, target.fileMtime);
         if ('exported' in r) {
-          const copy = baseName(r.exported);
+          const copy = H.fileNameOf(r.exported);
           toast(r.own ? 'Saved as ' + copy + ' beside this file, which is unchanged.' : 'Saved ' + copy + ' next to the ' + ui.what + '.', { label: 'Open', run: () => openFiles([r.exported]) });
           return { ok: true, own: !!r.own };
         }
@@ -205,7 +200,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     }
     function movedTo(target: CraftDoc, r: Extract<CraftSave, { relinked: string }>) {
       target.fileMtime = r.mtime;
-      toast('Saved as ' + baseName(r.relinked) + ' beside the original, which is unchanged. This note is that file now.');
+      toast('Saved as ' + H.fileNameOf(r.relinked) + ' beside the original, which is unchanged. This note is that file now.');
       setTimeout(async () => {
         const fresh = await api.notes.get(target.id);
         await refresh({ keepEditor: true });

@@ -1180,6 +1180,20 @@ test('the More menu copies the file name or the path of the open note, from the 
   await page.waitForSelector('.palette-item.is-active:has-text("Copy path")');
   await page.keyboard.press('Enter');
   await waitFor('path on the clipboard', async () => (await readClipboard()) === file);
+
+  const throwaway = await typeNote('Throwaway for copy', 'x');
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('throwaway trashed', () => findNote('Throwaway for copy').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await clickRow('Throwaway for copy');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Throwaway for copy');
+  await page.click('#moreBtn');
+  await page.waitForSelector('#moreMenu:not(.hidden)');
+  assert.equal(await page.isVisible('#copyNameBtn'), false, 'no file name to copy for a note in the trash');
+  assert.equal(await page.isVisible('#copyPathBtn'), false);
+  await page.keyboard.press('Escape');
+  await page.evaluate((id) => window.notesApi.notes.destroy(id), throwaway.id);
+  await page.click('.nav-item[data-view="all"]');
 });
 
 test('live share: the app hosts a note; another participant over HTTP sees edits as they happen and can edit back', { timeout: 60000 }, async () => {

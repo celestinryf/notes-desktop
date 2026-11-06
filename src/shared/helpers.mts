@@ -449,7 +449,7 @@ function isViewerOnlyFile(note: FileSource) {
 const fileNameOf = (filePath: string | null | undefined) => String(filePath || '').split(/[\\/]/).pop() || '';
 
 function extOf(filePath: string | null | undefined) {
-  const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
+  const base = fileNameOf(filePath).toLowerCase();
   if (!base.includes('.')) return base;
   return base.slice(base.lastIndexOf('.') + 1);
 }
