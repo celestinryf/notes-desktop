@@ -980,6 +980,7 @@ button.book-name:hover { background: var(--hover); }
 .find-input { flex: 1; min-width: 0; height: var(--control-h); }
 .find-count { font-size: var(--t-xs); color: var(--fg-3); white-space: nowrap; padding: 0 var(--s1); }
 .find-count.is-none { color: var(--danger); }
+.find-bar .tool-btn.is-on { background: var(--pressed); color: var(--fg); }
 .replace-row { display: flex; gap: var(--s1); width: 100%; align-items: center; }
 ::highlight(notes-find) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 ::highlight(notes-find-active) { background: var(--accent); color: var(--accent-fg); }
