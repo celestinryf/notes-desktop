@@ -259,6 +259,7 @@ const SCENES = {
   'short-note': { about: 'A short checklist note', run: openNote('Groceries') },
   focus: { about: 'Sidebar and list hidden: the writing view', run: steps(openNote('Notes on writing tools'), key('Control+\\'), key('Control+Shift+\\')) },
   find: { about: 'Find and replace in a note', run: steps(openNote('Q4 planning'), key('Control+h')) },
+  'find-options': { about: 'Find with Match case on: the pressed cell, and the count narrowed', run: steps(openNote('Q4 planning'), key('Control+f'), async (page) => { await page.fill('#findInput', 'the'); await sleep(200); await page.click('#findCaseBtn'); await sleep(300); }) },
   settings: { about: 'The settings dialog', run: key('Control+,') },
   share: { about: 'The share menu', run: steps(openNote('Q4 planning'), key('Control+Shift+s')) },
   book: { about: 'A book: pages as tabs', run: openNote('Birds of the ridge') },

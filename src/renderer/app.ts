@@ -1953,7 +1953,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
 
-  const { openFind, closeFind, runFind, toggleReplace, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
+  const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
 
@@ -2832,6 +2832,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
+      cmd('find-case', 'This note', 'Find: match case' + (find.matchCase ? ' (on)' : ''), 'case-sensitive', 'Alt+C', () => toggleFindOption('matchCase'), find.open, 'case sensitive'),
+      cmd('find-word', 'This note', 'Find: whole word' + (find.wholeWord ? ' (on)' : ''), 'whole-word', 'Alt+W', () => toggleFindOption('wholeWord'), find.open, 'whole word'),
       cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
       ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
@@ -2974,6 +2976,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); openShareMenu(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); printNote(); return; }
     if (e.key === 'F3' && find.open) { e.preventDefault(); runFind(!e.shiftKey); return; }
+    if (find.open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'w' || e.key === 'W')) { e.preventDefault(); toggleFindOption(e.key === 'c' || e.key === 'C' ? 'matchCase' : 'wholeWord'); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); startDictation(); return; }
     if (e.altKey && !ctrl && !e.shiftKey && e.key === 'Enter' && !state.sourceMode && el.richEditor.contains(document.activeElement)) {
       e.preventDefault();
@@ -3108,6 +3111,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.shareBtn.addEventListener('click', () => { if (el.shareMenu.classList.contains('hidden')) openShareMenu(); else closeShareMenu(); });
     el.shareMenu.addEventListener('click', (e) => { const b = closestTo(e, '[data-action]'); if (b) shareAction(b.dataset.action ?? ''); });
     el.findNextBtn.addEventListener('click', () => runFind(true));
+    el.findCaseBtn.addEventListener('click', () => toggleFindOption('matchCase'));
+    el.findWordBtn.addEventListener('click', () => toggleFindOption('wholeWord'));
     el.findReplaceToggle.addEventListener('click', () => toggleReplace());
     el.replaceOneBtn.addEventListener('click', replaceCurrent);
     el.replaceAllBtn.addEventListener('click', replaceAll);

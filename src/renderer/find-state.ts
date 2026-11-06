@@ -1,1 +1,1 @@
-export const find: { open: boolean, query: string, ranges: Range[], active: number, sourceHits: number[] } = { open: false, query: '', ranges: [], active: -1, sourceHits: [] };
+export const find: { open: boolean, query: string, matchCase: boolean, wholeWord: boolean, ranges: Range[], active: number, sourceHits: number[] } = { open: false, query: '', matchCase: false, wholeWord: false, ranges: [], active: -1, sourceHits: [] };
