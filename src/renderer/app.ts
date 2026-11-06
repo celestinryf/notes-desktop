@@ -895,6 +895,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (at >= 0) noteTree.focusAt(at);
   }
 
+  function firstTip() {
+    const soon = (ms: number) => setTimeout(() => hints.hint('palette', TIPS.palette), ms);
+    if (document.hasFocus()) soon(1200);
+    else window.addEventListener('focus', () => soon(600), { once: true });
+  }
+
   function treeRowHtml(item: TreeItem, override: RowSource | null) {
     if (item.kind === 'note') return treeNoteInner(override || item.note, item.away);
     if (item.kind === 'heading') return '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name">' + escapeHtml(item.text) + '</span>';
@@ -1995,13 +2001,14 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const hints = createHints({
     shown: () => (GUEST || !state.settings ? null : state.settings.hintsShown),
     remember: (ids) => updateSettings({ hintsShown: ids }),
-    show: (message) => { el.hintPop.textContent = message; el.hintPop.classList.remove('hidden'); },
-    hide: () => el.hintPop.classList.add('hidden'),
+    show: (message) => { el.hintPop.classList.remove('hidden'); requestAnimationFrame(() => { el.hintPop.textContent = message; }); },
+    hide: () => { el.hintPop.classList.add('hidden'); el.hintPop.textContent = ''; },
+    canShow: () => !document.querySelector('dialog[open]'),
   });
   const TIPS = {
     palette: 'Ctrl+P finds any note and runs any command.',
-    sidebar: 'Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ keeps it open.',
-    find: 'Alt+C matches the case, Alt+W whole words only. Enter: next match, Shift+Enter: previous.',
+    sidebar: 'Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ docks it again.',
+    find: 'Alt+C matches the case, Alt+W whole words only.',
   };
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
@@ -2893,7 +2900,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
       cmd('tree-show-all', 'View', 'Show every note in this folder', 'list', '', () => showWholeLevel(state.view === 'folder' ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === 'folder' ? state.folderId : null), 'see more'),
-      cmd('tips-again', 'App', 'Show the tips again', 'circle-alert', '', () => { hints.forget(); toast('The tips will show again as you go.'); }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, 'hints help'),
+      cmd('tips-again', 'App', 'Show the tips again', 'message-square', '', () => { hints.dismiss(); hints.forget(); toast('The tips will show again as you go.'); }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, 'hints help'),
       cmd('list-mode', 'View', settingsNow().listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', settingsNow().listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: settingsNow().listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
       cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), 'zen distraction free writing'),
       cmd('width', 'View', settingsNow().editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
@@ -2966,6 +2973,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         endSearchStep();
         return;
       }
+      if (!el.hintPop.classList.contains('hidden')) { e.preventDefault(); hints.dismiss(); return; }
       e.preventDefault();
       flushSave().then(() => api.app.hide());
       return;
@@ -3164,8 +3172,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.shareMenu.addEventListener('click', (e) => { const b = closestTo(e, '[data-action]'); if (b) shareAction(b.dataset.action ?? ''); });
     el.findNextBtn.addEventListener('click', () => runFind(true));
     el.hintPop.addEventListener('click', () => hints.dismiss());
-    const firstTip = () => { if (document.hasFocus()) setTimeout(() => hints.hint('palette', TIPS.palette), 1200); else window.addEventListener('focus', () => setTimeout(() => hints.hint('palette', TIPS.palette), 600), { once: true }); };
-    firstTip();
     el.findCaseBtn.addEventListener('click', () => toggleFindOption('matchCase'));
     el.findWordBtn.addEventListener('click', () => toggleFindOption('wholeWord'));
     el.findReplaceToggle.addEventListener('click', () => toggleReplace());
@@ -3470,5 +3476,5 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   init().catch((err) => {
     console.error(err);
     toast('Something went wrong starting Notes: ' + err.message);
-  }).finally(() => markInitDone());
+  }).finally(() => { markInitDone(); firstTip(); });
 })();

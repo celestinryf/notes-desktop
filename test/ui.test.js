@@ -2137,7 +2137,7 @@ test('tips: a small pop in the corner shows once for hiding the sidebar and for 
     await waitFor('sidebar hidden', async () => !(await docked()));
     await waitFor('the sidebar tip shows', async () => /left edge/.test((await pop()) || ''));
     const box = await page.evaluate(() => { const p = document.getElementById('hintPop').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return { right: e.right - p.right, bottom: e.bottom - p.bottom, width: p.width, scrim: !!document.querySelector('.modal[open], dialog[open]') }; });
-    assert.ok(box.right >= 8 && box.right <= 40 && box.bottom >= 8 && box.bottom <= 120, 'the tip sits in the bottom-right corner of the editor: ' + JSON.stringify(box));
+    assert.ok(box.right >= 8 && box.right <= 40 && box.bottom >= 40 && box.bottom <= 100, 'the tip sits in the bottom-right corner of the editor, above the status line: ' + JSON.stringify(box));
     assert.ok(box.width <= 320, 'the tip is small');
     assert.equal(box.scrim, false, 'nothing dims the screen');
     await page.click('#hintPop', { timeout: 4000 });
@@ -2157,6 +2157,10 @@ test('tips: a small pop in the corner shows once for hiding the sidebar and for 
     await waitFor('the find tip shows', async () => /Alt\+C/.test((await pop()) || ''));
     await page.keyboard.press('Escape');
     await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+    assert.notEqual(await pop(), null, 'Esc closed find first, the tip is still there');
+    await page.keyboard.press('Escape');
+    await waitFor('Esc closes the tip before hiding the window', async () => (await pop()) === null);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'the window stayed');
 
     await page.keyboard.press('Control+p');
     await page.waitForSelector('#palette[open]');

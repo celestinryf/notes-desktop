@@ -1005,7 +1005,7 @@ button.book-name:hover { background: var(--hover); }
 @media print {
   .body-input.uses-code:not(.hidden) { display: block !important; }
   .code-host { display: none !important; }
-  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .hint-pop, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; }
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }

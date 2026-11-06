@@ -50,6 +50,30 @@ test('a second tip replaces the first and restarts the clock; a click dismisses 
   assert.equal(calls.hidden, 2, 'no second hide after a dismiss');
 });
 
+test('a tip is not shown twice while its remembering is still on its way, and a later tip remembers the earlier one too', () => {
+  const shown = [];
+  const remembered = [];
+  const hints = createHints({ shown: () => ['old'], remember: (ids) => remembered.push(ids), show: (m) => shown.push(m), hide: () => {} });
+  assert.equal(hints.hint('a', 'A'), true);
+  assert.equal(hints.hint('a', 'A again'), false);
+  assert.equal(hints.hint('b', 'B'), true);
+  assert.deepEqual(shown, ['A', 'B']);
+  assert.deepEqual(remembered, [['old', 'a'], ['old', 'a', 'b']], 'the stale list from the settings does not drop what this session showed');
+  hints.forget();
+  assert.equal(hints.hint('a', 'A'), true);
+});
+
+test('a tip waits while something covers the screen, and is not remembered until it shows', () => {
+  let covered = true;
+  const remembered = [];
+  const hints = createHints({ shown: () => [], remember: (ids) => remembered.push(ids), show: () => {}, hide: () => {}, canShow: () => !covered });
+  assert.equal(hints.hint('a', 'A'), false);
+  assert.deepEqual(remembered, []);
+  covered = false;
+  assert.equal(hints.hint('a', 'A'), true);
+  assert.deepEqual(remembered, [['a']]);
+});
+
 test('no settings yet means no tip; forgetting clears the list', () => {
   const { hints, calls, ids } = harness(null);
   assert.equal(hints.hint('a', 'A'), false);

@@ -22110,13 +22110,16 @@
   var HINT_MS = 5e3;
   function createHints(deps) {
     let timer;
+    const shownNow = /* @__PURE__ */ new Set();
     function hint(id, message) {
       const seen = deps.shown();
-      if (!seen || seen.includes(id)) return false;
+      if (!seen || seen.includes(id) || shownNow.has(id)) return false;
+      if (deps.canShow && !deps.canShow()) return false;
+      shownNow.add(id);
       deps.show(message);
       clearTimeout(timer);
       timer = setTimeout(deps.hide, HINT_MS);
-      deps.remember([...seen, id]);
+      deps.remember(Array.from(/* @__PURE__ */ new Set([...seen, ...shownNow])));
       return true;
     }
     function dismiss() {
@@ -22124,6 +22127,7 @@
       deps.hide();
     }
     function forget() {
+      shownNow.clear();
       deps.remember([]);
     }
     return { hint, dismiss, forget };
@@ -25850,6 +25854,11 @@
       renderNoteTree();
       if (at >= 0) noteTree.focusAt(at);
     }
+    function firstTip() {
+      const soon = (ms) => setTimeout(() => hints.hint("palette", TIPS.palette), ms);
+      if (document.hasFocus()) soon(1200);
+      else window.addEventListener("focus", () => soon(600), { once: true });
+    }
     function treeRowHtml(item, override) {
       if (item.kind === "note") return treeNoteInner(override || item.note, item.away);
       if (item.kind === "heading") return '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name">' + escapeHtml(item.text) + "</span>";
@@ -27063,15 +27072,21 @@
       shown: () => GUEST || !state.settings ? null : state.settings.hintsShown,
       remember: (ids) => updateSettings({ hintsShown: ids }),
       show: (message) => {
-        el.hintPop.textContent = message;
         el.hintPop.classList.remove("hidden");
+        requestAnimationFrame(() => {
+          el.hintPop.textContent = message;
+        });
       },
-      hide: () => el.hintPop.classList.add("hidden")
+      hide: () => {
+        el.hintPop.classList.add("hidden");
+        el.hintPop.textContent = "";
+      },
+      canShow: () => !document.querySelector("dialog[open]")
     });
     const TIPS = {
       palette: "Ctrl+P finds any note and runs any command.",
-      sidebar: "Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ keeps it open.",
-      find: "Alt+C matches the case, Alt+W whole words only. Enter: next match, Shift+Enter: previous."
+      sidebar: "Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ docks it again.",
+      find: "Alt+C matches the case, Alt+W whole words only."
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
@@ -28035,7 +28050,8 @@
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
         cmd("tree-show-all", "View", "Show every note in this folder", "list", "", () => showWholeLevel(state.view === "folder" ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === "folder" ? state.folderId : null), "see more"),
-        cmd("tips-again", "App", "Show the tips again", "circle-alert", "", () => {
+        cmd("tips-again", "App", "Show the tips again", "message-square", "", () => {
+          hints.dismiss();
           hints.forget();
           toast("The tips will show again as you go.");
         }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, "hints help"),
@@ -28156,6 +28172,11 @@
           el.searchInput.value = "";
           clearTimeout(searchTimer);
           endSearchStep();
+          return;
+        }
+        if (!el.hintPop.classList.contains("hidden")) {
+          e.preventDefault();
+          hints.dismiss();
           return;
         }
         e.preventDefault();
@@ -28597,11 +28618,6 @@
       });
       el.findNextBtn.addEventListener("click", () => runFind(true));
       el.hintPop.addEventListener("click", () => hints.dismiss());
-      const firstTip = () => {
-        if (document.hasFocus()) setTimeout(() => hints.hint("palette", TIPS.palette), 1200);
-        else window.addEventListener("focus", () => setTimeout(() => hints.hint("palette", TIPS.palette), 600), { once: true });
-      };
-      firstTip();
       el.findCaseBtn.addEventListener("click", () => toggleFindOption("matchCase"));
       el.findWordBtn.addEventListener("click", () => toggleFindOption("wholeWord"));
       el.findReplaceToggle.addEventListener("click", () => toggleReplace());
@@ -29082,7 +29098,10 @@
     init().catch((err) => {
       console.error(err);
       toast("Something went wrong starting Notes: " + err.message);
-    }).finally(() => markInitDone());
+    }).finally(() => {
+      markInitDone();
+      firstTip();
+    });
   })();
 })();
 /*! Bundled license information:
