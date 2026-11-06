@@ -307,6 +307,9 @@ const SCENES = {
   'settings-save-prompt': { about: 'Closing Settings with unsaved changes: the Save your changes? question', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.click('.scheme-swatch[data-scheme="forest"]'); await page.keyboard.press('Escape'); await sleep(400); } },
   'settings-search-none': { about: 'A settings search with no match', run: async (page) => { await page.keyboard.press('Control+,'); await sleep(400); await page.keyboard.type('zzqx'); await sleep(400); } },
   'sidebar-float': { about: 'The sidebar unpinned, floated in from the left edge', settings: { sidebarCollapsed: true }, run: async (page) => { await page.mouse.move(2, 400); await sleep(600); } },
+  'sidebar-hidden': { about: 'The sidebar hidden with a note open: no rail, the note list at the window edge', settings: { sidebarCollapsed: true }, run: steps(openNote('Q4 planning'), async (page) => { await page.mouse.move(700, 400); await sleep(400); }) },
+  'sidebar-float-toggles': { about: 'The hidden sidebar floated in, the pointer on its sidebar toggle: the same header as when docked', settings: { sidebarCollapsed: true }, run: steps(openNote('Q4 planning'), async (page) => { await page.mouse.move(2, 400); await sleep(600); await page.hover('#toggleSidebarBtn'); await sleep(300); }) },
+  'sidebar-float-narrow': { about: 'A narrow window: the sidebar floats in with both toggles in its header', size: { width: 900, height: 640 }, run: steps(openNote('Q4 planning'), async (page) => { await page.mouse.move(2, 300); await sleep(600); await page.hover('#toggleListBtn'); await sleep(300); }) },
   'sidebar-float-resize': { about: 'The floating sidebar widened by dragging its right edge, the handle still under the pointer', settings: { sidebarCollapsed: true }, run: async (page) => {
     await page.mouse.move(2, 400); await sleep(600);
     const box = await page.locator('#sidebarResizer').boundingBox();

@@ -50,7 +50,6 @@ export function captionSize() {
   return { w: r.width, h: r.height };
 }
 
-export const cellWidth = () => el.cellProbe.getBoundingClientRect().width;
 
 export function watchBand(onCaption: () => void) {
   const observer = new ResizeObserver(() => { fitBand(); onCaption(); });
