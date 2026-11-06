@@ -140,3 +140,10 @@ test('markdownBlocks reads a spaced picture as an image run', () => {
   const blocks = convert.markdownBlocks('![Cards](my shots/one.png)\n');
   assert.deepEqual(blocks[0].runs, [{ img: 'my%20shots/one.png', alt: 'Cards' }]);
 });
+
+test('emphasis flush against a letter is not emphasis when an emoji sits inside its edge, as CommonMark says since markdown-it 14.3', () => {
+  const md = parser();
+  assert.equal(md.renderInline('**🔥**Hot'), '**🔥**Hot');
+  assert.equal(md.renderInline('**🔥** hot'), '<strong>🔥</strong> hot');
+  assert.equal(md.renderInline('**(x)**y'), '**(x)**y', 'the same rule as for punctuation, which 14.1 already had');
+});
