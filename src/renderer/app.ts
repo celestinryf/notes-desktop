@@ -36,6 +36,7 @@ import { createHistoryDialog } from './history-dialog.ts';
 import { createLibraryDialog, statusSentence } from './library-dialog.ts';
 import { createGithubDialog } from './github-dialog.ts';
 import { createSpeech } from './speech.ts';
+import { createHints } from './hints.ts';
 import { createFindBar, canFindInNote } from './find-bar.ts';
 import { createPdfNote } from './pdf-note.ts';
 import { createCraftNotes } from './craft-notes.ts';
@@ -211,6 +212,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const collapsed = !!settingsNow().sidebarCollapsed;
     sidebarPeek = null;
     updateSettings({ sidebarCollapsed: !collapsed });
+    if (!collapsed) hints.hint('sidebar-hidden', TIPS.sidebar);
   }
   function bindSidebarFloat() {
     if (GUEST) return;
@@ -1990,7 +1992,18 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { renderLiveRow, startLiveHost, stopLive, openLiveDialog, submitLiveDialog } = createLiveShare({ api, flushSave, refreshCurrentMeta, setView, selectNoteNow });
 
-  const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST });
+  const hints = createHints({
+    shown: () => (GUEST || !state.settings ? null : state.settings.hintsShown),
+    remember: (ids) => updateSettings({ hintsShown: ids }),
+    show: (message) => { el.hintPop.textContent = message; el.hintPop.classList.remove('hidden'); },
+    hide: () => el.hintPop.classList.add('hidden'),
+  });
+  const TIPS = {
+    palette: 'Ctrl+P finds any note and runs any command.',
+    sidebar: 'Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ keeps it open.',
+    find: 'Alt+C matches the case, Alt+W whole words only. Enter: next match, Shift+Enter: previous.',
+  };
+  const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
 
@@ -2880,6 +2893,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
       cmd('tree-show-all', 'View', 'Show every note in this folder', 'list', '', () => showWholeLevel(state.view === 'folder' ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === 'folder' ? state.folderId : null), 'see more'),
+      cmd('tips-again', 'App', 'Show the tips again', 'circle-alert', '', () => { hints.forget(); toast('The tips will show again as you go.'); }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, 'hints help'),
       cmd('list-mode', 'View', settingsNow().listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', settingsNow().listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: settingsNow().listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
       cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), 'zen distraction free writing'),
       cmd('width', 'View', settingsNow().editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
@@ -3149,6 +3163,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.shareBtn.addEventListener('click', () => { if (el.shareMenu.classList.contains('hidden')) openShareMenu(); else closeShareMenu(); });
     el.shareMenu.addEventListener('click', (e) => { const b = closestTo(e, '[data-action]'); if (b) shareAction(b.dataset.action ?? ''); });
     el.findNextBtn.addEventListener('click', () => runFind(true));
+    el.hintPop.addEventListener('click', () => hints.dismiss());
+    const firstTip = () => { if (document.hasFocus()) setTimeout(() => hints.hint('palette', TIPS.palette), 1200); else window.addEventListener('focus', () => setTimeout(() => hints.hint('palette', TIPS.palette), 600), { once: true }); };
+    firstTip();
     el.findCaseBtn.addEventListener('click', () => toggleFindOption('matchCase'));
     el.findWordBtn.addEventListener('click', () => toggleFindOption('wholeWord'));
     el.findReplaceToggle.addEventListener('click', () => toggleReplace());

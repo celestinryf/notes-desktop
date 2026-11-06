@@ -118,6 +118,9 @@ test('tags counts exclude trashed notes and sort by count then name', () => {
 test('settings are sanitized on load and on set', () => {
   assert.deepEqual(sanitizeSettings({ hotkey: 'garbage', theme: 'neon', fontSize: 'abc', sort: 'x', window: { width: 10 } }), DEFAULT_SETTINGS);
   assert.deepEqual(sanitizeSettings('bad'), DEFAULT_SETTINGS);
+  assert.deepEqual(DEFAULT_SETTINGS.hintsShown, []);
+  assert.deepEqual(sanitizeSettings({ hintsShown: ['a', 3, 'b'] }).hintsShown, ['a', 'b']);
+  assert.deepEqual(sanitizeSettings({ hintsShown: 'a' }).hintsShown, []);
   assert.deepEqual(sanitizeSettings(['x']), DEFAULT_SETTINGS);
   assert.equal(sanitizeSettings({ fontSize: 900 }).fontSize, 28);
   assert.equal(sanitizeSettings({ fontSize: 3 }).fontSize, 12);

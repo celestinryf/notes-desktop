@@ -12,13 +12,13 @@ import { tableShown, focusBody } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
 
-type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean };
+type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean, onOpen?: () => void };
 
 export function canFindInNote() {
   return !!state.current && state.current.fileKind !== 'binary' && !lockedNow() && !el.editor.classList.contains('hidden') && !el.editorColumn.classList.contains('shows-document') && !el.editor.classList.contains('shows-image');
 }
 
-export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
+export function createFindBar({ api, flushSave, GUEST, onOpen }: FindBarDeps) {
   const opts = (): FindOptions => ({ matchCase: find.matchCase, wholeWord: find.wholeWord });
   const findKey = (q: string) => q + (find.matchCase ? '\u0001' : '') + (find.wholeWord ? '\u0002' : '');
 
@@ -48,6 +48,7 @@ export function createFindBar({ api, flushSave, GUEST }: FindBarDeps) {
     el.findInput.focus();
     el.findInput.select();
     runFind(true, true);
+    if (onOpen) onOpen();
   }
 
   function toggleReplace(force?: boolean) {

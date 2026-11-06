@@ -21,6 +21,7 @@ interface Settings {
   sort: SortKey;
   sidebarCollapsed: boolean;
   listCollapsed: boolean;
+  hintsShown: string[];
   listMode: 'tree' | 'list';
   listLayout: number;
   lastFolderId: string | null;
