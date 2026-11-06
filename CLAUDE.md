@@ -4,13 +4,12 @@ Project docs live in the user's own Notes app, in `C:\Users\celes\Documents\Note
 
 Before doing any work, read from that folder:
 
-1. `Notes App - Current Status.md`
-2. The newest `Notes App - Handoff <date>.md`
-3. `Notes App Project.md`
+1. `Notes App - Current Status.md` (it ends with the prompt for the next session)
+2. `Notes App Project.md`
 4. The note your task touches: Architecture, Features, Decisions and Findings, or Testing and Gotchas
 5. For any change a person can see (layout, styles, a button, a menu, a dialog, copy): `Notes App - Design System.md`
 
-Write handoffs, decisions, and findings back to that folder. Update `Notes App - Current Status.md` at the end of every prompt: overwrite it with where things stand, what is in progress, what is next, and the decisions waiting on the user.
+Write decisions and findings back to that folder (there are no handoff notes: the day's record goes into `Notes App - Decisions and Findings.md`). Update `Notes App - Current Status.md` at the end of every prompt: overwrite it with where things stand, what is in progress, what is next, and the decisions waiting on the user.
 
 ## UI work (required for any visible change)
 - Follow the `ui-design` skill: brief, options, a spec in numbers, build, then the screenshot loop. Audit with the `ui-audit` skill; for anything bigger than a small fix, have the `design-reviewer` agent review it.
