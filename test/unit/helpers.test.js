@@ -39,6 +39,51 @@ test('relativeTime buckets', () => {
   assert.match(H.relativeTime(Date.UTC(2024, 0, 5), now), /2024/);
 });
 
+test('relativeTime past a week prints exactly what toLocaleDateString prints, in this year and an earlier one', () => {
+  const now = new Date(2026, 9, 13, 12, 0).getTime();
+  for (const then of [new Date(2026, 8, 1, 9, 0), new Date(2026, 0, 1, 0, 0), new Date(2025, 11, 31, 23, 59), new Date(2019, 5, 15, 12, 0)]) {
+    const sameYear = then.getFullYear() === 2026;
+    const expected = then.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+    assert.equal(H.relativeTime(then.getTime(), now), expected);
+    assert.equal(H.relativeTime(then.getTime(), now), expected, 'the second call, from the kept formatter, prints the same');
+  }
+});
+
+test('relativeTime with a kept formatter is many times faster than toLocaleDateString', () => {
+  const now = new Date(2026, 9, 13, 12, 0).getTime();
+  const dates = Array.from({ length: 5000 }, (_, i) => now - (8 + i) * 86400e3);
+  const timed = (fn) => { fn(dates[0]); const started = process.hrtime.bigint(); for (const ts of dates) fn(ts); return Number(process.hrtime.bigint() - started) / 1e6; };
+  const kept = timed((ts) => H.relativeTime(ts, now));
+  const fresh = timed((ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  assert.ok(kept * 5 < fresh, 'kept ' + kept.toFixed(1) + ' ms, toLocaleDateString ' + fresh.toFixed(1) + ' ms');
+});
+
+test('relativeTime and formatWhen follow a change of time zone while the process runs', () => {
+  const before = process.env.TZ;
+  const ts = Date.UTC(2026, 0, 10, 2, 0);
+  const now = Date.UTC(2026, 9, 13, 12, 0);
+  try {
+    process.env.TZ = 'America/New_York';
+    const there = H.relativeTime(ts, now);
+    assert.equal(there, new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    const clockThere = H.formatWhen(ts, now);
+    process.env.TZ = 'Asia/Tokyo';
+    const here = H.relativeTime(ts, now);
+    assert.equal(here, new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+    assert.notEqual(here, there, 'the day moves with the zone');
+    assert.notEqual(H.formatWhen(ts, now), clockThere, 'so does the clock');
+  } finally {
+    if (before === undefined) delete process.env.TZ; else process.env.TZ = before;
+  }
+});
+
+test('relativeTime and formatWhen print nothing for a time that is not a number', () => {
+  for (const bad of [NaN, Infinity, 9e15]) {
+    assert.equal(H.relativeTime(bad, Date.UTC(2026, 9, 13)), '');
+    assert.equal(H.formatWhen(bad, Date.UTC(2026, 9, 13)), '');
+  }
+});
+
 test('parseTags normalizes, dedupes, strips #, accepts arrays and strings', () => {
   assert.deepEqual(H.parseTags('Work, #work  ideas,,  Ideas'), ['work', 'ideas']);
   assert.deepEqual(H.parseTags(['A', 'b']), ['a', 'b']);

@@ -14871,7 +14871,10 @@
     const text = plainTextFromMarkdown(listed.join("\n")).replace(/\bcode block omitted\.\s*/g, "").replace(/\s+/g, " ").trim();
     return truncate(text, max);
   }
+  var MAX_TIME = 864e13;
+  var isValidTime = (ts) => Number.isFinite(ts) && Math.abs(ts) <= MAX_TIME;
   function relativeTime(ts, now) {
+    if (!isValidTime(ts)) return "";
     now = now == null ? Date.now() : now;
     const diff = Math.max(0, now - ts);
     const s = Math.floor(diff / 1e3);
@@ -14883,9 +14886,28 @@
     const d = Math.floor(h / 24);
     if (d < 7) return d + (d === 1 ? " day ago" : " days ago");
     const date = new Date(ts);
-    const sameYear = date.getFullYear() === new Date(now).getFullYear();
-    const opts = sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" };
-    return date.toLocaleDateString(void 0, opts);
+    return formatDate(date.getFullYear() === new Date(now).getFullYear() ? "monthDay" : "fullDate", date);
+  }
+  var DATE_STYLES = {
+    monthDay: { month: "short", day: "numeric" },
+    fullDate: { year: "numeric", month: "short", day: "numeric" },
+    weekdayMonthDay: { weekday: "short", month: "short", day: "numeric" },
+    clock: { hour: "2-digit", minute: "2-digit" }
+  };
+  var dateFormatters = /* @__PURE__ */ new Map();
+  var dateFormattersOffset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
+  function formatDate(style, date) {
+    const offset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
+    if (offset !== dateFormattersOffset) {
+      dateFormatters.clear();
+      dateFormattersOffset = offset;
+    }
+    let formatter = dateFormatters.get(style);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat(void 0, DATE_STYLES[style]);
+      dateFormatters.set(style, formatter);
+    }
+    return formatter.format(date);
   }
   function parseTags(input) {
     if (Array.isArray(input)) input = input.join(",");
@@ -15073,9 +15095,10 @@
     return Math.min(lim.max, Math.max(lim.min, Math.round(v)));
   }
   function formatWhen(ts, now) {
+    if (!isValidTime(ts)) return "";
     now = now == null ? Date.now() : now;
     const d = new Date(ts), n = new Date(now);
-    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = formatDate("clock", d);
     const dayOf = (x) => x.toDateString();
     const shift = (days) => {
       const c = new Date(n);
@@ -15085,8 +15108,7 @@
     if (dayOf(d) === dayOf(n)) return "today " + time;
     if (dayOf(d) === shift(1)) return "tomorrow " + time;
     if (dayOf(d) === shift(-1)) return "yesterday " + time;
-    const sameYear = d.getFullYear() === n.getFullYear();
-    return d.toLocaleDateString([], sameYear ? { weekday: "short", month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }) + " " + time;
+    return formatDate(d.getFullYear() === n.getFullYear() ? "weekdayMonthDay" : "fullDate", d) + " " + time;
   }
   function mailtoFor(note, limit) {
     limit = limit || 1900;
@@ -28099,7 +28121,9 @@
           group: "Notes",
           title: deriveTitle(n),
           icon: n.filePath && !n.home ? "file-text" : n.locked ? "lock" : n.pinned ? "star" : "notebook-text",
-          hint: n.folderId && folders.get(n.folderId) || relativeTime(n.updatedAt),
+          get hint() {
+            return n.folderId && folders.get(n.folderId) || relativeTime(n.updatedAt);
+          },
           matches: () => !n.locked && hits.has(n.id),
           run: (opts) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody())
         }));

@@ -155,6 +155,7 @@
   });
 
   // src/shared/helpers.mts
+  var dateFormattersOffset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
   var titleOrder = new Intl.Collator(void 0, { sensitivity: "base" });
   function isViewerOnlyFile(note) {
     return !!(note && note.filePath && note.fileKind !== "text");

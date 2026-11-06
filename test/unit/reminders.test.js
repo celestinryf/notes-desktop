@@ -73,6 +73,13 @@ test('formatWhen and mailtoFor', () => {
   assert.match(H.formatWhen(new Date(2026, 9, 13, 9, 0).getTime(), now), /^yesterday /);
   assert.doesNotMatch(H.formatWhen(new Date(2026, 9, 20, 9, 0).getTime(), now), /today|tomorrow|yesterday|2026/);
   assert.match(H.formatWhen(new Date(2027, 0, 2, 9, 0).getTime(), now), /2027/);
+  const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const today = new Date(2026, 9, 14, 18, 30);
+  assert.equal(H.formatWhen(today.getTime(), now), 'today ' + clock(today));
+  const later = new Date(2026, 9, 20, 9, 5);
+  assert.equal(H.formatWhen(later.getTime(), now), later.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + clock(later));
+  const nextYear = new Date(2027, 0, 2, 21, 45);
+  assert.equal(H.formatWhen(nextYear.getTime(), now), nextYear.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + clock(nextYear));
   const m = H.mailtoFor({ title: 'Plan & go', body: 'line 1\n**bold**' });
   assert.equal(m.truncated, false);
   assert.ok(m.url.startsWith('mailto:?subject=Plan%20%26%20go&body=line%201%0A**bold**'), m.url);

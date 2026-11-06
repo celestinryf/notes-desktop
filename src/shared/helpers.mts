@@ -97,7 +97,11 @@ function snippet(note: TitleSource, max?: number) {
   return truncate(text, max);
 }
 
+const MAX_TIME = 8.64e15;
+const isValidTime = (ts: number) => Number.isFinite(ts) && Math.abs(ts) <= MAX_TIME;
+
 function relativeTime(ts: number, now?: number) {
+  if (!isValidTime(ts)) return '';
   now = now == null ? Date.now() : now;
   const diff = Math.max(0, now - ts);
   const s = Math.floor(diff / 1000);
@@ -109,9 +113,25 @@ function relativeTime(ts: number, now?: number) {
   const d = Math.floor(h / 24);
   if (d < 7) return d + (d === 1 ? ' day ago' : ' days ago');
   const date = new Date(ts);
-  const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  const opts: Intl.DateTimeFormatOptions = sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' };
-  return date.toLocaleDateString(undefined, opts);
+  return formatDate(date.getFullYear() === new Date(now).getFullYear() ? 'monthDay' : 'fullDate', date);
+}
+
+type DateStyle = 'monthDay' | 'fullDate' | 'weekdayMonthDay' | 'clock';
+const DATE_STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
+  monthDay: { month: 'short', day: 'numeric' },
+  fullDate: { year: 'numeric', month: 'short', day: 'numeric' },
+  weekdayMonthDay: { weekday: 'short', month: 'short', day: 'numeric' },
+  clock: { hour: '2-digit', minute: '2-digit' },
+};
+const dateFormatters = new Map<DateStyle, Intl.DateTimeFormat>();
+let dateFormattersOffset = new Date().getTimezoneOffset();
+
+function formatDate(style: DateStyle, date: Date) {
+  const offset = new Date().getTimezoneOffset();
+  if (offset !== dateFormattersOffset) { dateFormatters.clear(); dateFormattersOffset = offset; }
+  let formatter = dateFormatters.get(style);
+  if (!formatter) { formatter = new Intl.DateTimeFormat(undefined, DATE_STYLES[style]); dateFormatters.set(style, formatter); }
+  return formatter.format(date);
 }
 
 function parseTags(input: unknown) {
@@ -312,16 +332,16 @@ function clampPane(name: PaneName, value: number) {
 }
 
 function formatWhen(ts: number, now?: number) {
+  if (!isValidTime(ts)) return '';
   now = now == null ? Date.now() : now;
   const d = new Date(ts), n = new Date(now);
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = formatDate('clock', d);
   const dayOf = (x: Date) => x.toDateString();
   const shift = (days: number) => { const c = new Date(n); c.setDate(n.getDate() + days); return dayOf(c); };
   if (dayOf(d) === dayOf(n)) return 'today ' + time;
   if (dayOf(d) === shift(1)) return 'tomorrow ' + time;
   if (dayOf(d) === shift(-1)) return 'yesterday ' + time;
-  const sameYear = d.getFullYear() === n.getFullYear();
-  return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + time;
+  return formatDate(d.getFullYear() === n.getFullYear() ? 'weekdayMonthDay' : 'fullDate', d) + ' ' + time;
 }
 
 function mailtoFor(note: Pick<Note, 'title' | 'body'>, limit?: number) {
