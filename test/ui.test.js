@@ -1683,14 +1683,20 @@ test('hidden sidebar: no rail and nothing in the tab bar; the toggles stay in it
       listLeft: Math.round(document.querySelector('.list-pane').getBoundingClientRect().left),
     }));
     assert.deepEqual(hidden, { rail: false, inTabBar: false, listLeft: 0 });
+    const edge = await page.evaluate(() => { const strip = document.getElementById('sidebarEdge'); const app = document.getElementById('app'); return { region: getComputedStyle(strip).getPropertyValue('-webkit-app-region'), last: app.lastElementChild === strip, width: strip.getBoundingClientRect().width }; });
+    assert.deepEqual(edge, { region: 'no-drag', last: true, width: 8 }, 'the edge strip is not a drag area and comes after the bars, so the top band still reaches the hover');
     assert.equal(await togglesInSidebarHeader(), true, 'hidden: the toggles stay in the sidebar header');
     assert.equal(await page.isVisible('#toggleListBtn'), false);
 
     await page.mouse.move(2, 400);
     await waitFor('sidebar floats in', isPeeking);
     await waitFor('the toggles show in the floating sidebar', async () => (await page.isVisible('#toggleSidebarBtn')) && (await page.isVisible('#toggleListBtn')));
-    await sleep(300);
-    assert.equal(await togglesInsideSidebar(), true, 'both toggles sit inside the floating sidebar');
+    await waitFor('both toggles sit inside the floating sidebar', togglesInsideSidebar);
+    const header = await page.evaluate(() => { const top = document.querySelector('#sidebar .sidebar-top'); const r = top.getBoundingClientRect(); return { region: getComputedStyle(top).getPropertyValue('-webkit-app-region'), x: r.right - 12, y: r.top + r.height / 2 }; });
+    assert.equal(header.region, 'no-drag', 'the floating header is not a window drag area, so the pointer on it keeps the sidebar out');
+    await page.mouse.move(header.x, header.y);
+    await sleep(700);
+    assert.equal(await isPeeking(), true, 'the pointer on the header keeps the sidebar out');
     assert.equal(await page.getAttribute('#toggleSidebarBtn', 'title'), 'Keep the sidebar open (Ctrl+\\)');
 
     const listShown = () => page.evaluate(() => getComputedStyle(document.querySelector('.list-pane')).display !== 'none');
@@ -1706,7 +1712,9 @@ test('hidden sidebar: no rail and nothing in the tab bar; the toggles stay in it
     await waitFor('sidebar docked from its own toggle', async () => !(await isSidebarCollapsed()));
     await waitFor('docked state saved', () => readNotes().settings.sidebarCollapsed === false);
     assert.equal(await isPeeking(), false);
-    assert.equal(await togglesInsideSidebar(), true, 'docked again: the toggles are where they were');
+    await waitFor('docked again: the toggles are in the sidebar', togglesInsideSidebar);
+    const docked = await page.evaluate(() => getComputedStyle(document.querySelector('#sidebar .sidebar-top')).getPropertyValue('-webkit-app-region'));
+    assert.equal(docked, 'drag', 'docked, the header still drags the window');
   } finally {
     if (await isSidebarCollapsed()) {
       await page.keyboard.press('Control+\\');
@@ -1726,8 +1734,7 @@ test('narrow window: the floating sidebar keeps its toggles, and its sidebar tog
     await page.mouse.move(2, 300);
     await waitFor('sidebar floats in', isPeeking);
     await waitFor('the toggles show', () => page.isVisible('#toggleSidebarBtn'));
-    await sleep(300);
-    assert.equal(await togglesInsideSidebar(), true);
+    await waitFor('the toggles sit inside the floating sidebar', togglesInsideSidebar);
     assert.equal(await page.getAttribute('#toggleSidebarBtn', 'title'), 'Hide the sidebar (Ctrl+\\)');
     await page.click('#toggleSidebarBtn');
     await waitFor('the sidebar goes away', async () => !(await isPeeking()));

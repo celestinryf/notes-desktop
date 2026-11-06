@@ -327,7 +327,7 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 
 .band-probe { position: fixed; top: 0; left: 0; display: flex; visibility: hidden; pointer-events: none; }
 #captionProbe { width: var(--caption-w); height: var(--bar-h); }
-.sidebar-edge { display: none; position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--s2); }
+.sidebar-edge { display: none; position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--s2); -webkit-app-region: no-drag; }
 .app.sidebar-float .sidebar-edge { display: block; }
 
 .sidebar-actions { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s1) var(--s2); }
@@ -340,6 +340,7 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   visibility: hidden;
   transition: transform var(--dur-2) var(--ease), visibility 0s linear var(--dur-2);
 }
+.app.sidebar-float .sidebar-top { -webkit-app-region: no-drag; }
 .app.sidebar-float .bar-toggles .tool-btn:first-child { border-top-left-radius: calc(var(--r-md) - 1px); }
 .app.sidebar-float.sidebar-peek .app-sidebar { transform: none; visibility: visible; transition: transform var(--dur-2) var(--ease); }
 .search-trigger {
