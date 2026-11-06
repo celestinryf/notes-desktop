@@ -2107,11 +2107,16 @@ test('the folder view shows ten notes of a long folder and a "See N more" row; i
     await page.focus('.note-tree .tree-more');
     await page.keyboard.press('Enter');
     await waitFor('every note shown by keyboard', async () => (await notesShown()) === 12);
+    await waitFor('the first revealed note takes the focus', () => page.evaluate(() => { const a = document.activeElement; const n = a && a.querySelector('.row-name'); return n ? n.textContent : null; }).then((t) => t === 'Entry 2'));
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.evaluate(() => document.activeElement.querySelector('.row-name').textContent), 'Entry 1', 'the arrow keys carry on from there');
   } finally {
-    for (const id of ids) await page.evaluate((i) => window.notesApi.notes.destroy(i), id);
-    await page.evaluate((f) => window.notesApi.folders.delete(f), folderId);
-    if (!wasTree) await page.click('#listModeSeg button[data-mode="list"]');
-    await page.click('.nav-item[data-view="all"]');
+    try {
+      for (const id of ids) await page.evaluate((i) => window.notesApi.notes.destroy(i), id);
+      await page.evaluate((f) => window.notesApi.folders.delete(f), folderId);
+      if (!wasTree) await page.click('#listModeSeg button[data-mode="list"]');
+      await page.click('.nav-item[data-view="all"]');
+    } catch (err) { console.log('  [see-more] cleanup failed: ' + err.message); }
   }
 });
 

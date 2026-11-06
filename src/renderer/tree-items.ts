@@ -1,5 +1,6 @@
 export const AWAY_KEY = 'p:';
 export const TREE_NOTE_LIMIT = 10;
+export const levelKey = (folderId: string | null) => folderId || '';
 
 export interface TreeGroup { key: string; owner: string; depth: number; here: boolean; outline: boolean }
 interface Placed { key: string; depth: number; groups: readonly TreeGroup[]; setSize: number; posInSet: number }
@@ -37,13 +38,14 @@ export function chooseActive(items: readonly TreeItem[], id: string | null, acti
 function numberSiblings(items: TreeItem[]) {
   const parentOf = (item: TreeItem) => (item.groups.length ? item.groups[item.groups.length - 1].key : '');
   const sizes = new Map<string, number>();
-  for (const item of items) { const p = parentOf(item); const n = (sizes.get(p) || 0) + 1; sizes.set(p, n); item.posInSet = n; }
-  for (const item of items) item.setSize = sizes.get(parentOf(item)) || 0;
+  for (const item of items) { if (item.kind === 'more') continue; const p = parentOf(item); const n = (sizes.get(p) || 0) + 1; sizes.set(p, n); item.posInSet = n; }
+  for (const item of items) if (item.kind !== 'more') item.setSize = sizes.get(parentOf(item)) || 0;
 }
 
 export function treeItems(input: TreeInput) {
   const { outline, open, here } = input;
   const items: TreeItem[] = [];
+  const revealed: string[] = [];
   const pinnedFirst = (notes: OutlineRow[], book: boolean) => (book ? { pins: [], rest: notes } : { pins: notes.filter((n) => n.pinned), rest: notes.filter((n) => !n.pinned) });
   const noteItem = (note: OutlineRow, depth: number, groups: readonly TreeGroup[], away: boolean) => {
     items.push({ kind: 'note', key: (away ? AWAY_KEY : 'n:') + note.id, note, away, depth, groups, setSize: 0, posInSet: 0 });
@@ -57,18 +59,20 @@ export function treeItems(input: TreeInput) {
     items.push({ kind: 'folder', key, node, open: isOpen, kids, here: isHere, depth, groups, setSize: 0, posInSet: 0 });
     if (isOpen) folderContents(node, depth + 1, [...groups, { key: 'g:' + key, owner: key, depth, here: isHere, outline: false }]);
   };
-  const fillLevel = (folderId: string | null, pins: OutlineRow[], folders: readonly FolderNode[], rest: OutlineRow[], depth: number, groups: readonly TreeGroup[]) => {
+  const fillLevel = (folderId: string | null, pins: OutlineRow[], folders: readonly FolderNode[], rest: OutlineRow[], depth: number, groups: readonly TreeGroup[], capped = true) => {
     pins.forEach((n) => noteItem(n, depth, groups, n.folderId !== folderId));
     folders.forEach((c) => folderItem(c, depth, groups));
-    const levelKey = folderId || '';
-    const keepAll = input.showAll.has(levelKey) || rest.length <= TREE_NOTE_LIMIT || rest.slice(TREE_NOTE_LIMIT).some((n) => n.id === input.currentId);
+    const key = levelKey(folderId);
+    const holdsOpenNote = rest.findIndex((n) => n.id === input.currentId) >= TREE_NOTE_LIMIT;
+    if (holdsOpenNote && !input.showAll.has(key)) revealed.push(key);
+    const keepAll = !capped || holdsOpenNote || input.showAll.has(key) || rest.length <= TREE_NOTE_LIMIT;
     const shown = keepAll ? rest : rest.slice(0, TREE_NOTE_LIMIT);
     shown.forEach((n) => noteItem(n, depth, groups, false));
-    if (!keepAll) items.push({ kind: 'more', key: 'm:' + levelKey, folderId, hidden: rest.length - shown.length, depth, groups, setSize: 0, posInSet: 0 });
+    if (!keepAll) items.push({ kind: 'more', key: 'm:' + key, folderId, hidden: rest.length - shown.length, depth, groups, setSize: 0, posInSet: 0 });
   };
   const folderContents = (node: FolderNode, depth: number, groups: readonly TreeGroup[]) => {
     const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);
-    fillLevel(node.id, pins, node.children, rest, depth, groups);
+    fillLevel(node.id, pins, node.children, rest, depth, groups, !node.book);
   };
   if (input.scope) folderContents(input.scope, 0, []);
   else {
@@ -86,5 +90,5 @@ export function treeItems(input: TreeInput) {
     items.splice(active + 1, 0, ...headings);
   }
   numberSiblings(items);
-  return { items, active };
+  return { items, active, revealed };
 }

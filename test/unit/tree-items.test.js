@@ -2,8 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-let treeItems, TREE_NOTE_LIMIT;
-test.before(async () => { ({ treeItems, TREE_NOTE_LIMIT } = await import('../../src/renderer/tree-items.ts')); });
+let treeItems, TREE_NOTE_LIMIT, levelKey;
+test.before(async () => { ({ treeItems, TREE_NOTE_LIMIT, levelKey } = await import('../../src/renderer/tree-items.ts')); });
 
 const note = (id, folderId, pinned = false) => ({ id, title: id, folderId, pinned, locked: false, unlocked: false, sticky: false, fileKind: null, filePath: null, remindAt: null, live: null, createdAt: 1, updatedAt: 1, home: true });
 const folder = (id, count) => ({ id, name: id, parentId: null, depth: 0, count, total: count, children: [], vaultId: null, isVaultRoot: false, book: false });
@@ -19,7 +19,8 @@ test('an open folder shows ten notes, then one "more" row counting the rest', ()
   assert.equal(more.key, 'm:f');
   assert.equal(more.folderId, 'f');
   assert.equal(more.depth, 1, 'the row sits with the notes it stands for');
-  assert.equal(more.posInSet, 11);
+  assert.equal(more.posInSet, 0, 'the row is not counted among the notes');
+  assert.equal(items[1].setSize, 10, 'the set counts the notes shown, not the row');
 });
 
 test('ten notes or fewer need no "more" row; a folder marked show-all lists every note', () => {
@@ -28,9 +29,12 @@ test('ten notes or fewer need no "more" row; a folder marked show-all lists ever
 });
 
 test('the open note is never hidden behind the "more" row', () => {
-  const { items, active } = treeItems(input({ tree: [folder('f', 25)], open: new Set(['f']), currentId: 'n20', outline: { notes: { f: notes(25, 'f') }, pinned: [] } }));
+  const { items, active, revealed } = treeItems(input({ tree: [folder('f', 25)], open: new Set(['f']), currentId: 'n20', outline: { notes: { f: notes(25, 'f') }, pinned: [] } }));
   assert.deepEqual(kinds(items), ['folder', ...Array(25).fill('note')]);
   assert.equal(items[active].note.id, 'n20');
+  assert.deepEqual(revealed, ['f'], 'the level is reported so the app keeps it open');
+  assert.deepEqual(treeItems(input({ tree: [folder('f', 25)], open: new Set(['f']), showAll: new Set(['f']), currentId: 'n20', outline: { notes: { f: notes(25, 'f') }, pinned: [] } })).revealed, [], 'not reported again once kept');
+  assert.deepEqual(treeItems(input({ tree: [folder('f', 25)], open: new Set(['f']), currentId: 'n3', outline: { notes: { f: notes(25, 'f') }, pinned: [] } })).revealed, [], 'an open note among the first ten reveals nothing');
 });
 
 test('pinned notes come first and do not count towards the ten', () => {
@@ -45,6 +49,14 @@ test('the top level of All notes is capped the same way, with its own key', () =
   assert.equal(items[10].key, 'm:');
   assert.equal(items[10].folderId, null);
   assert.deepEqual(kinds(treeItems(input({ showAll: new Set(['']), outline: { notes: { '': notes(12, null) }, pinned: [] } })).items), Array(12).fill('note'));
+});
+
+test('a book is never capped: its pages are an ordered whole', () => {
+  const book = { ...folder('b', 12), book: true };
+  const { items } = treeItems(input({ tree: [book], open: new Set(['b']), outline: { notes: { b: notes(12, 'b') }, pinned: [] } }));
+  assert.deepEqual(kinds(items), ['folder', ...Array(12).fill('note')]);
+  assert.equal(levelKey(null), '');
+  assert.equal(levelKey('b'), 'b');
 });
 
 test('a folder viewed on its own is capped too', () => {

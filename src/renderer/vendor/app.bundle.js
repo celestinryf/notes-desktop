@@ -19625,6 +19625,7 @@
   // src/renderer/tree-items.ts
   var AWAY_KEY = "p:";
   var TREE_NOTE_LIMIT = 10;
+  var levelKey = (folderId) => folderId || "";
   function chooseActive(items, id, activeKey) {
     if (!id) return -1;
     let first = -1;
@@ -19640,16 +19641,18 @@
     const parentOf = (item) => item.groups.length ? item.groups[item.groups.length - 1].key : "";
     const sizes = /* @__PURE__ */ new Map();
     for (const item of items) {
+      if (item.kind === "more") continue;
       const p = parentOf(item);
       const n = (sizes.get(p) || 0) + 1;
       sizes.set(p, n);
       item.posInSet = n;
     }
-    for (const item of items) item.setSize = sizes.get(parentOf(item)) || 0;
+    for (const item of items) if (item.kind !== "more") item.setSize = sizes.get(parentOf(item)) || 0;
   }
   function treeItems(input) {
     const { outline, open, here } = input;
     const items = [];
+    const revealed = [];
     const pinnedFirst = (notes, book) => book ? { pins: [], rest: notes } : { pins: notes.filter((n) => n.pinned), rest: notes.filter((n) => !n.pinned) };
     const noteItem = (note, depth, groups, away) => {
       items.push({ kind: "note", key: (away ? AWAY_KEY : "n:") + note.id, note, away, depth, groups, setSize: 0, posInSet: 0 });
@@ -19663,18 +19666,20 @@
       items.push({ kind: "folder", key, node, open: isOpen, kids, here: isHere, depth, groups, setSize: 0, posInSet: 0 });
       if (isOpen) folderContents(node, depth + 1, [...groups, { key: "g:" + key, owner: key, depth, here: isHere, outline: false }]);
     };
-    const fillLevel = (folderId, pins, folders, rest, depth, groups) => {
+    const fillLevel = (folderId, pins, folders, rest, depth, groups, capped = true) => {
       pins.forEach((n) => noteItem(n, depth, groups, n.folderId !== folderId));
       folders.forEach((c) => folderItem(c, depth, groups));
-      const levelKey = folderId || "";
-      const keepAll = input.showAll.has(levelKey) || rest.length <= TREE_NOTE_LIMIT || rest.slice(TREE_NOTE_LIMIT).some((n) => n.id === input.currentId);
+      const key = levelKey(folderId);
+      const holdsOpenNote = rest.findIndex((n) => n.id === input.currentId) >= TREE_NOTE_LIMIT;
+      if (holdsOpenNote && !input.showAll.has(key)) revealed.push(key);
+      const keepAll = !capped || holdsOpenNote || input.showAll.has(key) || rest.length <= TREE_NOTE_LIMIT;
       const shown2 = keepAll ? rest : rest.slice(0, TREE_NOTE_LIMIT);
       shown2.forEach((n) => noteItem(n, depth, groups, false));
-      if (!keepAll) items.push({ kind: "more", key: "m:" + levelKey, folderId, hidden: rest.length - shown2.length, depth, groups, setSize: 0, posInSet: 0 });
+      if (!keepAll) items.push({ kind: "more", key: "m:" + key, folderId, hidden: rest.length - shown2.length, depth, groups, setSize: 0, posInSet: 0 });
     };
     const folderContents = (node, depth, groups) => {
       const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);
-      fillLevel(node.id, pins, node.children, rest, depth, groups);
+      fillLevel(node.id, pins, node.children, rest, depth, groups, !node.book);
     };
     if (input.scope) folderContents(input.scope, 0, []);
     else {
@@ -19699,7 +19704,7 @@
       items.splice(active + 1, 0, ...headings);
     }
     numberSiblings(items);
-    return { items, active };
+    return { items, active, revealed };
   }
 
   // src/renderer/note-tree.tsx
@@ -19781,7 +19786,7 @@
         );
       }
       if (item.kind === "heading") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-heading" }, item.key);
-      if (item.kind === "more") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-more" }, item.key);
+      if (item.kind === "more") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-more", "aria-setsize": void 0, "aria-posinset": void 0, "aria-label": deps.title(item) }, item.key);
       const id = item.note.id;
       const active = item.key === activeKey;
       return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
@@ -19971,6 +19976,9 @@
       revealActive() {
         const index = activeKey === null ? -1 : indexOf.get(activeKey) ?? -1;
         if (index >= 0) handle.reveal(index);
+      },
+      focusAt(index) {
+        if (index >= 0 && index < layout.items.length) focusIndex(index);
       },
       replace(id, note, title) {
         if (!layout.items.some((item) => item.kind === "note" && item.note.id === id)) return;
@@ -25787,7 +25795,7 @@
     function renderNoteTree() {
       if (!treeJustLoaded && missingTreeFolders().length) loadThenRenderTree();
       const scopeId = state.view === "folder" ? state.folderId : null;
-      const { items, active } = treeItems({
+      const { items, active, revealed } = treeItems({
         outline: state.outline || { notes: {}, pinned: [] },
         tree: state.tree,
         scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
@@ -25799,11 +25807,22 @@
         activeKey: treeActiveKey,
         headings: currentHeadings()
       });
+      for (const key of revealed) treeShowAll.add(key);
       noteTree.render(items, active);
       if (active >= 0 && state.revealInTree === state.currentId) {
         noteTree.revealActive();
         state.revealInTree = null;
       }
+    }
+    function moreRow(folderId) {
+      return el.noteTree.querySelector('.tree-row[data-key="m:' + CSS.escape(levelKey(folderId)) + '"]');
+    }
+    function showWholeLevel(folderId) {
+      const row = moreRow(folderId);
+      const at = row ? Number(row.dataset.index) : -1;
+      treeShowAll.add(levelKey(folderId));
+      renderNoteTree();
+      if (at >= 0) noteTree.focusAt(at);
     }
     function treeRowHtml(item, override) {
       if (item.kind === "note") return treeNoteInner(override || item.note, item.away);
@@ -25812,7 +25831,7 @@
       return '<span class="tree-chevron' + (item.open ? " is-open" : "") + (item.kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + '</span><span class="row-name">' + escapeHtml(item.node.name) + "</span>" + (item.node.book ? bookMark() : "") + '<span class="count">' + (item.node.count ? String(item.node.count) : "") + "</span>";
     }
     function treeRowTitle(item) {
-      return item.kind === "note" ? item.note.title : item.kind === "folder" ? item.node.name : item.kind === "heading" ? item.text : "Show the other " + item.hidden + " notes here";
+      return item.kind === "note" ? item.note.title : item.kind === "folder" ? item.node.name : item.kind === "heading" ? item.text : "Show " + item.hidden + " more " + (item.hidden === 1 ? "note" : "notes");
     }
     function activateTreeRow(item, e) {
       if (item.kind === "folder") {
@@ -25824,8 +25843,7 @@
         return;
       }
       if (item.kind === "more") {
-        treeShowAll.add(item.folderId || "");
-        renderNoteTree();
+        showWholeLevel(item.folderId);
         return;
       }
       const newTab = e.ctrlKey || e.metaKey;
@@ -27976,6 +27994,7 @@
         ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action ?? "") })),
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
+        cmd("tree-show-all", "View", "Show every note in this folder", "list", "", () => showWholeLevel(state.view === "folder" ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === "folder" ? state.folderId : null), "see more"),
         cmd("list-mode", "View", settingsNow().listMode === "tree" ? "Note list: show as a list" : "Note list: show folders with their notes", settingsNow().listMode === "tree" ? "list" : "folder-open", "", () => updateSettings({ listMode: settingsNow().listMode === "tree" ? "list" : "tree" }).then(() => refresh({ keepEditor: true })), !GUEST, "tree outline view"),
         cmd("focus", "View", "Focus: hide the sidebar and the list", "eye", "", () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), "zen distraction free writing"),
         cmd("width", "View", settingsNow().editorWidth ? "Writing column: full width" : "Writing column: readable width", "columns-2", "", () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, "measure line length narrow wide"),

@@ -23,7 +23,7 @@ import { createNoteList } from './note-list.tsx';
 import { createRowCache } from './row-cache.ts';
 import { createNoteTree } from './note-tree.tsx';
 import type { DropZone } from './note-tree.tsx';
-import { treeItems } from './tree-items.ts';
+import { treeItems, levelKey } from './tree-items.ts';
 import type { TreeItem } from './tree-items.ts';
 import { createStickyButton } from './sticky-button.ts';
 import { createBotPanel } from './bot-panel.ts';
@@ -864,7 +864,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function renderNoteTree() {
     if (!treeJustLoaded && missingTreeFolders().length) loadThenRenderTree();
     const scopeId = state.view === 'folder' ? state.folderId : null;
-    const { items, active } = treeItems({
+    const { items, active, revealed } = treeItems({
       outline: state.outline || { notes: {}, pinned: [] },
       tree: state.tree,
       scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
@@ -876,8 +876,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       activeKey: treeActiveKey,
       headings: currentHeadings(),
     });
+    for (const key of revealed) treeShowAll.add(key);
     noteTree.render(items, active);
     if (active >= 0 && state.revealInTree === state.currentId) { noteTree.revealActive(); state.revealInTree = null; }
+  }
+
+  function moreRow(folderId: string | null) {
+    return el.noteTree.querySelector<HTMLElement>('.tree-row[data-key="m:' + CSS.escape(levelKey(folderId)) + '"]');
+  }
+
+  function showWholeLevel(folderId: string | null) {
+    const row = moreRow(folderId);
+    const at = row ? Number(row.dataset.index) : -1;
+    treeShowAll.add(levelKey(folderId));
+    renderNoteTree();
+    if (at >= 0) noteTree.focusAt(at);
   }
 
   function treeRowHtml(item: TreeItem, override: RowSource | null) {
@@ -890,13 +903,13 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function treeRowTitle(item: TreeItem) {
-    return item.kind === 'note' ? item.note.title : item.kind === 'folder' ? item.node.name : item.kind === 'heading' ? item.text : 'Show the other ' + item.hidden + ' notes here';
+    return item.kind === 'note' ? item.note.title : item.kind === 'folder' ? item.node.name : item.kind === 'heading' ? item.text : 'Show ' + item.hidden + ' more ' + (item.hidden === 1 ? 'note' : 'notes');
   }
 
   function activateTreeRow(item: TreeItem, e: MouseEvent) {
     if (item.kind === 'folder') { if (item.kids) setTreeOpen(item.node.id, !item.open); return; }
     if (item.kind === 'heading') { jumpToHeading(item.index); return; }
-    if (item.kind === 'more') { treeShowAll.add(item.folderId || ''); renderNoteTree(); return; }
+    if (item.kind === 'more') { showWholeLevel(item.folderId); return; }
     const newTab = e.ctrlKey || e.metaKey;
     if (!newTab && treeActiveKey !== item.key) {
       treeActiveKey = item.key;
@@ -2866,6 +2879,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       ...[...el.shareMenu.querySelectorAll<HTMLButtonElement>('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action ?? '') })),
       cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
+      cmd('tree-show-all', 'View', 'Show every note in this folder', 'list', '', () => showWholeLevel(state.view === 'folder' ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === 'folder' ? state.folderId : null), 'see more'),
       cmd('list-mode', 'View', settingsNow().listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', settingsNow().listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: settingsNow().listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
       cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), 'zen distraction free writing'),
       cmd('width', 'View', settingsNow().editorWidth ? 'Writing column: full width' : 'Writing column: readable width', 'columns-2', '', () => updateSettings({ editorWidth: settingsNow().editorWidth ? 0 : 760 }), !!state.settings, 'measure line length narrow wide'),
