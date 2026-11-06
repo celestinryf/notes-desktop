@@ -114,6 +114,7 @@ function NoteTree<N>({ layout, activeKey, tabKey, dragKey, dropKey, dropZone, ma
       );
     }
     if (item.kind === 'heading') return <div key={item.key} {...shared} className="tree-row tree-heading" />;
+    if (item.kind === 'more') return <div key={item.key} {...shared} className="tree-row tree-more" />;
     const id = item.note.id;
     const active = item.key === activeKey;
     return (

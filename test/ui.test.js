@@ -41,6 +41,8 @@ async function waitFor(label, fn, timeout = 6000) {
 
 let app, page;
 const rendererErrors = [];
+let runningTest = '';
+const duringTest = (text) => text + (runningTest ? ' [during: ' + runningTest + ']' : '');
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
 const waitForDomWithin = (timeout, fn) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn), timeout);
 const revealRow = (match) => page.evaluate(async (m) => {
@@ -73,8 +75,8 @@ test.before(async () => {
     }),
   });
   page = await app.firstWindow();
-  page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(m.text()); });
-  page.on('pageerror', (e) => rendererErrors.push('pageerror: ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error') rendererErrors.push(duringTest(m.text())); });
+  page.on('pageerror', (e) => rendererErrors.push(duringTest('pageerror: ' + e.message)));
   await page.waitForSelector('#app');
   await page.evaluate(() => { window.confirm = () => true; });
   await app.evaluate(({ shell }) => {
@@ -88,7 +90,8 @@ test.before(async () => {
 });
 const shellCalls = () => app.evaluate(() => global.__shell);
 
-test.beforeEach(async () => {
+test.beforeEach(async (t) => {
+  runningTest = t.name;
   if (!page) return;
   await page.evaluate(() => { document.querySelectorAll('dialog[open]').forEach((d) => d.close()); }).catch(() => {});
 });
@@ -2074,6 +2077,42 @@ test('folders: create, nest, new note inside, move via select and drag, counts, 
   await page.click('.nav-item[data-view="all"]', { timeout: 8000 });
   await waitForDom(() => document.querySelectorAll('.note-row').length >= 3);
   step('persisted across reload');
+});
+
+test('the folder view shows ten notes of a long folder and a "See N more" row; it opens the rest by click or Enter and closes with the folder', async () => {
+  const folderId = (await page.evaluate(() => window.notesApi.folders.create({ name: 'Long folder' }))).id;
+  const ids = [];
+  for (let i = 1; i <= 12; i++) ids.push((await page.evaluate(([f, n]) => window.notesApi.notes.create({ title: 'Entry ' + n, body: 'Line ' + n, folderId: f }), [folderId, i])).id);
+  await page.click('.nav-item[data-view="all"]');
+  const wasTree = await page.$eval('#listModeSeg button[data-mode="tree"]', (b) => b.classList.contains('is-on'));
+  const folderRow = `.note-tree .tree-folder[data-id="${folderId}"]`;
+  const notesShown = () => page.$$eval('.note-tree .tree-note', (rows, f) => rows.filter((r) => r.closest('.tree-children') && r.textContent.startsWith('Entry')).length, folderId);
+  const moreText = async () => { const m = await page.$('.note-tree .tree-more'); return m ? (await m.textContent()).trim() : null; };
+  try {
+    if (!wasTree) await page.click('#listModeSeg button[data-mode="tree"]');
+    await page.waitForSelector(folderRow);
+    if ((await page.$eval(folderRow, (r) => r.getAttribute('aria-expanded'))) !== 'true') await page.click(folderRow);
+    await page.waitForSelector('.note-tree .tree-more');
+    assert.equal(await notesShown(), 10);
+    assert.equal(await moreText(), 'See 2 more');
+    await page.click('.note-tree .tree-more');
+    await waitFor('every note shown', async () => (await notesShown()) === 12);
+    assert.equal(await moreText(), null);
+
+    await page.click(folderRow);
+    await waitFor('folder closed', async () => (await notesShown()) === 0);
+    await page.click(folderRow);
+    await page.waitForSelector('.note-tree .tree-more');
+    assert.equal(await notesShown(), 10, 'closing the folder forgets "see more"');
+    await page.focus('.note-tree .tree-more');
+    await page.keyboard.press('Enter');
+    await waitFor('every note shown by keyboard', async () => (await notesShown()) === 12);
+  } finally {
+    for (const id of ids) await page.evaluate((i) => window.notesApi.notes.destroy(i), id);
+    await page.evaluate((f) => window.notesApi.folders.delete(f), folderId);
+    if (!wasTree) await page.click('#listModeSeg button[data-mode="list"]');
+    await page.click('.nav-item[data-view="all"]');
+  }
 });
 
 test('folders move up, down, in and out: by drag in the sidebar and the note list, by Alt+arrows, and from the folder menu', async () => {

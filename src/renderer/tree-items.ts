@@ -1,17 +1,20 @@
 export const AWAY_KEY = 'p:';
+export const TREE_NOTE_LIMIT = 10;
 
 export interface TreeGroup { key: string; owner: string; depth: number; here: boolean; outline: boolean }
 interface Placed { key: string; depth: number; groups: readonly TreeGroup[]; setSize: number; posInSet: number }
 export type FolderItem = Placed & { kind: 'folder'; node: FolderNode; open: boolean; kids: boolean; here: boolean };
 export type NoteItem = Placed & { kind: 'note'; note: OutlineRow; away: boolean };
 export type HeadingItem = Placed & { kind: 'heading'; noteId: string; index: number; text: string };
-export type TreeItem = FolderItem | NoteItem | HeadingItem;
+export type MoreItem = Placed & { kind: 'more'; folderId: string | null; hidden: number };
+export type TreeItem = FolderItem | NoteItem | HeadingItem | MoreItem;
 
 export interface TreeInput {
   outline: TreeOutline;
   tree: readonly FolderNode[];
   scope: FolderNode | null;
   open: ReadonlySet<string>;
+  showAll: ReadonlySet<string>;
   here: ReadonlySet<string>;
   revealing: boolean;
   currentId: string | null;
@@ -57,7 +60,11 @@ export function treeItems(input: TreeInput) {
   const fillLevel = (folderId: string | null, pins: OutlineRow[], folders: readonly FolderNode[], rest: OutlineRow[], depth: number, groups: readonly TreeGroup[]) => {
     pins.forEach((n) => noteItem(n, depth, groups, n.folderId !== folderId));
     folders.forEach((c) => folderItem(c, depth, groups));
-    rest.forEach((n) => noteItem(n, depth, groups, false));
+    const levelKey = folderId || '';
+    const keepAll = input.showAll.has(levelKey) || rest.length <= TREE_NOTE_LIMIT || rest.slice(TREE_NOTE_LIMIT).some((n) => n.id === input.currentId);
+    const shown = keepAll ? rest : rest.slice(0, TREE_NOTE_LIMIT);
+    shown.forEach((n) => noteItem(n, depth, groups, false));
+    if (!keepAll) items.push({ kind: 'more', key: 'm:' + levelKey, folderId, hidden: rest.length - shown.length, depth, groups, setSize: 0, posInSet: 0 });
   };
   const folderContents = (node: FolderNode, depth: number, groups: readonly TreeGroup[]) => {
     const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);

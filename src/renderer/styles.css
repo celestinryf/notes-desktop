@@ -534,6 +534,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .tree-folder .count { font-size: var(--t-xs); margin-left: var(--s2); }
 .note-tree .tree-heading { min-height: 24px; font-size: var(--t-xs); color: var(--fg-3); }
 .note-tree .tree-heading:hover { color: var(--fg); }
+.note-tree .tree-more { color: var(--accent-text); font-weight: 500; }
 .tree-outline::before { background: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
 .seg-icons { padding: 2px; }
 .segmented.seg-icons button { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; color: var(--fg-2); }

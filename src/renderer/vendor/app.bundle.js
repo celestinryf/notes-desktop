@@ -19437,7 +19437,8 @@
       estimateSize,
       getItemKey,
       measureElement: measure,
-      overscan: OVERSCAN
+      overscan: OVERSCAN,
+      useAnimationFrameWithResizeObserver: true
     });
     (0, import_react.useLayoutEffect)(() => {
       handle.reveal = (index) => list.scrollToIndex(index, { align: "auto" });
@@ -19623,6 +19624,7 @@
 
   // src/renderer/tree-items.ts
   var AWAY_KEY = "p:";
+  var TREE_NOTE_LIMIT = 10;
   function chooseActive(items, id, activeKey) {
     if (!id) return -1;
     let first = -1;
@@ -19664,7 +19666,11 @@
     const fillLevel = (folderId, pins, folders, rest, depth, groups) => {
       pins.forEach((n) => noteItem(n, depth, groups, n.folderId !== folderId));
       folders.forEach((c) => folderItem(c, depth, groups));
-      rest.forEach((n) => noteItem(n, depth, groups, false));
+      const levelKey = folderId || "";
+      const keepAll = input.showAll.has(levelKey) || rest.length <= TREE_NOTE_LIMIT || rest.slice(TREE_NOTE_LIMIT).some((n) => n.id === input.currentId);
+      const shown2 = keepAll ? rest : rest.slice(0, TREE_NOTE_LIMIT);
+      shown2.forEach((n) => noteItem(n, depth, groups, false));
+      if (!keepAll) items.push({ kind: "more", key: "m:" + levelKey, folderId, hidden: rest.length - shown2.length, depth, groups, setSize: 0, posInSet: 0 });
     };
     const folderContents = (node, depth, groups) => {
       const { pins, rest } = pinnedFirst(outline.notes[node.id] || [], node.book);
@@ -19775,6 +19781,7 @@
         );
       }
       if (item.kind === "heading") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-heading" }, item.key);
+      if (item.kind === "more") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ...shared, className: "tree-row tree-more" }, item.key);
       const id = item.note.id;
       const active = item.key === activeKey;
       return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
@@ -25035,6 +25042,7 @@
     const NARROW_W = 1e3;
     const PEEK_EDGE_PX = 24;
     let treeActiveKey = null;
+    const treeShowAll = /* @__PURE__ */ new Set();
     let sidebarPeek = null;
     let peekTimer;
     const isNarrow = () => window.innerWidth < NARROW_W;
@@ -25770,7 +25778,10 @@
     function setTreeOpen(id, on) {
       const next = new Set(settingsNow().treeExpanded || []);
       if (on) next.add(id);
-      else next.delete(id);
+      else {
+        next.delete(id);
+        treeShowAll.delete(id);
+      }
       updateSettings({ treeExpanded: Array.from(next) }).then(loadThenRenderTree);
     }
     function renderNoteTree() {
@@ -25781,6 +25792,7 @@
         tree: state.tree,
         scope: scopeId ? flattenTree(state.tree).find((f) => f.id === scopeId) || null : null,
         open: new Set(settingsNow().treeExpanded || []),
+        showAll: treeShowAll,
         here: new Set(state.current && state.current.folderId ? pathTo(state.current.folderId) : []),
         revealing: state.revealInTree === state.currentId,
         currentId: state.currentId,
@@ -25796,10 +25808,11 @@
     function treeRowHtml(item, override) {
       if (item.kind === "note") return treeNoteInner(override || item.note, item.away);
       if (item.kind === "heading") return '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name">' + escapeHtml(item.text) + "</span>";
+      if (item.kind === "more") return '<span class="tree-spacer" aria-hidden="true"></span><span class="row-name">See ' + item.hidden + " more</span>";
       return '<span class="tree-chevron' + (item.open ? " is-open" : "") + (item.kids ? "" : " is-leaf") + '" aria-hidden="true">' + I("chevron-right") + '</span><span class="row-name">' + escapeHtml(item.node.name) + "</span>" + (item.node.book ? bookMark() : "") + '<span class="count">' + (item.node.count ? String(item.node.count) : "") + "</span>";
     }
     function treeRowTitle(item) {
-      return item.kind === "note" ? item.note.title : item.kind === "folder" ? item.node.name : item.text;
+      return item.kind === "note" ? item.note.title : item.kind === "folder" ? item.node.name : item.kind === "heading" ? item.text : "Show the other " + item.hidden + " notes here";
     }
     function activateTreeRow(item, e) {
       if (item.kind === "folder") {
@@ -25808,6 +25821,11 @@
       }
       if (item.kind === "heading") {
         jumpToHeading(item.index);
+        return;
+      }
+      if (item.kind === "more") {
+        treeShowAll.add(item.folderId || "");
+        renderNoteTree();
         return;
       }
       const newTab = e.ctrlKey || e.metaKey;
