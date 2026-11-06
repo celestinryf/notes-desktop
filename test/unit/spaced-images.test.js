@@ -64,6 +64,34 @@ test('rendered HTML carries a valid, encoded src', () => {
   assert.equal(parser().render('![Cards](Jide-1 screenshots/a b.png)').trim(), '<p><img src="Jide-1%20screenshots/a%20b.png" alt="Cards"></p>');
 });
 
+test('the rule stops at the end of a link label, so reference links round it survive', () => {
+  const html = parser().render('[![](a b][r].png)\n\n[r]: /u\n');
+  assert.ok(html.includes('<a href="/u">'), html);
+  assert.ok(!html.includes('<img'), html);
+  assert.deepEqual(images('[a ![](x y.png)](u)').map((i) => i.written), ['x y.png']);
+});
+
+test('parentheses in a spaced path, bare or escaped, read as the same picture', () => {
+  assert.deepEqual(images('![](a (1) b.png)'), [{ src: 'a%20(1)%20b.png', alt: '', written: 'a (1) b.png' }]);
+  assert.deepEqual(images('![](a \\(1\\) b.png)'), [{ src: 'a%20(1)%20b.png', alt: '', written: 'a (1) b.png' }]);
+  assert.deepEqual(images('![](a b.png) and (c d.png)').map((i) => i.written), ['a b.png']);
+  assert.deepEqual(images('![](a (b.png)'), []);
+});
+
+test('an escaped alt, as the editor writes it back, still reads as a picture, with the alt the standard rule gives', () => {
+  const standard = new MarkdownIt().render('![a \\[1\\] \\*b\\*](x.png)').replace('src="x.png"', 'src="x%20y.png"');
+  assert.equal(parser().render('![a \\[1\\] \\*b\\*](x y.png)'), standard);
+  assert.match(standard, /<img src="x%20y\.png" alt="a 1 b">/);
+  assert.deepEqual(images('![a [1]](x y.png)').map((i) => [i.alt, i.written]), [['a [1]', 'x y.png']]);
+  assert.deepEqual(images('![a [1](x y.png)'), []);
+  assert.deepEqual(images('![](x [1] y.png)'), []);
+});
+
+test('a data URI with a space is not a spaced picture, and CRLF text parses the same', () => {
+  assert.deepEqual(images('![](data:image/png;base64,AA A.png)'), []);
+  assert.deepEqual(images('Shots:\r\n\r\n![](a b.png)\r\n').map((i) => i.written), ['a b.png']);
+});
+
 test('isSpacedImagePath needs a space, no edge spaces and a picture extension', () => {
   assert.equal(isSpacedImagePath('a b.png'), true);
   assert.equal(isSpacedImagePath('a b.avif'), true);
@@ -79,6 +107,8 @@ test('inlinePicturesOnly drops spaced picture links like any other, and leaves s
   assert.equal(convert.inlinePicturesOnly('A ![](my shots/one.png) B'), 'A  B');
   assert.equal(convert.inlinePicturesOnly('A ![x](one.png "t") B ![y](<my shots/two.png>) C'), 'A *[x]* B *[y]* C');
   assert.equal(convert.inlinePicturesOnly('A ![](my notes/plan.md) B'), 'A ![](my notes/plan.md) B');
+  assert.equal(convert.inlinePicturesOnly('A ![x \\[1\\]](my shots/two \\(b\\).png) B'), 'A *[x \\[1\\]]* B');
+  assert.equal(convert.inlinePicturesOnly('A ![](a b.png) and (c d.png)'), 'A  and (c d.png)');
   assert.equal(convert.inlinePicturesOnly('A ![](data:image/png;base64,AAAA) B'), 'A ![](data:image/png;base64,AAAA) B');
 });
 
