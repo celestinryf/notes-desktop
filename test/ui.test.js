@@ -1627,26 +1627,123 @@ test('settings: changes preview on the page and are written by Save changes; the
   await waitForDom(() => document.documentElement.dataset.theme === 'light');
 });
 
+const isPeeking = () => page.evaluate(() => document.getElementById('app').classList.contains('sidebar-peek'));
+const isSidebarCollapsed = () => page.evaluate(() => document.getElementById('app').classList.contains('sidebar-collapsed'));
+const togglesInSidebarHeader = () => page.evaluate(() => {
+  const header = document.querySelector('#sidebar .sidebar-top');
+  return ['toggleSidebarBtn', 'toggleListBtn'].every((id) => header.contains(document.getElementById(id)));
+});
+const togglesInsideSidebar = () => page.evaluate(() => {
+  const s = document.getElementById('sidebar').getBoundingClientRect();
+  return ['toggleSidebarBtn', 'toggleListBtn'].every((id) => {
+    const b = document.getElementById(id).getBoundingClientRect();
+    return b.width >= 24 && b.left >= s.left && b.top >= s.top && b.right <= s.right && b.bottom <= s.bottom;
+  });
+});
+
 test('hidden sidebar: the pointer within 24px of the left edge floats it in, further away sends it off', async () => {
-  const peeking = () => page.evaluate(() => document.getElementById('app').classList.contains('sidebar-peek'));
   await page.mouse.move(600, 400);
   await page.click('#toggleSidebarBtn');
-  await waitForDom(() => document.getElementById('app').classList.contains('sidebar-collapsed'));
+  await waitFor('sidebar hidden', isSidebarCollapsed);
   try {
     await page.mouse.move(600, 400);
     await sleep(500);
-    assert.equal(await peeking(), false, 'hidden while the pointer is far from the edge');
+    assert.equal(await isPeeking(), false, 'hidden while the pointer is far from the edge');
+    await page.mouse.move(30, 400);
+    await sleep(500);
+    assert.equal(await isPeeking(), false, 'still hidden 30px from the edge');
     await page.mouse.move(20, 400);
-    await waitFor('sidebar floats in from 20px', peeking);
+    await waitFor('sidebar floats in from 20px', isPeeking);
     await page.mouse.move(600, 400);
-    await waitFor('sidebar goes away', async () => !(await peeking()));
+    await waitFor('sidebar goes away', async () => !(await isPeeking()));
     await page.mouse.move(2, 400);
-    await waitFor('sidebar floats in from the edge itself', peeking);
+    await waitFor('sidebar floats in from the edge itself', isPeeking);
     await page.mouse.move(600, 400);
-    await waitFor('sidebar goes away again', async () => !(await peeking()));
+    await waitFor('sidebar goes away again', async () => !(await isPeeking()));
   } finally {
     await page.keyboard.press('Control+\\');
-    await waitForDom(() => !document.getElementById('app').classList.contains('sidebar-collapsed'));
+    await waitFor('sidebar docked', async () => !(await isSidebarCollapsed()));
+  }
+});
+
+test('hidden sidebar: no rail and nothing in the tab bar; the toggles stay in its header and work from the floating sidebar', async () => {
+  if (await page.isHidden('#editor')) await page.click('.note-row >> nth=0');
+  await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
+  assert.equal(await togglesInSidebarHeader(), true, 'docked: the toggles are in the sidebar header');
+  await page.mouse.move(600, 400);
+  await page.click('#toggleSidebarBtn');
+  await waitFor('sidebar hidden', isSidebarCollapsed);
+  await waitFor('hidden state saved', () => readNotes().settings.sidebarCollapsed === true);
+  try {
+    await page.mouse.move(600, 400);
+    await waitFor('the toggles hide with the sidebar', async () => !(await page.isVisible('#toggleSidebarBtn')));
+    const hidden = await page.evaluate(() => ({
+      rail: !!document.querySelector('#sidebarRail, .sidebar-rail'),
+      inTabBar: !!document.querySelector('.tab-bar #toggleSidebarBtn, .tab-bar #toggleListBtn, .tab-bar .bar-toggles'),
+      listLeft: Math.round(document.querySelector('.list-pane').getBoundingClientRect().left),
+    }));
+    assert.deepEqual(hidden, { rail: false, inTabBar: false, listLeft: 0 });
+    const edge = await page.evaluate(() => { const strip = document.getElementById('sidebarEdge'); const app = document.getElementById('app'); return { region: getComputedStyle(strip).getPropertyValue('-webkit-app-region'), last: app.lastElementChild === strip, width: strip.getBoundingClientRect().width }; });
+    assert.deepEqual(edge, { region: 'no-drag', last: true, width: 8 }, 'the edge strip is not a drag area and comes after the bars, so the top band still reaches the hover');
+    assert.equal(await togglesInSidebarHeader(), true, 'hidden: the toggles stay in the sidebar header');
+    assert.equal(await page.isVisible('#toggleListBtn'), false);
+
+    await page.mouse.move(2, 400);
+    await waitFor('sidebar floats in', isPeeking);
+    await waitFor('the toggles show in the floating sidebar', async () => (await page.isVisible('#toggleSidebarBtn')) && (await page.isVisible('#toggleListBtn')));
+    await waitFor('both toggles sit inside the floating sidebar', togglesInsideSidebar);
+    const header = await page.evaluate(() => { const top = document.querySelector('#sidebar .sidebar-top'); const r = top.getBoundingClientRect(); return { region: getComputedStyle(top).getPropertyValue('-webkit-app-region'), x: r.right - 12, y: r.top + r.height / 2 }; });
+    assert.equal(header.region, 'no-drag', 'the floating header is not a window drag area, so the pointer on it keeps the sidebar out');
+    await page.mouse.move(header.x, header.y);
+    await sleep(700);
+    assert.equal(await isPeeking(), true, 'the pointer on the header keeps the sidebar out');
+    assert.equal(await page.getAttribute('#toggleSidebarBtn', 'title'), 'Keep the sidebar open (Ctrl+\\)');
+
+    const listShown = () => page.evaluate(() => getComputedStyle(document.querySelector('.list-pane')).display !== 'none');
+    await page.click('#toggleListBtn');
+    await waitFor('list hidden from the floating sidebar', async () => !(await listShown()));
+    assert.equal(await isPeeking(), true, 'the sidebar stays out after the list toggle');
+    await page.click('#toggleListBtn');
+    await waitFor('list shown again', listShown);
+    await waitFor('list state saved', () => readNotes().settings.listCollapsed === false);
+    assert.equal(await isPeeking(), true);
+
+    await page.click('#toggleSidebarBtn');
+    await waitFor('sidebar docked from its own toggle', async () => !(await isSidebarCollapsed()));
+    await waitFor('docked state saved', () => readNotes().settings.sidebarCollapsed === false);
+    assert.equal(await isPeeking(), false);
+    await waitFor('docked again: the toggles are in the sidebar', togglesInsideSidebar);
+    const docked = await page.evaluate(() => getComputedStyle(document.querySelector('#sidebar .sidebar-top')).getPropertyValue('-webkit-app-region'));
+    assert.equal(docked, 'drag', 'docked, the header still drags the window');
+  } finally {
+    if (await isSidebarCollapsed()) {
+      await page.keyboard.press('Control+\\');
+      await waitFor('sidebar docked', async () => !(await isSidebarCollapsed()));
+    }
+  }
+});
+
+test('narrow window: the floating sidebar keeps its toggles, and its sidebar toggle sends it away', async () => {
+  await page.mouse.move(600, 300);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 640));
+  try {
+    await waitFor('sidebar floats below 1000px', isSidebarCollapsed);
+    assert.equal(readNotes().settings.sidebarCollapsed, false, 'a narrow window leaves the saved choice alone');
+    await waitFor('the toggles hide with the sidebar', async () => !(await page.isVisible('#toggleSidebarBtn')));
+    assert.equal(await isPeeking(), false);
+    await page.mouse.move(2, 300);
+    await waitFor('sidebar floats in', isPeeking);
+    await waitFor('the toggles show', () => page.isVisible('#toggleSidebarBtn'));
+    await waitFor('the toggles sit inside the floating sidebar', togglesInsideSidebar);
+    assert.equal(await page.getAttribute('#toggleSidebarBtn', 'title'), 'Hide the sidebar (Ctrl+\\)');
+    await page.click('#toggleSidebarBtn');
+    await waitFor('the sidebar goes away', async () => !(await isPeeking()));
+    assert.equal(await isSidebarCollapsed(), true, 'still floating: the window is narrow');
+    assert.equal(readNotes().settings.sidebarCollapsed, false);
+  } finally {
+    await page.mouse.move(600, 300);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 720));
+    await waitFor('sidebar docked when wide again', async () => !(await isSidebarCollapsed()));
   }
 });
 

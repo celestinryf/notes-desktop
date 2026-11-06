@@ -154,9 +154,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react/cjs/react.production.js
+  // node_modules/react/cjs/react.production.js
   var require_react_production = __commonJS({
-    "../notes-app/node_modules/react/cjs/react.production.js"(exports) {
+    "node_modules/react/cjs/react.production.js"(exports) {
       "use strict";
       var REACT_ELEMENT_TYPE = /* @__PURE__ */ Symbol.for("react.transitional.element");
       var REACT_PORTAL_TYPE = /* @__PURE__ */ Symbol.for("react.portal");
@@ -606,9 +606,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react/index.js
+  // node_modules/react/index.js
   var require_react = __commonJS({
-    "../notes-app/node_modules/react/index.js"(exports, module) {
+    "node_modules/react/index.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_react_production();
@@ -618,9 +618,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react-dom/cjs/react-dom.production.js
+  // node_modules/react-dom/cjs/react-dom.production.js
   var require_react_dom_production = __commonJS({
-    "../notes-app/node_modules/react-dom/cjs/react-dom.production.js"(exports) {
+    "node_modules/react-dom/cjs/react-dom.production.js"(exports) {
       "use strict";
       var React2 = require_react();
       function formatProdErrorMessage(code2) {
@@ -775,9 +775,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react-dom/index.js
+  // node_modules/react-dom/index.js
   var require_react_dom = __commonJS({
-    "../notes-app/node_modules/react-dom/index.js"(exports, module) {
+    "node_modules/react-dom/index.js"(exports, module) {
       "use strict";
       function checkDCE() {
         if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ === "undefined" || typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE !== "function") {
@@ -801,9 +801,9 @@
     }
   });
 
-  // ../notes-app/node_modules/scheduler/cjs/scheduler.production.js
+  // node_modules/scheduler/cjs/scheduler.production.js
   var require_scheduler_production = __commonJS({
-    "../notes-app/node_modules/scheduler/cjs/scheduler.production.js"(exports) {
+    "node_modules/scheduler/cjs/scheduler.production.js"(exports) {
       "use strict";
       function push(heap, node) {
         var index = heap.length;
@@ -1074,9 +1074,9 @@
     }
   });
 
-  // ../notes-app/node_modules/scheduler/index.js
+  // node_modules/scheduler/index.js
   var require_scheduler = __commonJS({
-    "../notes-app/node_modules/scheduler/index.js"(exports, module) {
+    "node_modules/scheduler/index.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_scheduler_production();
@@ -1086,9 +1086,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react-dom/cjs/react-dom-client.production.js
+  // node_modules/react-dom/cjs/react-dom-client.production.js
   var require_react_dom_client_production = __commonJS({
-    "../notes-app/node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
+    "node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
       "use strict";
       var Scheduler = require_scheduler();
       var React2 = require_react();
@@ -14630,9 +14630,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react-dom/client.js
+  // node_modules/react-dom/client.js
   var require_client = __commonJS({
-    "../notes-app/node_modules/react-dom/client.js"(exports, module) {
+    "node_modules/react-dom/client.js"(exports, module) {
       "use strict";
       function checkDCE() {
         if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ === "undefined" || typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE !== "function") {
@@ -14656,9 +14656,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react/cjs/react-jsx-runtime.production.js
+  // node_modules/react/cjs/react-jsx-runtime.production.js
   var require_react_jsx_runtime_production = __commonJS({
-    "../notes-app/node_modules/react/cjs/react-jsx-runtime.production.js"(exports) {
+    "node_modules/react/cjs/react-jsx-runtime.production.js"(exports) {
       "use strict";
       var REACT_ELEMENT_TYPE = /* @__PURE__ */ Symbol.for("react.transitional.element");
       var REACT_FRAGMENT_TYPE = /* @__PURE__ */ Symbol.for("react.fragment");
@@ -14686,9 +14686,9 @@
     }
   });
 
-  // ../notes-app/node_modules/react/jsx-runtime.js
+  // node_modules/react/jsx-runtime.js
   var require_jsx_runtime = __commonJS({
-    "../notes-app/node_modules/react/jsx-runtime.js"(exports, module) {
+    "node_modules/react/jsx-runtime.js"(exports, module) {
       "use strict";
       if (true) {
         module.exports = require_react_jsx_runtime_production();
@@ -16269,11 +16269,8 @@
     inlineMenu: pageElement("#inlineMenu", HTMLDivElement),
     wordcraftFrame: pageElement("#wordcraftFrame", HTMLIFrameElement),
     gridcraftFrame: pageElement("#gridcraftFrame", HTMLIFrameElement),
-    sidebarTop: pageElement("#sidebarTop", HTMLDivElement),
-    sidebarRail: pageElement("#sidebarRail", HTMLElement),
+    sidebarEdge: pageElement("#sidebarEdge", HTMLDivElement),
     captionProbe: pageElement("#captionProbe", HTMLSpanElement),
-    cellProbe: pageElement("#cellProbe", HTMLSpanElement),
-    barToggles: pageElement("#barToggles", HTMLDivElement),
     versionsBtn: pageElement("#versionsBtn", HTMLButtonElement),
     moreFolded: pageElement("#moreFolded", HTMLDivElement),
     moreSourceBtn: pageElement("#moreSourceBtn", HTMLButtonElement),
@@ -16510,7 +16507,6 @@
     const r = el.captionProbe.getBoundingClientRect();
     return { w: r.width, h: r.height };
   }
-  var cellWidth = () => el.cellProbe.getBoundingClientRect().width;
   function watchBand(onCaption) {
     const observer = new ResizeObserver(() => {
       fitBand();
@@ -17338,11 +17334,11 @@
   // src/renderer/virtual-rows.tsx
   var import_react = __toESM(require_react());
 
-  // ../notes-app/node_modules/@tanstack/react-virtual/dist/esm/index.js
+  // node_modules/@tanstack/react-virtual/dist/esm/index.js
   var React = __toESM(require_react(), 1);
   var import_react_dom = __toESM(require_react_dom(), 1);
 
-  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js
+  // node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js
   function getMeasurementKey(item) {
     return typeof item === "object" ? item.key : item;
   }
@@ -17377,7 +17373,7 @@
     });
   }
 
-  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/utils.js
+  // node_modules/@tanstack/virtual-core/dist/esm/utils.js
   function memo(getDeps, fn, opts) {
     let deps = opts.initialDeps ?? [];
     let result;
@@ -17456,7 +17452,7 @@
     );
   };
 
-  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/scroll-classifier.js
+  // node_modules/@tanstack/virtual-core/dist/esm/scroll-classifier.js
   function classifyScrollEvent({
     offset,
     isScrolling,
@@ -17535,7 +17531,7 @@
     return Math.abs(last.offset - from.offset) / (last.t - from.t) >= 0.05;
   }
 
-  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/ios-gesture.js
+  // node_modules/@tanstack/virtual-core/dist/esm/ios-gesture.js
   var _isIOSResult;
   var isIOSWebKit = () => {
     if (_isIOSResult !== void 0) return _isIOSResult;
@@ -17655,7 +17651,7 @@
     }
   };
 
-  // ../notes-app/node_modules/@tanstack/virtual-core/dist/esm/index.js
+  // node_modules/@tanstack/virtual-core/dist/esm/index.js
   var getRect = (element) => {
     const { clientWidth, clientHeight } = element;
     return { width: clientWidth, height: clientHeight };
@@ -19244,7 +19240,7 @@
     return { startIndex, endIndex };
   }
 
-  // ../notes-app/node_modules/@tanstack/react-virtual/dist/esm/index.js
+  // node_modules/@tanstack/react-virtual/dist/esm/index.js
   var useIsomorphicLayoutEffect = typeof document !== "undefined" ? React.useLayoutEffect : React.useEffect;
   function useVirtualizerBase({
     useFlushSync = true,
@@ -24956,6 +24952,7 @@
       el.editorColumn.style.setProperty("--editor-col-width", (settings.editorWidth || 760) + "px");
     }
     const NARROW_W = 1e3;
+    const PEEK_EDGE_PX = 24;
     let treeActiveKey = null;
     let sidebarPeek = null;
     let peekTimer;
@@ -24974,9 +24971,12 @@
       el.app.classList.toggle("sidebar-float", layout === "float");
       el.app.classList.toggle("sidebar-peek", layout === "float" && !!sidebarPeek);
       el.toggleSidebarBtn.classList.toggle("is-on", layout === "docked");
-      el.toggleSidebarBtn.title = layout === "docked" ? "Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back." : "Show the sidebar (Ctrl+\\)";
-      const home = layout === "docked" ? el.sidebarTop : el.sidebarRail;
-      if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
+      el.toggleSidebarBtn.title = sidebarToggleTitle(layout);
+    }
+    function sidebarToggleTitle(layout) {
+      if (layout === "docked") return "Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back.";
+      if (isNarrow()) return "Hide the sidebar (Ctrl+\\)";
+      return "Keep the sidebar open (Ctrl+\\)";
     }
     function peekSidebar(how) {
       if (GUEST || sidebarLayout() !== "float") return;
@@ -25039,9 +25039,8 @@
         }, 350);
       };
       document.addEventListener("mousemove", (e) => {
-        const target = e.target instanceof Element ? e.target : null;
-        const overSidebar = !!target && el.sidebar.contains(target);
-        const near = !!target && el.sidebarRail.contains(target) && !target.closest("button");
+        const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
+        const near = e.clientX <= PEEK_EDGE_PX;
         if (near && !sidebarPeek) {
           clearTimeout(peekTimer);
           peekTimer = setTimeout(() => peekSidebar("hover"), 90);
@@ -25052,7 +25051,7 @@
         if (sidebarPeek === "hover") leaveSoon();
         else if (!sidebarPeek) clearTimeout(peekTimer);
       });
-      el.sidebarRail.addEventListener("dragenter", () => peekSidebar("hover"));
+      el.sidebarEdge.addEventListener("dragenter", () => peekSidebar("hover"));
       el.sidebar.addEventListener("mouseenter", () => {
         if (sidebarPeek === "hover") clearTimeout(peekTimer);
       });
@@ -25061,7 +25060,7 @@
       });
       document.addEventListener("pointerdown", (e) => {
         const target = e.target instanceof Node ? e.target : null;
-        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
+        if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.folderMenu.contains(target)) return;
         unpeekSidebar();
       }, true);
     }
@@ -25072,8 +25071,7 @@
       sidebar = clampPane("sidebarWidth", sidebar);
       list = clampPane("listWidth", list);
       const sidebarShown = sidebarHidden() ? 0 : sidebar;
-      const rail = sidebarHidden() ? cellWidth() : 0;
-      const over2 = sidebarShown + rail + list - paneBudget();
+      const over2 = sidebarShown + list - paneBudget();
       if (over2 > 0) {
         const listGive = Math.min(over2, list - PANE_LIMITS.listWidth.min);
         list -= listGive;

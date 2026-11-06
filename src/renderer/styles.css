@@ -155,10 +155,10 @@ kbd + kbd { margin-left: 2px; }
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
 }
-.app.sidebar-collapsed { grid-template-columns: var(--cell-w) var(--list-w) minmax(0, 1fr); }
+.app.sidebar-collapsed { grid-template-columns: 0 var(--list-w) minmax(0, 1fr); }
 .app.sidebar-collapsed .app-sidebar { display: none; }
 .app.list-collapsed { grid-template-columns: var(--sidebar-w) 0 minmax(0, 1fr); }
-.app.sidebar-collapsed.list-collapsed { grid-template-columns: var(--cell-w) 0 minmax(0, 1fr); }
+.app.sidebar-collapsed.list-collapsed { grid-template-columns: 0 0 minmax(0, 1fr); }
 .app.list-collapsed .list-pane { display: none; }
 .app-sidebar, .list-pane { position: relative; }
 .app > * { min-height: 0; }
@@ -324,27 +324,24 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
   min-width: 0;
 }
 .sidebar-top { display: flex; align-items: stretch; height: var(--bar-h); margin: 0 calc(-1 * var(--s2)); flex: none; }
-.app.sidebar-float .sidebar-top { display: none; }
-.app.sidebar-float .app-sidebar { padding-top: var(--s2); }
 
 .band-probe { position: fixed; top: 0; left: 0; display: flex; visibility: hidden; pointer-events: none; }
 #captionProbe { width: var(--caption-w); height: var(--bar-h); }
-#cellProbe { width: var(--cell-w); }
-.sidebar-rail { display: none; grid-column: 1; grid-row: 1; flex-direction: column; background: var(--chrome); border-right: 1px solid var(--line); }
-.app.sidebar-collapsed .sidebar-rail { display: flex; position: relative; z-index: 26; }
-.sidebar-rail .bar-toggles { flex-direction: column; align-items: stretch; }
-.sidebar-rail .bar-toggles .tool-btn { height: var(--bar-h); }
+.sidebar-edge { display: none; position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--s2); -webkit-app-region: no-drag; }
+.app.sidebar-float .sidebar-edge { display: block; }
 
 .sidebar-actions { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s1) var(--s2); }
 .sidebar-actions .btn-primary { justify-content: flex-start; padding: 0 var(--s3); }
 .app.sidebar-float .app-sidebar {
   display: flex; position: fixed; z-index: 25;
-  top: var(--s2); bottom: var(--s2); left: calc(var(--cell-w) + var(--s2));
+  top: var(--s2); bottom: var(--s2); left: var(--s2);
   width: var(--sidebar-w);
   transform: translateX(calc(-100% - var(--s5)));
   visibility: hidden;
   transition: transform var(--dur-2) var(--ease), visibility 0s linear var(--dur-2);
 }
+.app.sidebar-float .sidebar-top { -webkit-app-region: no-drag; }
+.app.sidebar-float .bar-toggles .tool-btn:first-child { border-top-left-radius: calc(var(--r-md) - 1px); }
 .app.sidebar-float.sidebar-peek .app-sidebar { transform: none; visibility: visible; transition: transform var(--dur-2) var(--ease); }
 .search-trigger {
   display: flex; align-items: center; gap: var(--s2);
@@ -586,7 +583,7 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .editor-pane:not(.is-split) .tab-bar, body.pane-guest .tab-bar { padding-right: var(--caption-w); }
 
 body.pane-guest .app { grid-template-columns: 0 0 minmax(0, 1fr) !important; }
-body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-rail, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
+body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sidebar-edge, body.pane-guest .bar-toggles, body.pane-guest #botBtn, body.pane-guest #splitViewBtn { display: none !important; }
 
 .editor-empty { position: relative; flex: 1; display: grid; place-items: center; padding: var(--s5); }
 .editor-empty-inner { display: flex; flex-direction: column; align-items: center; gap: var(--s3); max-width: 360px; text-align: center; }
@@ -992,7 +989,7 @@ button.book-name:hover { background: var(--hover); }
 @media print {
   .body-input.uses-code:not(.hidden) { display: block !important; }
   .code-host { display: none !important; }
-  .app-sidebar, .list-pane, .sidebar-rail, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
+  .app-sidebar, .list-pane, .sidebar-edge, .note-path, .status-bar, .find-bar, .bot-panel, .file-row, .toast, .resizer, .tab-bar, .split-divider, .pane-peer, #tagsInput, #titleInput:placeholder-shown { display: none !important; }
   .app { display: block !important; }
   html, body, .app, .editor-pane, .pane-main, .editor, .editor-scroll, .editor-column { height: auto !important; overflow: visible !important; background: #fff !important; color: #000 !important; box-shadow: none !important; border: none !important; }
   .editor-column { max-width: none !important; width: auto !important; margin: 0 !important; padding: 0 !important; }

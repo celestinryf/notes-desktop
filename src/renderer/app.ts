@@ -11,7 +11,7 @@ import { toast } from './toast.ts';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.ts';
 import { placePopover } from './popover.ts';
 import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.ts';
-import { fitBand, captionSize, cellWidth, watchBand, applyPeerCaption, isShown } from './band.ts';
+import { fitBand, captionSize, watchBand, applyPeerCaption, isShown } from './band.ts';
 import { createBooks } from './books.ts';
 import { createRelated } from './related.ts';
 import { createReminders } from './reminders.ts';
@@ -150,6 +150,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   const NARROW_W = 1000;
+  const PEEK_EDGE_PX = 24;
   let treeActiveKey: string | null = null;
   let sidebarPeek: 'hover' | 'sticky' | null = null;
   let peekTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,9 +167,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.app.classList.toggle('sidebar-float', layout === 'float');
     el.app.classList.toggle('sidebar-peek', layout === 'float' && !!sidebarPeek);
     el.toggleSidebarBtn.classList.toggle('is-on', layout === 'docked');
-    el.toggleSidebarBtn.title = layout === 'docked' ? 'Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back.' : 'Show the sidebar (Ctrl+\\)';
-    const home = layout === 'docked' ? el.sidebarTop : el.sidebarRail;
-    if (el.barToggles.parentElement !== home) home.prepend(el.barToggles);
+    el.toggleSidebarBtn.title = sidebarToggleTitle(layout);
+  }
+  function sidebarToggleTitle(layout: 'docked' | 'float') {
+    if (layout === 'docked') return 'Hide the sidebar (Ctrl+\\). Point at the window\u2019s left edge to bring it back.';
+    if (isNarrow()) return 'Hide the sidebar (Ctrl+\\)';
+    return 'Keep the sidebar open (Ctrl+\\)';
   }
   function peekSidebar(how: 'hover' | 'sticky') {
     if (GUEST || sidebarLayout() !== 'float') return;
@@ -220,9 +224,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       }, 350);
     };
     document.addEventListener('mousemove', (e) => {
-      const target = e.target instanceof Element ? e.target : null;
-      const overSidebar = !!target && el.sidebar.contains(target);
-      const near = !!target && el.sidebarRail.contains(target) && !target.closest('button');
+      const overSidebar = el.sidebar.contains(e.target instanceof Node ? e.target : null);
+      const near = e.clientX <= PEEK_EDGE_PX;
       if (near && !sidebarPeek) { clearTimeout(peekTimer); peekTimer = setTimeout(() => peekSidebar('hover'), 90); }
       if (near === nearEdge) return;
       nearEdge = near;
@@ -230,12 +233,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (sidebarPeek === 'hover') leaveSoon();
       else if (!sidebarPeek) clearTimeout(peekTimer);
     });
-    el.sidebarRail.addEventListener('dragenter', () => peekSidebar('hover'));
+    el.sidebarEdge.addEventListener('dragenter', () => peekSidebar('hover'));
     el.sidebar.addEventListener('mouseenter', () => { if (sidebarPeek === 'hover') clearTimeout(peekTimer); });
     el.sidebar.addEventListener('mouseleave', () => { if (sidebarPeek === 'hover') leaveSoon(); });
     document.addEventListener('pointerdown', (e) => {
       const target = e.target instanceof Node ? e.target : null;
-      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarRail.contains(target) || el.folderMenu.contains(target)) return;
+      if (!sidebarPeek || el.sidebar.contains(target) || el.sidebarEdge.contains(target) || el.folderMenu.contains(target)) return;
       unpeekSidebar();
     }, true);
   }
@@ -248,8 +251,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     sidebar = H.clampPane('sidebarWidth', sidebar);
     list = H.clampPane('listWidth', list);
     const sidebarShown = sidebarHidden() ? 0 : sidebar;
-    const rail = sidebarHidden() ? cellWidth() : 0;
-    const over = sidebarShown + rail + list - paneBudget();
+    const over = sidebarShown + list - paneBudget();
     if (over > 0) {
       const listGive = Math.min(over, list - H.PANE_LIMITS.listWidth.min);
       list -= listGive;
