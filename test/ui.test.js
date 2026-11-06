@@ -1212,6 +1212,31 @@ test('the flat list shows cards: title, a two-line snippet, the time and tags; t
   }
 });
 
+test('the palette shows a note with its folder, or with its age when it has none', async () => {
+  const shown = await typeNote('Palette hint shown', 'x');
+  await typeNote('Palette hint from here', 'y');
+  await page.keyboard.press('Control+p');
+  await page.waitForSelector('#palette[open]');
+  await page.keyboard.type('Palette hint');
+  const hintOf = (title) => page.evaluate((t) => {
+    const li = [...document.querySelectorAll('#paletteList .palette-item')].find((x) => x.querySelector('.palette-title').textContent === t);
+    return li ? (li.querySelector('.palette-hint') || { textContent: '' }).textContent : null;
+  }, title);
+  await waitFor('the note listed in the palette', async () => (await hintOf('Palette hint shown')) !== null);
+  const folder = shown.folderId ? readNotes().folders.find((f) => f.id === shown.folderId) : null;
+  assert.equal(await hintOf('Palette hint shown'), folder ? folder.name : 'just now');
+  assert.equal(await hintOf('Palette hint from here'), null, 'the open note is not offered');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !document.getElementById('palette').open);
+  for (const title of ['Palette hint from here', 'Palette hint shown']) {
+    await clickRow(title);
+    await waitForDom((t) => document.getElementById('titleInput').value === t, title);
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor(title + ' trashed', () => findNote(title).trashedAt);
+    await page.evaluate((id) => window.notesApi.notes.destroy(id), findNote(title).id);
+  }
+});
+
 test('the More menu copies the file name or the path of the open note, from the menu and from the palette', async () => {
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');

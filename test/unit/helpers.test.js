@@ -39,6 +39,26 @@ test('relativeTime buckets', () => {
   assert.match(H.relativeTime(Date.UTC(2024, 0, 5), now), /2024/);
 });
 
+test('relativeTime past a week prints exactly what toLocaleDateString prints, in this year and an earlier one', () => {
+  const now = new Date(2026, 9, 13, 12, 0).getTime();
+  for (const then of [new Date(2026, 8, 1, 9, 0), new Date(2026, 0, 1, 0, 0), new Date(2025, 11, 31, 23, 59), new Date(2019, 5, 15, 12, 0)]) {
+    const sameYear = then.getFullYear() === 2026;
+    const expected = then.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+    assert.equal(H.relativeTime(then.getTime(), now), expected);
+    assert.equal(H.relativeTime(then.getTime(), now), expected, 'the second call, from the kept formatter, prints the same');
+  }
+});
+
+test('relativeTime stays within a few milliseconds per thousand dates', () => {
+  const now = new Date(2026, 9, 13, 12, 0).getTime();
+  const dates = Array.from({ length: 20000 }, (_, i) => now - (8 + i) * 86400e3);
+  H.relativeTime(dates[0], now);
+  const started = process.hrtime.bigint();
+  for (const ts of dates) H.relativeTime(ts, now);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(ms < 400, '20,000 dates took ' + ms.toFixed(0) + ' ms');
+});
+
 test('parseTags normalizes, dedupes, strips #, accepts arrays and strings', () => {
   assert.deepEqual(H.parseTags('Work, #work  ideas,,  Ideas'), ['work', 'ideas']);
   assert.deepEqual(H.parseTags(['A', 'b']), ['a', 'b']);

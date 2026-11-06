@@ -2938,7 +2938,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       const folders = new Map(flattenTree(state.tree).map((f) => [f.id, f.name]));
       notes = all.filter((n) => n.id !== state.currentId).map((n) => ({
         id: 'note-' + n.id, group: 'Notes', title: H.deriveTitle(n), icon: n.filePath && !n.home ? 'file-text' : n.locked ? 'lock' : n.pinned ? 'star' : 'notebook-text',
-        hint: (n.folderId && folders.get(n.folderId)) || H.relativeTime(n.updatedAt),
+        get hint() { return (n.folderId && folders.get(n.folderId)) || H.relativeTime(n.updatedAt); },
         matches: () => !n.locked && hits.has(n.id),
         run: (opts: { newTab?: boolean }) => (opts.newTab ? openNote(n.id, { newTab: true }) : scopeListToNote(n).then(() => openNote(n.id))).then(() => focusBody()),
       }));
