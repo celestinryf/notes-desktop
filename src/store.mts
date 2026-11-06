@@ -105,12 +105,16 @@ function sanitizeFolder(raw: unknown, now: number): Folder | null {
   return folderFrom(raw, now);
 }
 
+const folderOrder = (f: Folder) => (f.order === null ? Number.MAX_SAFE_INTEGER : f.order);
+const compareFolders = (a: Folder, b: Folder) => folderOrder(a) - folderOrder(b) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt;
+
 function folderFrom(raw: Record<string, unknown>, now: number): Folder {
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
     name: cleanFolderName(raw.name),
     parentId: typeof raw.parentId === 'string' && raw.parentId ? raw.parentId : null,
     createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : now,
+    order: isFiniteNumber(raw.order) ? raw.order : null,
     vaultId: typeof raw.vaultId === 'string' && raw.vaultId ? raw.vaultId : null,
     dirPath: typeof raw.dirPath === 'string' && raw.dirPath ? raw.dirPath : null,
     book: !!raw.book,
@@ -1694,7 +1698,7 @@ class Store {
     const folderByKey = this._vaultFoldersByKey(id);
     let root = home ? null : this.vaultRootFolder(id);
     if (!home && !root) {
-      root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
+      root = { id: crypto.randomUUID(), name: vault.name, parentId: null, createdAt: now, order: null, vaultId: id, dirPath: vault.path, book: false, pageOrder: [] };
       this.folders.push(root);
       change.folders = true;
     }
@@ -1710,11 +1714,12 @@ class Store {
       let sub = folderByKey.get(d.key);
       if (!sub) {
         if (this.revision !== readAtRevision && !fs.existsSync(d.full)) continue;
-        sub = { id: crypto.randomUUID(), name: d.name, parentId, createdAt: now, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
+        sub = { id: crypto.randomUUID(), name: d.name, parentId, createdAt: now, order: null, vaultId: id, dirPath: d.full, book: false, pageOrder: [] };
         this.folders.push(sub);
         folderByKey.set(d.key, sub);
         change.folders = true;
       } else if (sub.parentId !== parentId || sub.name !== d.name) {
+        if (sub.parentId !== parentId) sub.order = null;
         sub.parentId = parentId;
         sub.name = d.name;
         change.folders = true;
@@ -2263,7 +2268,7 @@ class Store {
     }
     const build = (pid: string | null, depth: number): FolderNode[] => (byParent.get(pid) || [])
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.createdAt - b.createdAt)
+      .sort(compareFolders)
       .map((f) => {
         const children = build(f.id, depth + 1);
         const count = direct.get(f.id) || 0;
@@ -2331,7 +2336,7 @@ class Store {
     return moved;
   }
 
-  moveFolder(id: string, parentId: string | null) {
+  _relocateFolder(id: string, parentId: string | null) {
     const f = this.getFolder(id);
     if (!f) return { error: 'Folder not found.' };
     parentId = parentId || null;
@@ -2340,7 +2345,7 @@ class Store {
       if (!this.getFolder(parentId)) return { error: 'Target folder not found.' };
       if (this.descendantIds(id).has(parentId)) return { error: 'A folder cannot be moved into one of its own subfolders.' };
     }
-    if ((f.parentId || null) === parentId) return { folder: f };
+    if ((f.parentId || null) === parentId) return { folder: f, moved: [], apply: () => {} };
     let moved: Note[] = [];
     if (f.vaultId) {
       const target = parentId ? this.getFolder(parentId) : null;
@@ -2356,8 +2361,34 @@ class Store {
     } else if (parentId && this.getFolder(parentId)?.vaultId) {
       return { error: 'Plain folders cannot move into a vault. Create the folder inside the vault instead.' };
     }
-    this._change({ notes: moved, folders: true }, () => { f.parentId = parentId; });
-    return { folder: f };
+    return { folder: f, moved, apply: () => { f.parentId = parentId; f.order = null; } };
+  }
+
+  moveFolder(id: string, parentId: string | null) {
+    const r = this._relocateFolder(id, parentId);
+    if ('error' in r) return r;
+    this._change({ notes: r.moved, folders: true }, r.apply);
+    return { folder: r.folder };
+  }
+
+  siblingFolders(parentId: string | null) {
+    return this.folders.filter((f) => (f.parentId || null) === (parentId || null)).sort(compareFolders);
+  }
+
+  placeFolder(id: string, parentId: string | null, beforeId: string | null) {
+    parentId = parentId || null;
+    beforeId = beforeId || null;
+    if (beforeId) {
+      const before = this.getFolder(beforeId);
+      if (!before || beforeId === id) return { error: 'Target folder not found.' };
+      if ((before.parentId || null) !== parentId) return { error: 'The folder to place it before is in another folder.' };
+    }
+    const r = this._relocateFolder(id, parentId);
+    if ('error' in r) return r;
+    const siblings = this.siblingFolders(parentId).filter((f) => f.id !== id);
+    siblings.splice(beforeId ? siblings.findIndex((f) => f.id === beforeId) : siblings.length, 0, r.folder);
+    this._change({ notes: r.moved, folders: true }, () => { r.apply(); siblings.forEach((f, i) => { f.order = i; }); });
+    return { folder: r.folder };
   }
 
   deleteFolder(id: string) {
@@ -2383,7 +2414,7 @@ class Store {
     return this._commit(() => {
       let movedNotes = 0, movedFolders = 0;
       for (const n of this.notes) if (n.folderId === id) { n.folderId = parent; movedNotes++; }
-      for (const c of this.folders) if (c.parentId === id) { c.parentId = parent; movedFolders++; }
+      for (const c of this.folders) if (c.parentId === id) { c.parentId = parent; c.order = null; movedFolders++; }
       this.folders = this.folders.filter((x) => x.id !== id);
       this.settings.expandedFolders = this.settings.expandedFolders.filter((x) => x !== id);
       this.settings.treeExpanded = this.settings.treeExpanded.filter((x) => x !== id);

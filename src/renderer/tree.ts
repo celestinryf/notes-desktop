@@ -33,11 +33,12 @@ export function restoreTreeFocus(root: HTMLElement, key?: string | null) {
   const first = all.find((r) => r.classList.contains('is-active')) || all[0];
   if (first) first.tabIndex = 0;
 }
-export function bindTreeKeys(root: HTMLElement) {
+export function bindTreeKeys(root: HTMLElement, altArrow?: (row: HTMLElement, key: string) => boolean) {
   root.addEventListener('keydown', (e) => {
-    if (!(e.target instanceof Element) || e.target.closest('input, select, textarea') || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!(e.target instanceof Element) || e.target.closest('input, select, textarea') || e.ctrlKey || e.metaKey) return;
     const row = e.target.closest<HTMLElement>('.tree-row');
     if (!row || !root.contains(row) || e.target !== row) return;
+    if (e.altKey) { if (altArrow && altArrow(row, e.key)) { e.preventDefault(); e.stopPropagation(); } return; }
     const rows = visibleRows(root);
     const i = rows.indexOf(row);
     const go = (j: number) => { if (rows[j]) { e.preventDefault(); focusRow(root, rows[j]); } };

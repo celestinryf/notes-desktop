@@ -77,6 +77,7 @@ interface Folder {
   name: string;
   parentId: string | null;
   createdAt: number;
+  order: number | null;
   vaultId: string | null;
   dirPath: string | null;
   book: boolean;
@@ -215,6 +216,7 @@ interface IpcContract {
   'folders:create': (data: { name?: string; parentId?: string | null }) => Folder;
   'folders:rename': (id: string, name: string) => Folder | null;
   'folders:move': (id: string, parentId: string | null) => { error: string } | { folder: Folder };
+  'folders:place': (id: string, parentId: string | null, beforeId: string | null) => { error: string } | { folder: Folder };
   'folders:delete': (id: string) => null | { error: string } | { movedNotes: number; movedFolders: number; parentId: string | null };
   'folders:setBook': (id: string, on: boolean) => Folder | null;
   'folders:reorderPages': (id: string, ids: string[]) => Folder | null;
@@ -385,7 +387,7 @@ interface NotesApi {
   };
   folders: {
     tree: Invoker<'folders:tree'>; path: Invoker<'folders:path'>; create: Invoker<'folders:create'>; rename: Invoker<'folders:rename'>;
-    setBook: Invoker<'folders:setBook'>; reorderPages: Invoker<'folders:reorderPages'>; move: Invoker<'folders:move'>; delete: Invoker<'folders:delete'>;
+    setBook: Invoker<'folders:setBook'>; reorderPages: Invoker<'folders:reorderPages'>; move: Invoker<'folders:move'>; place: Invoker<'folders:place'>; delete: Invoker<'folders:delete'>;
   };
   settings: { get: Invoker<'settings:get'>; set: Invoker<'settings:set'> };
   git: { status: Invoker<'git:status'>; commit: Invoker<'git:commit'>; push: Invoker<'git:push'>; sync: Invoker<'git:sync'>; history: Invoker<'git:history'>; versions: Invoker<'git:versions'>; bringBack: Invoker<'git:bringBack'> };

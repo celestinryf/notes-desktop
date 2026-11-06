@@ -1106,6 +1106,7 @@ function main() {
   handle('folders:create', (_e, data) => store.createFolder(data));
   handle('folders:rename', (_e, id, name) => store.renameFolder(id, name));
   handle('folders:move', (_e, id, parentId) => store.moveFolder(id, parentId));
+  handle('folders:place', (_e, id, parentId, beforeId) => store.placeFolder(id, parentId, beforeId));
   handle('folders:delete', (_e, id) => store.deleteFolder(id));
 
   handle('settings:get', () => store.getSettings());
