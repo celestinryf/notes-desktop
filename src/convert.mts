@@ -3,6 +3,7 @@ import path from 'node:path';
 import { runWorker } from './run-worker.mts';
 import { extOf, readText, readDocumentBuffer, readDocxText } from './files.mts';
 import { OOXML_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
+import { addSpacedImages, isSpacedImagePath } from './shared/spaced-images.mts';
 import * as markitdown from './markitdown.mts';
 import { createRequire } from 'node:module';
 import type MarkdownIt from 'markdown-it';
@@ -172,6 +173,7 @@ function md(): MarkdownIt {
   if (!markdownIt) {
     const createMarkdownIt: typeof MarkdownIt = requireWhenNeeded('markdown-it');
     markdownIt = createMarkdownIt({ html: true, linkify: false });
+    addSpacedImages(markdownIt);
   }
   return markdownIt;
 }
@@ -441,8 +443,13 @@ function htmlDocument(title: string, bodyHtml: string, extraCss?: string) {
 }
 const PRINT_CSS = '@media print{body{background:#fff;margin:0;max-width:none;padding:0}pre{white-space:pre-wrap}}';
 
+const PICTURE_LINK = /!\[([^\]]*)\]\((?!data:)(<[^>]*>|[^)\s]*|[^()<>\n]+)(?:\s+"[^"]*")?\)/g;
+
 function inlinePicturesOnly(markdown: string) {
-  return String(markdown).replace(/!\[([^\]]*)\]\((?!data:)(?:<[^>]*>|[^)\s]*)(?:\s+"[^"]*")?\)/g, (m, alt) => (alt ? '*[' + alt + ']*' : ''));
+  return String(markdown).replace(PICTURE_LINK, (m: string, alt: string, dest: string) => {
+    if (/\s/.test(dest) && !dest.startsWith('<') && !isSpacedImagePath(dest)) return m;
+    return alt ? '*[' + alt + ']*' : '';
+  });
 }
 
 function firstFree(stem: string, ext: string, make: (name: string) => void) {

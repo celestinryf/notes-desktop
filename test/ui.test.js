@@ -432,6 +432,42 @@ test.afterEach(() => {
   setSavesReadOnly(false);
 });
 
+test('a picture whose path has spaces shows in the rendered view, and an edit keeps the link as written', async () => {
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Spaced pictures');
+  await useSourceMode(true);
+  const body = 'Shots:\n\n![Feed cards](my shots/one.png)\n\nDone.';
+  await page.fill('#bodyInput', body);
+  await waitFor('spaced picture note saved', () => findNote('Spaced pictures') && findNote('Spaced pictures').body === body);
+  const dir = path.dirname(homeNoteFile('Spaced pictures'));
+  fs.mkdirSync(path.join(dir, 'my shots'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'my shots', 'one.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'));
+  try {
+    await page.keyboard.press('Control+e');
+    await page.waitForSelector('#richEditor:not(.hidden) img[data-src]', { timeout: 8000 });
+    const img = await page.$eval('#richEditor img[data-src]', (i) => ({ written: i.getAttribute('data-src'), src: i.getAttribute('src'), alt: i.getAttribute('alt') }));
+    assert.equal(img.written, 'my shots/one.png');
+    assert.equal(img.alt, 'Feed cards');
+    assert.match(img.src, /^file:\/\/\/.*\/my%20shots\/one\.png$/);
+    await waitForDom(() => { const i = document.querySelector('#richEditor img[data-src]'); return !!i && i.complete && i.naturalWidth === 1; });
+    assert.equal(await page.isVisible('#bodyInput'), false, 'the note is not sent to the source view');
+    assert.equal(await page.evaluate(() => document.getElementById('richEditor').textContent.includes('](')), false, 'no link text left on the page');
+
+    await page.click('#richEditor p >> nth=-1');
+    await page.keyboard.press('End');
+    await page.keyboard.type(' More');
+    await waitFor('rendered edit saved', () => findNote('Spaced pictures').body.includes('Done. More'));
+    const edited = findNote('Spaced pictures').body;
+    assert.ok(edited.includes('![Feed cards](my shots/one.png)'), 'the link is saved as written: ' + JSON.stringify(edited));
+    assert.ok(!edited.includes('\\'), 'nothing escaped: ' + JSON.stringify(edited));
+  } finally {
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor('spaced picture note trashed', () => findNote('Spaced pictures').trashedAt);
+    fs.rmSync(path.join(dir, 'my shots'), { recursive: true, force: true });
+  }
+});
+
 test('an edit that cannot be saved survives switching notes and lands once the disk allows it', { timeout: 60000 }, async () => {
   await useSourceMode(true);
   await clickRow("Gamma (copy)");

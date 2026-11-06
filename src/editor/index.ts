@@ -7,6 +7,7 @@ import type MarkdownIt from 'markdown-it';
 import type { StateInline } from 'markdown-it';
 import { IMAGE_EXT, extOf, isRecord, wikiLinkLabel, wikiLinkName } from '../shared/helpers.mts';
 import { splitFrontMatter } from '../shared/front-matter.mts';
+import { addSpacedImages, writtenImagePath } from '../shared/spaced-images.mts';
 import StarterKit from '@tiptap/starter-kit';
 import Text from '@tiptap/extension-text';
 import TaskList from '@tiptap/extension-task-list';
@@ -429,8 +430,25 @@ export function resolveImageSrc(src: string | null | undefined, base: string | n
   return u.href;
 }
 
+const parsersWithWrittenImagePaths = new WeakSet<MarkdownIt>();
+
+function keepWrittenImagePaths(md: MarkdownIt) {
+  if (parsersWithWrittenImagePaths.has(md)) return;
+  parsersWithWrittenImagePaths.add(md);
+  addSpacedImages(md);
+  const image = md.renderer.rules.image;
+  md.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const written = writtenImagePath(tokens[idx]);
+    if (written) tokens[idx].attrSet('data-src', written);
+    return image ? image(tokens, idx, options, env, self) : self.renderToken(tokens, idx, options);
+  };
+}
+
 function pictures(imageBase: (() => string | null) | undefined) {
   return Image.extend({
+    addStorage() {
+      return { markdown: { parse: { setup: keepWrittenImagePaths } } };
+    },
     addAttributes() {
       const parent: Partial<Attributes> = this.parent ? this.parent() : {};
       return Object.assign({}, parent, { src: Object.assign({}, parent.src, { parseHTML: (el: HTMLElement) => el.getAttribute('data-src') || el.getAttribute('src') }) });
