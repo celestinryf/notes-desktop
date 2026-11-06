@@ -23,7 +23,9 @@ test('snippet skips the first line only when it became the title', () => {
   assert.equal(H.snippet({ title: 'T', body: 'a'.repeat(200) }, 20).length, 20);
   assert.equal(H.snippet({ title: 'Plan', body: '# Plan\n\nThe text.' }), 'The text.', 'a heading that repeats the title is not the snippet');
   assert.equal(H.snippet({ title: 'Plan', body: 'Plan\nThe text.' }), 'The text.');
-  assert.equal(H.snippet({ title: 'Plan', body: '# Planning\n\nThe text.' }), 'Planning. The text.');
+  assert.equal(H.snippet({ title: 'Plan', body: '# Planning\n\nThe text.' }), 'The text.', 'a heading is dropped when prose follows');
+  assert.equal(H.snippet({ title: 'Plan', body: '# Goals\n\nShip it.\n\n## Later\n\nRest.' }), 'Ship it. Rest.');
+  assert.match(H.snippet({ title: 'Plan', body: '# Only\n## Headings' }), /^Only/, 'a note of headings alone keeps them');
 });
 
 test('relativeTime buckets', () => {
@@ -185,10 +187,19 @@ test('file kind helpers: Markdown files render, other text files are plain, ever
 
 test('listRow carries a snippet of the body for the cards, at most 120 characters, and none for a note without text', () => {
   const base = { id: 'n', title: 'Plan', folderId: null, pinned: false, lock: null, sticky: null, fileKind: null, filePath: null, remindAt: null, live: null, createdAt: 1, updatedAt: 2, vaultId: null, tags: ['work'], trashedAt: null };
-  assert.equal(H.listRow({ ...base, body: '# Plan\n\nShip the **sync** rewrite before the freeze.' }).snippet, 'Ship the sync rewrite before the freeze.');
-  assert.equal(H.listRow({ ...base, body: '' }).snippet, '');
-  assert.ok(H.listRow({ ...base, body: 'word '.repeat(100) }).snippet.length <= 120);
-  assert.deepEqual(H.listRow({ ...base, body: 'x' }).tags, ['work']);
+  const forCards = (body) => H.listRow({ ...base, body }, undefined, undefined, true);
+  assert.equal(forCards('# Plan\n\nShip the **sync** rewrite before the freeze.').snippet, 'Ship the sync rewrite before the freeze.');
+  assert.equal(forCards('').snippet, '');
+  assert.ok(forCards('word '.repeat(100)).snippet.length <= 120);
+  assert.deepEqual(forCards('x').tags, ['work']);
+  assert.equal(H.listRow({ ...base, body: 'x' }).snippet, undefined, 'rows not meant for the cards carry no snippet');
+});
+
+test('matchExcerpt reads the note as plain text: no front matter, no list boxes, no Markdown marks', () => {
+  assert.equal(H.matchExcerpt({ body: '---\ntags: [work]\n---\nTalked through the benchmark setup.' }, 'bench').includes('---'), false);
+  assert.match(H.matchExcerpt({ body: '- [ ] Benchmark the new index\n- [x] Draft the plan' }, 'benchmark'), /^Benchmark the new index/);
+  assert.match(H.matchExcerpt({ body: 'Some **bold** words about the benchmark.' }, 'benchmark'), /bold words about the benchmark/);
+  assert.equal(H.matchExcerpt({ body: 'Some **bold** words about the benchmark.' }, 'benchmark').includes('**'), false);
 });
 
 test('fileNameOf takes the last segment of a path with either slash, and nothing from nothing', () => {

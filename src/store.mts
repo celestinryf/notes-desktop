@@ -902,7 +902,7 @@ class Store {
     const listed = this.list(opts, candidates);
     const first = listed.slice(0, size);
     const shown = new Set(first.map((n) => n.id));
-    return { ids: listed.map((n) => n.id), rows: first.map((n) => this._row(n, query)).concat(this.rowsFor(also.filter((id) => !shown.has(id)), query)) };
+    return { ids: listed.map((n) => n.id), rows: first.map((n) => this._row(n, query, true)).concat(this.rowsFor(also.filter((id) => !shown.has(id)), query)) };
   }
 
   rowsFor(ids: readonly string[], query?: string) {
@@ -910,11 +910,11 @@ class Store {
     const wanted = new Set(ids);
     const found = new Map<string, Note>();
     for (const n of this.notes) if (wanted.has(n.id)) found.set(n.id, n);
-    return ids.flatMap((id) => { const n = found.get(id); return n ? [this._row(n, query)] : []; });
+    return ids.flatMap((id) => { const n = found.get(id); return n ? [this._row(n, query, true)] : []; });
   }
 
-  _row(n: Note, query?: string) {
-    return H.listRow(this._rowView(n), query, this.isHome(n.vaultId));
+  _row(n: Note, query?: string, forCards?: boolean) {
+    return H.listRow(this._rowView(n), query, this.isHome(n.vaultId), forCards);
   }
 
   _rowView(n: Note) {

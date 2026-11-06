@@ -1159,7 +1159,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
 });
 
 test('the flat list shows cards: title, a two-line snippet, the time and tags; the folder view keeps one-line rows; a search card shows the match', async () => {
-  const body = 'The quick brown fox jumps over the lazy dog, then naps.\n\nTags: #cards';
+  const body = 'The quick brown fox jumps over the lazy dog, then naps in the warm afternoon sun while the farmer counts his sheep and the river runs on past the mill.\n\nTags: #cards';
   const note = await typeNote('Card sample', body);
   await page.click('.nav-item[data-view="all"]');
   const wasTree = await page.$eval('#listModeSeg button[data-mode="tree"]', (b) => b.classList.contains('is-on'));
@@ -1171,20 +1171,24 @@ test('the flat list shows cards: title, a two-line snippet, the time and tags; t
       title: c.querySelector('.card-title .row-name').textContent,
       snippet: c.querySelector('.card-snippet').textContent,
       meta: c.querySelector('.card-meta').textContent,
+      metaLines: Math.round(c.querySelector('.card-meta').getBoundingClientRect().height / parseFloat(getComputedStyle(c.querySelector('.card-meta')).lineHeight)),
+      timeTitle: c.querySelector('.card-time').getAttribute('title'),
       tags: [...c.querySelectorAll('.card-meta .tag')].map((t) => t.textContent),
       height: c.getBoundingClientRect().height,
-      snippetLines: Math.round(c.querySelector('.card-snippet').getBoundingClientRect().height / (13 * 1.4)),
+      snippetLines: Math.round(c.querySelector('.card-snippet').getBoundingClientRect().height / parseFloat(getComputedStyle(c.querySelector('.card-snippet')).lineHeight)),
+      snippetClamped: c.querySelector('.card-snippet').scrollHeight > c.querySelector('.card-snippet').clientHeight,
     }));
     assert.equal(parts.title, 'Card sample');
-    assert.equal(parts.snippet, 'The quick brown fox jumps over the lazy dog, then naps. Tags: #cards');
-    assert.match(parts.meta, /^just now/);
+    assert.match(parts.snippet, /^The quick brown fox jumps over the lazy dog, then naps in the warm afternoon sun/);
+    assert.match(parts.meta, /^(just now|\d+ (seconds?|minutes?) ago)/);
     assert.deepEqual(parts.tags, ['#cards']);
-    assert.ok(parts.height >= 60 && parts.height <= 110, 'a card is a few lines tall: ' + parts.height);
-    assert.ok(parts.snippetLines <= 2, 'the snippet is clamped to two lines');
-    const sampleRow = await page.$eval(card, (c) => c.getBoundingClientRect().height);
+    assert.equal(parts.metaLines, 1, 'the meta line never wraps');
+    assert.match(parts.timeTitle, /\d/, 'the full date is the tooltip of the time');
+    assert.ok(parts.height >= 56 && parts.height <= 130, 'a card is a few lines tall: ' + parts.height);
+    assert.equal(parts.snippetLines, 2, 'the snippet is clamped to two lines');
+    assert.equal(parts.snippetClamped, true, 'the longer text is cut, not shown');
     const otherRow = await page.$eval('#noteList .note-row:not([data-id="' + note.id + '"])', (c) => c.getBoundingClientRect().height);
     assert.ok(otherRow >= 40, 'every flat row is a card: ' + otherRow);
-    assert.ok(sampleRow !== undefined);
 
     await page.keyboard.press('Control+Shift+f');
     await page.keyboard.type('lazy dog');

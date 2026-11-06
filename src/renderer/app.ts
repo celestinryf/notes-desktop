@@ -49,7 +49,7 @@ type OpenFocus = 'title' | 'body';
 type OpenOpts = { newTab?: boolean; focus?: OpenFocus | null };
 type RefreshOpts = { keepEditor?: boolean };
 type RowSource = Pick<OutlineRow, 'id' | 'title' | 'folderId' | 'pinned' | 'locked' | 'unlocked' | 'fileKind' | 'filePath' | 'remindAt' | 'live' | 'home'>
-  & { sticky: Sticky | boolean | null; trashedAt?: number | null; updatedAt?: number; body?: string; tags?: string[]; snippet?: string; excerpt?: string };
+  & { sticky: Sticky | boolean | null; trashedAt?: number | null; createdAt?: number; updatedAt?: number; body?: string; tags?: string[]; snippet?: string; excerpt?: string };
 type SettingValue = Settings[keyof Settings];
 type PeerMessage =
   | { type: 'hello' | 'changed' | 'focus' | 'close' }
@@ -534,29 +534,25 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     return '<span class="row-meta remind-mark' + (overdue ? ' is-overdue' : '') + '" title="' + (overdue ? 'Reminder went off' : 'Reminder') + '">' + I('bell') + escapeHtml(H.formatWhen(n.remindAt)) + '</span>';
   }
 
-  function rowTitleLine(n: RowSource, q: string, where: string) {
+  function rowTitleLine(n: RowSource, q: string, where: string, withPin = true) {
     const title = n.body === undefined ? n.title : H.deriveTitle(n);
     const fileMark = n.filePath && !n.home ? '<span class="file-mark" title="' + escapeHtml(n.filePath) + '">' + escapeHtml(fileBadge(n)) + '</span>' : '';
-    const pin = n.pinned ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '';
+    const pin = n.pinned && withPin ? '<span class="row-mark pin" title="Pinned">' + I('star') + '</span>' : '';
     const marks = (n.sticky ? '<span class="row-mark sticky-mark" title="On the desktop as a sticky">' + I('sticky-note') + '</span>' : '')
       + (n.locked ? '<span class="row-mark lock-mark" title="' + (n.unlocked ? 'Locked (unlocked for now)' : 'Locked') + '">' + I(n.unlocked ? 'lock-open' : 'lock') + '</span>' : '')
       + (n.live ? '<span class="row-mark live-mark" title="Live share' + (n.live.role ? ' (' + n.live.role + ')' : '') + '">' + I('radio') + '</span>' : '');
     return '<span class="row-name">' + highlight(title, q) + '</span>' + where + marks + fileMark + reminderMark(n) + pin;
   }
 
-  function rowInner(n: RowSource, q: string, where = whereMark(n, q)) {
-    const why = rowHasExcerpt(n, q) ? '<span class="row-meta match">' + highlight(n.excerpt ?? H.matchExcerpt(n, q), q) + '</span>' : '';
-    return rowTitleLine(n, q, where) + why;
-  }
-
   function cardInner(n: RowSource, q: string, lead: string) {
     const snippet = n.locked && !n.unlocked ? '<span class="card-snippet is-locked">Locked note</span>'
       : rowHasExcerpt(n, q) ? '<span class="card-snippet">' + highlight(n.excerpt ?? H.matchExcerpt(n, q), q) + '</span>'
       : n.snippet ? '<span class="card-snippet">' + highlight(n.snippet, q) + '</span>' : '';
-    const when = n.trashedAt || n.updatedAt;
-    const tags = (n.tags || []).map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join('');
-    const meta = (when ? '<span>' + escapeHtml(H.relativeTime(when)) + '</span>' : '') + whereMark(n, q) + tags;
-    return '<span class="card-title">' + lead + rowTitleLine(n, q, '') + '</span>' + snippet + (meta ? '<span class="card-meta">' + meta + '</span>' : '');
+    const when = n.trashedAt || (settingsNow().sort === 'created' ? n.createdAt : n.updatedAt);
+    const time = when ? '<span class="card-time" title="' + escapeHtml(new Date(when).toLocaleString()) + '">' + escapeHtml(H.relativeTime(when)) + '</span>' : '';
+    const tags = n.tags && n.tags.length ? '<span class="card-tags">' + n.tags.map((t) => '<span class="tag">#' + escapeHtml(t) + '</span>').join(' ') + '</span>' : '';
+    const meta = time + whereMark(n, q) + tags;
+    return '<span class="card-title">' + lead + rowTitleLine(n, q, '', state.view !== 'pinned') + '</span>' + snippet + (meta ? '<span class="card-meta">' + meta + '</span>' : '');
   }
 
   function rowHasExcerpt(n: RowSource, q: string) {
@@ -581,7 +577,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function treeNoteInner(n: RowSource, awayFromFolder: boolean) {
-    return '<span class="tree-spacer" aria-hidden="true"></span>' + rowInner(n, '', awayFromFolder ? folderMark(n) : '');
+    return '<span class="tree-spacer" aria-hidden="true"></span>' + rowTitleLine(n, '', awayFromFolder ? folderMark(n) : '');
   }
 
   function refreshRow(note: PublicNote) {
@@ -1992,7 +1988,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     need: (ids) => { rowCache.fetch(ids).then((got) => noteList.changed(got)).catch(() => {}); },
     html: (n, i, q) => cardInner(n, q, listPageNumbers ? '<span class="page-no">p. ' + (i + 1) + '</span>' : ''),
     title: (n) => H.deriveTitle(n),
-    tall: (n, q) => rowHasExcerpt(n, q),
+    tall: (n, q) => rowHasExcerpt(n, q) || !!n.snippet,
     draggable: (n) => !n.trashedAt,
     open: (id, newTab) => { openNote(id, { newTab }); },
     dragStart: startNoteDrag,

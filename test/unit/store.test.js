@@ -284,6 +284,15 @@ test('folders: placing one before a sibling gives that level a manual order; a m
   assert.deepEqual(names(), ['D', 'A', 'B']);
 });
 
+test('list rows for the cards carry a snippet; the rows every note loads for the palette do not', () => {
+  const { store } = makeStore();
+  const n = store.create({ title: 'Plan', body: '# Plan\n\nShip it before the freeze.' });
+  assert.equal(store.rowsFor([n.id])[0].snippet, 'Ship it before the freeze.');
+  assert.equal(store.page({}, null, [], 10).rows[0].snippet, 'Ship it before the freeze.');
+  assert.equal(store.rows({})[0].snippet, undefined);
+  assert.equal(store.rowsFor([n.id], 'freeze')[0].excerpt.includes('freeze'), true);
+});
+
 test('folders: a saved order that is not a number reads as none', () => {
   const { store } = makeStore();
   const a = store.createFolder({ name: 'A' });
