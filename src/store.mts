@@ -21,6 +21,7 @@ const SET_ASIDE_KEPT = 3;
 const SET_ASIDE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const STALE_JOURNAL_INFIX = '.stale-';
 const OUTSIDE_COPY_INFIX = '.outside-';
+const OUTSIDE_WRITE_RETRY_MS = 2000;
 const SCAN_YIELD_EVERY = 256;
 const SCAN_READERS = 16;
 const SCAN_TARGETED_MAX = 1000;
@@ -646,7 +647,7 @@ class Store {
   revision: number;
   base: LibraryBase;
   touched: Set<string>;
-  taken: { stamp: DiskStamp | null; edits: OutsideEdit[] } | null;
+  taken: { stamp: DiskStamp | null; edits: OutsideEdit[]; failedAt: number | null } | null;
   unreadable: DiskStamp | null;
   unannounced: OutsideEdit[];
   onOutsideEdit: ((edit: OutsideEdit) => void) | null;
@@ -701,6 +702,7 @@ class Store {
     this.touched = new Set();
     this.taken = null;
     this.unreadable = null;
+    this.unannounced = [];
     const stampBeforeRead = stampOf(this.file);
     const base = readWithRetry(this.file);
     const stamp = base.text === null ? null : stampBeforeRead;
@@ -858,8 +860,7 @@ class Store {
   syncWithDisk(opts?: { unreadable?: 'wait' | 'set-aside' }): OutsideEdit | null {
     if (this.saveBlocked) return null;
     const edit = this._takeOutsideEdit(!!opts && opts.unreadable === 'set-aside');
-    const edits = this.unannounced.splice(0);
-    if (this.onOutsideEdit) for (const e of edits) this.onOutsideEdit(e);
+    for (let next = this.unannounced.shift(); next; next = this.unannounced.shift()) if (this.onOutsideEdit) this.onOutsideEdit(next);
     return edit;
   }
 
@@ -867,14 +868,19 @@ class Store {
     const stamp = stampOf(this.file);
     if (sameStamp(stamp, this.base.stamp) && (!this.journalReady || this._journalIntact())) return null;
     if (stamp && sameStamp(stamp, this.unreadable) && !setAsideUnreadable) return { kind: 'unreadable' };
-    if (!this.taken || !sameStamp(stamp, this.taken.stamp)) {
-      const edit: OutsideEdit = stamp && !sameStamp(stamp, this.base.stamp) ? this._readOutsideEdit(setAsideUnreadable) : { kind: 'restored' };
-      if (edit.kind === 'unreadable') { this.unreadable = stamp; return edit; }
-      this.taken = { stamp, edits: (this.taken ? this.taken.edits : []).concat(edit) };
-    }
-    const edits = this.taken.edits;
-    this._compact();
-    return edits[edits.length - 1];
+    const pending = this.taken && sameStamp(stamp, this.taken.stamp) ? this.taken : null;
+    if (pending && pending.failedAt !== null && this.now() - pending.failedAt < OUTSIDE_WRITE_RETRY_MS) return null;
+    const taken = pending || this._takeIn(stamp, setAsideUnreadable);
+    if (!taken) return { kind: 'unreadable' };
+    try { this._compact(); } catch (err) { taken.failedAt = this.now(); throw err; }
+    return taken.edits[taken.edits.length - 1];
+  }
+
+  _takeIn(stamp: DiskStamp | null, setAsideUnreadable: boolean) {
+    const edit: OutsideEdit = stamp && !sameStamp(stamp, this.base.stamp) ? this._readOutsideEdit(setAsideUnreadable) : { kind: 'restored' };
+    if (edit.kind === 'unreadable') { this.unreadable = stamp; return null; }
+    this.taken = { stamp, edits: (this.taken ? this.taken.edits : []).concat(edit), failedAt: null };
+    return this.taken;
   }
 
   _readOutsideEdit(setAsideUnreadable: boolean): OutsideEdit {
@@ -887,7 +893,6 @@ class Store {
   }
 
   _mergeOutside(doc: Record<string, unknown>): OutsideEdit {
-    this._backup((target) => fs.writeFileSync(target, JSON.stringify(this.serialize(), null, 2)));
     this.revision++;
     const settingsBefore = structuredClone(this.settings);
     const notes = Array.isArray(doc.notes) ? this._mergeNotes(doc.notes) : { changed: [], dropped: [], refresh: [], sealed: false };
@@ -905,16 +910,19 @@ class Store {
     const now = this.now();
     const theirs = new Map<string, Note>();
     for (const raw of rows) { const n = sanitizeNote(raw, now); if (n && !theirs.has(n.id)) theirs.set(n.id, n); }
+    const keepsOurs = (n: Note) => this.touched.has(n.id) || this.recycling.has(n.id);
+    const dropped = this.notes.filter((n) => !theirs.has(n.id) && !keepsOurs(n) && !this._fileBringsBack(n)).map((n) => n.id);
+    if (dropped.length) this._backup((target) => fs.writeFileSync(target, JSON.stringify(this.serialize(), null, 2)));
+    const going = new Set(dropped);
     const changed: Note[] = [];
-    const dropped: string[] = [];
     const refresh: string[] = [];
     const kept: Note[] = [];
     let sealed = false;
     for (const n of this.notes) {
-      const t = theirs.get(n.id);
-      if (this.touched.has(n.id) || this.recycling.has(n.id) || (!t && this._fileBringsBack(n))) { kept.push(n); continue; }
-      if (!t) { dropped.push(n.id); this.relock(n.id); continue; }
+      if (going.has(n.id)) { this.relock(n.id); continue; }
       kept.push(n);
+      const t = theirs.get(n.id);
+      if (!t || keepsOurs(n)) continue;
       const lockBefore = n.lock;
       const taken = this._takeOutsideRow(n, t);
       if (taken === 'same') continue;
@@ -1093,8 +1101,10 @@ class Store {
 
   _backup(write: (target: string) => void) {
     const now = this.now();
-    fs.mkdirSync(this.backupDir, { recursive: true });
-    try { write(path.join(this.backupDir, 'notes-' + H.fileStamp(now) + '.json')); } catch (_) { return; }
+    try {
+      fs.mkdirSync(this.backupDir, { recursive: true });
+      write(path.join(this.backupDir, 'notes-' + H.fileStamp(now) + '.json'));
+    } catch (_) { return; }
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
     while (files.length > MAX_BACKUPS) { const oldest = files.shift(); if (!oldest) break; try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) { break; } }

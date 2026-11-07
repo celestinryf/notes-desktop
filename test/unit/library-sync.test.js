@@ -20,11 +20,11 @@ function homeStore() {
 }
 
 function twoNotes() {
-  const { store } = makeStore();
+  const { store, tick } = makeStore();
   const a = store.create({ title: 'A', body: 'a' });
   const b = store.create({ title: 'B', body: 'b' });
   store.save();
-  return { store, a, b };
+  return { store, tick, a, b };
 }
 
 const readDoc = (store) => JSON.parse(fs.readFileSync(store.file, 'utf8'));
@@ -156,18 +156,21 @@ test('a full save that finds an unmerged outside edit keeps a copy of it instead
   assert.deepEqual(heard.edits, [{ kind: 'set-aside', file: path.join(store.dir, kept[0]) }], 'announced at the next sync');
 });
 
-test('when the write after a merge fails, nothing is announced, nothing is merged or copied again, and the news comes once the write works', () => {
-  const { store, a } = twoNotes();
+test('when the write after a merge fails, nothing is announced, nothing is merged or copied again, retries wait a moment, and the news comes once the write works', () => {
+  const { store, tick, a } = twoNotes();
   const heard = listen(store);
   editOutside(store, (doc) => { delete doc.journalId; });
   const blocker = store.file + '.tmp';
   fs.mkdirSync(blocker);
   try {
     assert.throws(() => store.syncWithDisk());
-    assert.throws(() => store.syncWithDisk());
+    assert.equal(store.syncWithDisk(), null, 'no second try at once');
+    tick(2000);
+    assert.throws(() => store.syncWithDisk(), undefined, 'a later try writes again');
     assert.deepEqual(heard.edits, []);
     assert.equal(keptAside(store).length, 1, 'copied aside once, not on every try');
   } finally { fs.rmdirSync(blocker); }
+  tick(2000);
   const edit = store.syncWithDisk();
   assert.equal(edit.kind, 'set-aside');
   assert.deepEqual(heard.edits, [edit]);
@@ -187,6 +190,24 @@ test('when the write after a merge fails, nothing is announced, nothing is merge
   assert.equal(again.get(a.id).body, 'typed while the disk was failing');
 });
 
+test('a listener that throws does not cost the other edits their announcement', () => {
+  const { store, tick, a, b } = twoNotes();
+  const blocker = store.file + '.tmp';
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  fs.mkdirSync(blocker);
+  try {
+    assert.throws(() => store.syncWithDisk());
+    editOutside(store, (doc) => { rowOf(doc, b.id).pinned = true; });
+    assert.throws(() => store.syncWithDisk(), undefined, 'a new outside write is taken in and tried at once');
+  } finally { fs.rmdirSync(blocker); }
+  tick(2000);
+  const heard = [];
+  store.onOutsideEdit = (e) => { heard.push(e.notes.map((n) => n.id)); if (heard.length === 1) throw new Error('listener failed'); };
+  assert.throws(() => store.syncWithDisk(), /listener failed/);
+  store.syncWithDisk();
+  assert.deepEqual(heard, [[a.id], [b.id]]);
+});
+
 test('a notes.json that stays unreadable is read once, not on every sync, until it changes or the caller gives up waiting', () => {
   const { store } = twoNotes();
   fs.writeFileSync(store.file, '{ not json');
@@ -203,7 +224,7 @@ test('a notes.json that stays unreadable is read once, not on every sync, until 
   } finally { fs.readFileSync = realRead; }
 });
 
-test('every merge first backs up the library as Notes held it, so an outside file that empties it can be undone', () => {
+test('a merge that removes notes first backs up the library as Notes held it, so an outside file that empties it can be undone', () => {
   const { store, a, b } = twoNotes();
   store.update(a.id, { body: 'latest' });
   editOutside(store, (doc) => { doc.notes = []; });
@@ -213,6 +234,27 @@ test('every merge first backs up the library as Notes held it, so an outside fil
   const before = backups.find((d) => d.notes.some((n) => n.id === a.id && n.body === 'latest'));
   assert.ok(before, 'a backup holds the library as it was just before the merge');
   assert.ok(before.notes.some((n) => n.id === b.id));
+});
+
+test('a merge that removes nothing writes no backup, so a tool that rewrites notes.json often cannot push the old backups out', () => {
+  const { store, tick, a } = twoNotes();
+  const count = () => fs.readdirSync(store.backupDir).length;
+  const before = count();
+  for (let i = 0; i < 3; i++) {
+    tick(60_000);
+    editOutside(store, (doc) => { rowOf(doc, a.id).pinned = i % 2 === 0; });
+    assert.equal(store.syncWithDisk().kind, 'merged');
+  }
+  assert.equal(count(), before);
+});
+
+test('a backups folder that cannot be made does not stop a merge', () => {
+  const { store, a } = twoNotes();
+  fs.rmSync(store.backupDir, { recursive: true, force: true });
+  fs.writeFileSync(store.backupDir, 'not a folder');
+  editOutside(store, (doc) => { doc.notes = doc.notes.filter((n) => n.id !== a.id); });
+  assert.deepEqual(store.syncWithDisk().dropped, [a.id]);
+  assert.equal(reload(store).get(a.id), null);
 });
 
 test('an outside edit that unlinks a linked file leaves the note without a file and reads nothing', async () => {
