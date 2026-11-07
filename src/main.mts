@@ -412,7 +412,7 @@ function main() {
     if (win && !win.isDestroyed()) win.setBackgroundColor(windowColors().background);
   }
 
-  function applySettingsEffects(before: Settings | null) {
+  async function applySettingsEffects(before: Settings | null) {
     const now = store.settings;
     const changed = (key: keyof Settings) => !before || JSON.stringify(now[key]) !== JSON.stringify(before[key]);
     if (changed('theme') || changed('colorScheme') || changed('customColors')) applyTheme();
@@ -420,8 +420,9 @@ function main() {
     if (changed('alwaysOnTop') && win && !win.isDestroyed()) win.setAlwaysOnTop(!!now.alwaysOnTop);
     if (changed('openAtLogin')) applyLoginItem();
     refreshTray();
-    if (!changed('gitEnabled') && !changed('gitRemote')) return Promise.resolve();
-    return git.configure(now).then(() => { if (now.gitEnabled) git.noteChanged(); });
+    if (!changed('gitEnabled') && !changed('gitRemote')) return;
+    await git.configure(now);
+    if (now.gitEnabled) git.noteChanged();
   }
 
   function refreshTray() {
@@ -540,10 +541,12 @@ function main() {
     trace.write('library-outside-edit', { kind: edit.kind });
     if (edit.kind === 'set-aside') console.error('[library] kept an outside change to notes.json that could not be merged:', edit.file);
     if (edit.kind !== 'merged') return;
-    for (const id of edit.refresh) store.refreshFileNote(id).then(() => fanReloaded({ reason: 'library', id })).catch((err) => console.error('[library] reading a relinked file failed', err));
-    if (edit.settings.length) { applySettingsEffects(edit.settingsBefore).catch(() => {}); broadcastSettings(); }
     closeOrphanStickies();
     fanReloaded({ reason: 'library' });
+    for (const id of edit.refresh) store.refreshFileNote(id).then(() => fanReloaded({ reason: 'library', id })).catch((err) => console.error('[library] reading a relinked file failed', err));
+    if (!edit.settings.length) return;
+    broadcastSettings();
+    applySettingsEffects(edit.settingsBefore).catch((err) => console.error('[library] applying outside settings failed', err));
   };
   function takeLibraryEdit(unreadable: 'wait' | 'set-aside' = 'wait'): OutsideEdit | null {
     try { return store.syncWithDisk({ unreadable }); }

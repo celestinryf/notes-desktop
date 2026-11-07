@@ -17,8 +17,10 @@ const MAX_BACKUPS = 10;
 const BACKUP_MIN_INTERVAL_MS = 10 * 60 * 1000;
 const JOURNAL_MIN_BYTES = 1024 * 1024;
 const JOURNAL_SHARE_OF_BASE = 0.25;
-const STALE_JOURNALS_KEPT = 3;
-const STALE_JOURNAL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const SET_ASIDE_KEPT = 3;
+const SET_ASIDE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const STALE_JOURNAL_INFIX = '.stale-';
+const OUTSIDE_COPY_INFIX = '.outside-';
 const SCAN_YIELD_EVERY = 256;
 const SCAN_READERS = 16;
 const SCAN_TARGETED_MAX = 1000;
@@ -33,7 +35,7 @@ type FoundFile = { full: string; key: string; name: string; dirKey: string };
 type DiskFile = FoundFile & { mtime: number | null; text?: string | null };
 type DiskView = { dirs: DiskDir[]; files: DiskFile[]; changed: Set<string> | null };
 type DiskStamp = { size: number; mtimeMs: number; ino: number };
-type LibraryBase = { stamp: DiskStamp | null; settings: Settings; folders: Folder[] };
+type LibraryBase = { stamp: DiskStamp | null; journalId: string | null; settings: Settings; folders: Folder[] };
 type OutsideEdit =
   | { kind: 'merged'; notes: Note[]; dropped: string[]; refresh: string[]; settings: (keyof Settings)[]; settingsBefore: Settings; folders: boolean }
   | { kind: 'set-aside'; file: string }
@@ -308,7 +310,7 @@ const isSettingKey = (key: string): key is keyof Settings => Object.hasOwn(DEFAU
 function libraryBase(stamp: DiskStamp | null, doc: unknown, now: number): LibraryBase {
   const d = isRecord(doc) ? doc : {};
   const folders: unknown[] = Array.isArray(d.folders) ? d.folders : [];
-  return { stamp, settings: sanitizeSettings(d.settings), folders: folders.map((f) => sanitizeFolder(f, now)).filter(isPresent) };
+  return { stamp, journalId: typeof d.journalId === 'string' ? d.journalId : null, settings: sanitizeSettings(d.settings), folders: folders.map((f) => sanitizeFolder(f, now)).filter(isPresent) };
 }
 
 function readLibrary(dir: string): Record<string, unknown> | null {
@@ -644,6 +646,9 @@ class Store {
   revision: number;
   base: LibraryBase;
   touched: Set<string>;
+  taken: { stamp: DiskStamp | null; edits: OutsideEdit[] } | null;
+  unreadable: DiskStamp | null;
+  unannounced: OutsideEdit[];
   onOutsideEdit: ((edit: OutsideEdit) => void) | null;
   constructor(dir: string, opts?: { now?: () => number }) {
     opts = opts || {};
@@ -674,6 +679,9 @@ class Store {
     this.revision = 0;
     this.base = libraryBase(null, null, this.now());
     this.touched = new Set();
+    this.taken = null;
+    this.unreadable = null;
+    this.unannounced = [];
     this.onOutsideEdit = null;
   }
 
@@ -691,8 +699,11 @@ class Store {
     this.baseBytes = 0;
     this.lastCompactedAt = 0;
     this.touched = new Set();
+    this.taken = null;
+    this.unreadable = null;
+    const stampBeforeRead = stampOf(this.file);
     const base = readWithRetry(this.file);
-    const stamp = base.text === null ? null : stampOf(this.file);
+    const stamp = base.text === null ? null : stampBeforeRead;
     if (base.error) {
       this.loadError = base.error;
       this.saveBlocked = true;
@@ -797,7 +808,7 @@ class Store {
     const journal = parseJournal(read.text);
     if (!journal.header || !journal.journalId || !isRecord(raw) || raw.journalId !== journal.journalId) {
       if (!journal.records.length) return raw;
-      try { fs.renameSync(this.journalFile, this.journalFile + '.stale-' + this.now()); } catch (_) {  }
+      try { fs.renameSync(this.journalFile, this.journalFile + STALE_JOURNAL_INFIX + this.now()); } catch (_) {  }
       if (!this.recoveredFromBackup || !isRecord(raw) || !journal.header || !isFiniteNumber(journal.header.baseMtime) || !isFiniteNumber(raw.savedAt) || journal.header.baseMtime <= raw.savedAt) return raw;
       this.journalRecords = journal.records.length;
       return replayJournal(raw, journal.records, true, this.touched);
@@ -846,14 +857,24 @@ class Store {
 
   syncWithDisk(opts?: { unreadable?: 'wait' | 'set-aside' }): OutsideEdit | null {
     if (this.saveBlocked) return null;
-    const stamp = stampOf(this.file);
-    const fileEdited = !sameStamp(stamp, this.base.stamp);
-    if (!fileEdited && (!this.journalReady || this._journalIntact())) return null;
-    const edit: OutsideEdit = fileEdited && stamp ? this._readOutsideEdit(!!opts && opts.unreadable === 'set-aside') : { kind: 'restored' };
-    if (edit.kind === 'unreadable') return edit;
-    try { this._compact(); }
-    finally { if (this.onOutsideEdit) this.onOutsideEdit(edit); }
+    const edit = this._takeOutsideEdit(!!opts && opts.unreadable === 'set-aside');
+    const edits = this.unannounced.splice(0);
+    if (this.onOutsideEdit) for (const e of edits) this.onOutsideEdit(e);
     return edit;
+  }
+
+  _takeOutsideEdit(setAsideUnreadable: boolean): OutsideEdit | null {
+    const stamp = stampOf(this.file);
+    if (sameStamp(stamp, this.base.stamp) && (!this.journalReady || this._journalIntact())) return null;
+    if (stamp && sameStamp(stamp, this.unreadable) && !setAsideUnreadable) return { kind: 'unreadable' };
+    if (!this.taken || !sameStamp(stamp, this.taken.stamp)) {
+      const edit: OutsideEdit = stamp && !sameStamp(stamp, this.base.stamp) ? this._readOutsideEdit(setAsideUnreadable) : { kind: 'restored' };
+      if (edit.kind === 'unreadable') { this.unreadable = stamp; return edit; }
+      this.taken = { stamp, edits: (this.taken ? this.taken.edits : []).concat(edit) };
+    }
+    const edits = this.taken.edits;
+    this._compact();
+    return edits[edits.length - 1];
   }
 
   _readOutsideEdit(setAsideUnreadable: boolean): OutsideEdit {
@@ -861,11 +882,12 @@ class Store {
     if (read.text === null && !read.error) return { kind: 'restored' };
     const doc = read.text === null ? null : parseLine(read.text);
     if (!isRecord(doc)) return setAsideUnreadable ? { kind: 'set-aside', file: this._setAside() } : { kind: 'unreadable' };
-    if (this.journalId === null || doc.journalId !== this.journalId) return { kind: 'set-aside', file: this._setAside() };
+    if (this.base.journalId === null || doc.journalId !== this.base.journalId) return { kind: 'set-aside', file: this._setAside() };
     return this._mergeOutside(doc);
   }
 
   _mergeOutside(doc: Record<string, unknown>): OutsideEdit {
+    this._backup((target) => fs.writeFileSync(target, JSON.stringify(this.serialize(), null, 2)));
     this.revision++;
     const settingsBefore = structuredClone(this.settings);
     const notes = Array.isArray(doc.notes) ? this._mergeNotes(doc.notes) : { changed: [], dropped: [], refresh: [], sealed: false };
@@ -897,7 +919,7 @@ class Store {
       const taken = this._takeOutsideRow(n, t);
       if (taken === 'same') continue;
       changed.push(n);
-      if (taken === 'relinked') refresh.push(n.id);
+      if (taken === 'relinked' && n.filePath) refresh.push(n.id);
       if (n.lock && !sameValue(lockBefore, n.lock)) sealed = true;
     }
     const known = new Set(this.notes.map((n) => n.id));
@@ -912,7 +934,7 @@ class Store {
   }
 
   _takeOutsideRow(note: Note, theirs: Note): RowTaken {
-    const relinked = !note.vaultId && !!theirs.filePath && theirs.filePath !== note.filePath;
+    const relinked = !note.vaultId && theirs.filePath !== note.filePath;
     const next: Note = Object.assign({}, theirs);
     if (relinked) next.fileMtime = null;
     else for (const k of fileOwnedFields(note)) Object.assign(next, { [k]: note[k] });
@@ -958,14 +980,21 @@ class Store {
   }
 
   _setAside() {
-    const target = path.join(this.dir, uniqueName(this.dir, path.basename(this.file) + '.outside-' + this.now(), ''));
+    let at = this.now();
+    while (fs.existsSync(this._setAsidePath(at))) at++;
+    const target = this._setAsidePath(at);
     fs.copyFileSync(this.file, target);
     return target;
   }
 
+  _setAsidePath(at: number) {
+    return path.join(this.dir, path.basename(this.file) + OUTSIDE_COPY_INFIX + at);
+  }
+
   _keepOutsideEdit() {
     const stamp = stampOf(this.file);
-    if (stamp && !sameStamp(stamp, this.base.stamp)) this._setAside();
+    if (!stamp || sameStamp(stamp, this.base.stamp) || (this.taken && sameStamp(stamp, this.taken.stamp))) return;
+    this.unannounced.push({ kind: 'set-aside', file: this._setAside() });
   }
 
   _journalIntact() {
@@ -990,8 +1019,10 @@ class Store {
     const text = JSON.stringify(this.serialize(journalId), null, 2);
     writeFileAtomic(this.file, text);
     const stamp = stampOf(this.file);
-    this.base = { stamp, settings: structuredClone(this.settings), folders: structuredClone(this.folders) };
+    this.base = { stamp, journalId, settings: structuredClone(this.settings), folders: structuredClone(this.folders) };
     this.touched = new Set();
+    this.unreadable = null;
+    if (this.taken) { this.unannounced.push(...this.taken.edits); this.taken = null; }
     this.journalId = journalId;
     this.baseBytes = text.length;
     this.lastCompactedAt = this.now();
@@ -999,7 +1030,7 @@ class Store {
     if (!overwritesUnmovedCorruptFile) this._maybeBackup();
     this.journalRecords = 0;
     this.journalReady = stamp !== null && this._startJournal(journalId, stamp);
-    this._removeStaleJournals(STALE_JOURNALS_KEPT);
+    this._removeSetAsideCopies(SET_ASIDE_KEPT);
   }
 
   _startJournal(journalId: string, base: DiskStamp) {
@@ -1009,16 +1040,17 @@ class Store {
     return true;
   }
 
-  _removeStaleJournals(keep: number) {
-    const prefix = path.basename(this.journalFile) + '.stale-';
+  _removeSetAsideCopies(keep: number) {
     let names: string[] = [];
-    try { names = fs.readdirSync(this.dir).filter((f) => f.startsWith(prefix)); } catch (_) { return; }
+    try { names = fs.readdirSync(this.dir); } catch (_) { return; }
     const now = this.now();
-    const stale = names.map((name) => { const at = Number(name.slice(prefix.length)); return { name, at: Number.isFinite(at) ? at : 0 }; }).sort((a, b) => b.at - a.at);
-    stale.forEach((s, i) => {
-      if (i < keep && now - s.at <= STALE_JOURNAL_MAX_AGE_MS) return;
-      try { fs.unlinkSync(path.join(this.dir, s.name)); } catch (_) {  }
-    });
+    for (const prefix of [path.basename(this.journalFile) + STALE_JOURNAL_INFIX, path.basename(this.file) + OUTSIDE_COPY_INFIX]) {
+      const copies = names.filter((f) => f.startsWith(prefix)).map((name) => { const at = Number(name.slice(prefix.length)); return { name, at: Number.isFinite(at) ? at : 0 }; }).sort((a, b) => b.at - a.at);
+      copies.forEach((c, i) => {
+        if (i < keep && now - c.at <= SET_ASIDE_MAX_AGE_MS) return;
+        try { fs.unlinkSync(path.join(this.dir, c.name)); } catch (_) {  }
+      });
+    }
   }
 
   _append(records: string, bytes: number) {
@@ -1055,11 +1087,14 @@ class Store {
   }
 
   _maybeBackup() {
+    if (!fs.existsSync(this.file) || this.now() - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
+    this._backup((target) => fs.copyFileSync(this.file, target));
+  }
+
+  _backup(write: (target: string) => void) {
     const now = this.now();
-    if (!fs.existsSync(this.file) || now - this.lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     fs.mkdirSync(this.backupDir, { recursive: true });
-    const stamp = H.fileStamp(now);
-    try { fs.copyFileSync(this.file, path.join(this.backupDir, 'notes-' + stamp + '.json')); } catch (_) { return; }
+    try { write(path.join(this.backupDir, 'notes-' + H.fileStamp(now) + '.json')); } catch (_) { return; }
     this.lastBackupAt = now;
     const files = fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort();
     while (files.length > MAX_BACKUPS) { const oldest = files.shift(); if (!oldest) break; try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) { break; } }
@@ -1296,7 +1331,7 @@ class Store {
       if (sealedPath && plainPath) { try { writeFileAtomic(plainPath, body); fs.rmSync(sealedPath); } catch (_) {  } }
       throw err;
     }
-    this._removeStaleJournals(0);
+    this._removeSetAsideCopies(0);
     this.plain.set(id, body);
     this.keys.set(id, key);
     return this.publicNote(note);
@@ -2250,7 +2285,7 @@ class Store {
     const gone = new Set(ids);
     const before = this.notes.length;
     const dropped = this._commit(() => { this.notes = this.notes.filter((n) => !gone.has(n.id)); return before - this.notes.length; }, undefined, { notes: [], dropped: ids, purge: true });
-    this._removeStaleJournals(0);
+    this._removeSetAsideCopies(0);
     return dropped;
   }
 
