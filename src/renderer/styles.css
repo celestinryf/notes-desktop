@@ -309,6 +309,9 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .inline-item.is-active { background: var(--selected); color: var(--selected-fg); }
 .inline-item.is-active .icon, .inline-item.is-active .keys { color: inherit; }
 .inline-item .keys.md { font-family: var(--font-mono); }
+.link-results { display: flex; flex-direction: column; height: calc(var(--row-h) * 6); margin-top: 2px; }
+.link-results .inline-item { min-height: var(--row-h); flex-shrink: 0; }
+.link-empty { padding: 0 var(--s2); line-height: var(--row-h); font-size: var(--t-sm); color: var(--fg-3); }
 .convert-menu { max-width: 340px; }
 .convert-menu .menu-note { display: block; margin-top: 2px; font-size: var(--t-xs); font-weight: 400; color: var(--fg-3); white-space: normal; }
 .convert-menu > button { flex-direction: column; align-items: flex-start; padding: 6px var(--s2); }

@@ -696,17 +696,14 @@
         </div>
       </form>
     </dialog>
-    <dialog id="linkDialog" class="modal dialog-small">
+    <dialog id="linkDialog" class="modal dialog-small" aria-labelledby="linkTitle">
       <form method="dialog" class="dialog-form" id="linkForm">
-        <h2 class="dialog-title">Link</h2>
-        <label class="field">
-          <span class="field-label">URL</span>
-          <input id="linkInput" class="input" type="text" placeholder="https://" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span class="field-label">Or link to one of your notes</span>
-          <select id="linkNoteSelect" class="input"><option value="">— pick a note —</option></select>
-        </label>
+        <h2 class="dialog-title" id="linkTitle">Link</h2>
+        <div class="field">
+          <label class="field-label" for="linkInput">Link to</label>
+          <input id="linkInput" class="input" type="text" placeholder="Paste a web address or search your notes" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="linkResults" />
+          <div id="linkResults" class="link-results" role="listbox" aria-label="Notes and web addresses"></div>
+        </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-small" id="linkRemoveBtn">Remove link</button>
           <span class="spacer"></span>

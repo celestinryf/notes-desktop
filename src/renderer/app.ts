@@ -29,6 +29,7 @@ import { createStickyButton } from './sticky-button.ts';
 import { createBotPanel } from './bot-panel.ts';
 import { createCodeEditor, src } from './code-editor.ts';
 import { createEditorView, tableShown, focusBody, inTextField, bodyHasFocus, autoGrow } from './editor-view.ts';
+import { createLinkDialog } from './link-dialog.ts';
 import { createVaultsPanel } from './vaults-panel.ts';
 import { createLocking } from './locking.ts';
 import { createAttachments } from './attachments.ts';
@@ -2016,7 +2017,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   };
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
-  const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const links = createLinkDialog(api);
 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
 
@@ -2891,6 +2893,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('notes-folder', 'Go to', 'Show the notes folder', 'folder-open', '', showNotesFolder, !!(state.info && state.info.homeVaultId), 'folder files explorer location markdown disk'),
       fromButton(el.pinBtn, 'This note', { title: state.current && state.current.pinned ? 'Unpin' : 'Pin to the top', keys: 'Ctrl+D' }),
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
+      cmd('link', 'This note', 'Link the selected text', 'link', 'Ctrl+K', () => links.open(), noteOpen && !!state.rich && !state.sourceMode && !src.codeOn, 'url web address note reference'),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
       cmd('find-case', 'This note', 'Find: match case' + (find.matchCase ? ' (on)' : ''), 'case-sensitive', 'Alt+C', () => toggleFindOption('matchCase'), find.open, 'case sensitive'),
@@ -3010,7 +3013,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         case 'i': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
           if (document.activeElement === el.bodyInput) { if (!isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('[', '](url)'); } }
-          else if (bodyHasFocus() && !src.codeOn) { e.preventDefault(); openLinkDialog(); }
+          else if (bodyHasFocus() && !src.codeOn) { e.preventDefault(); links.open(); }
           return;
         default: break;
       }
@@ -3194,7 +3197,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
     el.historyRestoreBtn.addEventListener('click', restoreVersion);
     el.historyDialog.addEventListener('close', () => focusBody());
-    el.linkNoteSelect.addEventListener('change', () => { if (el.linkNoteSelect.value) el.linkInput.value = el.linkNoteSelect.value; });
     el.findPrevBtn.addEventListener('click', () => runFind(false));
     el.findCloseBtn.addEventListener('click', closeFind);
     el.findInput.addEventListener('input', () => runFind(true, true));
@@ -3274,15 +3276,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.bodyInput.addEventListener('input', autoGrow);
     el.richEditor.addEventListener('mousedown', (e) => { if (e.target === el.richEditor && state.rich) { e.preventDefault(); state.rich.focus('end'); } });
 
-    el.linkForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const href = el.linkInput.value.trim();
-      el.linkDialog.close();
-      if (state.rich) state.rich.setLink(href && href !== 'https://' ? href : '', state.linkRange);
-    });
-    el.linkRemoveBtn.addEventListener('click', () => { el.linkDialog.close(); if (state.rich) state.rich.setLink('', state.linkRange); });
-    el.linkCancelBtn.addEventListener('click', () => el.linkDialog.close());
-    el.linkDialog.addEventListener('close', () => focusBody());
+    links.bind();
 
     el.alignSeg.querySelectorAll<HTMLButtonElement>('button[data-align]').forEach((b) => b.addEventListener('click', () => { const align = b.dataset.align; if (align === 'left' || align === 'center' || align === 'right') { setDraft({ editorAlign: align }); syncAlignSeg(align); } }));
     el.editorWidthInput.addEventListener('input', () => {
