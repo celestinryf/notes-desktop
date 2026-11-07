@@ -1,0 +1,497 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+const { Store, readLibrary } = require('../../src/store.mts');
+const { tmpDir } = require('../helpers/tmp');
+
+function makeStore() {
+  let t = 1_000_000;
+  const store = new Store(tmpDir('notes-outside-'), { now: () => t }).load();
+  return { store, tick: (ms) => { t += ms; } };
+}
+
+function homeStore() {
+  let t = 1_000_000;
+  const store = new Store(tmpDir('notes-outside-data-'), { now: () => (t += 1000) }).load();
+  const home = store.addHomeVault(tmpDir('notes-outside-home-'));
+  return { store, home };
+}
+
+function twoNotes() {
+  const { store } = makeStore();
+  const a = store.create({ title: 'A', body: 'a' });
+  const b = store.create({ title: 'B', body: 'b' });
+  store.save();
+  return { store, a, b };
+}
+
+const readDoc = (store) => JSON.parse(fs.readFileSync(store.file, 'utf8'));
+const rowOf = (doc, id) => doc.notes.find((n) => n.id === id);
+const reload = (store) => new Store(store.dir).load();
+const keptAside = (store) => fs.readdirSync(store.dir).filter((f) => f.startsWith('notes.json.outside-'));
+
+function writeDoc(store, doc) {
+  const tmp = store.file + '.writing';
+  fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
+  fs.renameSync(tmp, store.file);
+}
+
+function editOutside(store, edit) {
+  const doc = readDoc(store);
+  edit(doc);
+  writeDoc(store, doc);
+  return doc;
+}
+
+function listen(store) {
+  const heard = { edits: [], index: [] };
+  store.onOutsideEdit = (e) => heard.edits.push(e);
+  store.onIndexChange = (u) => heard.index.push(u);
+  return heard;
+}
+
+test('an outside edit is taken in and survives the next save and a restart (the stale-rows bug of 2026-11-05)', () => {
+  const { store, a, b } = twoNotes();
+  const heard = listen(store);
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  const edit = store.syncWithDisk();
+  assert.equal(edit.kind, 'merged');
+  assert.deepEqual(edit.notes.map((n) => n.id), [a.id]);
+  assert.deepEqual(heard.edits, [edit]);
+  assert.deepEqual(heard.index.map((u) => u.notes.map((n) => n.id)), [[a.id]]);
+  assert.equal(store.get(a.id).pinned, true);
+  assert.equal(store.get(a.id), store.notes.find((n) => n.id === a.id), 'the row object is kept, so other modules holding it stay current');
+  store.update(b.id, { body: 'b2' });
+  store.save();
+  const again = reload(store);
+  assert.equal(again.get(a.id).pinned, true);
+  assert.equal(again.get(b.id).body, 'b2');
+  assert.deepEqual(keptAside(store), []);
+});
+
+test('an outside write in place with the same size is still seen, by its time', () => {
+  const { store, a } = twoNotes();
+  const doc = readDoc(store);
+  rowOf(doc, a.id).title = 'Z';
+  fs.writeFileSync(store.file, JSON.stringify(doc, null, 2));
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(store.file, later, later);
+  assert.equal(store.syncWithDisk().kind, 'merged');
+  assert.equal(store.get(a.id).title, 'Z');
+});
+
+test('nothing changed on disk: a sync returns nothing and writes nothing, and Notes\' own journal append is not an outside edit', () => {
+  const { store, a } = twoNotes();
+  const heard = listen(store);
+  const before = fs.statSync(store.file);
+  assert.equal(store.syncWithDisk(), null);
+  store.update(a.id, { body: 'appended' });
+  assert.equal(store.journalRecords, 1);
+  assert.equal(store.syncWithDisk(), null);
+  const after = fs.statSync(store.file);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.equal(after.size, before.size);
+  assert.deepEqual(heard.edits, []);
+});
+
+test('a row Notes changed since its last full save keeps Notes\' version; the outside edit\'s other rows are taken', () => {
+  const { store, a, b } = twoNotes();
+  store.update(a.id, { body: 'mine' });
+  editOutside(store, (doc) => {
+    Object.assign(rowOf(doc, a.id), { body: 'theirs', pinned: true });
+    rowOf(doc, b.id).pinned = true;
+  });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.notes.map((n) => n.id), [b.id]);
+  assert.equal(store.get(a.id).body, 'mine');
+  assert.equal(store.get(a.id).pinned, false);
+  assert.equal(store.get(b.id).pinned, true);
+  const again = reload(store);
+  assert.equal(again.get(a.id).body, 'mine');
+  assert.equal(again.get(b.id).pinned, true);
+});
+
+test('Notes\' journal append after an outside edit is kept when the edit is merged later', () => {
+  const { store, a, b } = twoNotes();
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  store.update(b.id, { body: 'typed meanwhile' });
+  assert.equal(store.journalRecords, 1, 'the append does not overwrite notes.json');
+  store.syncWithDisk();
+  assert.equal(store.get(a.id).pinned, true);
+  assert.equal(store.get(b.id).body, 'typed meanwhile');
+  const again = reload(store);
+  assert.equal(again.get(a.id).pinned, true);
+  assert.equal(again.get(b.id).body, 'typed meanwhile');
+});
+
+test('a full save that finds an unmerged outside edit keeps a copy of it instead of overwriting it', () => {
+  const { store, a } = twoNotes();
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  const theirs = fs.readFileSync(store.file, 'utf8');
+  store.save();
+  const kept = keptAside(store);
+  assert.equal(kept.length, 1);
+  assert.equal(fs.readFileSync(path.join(store.dir, kept[0]), 'utf8'), theirs);
+  assert.equal(store.syncWithDisk(), null, 'the save wrote over it, so there is nothing left to merge');
+});
+
+test('flush takes in an outside edit before it saves', () => {
+  const { store, a, b } = twoNotes();
+  store.update(b.id, { body: 'unsaved' });
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  store.flush();
+  assert.equal(store.journalRecords, 0);
+  assert.deepEqual(keptAside(store), []);
+  const again = reload(store);
+  assert.equal(again.get(a.id).pinned, true);
+  assert.equal(again.get(b.id).body, 'unsaved');
+});
+
+test('a row the outside edit removes is dropped and a row it adds is taken, in memory, in the index and on disk', () => {
+  const { store, a, b } = twoNotes();
+  const heard = listen(store);
+  editOutside(store, (doc) => {
+    doc.notes = doc.notes.filter((n) => n.id !== a.id);
+    doc.notes.push(Object.assign({}, rowOf(doc, b.id), { id: 'from-outside', title: 'Added', body: 'hello' }));
+  });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.dropped, [a.id]);
+  assert.deepEqual(edit.notes.map((n) => n.id), ['from-outside']);
+  assert.deepEqual(edit.refresh, []);
+  assert.equal(store.get(a.id), null);
+  assert.equal(store.get('from-outside').body, 'hello');
+  assert.deepEqual(heard.index[0].dropped, [a.id]);
+  const again = reload(store);
+  assert.equal(again.get(a.id), null);
+  assert.equal(again.get('from-outside').title, 'Added');
+});
+
+test('a row Notes removed since its last full save stays removed, even though the outside copy still has it', async () => {
+  const { store, home } = homeStore();
+  const gone = store.create({ body: '# Gone\n' });
+  store.save();
+  fs.rmSync(gone.filePath);
+  await store.scanVault(home.id);
+  assert.equal(store.get(gone.id), null);
+  assert.ok(store.journalRecords > 0, 'the removal was journaled, not a full save');
+  editOutside(store, (doc) => { assert.ok(rowOf(doc, gone.id), 'the outside editor read the copy from before the removal'); });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.notes, []);
+  assert.equal(store.get(gone.id), null);
+  assert.equal(reload(store).get(gone.id), null);
+});
+
+test('a note on its way to the Recycle Bin is left alone', () => {
+  const { store, a } = twoNotes();
+  store.recycling.add(a.id);
+  editOutside(store, (doc) => { doc.notes = doc.notes.filter((n) => n.id !== a.id); });
+  assert.deepEqual(store.syncWithDisk().dropped, []);
+  assert.ok(store.get(a.id));
+});
+
+test('a removed row stays while its file is still in a notes folder; one whose file is gone is dropped', () => {
+  const { store } = homeStore();
+  const keep = store.create({ body: '# Keep\n' });
+  const gone = store.create({ body: '# Gone\n' });
+  store.save();
+  fs.rmSync(gone.filePath);
+  editOutside(store, (doc) => { doc.notes = doc.notes.filter((n) => n.id !== keep.id && n.id !== gone.id); });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.dropped, [gone.id]);
+  assert.ok(store.get(keep.id));
+  assert.equal(store.get(gone.id), null);
+});
+
+test('the file decides a file note\'s text, name and place; its pin comes from the outside edit', () => {
+  const { store } = homeStore();
+  const n = store.create({ body: '# Plan\nreal text\n', tags: 'work' });
+  store.save();
+  const before = Object.assign({}, store.get(n.id));
+  editOutside(store, (doc) => {
+    Object.assign(rowOf(doc, n.id), { body: 'stale', title: 'Renamed', filePath: 'C:\\elsewhere\\Plan.md', folderId: 'nowhere', tags: ['other'], fileMtime: 1, pinned: true });
+  });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.notes.map((x) => x.id), [n.id]);
+  assert.deepEqual(edit.refresh, []);
+  const after = store.get(n.id);
+  for (const k of ['body', 'title', 'filePath', 'folderId', 'vaultId', 'tags', 'fileMtime', 'fileKind']) assert.deepEqual(after[k], before[k], k);
+  assert.equal(after.pinned, true);
+});
+
+test('an outside relink of a linked file points the note at the new file, which is read again', async () => {
+  const { store } = makeStore();
+  const dir = tmpDir('notes-outside-files-');
+  const oldFile = path.join(dir, 'old.txt');
+  const newFile = path.join(dir, 'new.txt');
+  fs.writeFileSync(oldFile, 'old text');
+  fs.writeFileSync(newFile, 'new text');
+  const n = await store.linkFile(oldFile);
+  store.save();
+  editOutside(store, (doc) => { rowOf(doc, n.id).filePath = newFile; });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.refresh, [n.id]);
+  assert.equal(store.get(n.id).filePath, newFile);
+  assert.equal(store.get(n.id).fileMtime, null);
+  await store.refreshFileNote(n.id);
+  assert.equal(store.get(n.id).body, 'new text');
+});
+
+test('a linked file added from outside is read from disk, not from the row\'s text', async () => {
+  const { store, b } = twoNotes();
+  const file = path.join(tmpDir('notes-outside-files-'), 'added.txt');
+  fs.writeFileSync(file, 'on disk');
+  editOutside(store, (doc) => {
+    doc.notes.push(Object.assign({}, rowOf(doc, b.id), { id: 'linked', title: 'added.txt', body: 'stale', filePath: file, fileKind: 'text', fileMtime: 1 }));
+  });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.refresh, ['linked']);
+  await store.refreshFileNote('linked');
+  assert.equal(store.get('linked').body, 'on disk');
+});
+
+test('settings merge key by key: an outside key is taken, a key Notes changed keeps Notes\' value', () => {
+  const { store } = twoNotes();
+  store.setSettings({ sidebarWidth: 300 });
+  editOutside(store, (doc) => { doc.settings.fontSize = 18; doc.settings.sidebarWidth = 250; });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.settings, ['fontSize']);
+  assert.equal(edit.settingsBefore.fontSize, 16);
+  assert.equal(store.settings.fontSize, 18);
+  assert.equal(store.settings.sidebarWidth, 300);
+  const again = reload(store);
+  assert.equal(again.settings.fontSize, 18);
+  assert.equal(again.settings.sidebarWidth, 300);
+});
+
+test('an outside setting is cleaned like any other, and an unchanged one is not reported', () => {
+  const { store } = twoNotes();
+  editOutside(store, (doc) => { doc.settings.fontSize = 999; doc.settings.theme = doc.settings.theme; });
+  const edit = store.syncWithDisk();
+  assert.deepEqual(edit.settings, ['fontSize']);
+  assert.ok(store.settings.fontSize < 999, 'clamped by sanitizeSettings');
+});
+
+test('an outside file without notes, folders or settings leaves those alone', () => {
+  const { store } = twoNotes();
+  store.createFolder({ name: 'Kept' });
+  store.save();
+  const settings = store.getSettings();
+  editOutside(store, (doc) => { delete doc.notes; delete doc.folders; delete doc.settings; });
+  const edit = store.syncWithDisk();
+  assert.equal(edit.kind, 'merged');
+  assert.deepEqual([edit.notes, edit.dropped, edit.settings, edit.folders], [[], [], [], false]);
+  assert.equal(store.notes.length, 2);
+  assert.equal(store.folders.length, 1);
+  assert.deepEqual(store.getSettings(), settings);
+});
+
+test('an outside edit made from an older copy is kept aside, not merged, and Notes\' newer state is written', () => {
+  const { store, a } = twoNotes();
+  const heard = listen(store);
+  const old = readDoc(store);
+  store.update(a.id, { body: 'newer' });
+  store.save();
+  rowOf(old, a.id).pinned = true;
+  writeDoc(store, old);
+  const edit = store.syncWithDisk();
+  assert.equal(edit.kind, 'set-aside');
+  assert.deepEqual(heard.edits, [edit]);
+  assert.equal(JSON.parse(fs.readFileSync(edit.file, 'utf8')).journalId, old.journalId);
+  assert.equal(store.get(a.id).pinned, false);
+  const again = reload(store);
+  assert.equal(again.get(a.id).body, 'newer');
+  assert.equal(again.get(a.id).pinned, false);
+});
+
+test('an outside file with no journal id is kept aside', () => {
+  const { store, a } = twoNotes();
+  editOutside(store, (doc) => { delete doc.journalId; rowOf(doc, a.id).pinned = true; });
+  assert.equal(store.syncWithDisk().kind, 'set-aside');
+  assert.equal(store.get(a.id).pinned, false);
+});
+
+test('two copies kept aside at the same moment get different names', () => {
+  const { store, a } = twoNotes();
+  editOutside(store, (doc) => { delete doc.journalId; });
+  const first = store.syncWithDisk();
+  editOutside(store, (doc) => { delete doc.journalId; rowOf(doc, a.id).pinned = true; });
+  const second = store.syncWithDisk();
+  assert.notEqual(first.file, second.file);
+  assert.equal(keptAside(store).length, 2);
+});
+
+test('a half-written notes.json is left alone while it may still be written, then kept aside when asked', () => {
+  const { store, a } = twoNotes();
+  const heard = listen(store);
+  const partial = '{"schemaVersion": 2, "notes": [';
+  fs.writeFileSync(store.file, partial);
+  assert.deepEqual(store.syncWithDisk(), { kind: 'unreadable' });
+  assert.equal(fs.readFileSync(store.file, 'utf8'), partial);
+  assert.deepEqual(heard.edits, [], 'nothing to tell anyone yet');
+  const edit = store.syncWithDisk({ unreadable: 'set-aside' });
+  assert.equal(edit.kind, 'set-aside');
+  assert.equal(fs.readFileSync(edit.file, 'utf8'), partial);
+  assert.equal(reload(store).get(a.id).title, 'A');
+});
+
+test('a deleted notes.json is written again from what Notes holds', () => {
+  const { store, a } = twoNotes();
+  store.update(a.id, { body: 'journaled' });
+  fs.rmSync(store.file);
+  assert.deepEqual(store.syncWithDisk(), { kind: 'restored' });
+  assert.equal(reload(store).get(a.id).body, 'journaled');
+});
+
+test('a journal removed from outside is rewritten on the next sync', () => {
+  const { store, a } = twoNotes();
+  store.update(a.id, { body: 'journaled' });
+  fs.rmSync(store.journalFile);
+  assert.deepEqual(store.syncWithDisk(), { kind: 'restored' });
+  assert.ok(fs.readFileSync(store.journalFile, 'utf8').startsWith('{"journalId"'));
+  assert.equal(reload(store).get(a.id).body, 'journaled');
+});
+
+test('a journal removed from outside makes the next change a full save, so the change outlives a restart', () => {
+  const { store, a } = twoNotes();
+  fs.rmSync(store.journalFile);
+  store.update(a.id, { body: 'after' });
+  assert.equal(store.journalRecords, 0, 'not appended to a journal with no header');
+  assert.ok(fs.readFileSync(store.journalFile, 'utf8').startsWith('{"journalId"'));
+  assert.equal(reload(store).get(a.id).body, 'after');
+});
+
+test('a journal emptied or rewritten outside is not appended to: the next change is a full save that outlives a restart', () => {
+  for (const outsideText of ['', '{"journalId":"someone-else"}']) {
+    const { store, a } = twoNotes();
+    store.update(a.id, { body: 'before' });
+    fs.writeFileSync(store.journalFile, outsideText);
+    store.update(a.id, { body: 'after' });
+    assert.equal(store.journalRecords, 0, 'not appended after ' + JSON.stringify(outsideText));
+    assert.equal(reload(store).get(a.id).body, 'after');
+  }
+});
+
+test('a library that could not be read at start is never synced', () => {
+  const { store, a } = twoNotes();
+  editOutside(store, (doc) => { rowOf(doc, a.id).pinned = true; });
+  store.saveBlocked = true;
+  assert.equal(store.syncWithDisk(), null);
+  assert.equal(store.get(a.id).pinned, false);
+});
+
+test('after a restart with an unsaved journal, the rows in it count as changed by Notes', () => {
+  const { store, a, b } = twoNotes();
+  store.update(a.id, { body: 'journaled' });
+  const restarted = new Store(store.dir, { now: () => 2_000_000 }).load();
+  editOutside(restarted, (doc) => {
+    rowOf(doc, a.id).body = 'theirs';
+    rowOf(doc, b.id).pinned = true;
+  });
+  restarted.syncWithDisk();
+  assert.equal(restarted.get(a.id).body, 'journaled');
+  assert.equal(restarted.get(b.id).pinned, true);
+});
+
+test('an outside editor that read the journal too is merged the same way', () => {
+  const { store, a, b } = twoNotes();
+  store.update(a.id, { body: 'journaled' });
+  const doc = readLibrary(store.dir);
+  assert.equal(rowOf(doc, a.id).body, 'journaled');
+  rowOf(doc, b.id).pinned = true;
+  writeDoc(store, doc);
+  store.syncWithDisk();
+  assert.equal(store.get(a.id).body, 'journaled');
+  assert.equal(store.get(b.id).pinned, true);
+});
+
+test('a locked note whose sealed text changes outside is locked again for the session, and the index is purged', () => {
+  const { store } = makeStore();
+  const secret = store.create({ title: 'Secret', body: 'hidden' });
+  const other = store.create({ title: 'Other', body: 'also hidden' });
+  store.lockNote(secret.id, 'pw');
+  store.lockNote(other.id, 'pw2');
+  store.save();
+  assert.equal(store.publicNote(store.get(secret.id)).unlocked, true);
+  const heard = listen(store);
+  editOutside(store, (doc) => { rowOf(doc, secret.id).lock = rowOf(doc, other.id).lock; });
+  store.syncWithDisk();
+  assert.equal(store.publicNote(store.get(secret.id)).unlocked, false);
+  assert.equal(store.publicNote(store.get(other.id)).unlocked, true);
+  assert.equal(heard.index[0].purge, true);
+});
+
+test('a locked note removed outside is forgotten for the session too', () => {
+  const { store } = makeStore();
+  const secret = store.create({ title: 'Secret', body: 'hidden' });
+  store.lockNote(secret.id, 'pw');
+  store.save();
+  editOutside(store, (doc) => { doc.notes = doc.notes.filter((n) => n.id !== secret.id); });
+  store.syncWithDisk();
+  assert.equal(store.plain.has(secret.id), false);
+  assert.equal(store.keys.has(secret.id), false);
+});
+
+test('folders: an outside rename is taken, a folder removed outside frees its notes, and a new one is added', () => {
+  const { store } = makeStore();
+  const work = store.createFolder({ name: 'Work' });
+  const old = store.createFolder({ name: 'Old' });
+  const n = store.create({ title: 'In old', folderId: old.id });
+  store.setSettings({ expandedFolders: [old.id] });
+  store.save();
+  editOutside(store, (doc) => {
+    doc.folders.find((f) => f.id === work.id).name = 'Jobs';
+    doc.folders = doc.folders.filter((f) => f.id !== old.id);
+    doc.folders.push(Object.assign({}, doc.folders[0], { id: 'outside-folder', name: 'New' }));
+  });
+  const edit = store.syncWithDisk();
+  assert.equal(edit.folders, true);
+  assert.equal(store.getFolder(work.id).name, 'Jobs');
+  assert.equal(store.getFolder(old.id), null);
+  assert.equal(store.getFolder('outside-folder').name, 'New');
+  assert.equal(store.get(n.id).folderId, null);
+  assert.deepEqual(store.settings.expandedFolders, []);
+  assert.equal(reload(store).getFolder(work.id).name, 'Jobs');
+});
+
+test('folders: one Notes changed since its last full save keeps Notes\' version', () => {
+  const { store } = makeStore();
+  const f = store.createFolder({ name: 'Work' });
+  store.save();
+  store.renameFolder(f.id, 'Mine');
+  editOutside(store, (doc) => { doc.folders.find((x) => x.id === f.id).name = 'Theirs'; });
+  assert.equal(store.syncWithDisk().folders, false);
+  assert.equal(store.getFolder(f.id).name, 'Mine');
+});
+
+test('folders: a folder in a notes folder on disk is decided by the disk', () => {
+  const { store } = homeStore();
+  const f = store.createFolder({ name: 'Projects' });
+  store.save();
+  editOutside(store, (doc) => {
+    doc.folders.find((x) => x.id === f.id).name = 'Renamed';
+    doc.folders.push(Object.assign({}, doc.folders.find((x) => x.id === f.id), { id: 'outside-vault-folder' }));
+  });
+  assert.equal(store.syncWithDisk().folders, false);
+  assert.equal(store.getFolder(f.id).name, 'Projects');
+  assert.equal(store.getFolder('outside-vault-folder'), null);
+});
+
+test('folders: an outside edit cannot remove a folder that lives on disk', () => {
+  const { store } = homeStore();
+  const f = store.createFolder({ name: 'Projects' });
+  store.save();
+  editOutside(store, (doc) => { doc.folders = doc.folders.filter((x) => x.id !== f.id); });
+  store.syncWithDisk();
+  assert.ok(store.getFolder(f.id));
+});
+
+test('vaults are Notes\' own: an outside change to them is ignored', () => {
+  const { store, home } = homeStore();
+  store.save();
+  editOutside(store, (doc) => { doc.vaults[0].name = 'Elsewhere'; doc.vaults.push(Object.assign({}, doc.vaults[0], { id: 'outside-vault', home: false })); });
+  store.syncWithDisk();
+  assert.deepEqual(store.vaults.map((v) => v.id), [home.id]);
+  assert.equal(store.getVault(home.id).name, home.name);
+});

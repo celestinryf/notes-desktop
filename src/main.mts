@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, dialog, shell, nativeTheme, screen, Notification, clipboard, ClipboardItem, session, protocol, safeStorage } from 'electron';
 import { Store, isFileNote, MOVING_MARKER } from './store.mts';
+import type { OutsideEdit } from './store.mts';
 import { SearchIndex } from './search-index.mts';
 import { linkNamesOf } from './vault-links.mts';
 import { GitHub } from './github.mts';
@@ -43,6 +44,9 @@ const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const USE_RECYCLE_BIN = process.env.NOTES_APP_NO_RECYCLE_BIN !== '1';
 const SYNC_EVERY_MS = 5 * 60 * 1000;
 const SYNC_ON_SHOW_MS = 60 * 1000;
+const LIBRARY_SETTLE_MS = 300;
+const LIBRARY_RETRY_MS = 1000;
+const LIBRARY_UNREADABLE_TRIES = 5;
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
 const TITLE_BAR_H = 39;
@@ -318,11 +322,7 @@ function main() {
     if (!store.saveBlocked) {
       reloadedSinceStart = true;
       filesMove = ensureNotesFolder(store);
-      applyTheme();
-      registerHotkey(store.settings.hotkey);
-      if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!store.settings.alwaysOnTop);
-      applyLoginItem();
-      git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
+      applySettingsEffects(null).catch(() => {});
       if (win && !win.isDestroyed()) win.webContents.send('settings:changed', store.getSettings());
       fanReloaded({ reason: 'recovered' });
       try { stickies.restoreAll(); } catch (_) {  }
@@ -412,6 +412,18 @@ function main() {
     if (win && !win.isDestroyed()) win.setBackgroundColor(windowColors().background);
   }
 
+  function applySettingsEffects(before: Settings | null) {
+    const now = store.settings;
+    const changed = (key: keyof Settings) => !before || JSON.stringify(now[key]) !== JSON.stringify(before[key]);
+    if (changed('theme') || changed('colorScheme') || changed('customColors')) applyTheme();
+    if (changed('hotkey') && (hotkeyState.hotkey !== now.hotkey || !hotkeyState.registered)) registerHotkey(now.hotkey);
+    if (changed('alwaysOnTop') && win && !win.isDestroyed()) win.setAlwaysOnTop(!!now.alwaysOnTop);
+    if (changed('openAtLogin')) applyLoginItem();
+    refreshTray();
+    if (!changed('gitEnabled') && !changed('gitRemote')) return Promise.resolve();
+    return git.configure(now).then(() => { if (now.gitEnabled) git.noteChanged(); });
+  }
+
   function refreshTray() {
     if (!tray) return;
     const hk = hotkeyState.registered ? H.displayAccelerator(hotkeyState.hotkey) : 'hotkey unavailable';
@@ -478,7 +490,7 @@ function main() {
     };
   }
 
-  const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, fn);
+  const handle = <K extends IpcChannel>(channel: K, fn: (event: Electron.IpcMainInvokeEvent, ...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>) => ipcMain.handle(channel, (event, ...args: IpcArgs<K>) => { takeLibraryEdit(); return fn(event, ...args); });
   ipcMain.on('app:trace', (_e, event: unknown, fields: unknown) => trace.fromPage(event, fields));
   handle('notes:list', async (_e, opts) => store.list(opts, await searchIndex.candidates(opts && opts.query)).map((n) => store.publicNote(n)));
   handle('notes:rows', async (_e, opts) => store.rows(opts, await searchIndex.candidates(opts && opts.query)));
@@ -524,6 +536,31 @@ function main() {
     stickies.broadcast('notes:reloaded', payload);
   }
   store.onFileText = (id) => { fanReloaded({ reason: 'file', id }); };
+  store.onOutsideEdit = (edit) => {
+    trace.write('library-outside-edit', { kind: edit.kind });
+    if (edit.kind === 'set-aside') console.error('[library] kept an outside change to notes.json that could not be merged:', edit.file);
+    if (edit.kind !== 'merged') return;
+    for (const id of edit.refresh) store.refreshFileNote(id).then(() => fanReloaded({ reason: 'library', id })).catch((err) => console.error('[library] reading a relinked file failed', err));
+    if (edit.settings.length) { applySettingsEffects(edit.settingsBefore).catch(() => {}); broadcastSettings(); }
+    closeOrphanStickies();
+    fanReloaded({ reason: 'library' });
+  };
+  function takeLibraryEdit(unreadable: 'wait' | 'set-aside' = 'wait'): OutsideEdit | null {
+    try { return store.syncWithDisk({ unreadable }); }
+    catch (err) { console.error('[library] taking in an outside change failed', err); return null; }
+  }
+  let libraryTimer: NodeJS.Timeout | undefined;
+  function watchLibraryEdit(attempt: number) {
+    clearTimeout(libraryTimer);
+    libraryTimer = setTimeout(() => {
+      const edit = takeLibraryEdit(attempt < LIBRARY_UNREADABLE_TRIES ? 'wait' : 'set-aside');
+      if (edit && edit.kind === 'unreadable') watchLibraryEdit(attempt + 1);
+    }, attempt ? LIBRARY_RETRY_MS : LIBRARY_SETTLE_MS);
+  }
+  try {
+    fs.watch(DATA_DIR, { persistent: false }, (_event, name) => { if (name === null || name === path.basename(store.file)) watchLibraryEdit(0); })
+      .on('error', (err) => console.error('[library] watching notes.json failed', err));
+  } catch (err) { console.error('[library] watching notes.json failed', err); }
 
   function forgetEmptiedBin() {
     if (store.saveBlocked) return;
@@ -1133,15 +1170,7 @@ function main() {
       if (patch.hotkey && patch.hotkey !== before.hotkey) registerHotkey(before.hotkey);
       throw err;
     }
-    const schemeChanged = settings.colorScheme !== before.colorScheme || JSON.stringify(settings.customColors) !== JSON.stringify(before.customColors);
-    if (settings.theme !== before.theme || schemeChanged) applyTheme();
-    if (settings.alwaysOnTop !== before.alwaysOnTop && win) win.setAlwaysOnTop(settings.alwaysOnTop);
-    if (settings.openAtLogin !== before.openAtLogin) applyLoginItem();
-    if (settings.gitEnabled !== before.gitEnabled || settings.gitRemote !== before.gitRemote) {
-      await git.configure(settings);
-      if (settings.gitEnabled) git.noteChanged();
-    }
-    refreshTray();
+    await applySettingsEffects(before);
     stickies.broadcast('settings:changed', settings);
     return { settings, info: info(), error };
   });

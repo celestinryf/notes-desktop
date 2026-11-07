@@ -32,6 +32,14 @@ type DiskDir = { full: string; key: string; name: string; parentKey: string };
 type FoundFile = { full: string; key: string; name: string; dirKey: string };
 type DiskFile = FoundFile & { mtime: number | null; text?: string | null };
 type DiskView = { dirs: DiskDir[]; files: DiskFile[]; changed: Set<string> | null };
+type DiskStamp = { size: number; mtimeMs: number; ino: number };
+type LibraryBase = { stamp: DiskStamp | null; settings: Settings; folders: Folder[] };
+type OutsideEdit =
+  | { kind: 'merged'; notes: Note[]; dropped: string[]; refresh: string[]; settings: (keyof Settings)[]; settingsBefore: Settings; folders: boolean }
+  | { kind: 'set-aside'; file: string }
+  | { kind: 'restored' }
+  | { kind: 'unreadable' };
+type RowTaken = 'same' | 'changed' | 'relinked';
 
 const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   hotkey: 'CommandOrControl+Alt+N',
@@ -272,10 +280,35 @@ function parseJournal(text: string) {
 }
 
 function baseMatches(file: string, header: Record<string, unknown>) {
+  const stamp = stampOf(file);
+  return !!stamp && stamp.size === header.baseSize && stamp.mtimeMs === header.baseMtime;
+}
+
+function stampOf(file: string): DiskStamp | null {
   try {
     const st = fs.statSync(file);
-    return st.size === header.baseSize && st.mtimeMs === header.baseMtime;
-  } catch (_) { return false; }
+    return { size: st.size, mtimeMs: st.mtimeMs, ino: st.ino };
+  } catch (_) { return null; }
+}
+
+const sameStamp = (a: DiskStamp | null, b: DiskStamp | null) => (a && b ? a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino : a === b);
+const byName = ([a]: [string, unknown], [b]: [string, unknown]) => (a < b ? -1 : a > b ? 1 : 0);
+const keysInOrder = (_key: string, v: unknown) => (isRecord(v) ? Object.fromEntries(Object.entries(v).sort(byName)) : v);
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a, keysInOrder) === JSON.stringify(b, keysInOrder);
+const sameFields = (a: object, b: object) => {
+  for (const key of new Set(Object.keys(a).concat(Object.keys(b)))) {
+    const x: unknown = Reflect.get(a, key);
+    const y: unknown = Reflect.get(b, key);
+    if (x !== y && !(typeof x === 'object' && typeof y === 'object' && sameValue(x, y))) return false;
+  }
+  return true;
+};
+const isSettingKey = (key: string): key is keyof Settings => Object.hasOwn(DEFAULT_SETTINGS, key);
+
+function libraryBase(stamp: DiskStamp | null, doc: unknown, now: number): LibraryBase {
+  const d = isRecord(doc) ? doc : {};
+  const folders: unknown[] = Array.isArray(d.folders) ? d.folders : [];
+  return { stamp, settings: sanitizeSettings(d.settings), folders: folders.map((f) => sanitizeFolder(f, now)).filter(isPresent) };
 }
 
 function readLibrary(dir: string): Record<string, unknown> | null {
@@ -308,7 +341,7 @@ const copySettings = (s: Settings): Settings => Object.assign({}, s, { expandedF
 const touchesContent = (c: Change) => !!((c.notes && c.notes.length) || (c.dropped && c.dropped.length) || c.folders);
 const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function replayJournal(doc: Record<string, unknown>, lines: unknown[], baseWasEdited: boolean): Record<string, unknown> {
+function replayJournal(doc: Record<string, unknown>, lines: unknown[], baseWasEdited: boolean, touched?: Set<string>): Record<string, unknown> {
   const records = lines.flatMap((line) => (isRecord(line) && Array.isArray(line.change) ? line.change : []));
   const out = Object.assign({}, doc);
   const notes: unknown[] = Array.isArray(doc.notes) ? doc.notes.slice() : [];
@@ -324,14 +357,17 @@ function replayJournal(doc: Record<string, unknown>, lines: unknown[], baseWasEd
     const note = rec.note;
     const nid = idOf(note);
     if (nid !== null && isRecord(note)) {
+      if (touched) touched.add(nid);
       dropped.delete(nid);
       const i = inBase.get(nid);
       const j = inFront.get(nid);
       if (i !== undefined) { if (!baseIsNewer(notes[i], note)) notes[i] = note; }
       else if (j !== undefined) front[j] = note;
       else { inFront.set(nid, front.length); front.push(note); }
-    } else if (typeof rec.drop === 'string') dropped.add(rec.drop);
-    else if (Array.isArray(rec.folders)) out.folders = rec.folders;
+    } else if (typeof rec.drop === 'string') {
+      dropped.add(rec.drop);
+      if (touched) touched.add(rec.drop);
+    } else if (Array.isArray(rec.folders)) out.folders = rec.folders;
     else if (Array.isArray(rec.vaults)) out.vaults = rec.vaults;
     else if (isRecord(rec.settings)) out.settings = rec.settings;
   }
@@ -553,6 +589,14 @@ function tagsInFile(note: Note): note is FileNote {
   return !note.lock && FM.fileKeepsTags(note);
 }
 
+function fileOwnedFields(note: Note): (keyof Note)[] {
+  if (!note.filePath) return [];
+  const fields: (keyof Note)[] = ['body', 'fileMtime', 'fileKind', 'lock'];
+  if (tagsInFile(note)) fields.push('tags');
+  if (note.vaultId) fields.push('title', 'filePath', 'folderId', 'vaultId');
+  return fields;
+}
+
 function syncFileTags(note: Note) {
   if (!tagsInFile(note)) return false;
   const tags = FM.noteTags(note.body);
@@ -598,6 +642,9 @@ class Store {
   journalRecords: number;
   baseBytes: number;
   revision: number;
+  base: LibraryBase;
+  touched: Set<string>;
+  onOutsideEdit: ((edit: OutsideEdit) => void) | null;
   constructor(dir: string, opts?: { now?: () => number }) {
     opts = opts || {};
     this.dir = dir;
@@ -625,6 +672,9 @@ class Store {
     this.journalRecords = 0;
     this.baseBytes = 0;
     this.revision = 0;
+    this.base = libraryBase(null, null, this.now());
+    this.touched = new Set();
+    this.onOutsideEdit = null;
   }
 
   load() {
@@ -640,7 +690,9 @@ class Store {
     this.journalRecords = 0;
     this.baseBytes = 0;
     this.lastCompactedAt = 0;
+    this.touched = new Set();
     const base = readWithRetry(this.file);
+    const stamp = base.text === null ? null : stampOf(this.file);
     if (base.error) {
       this.loadError = base.error;
       this.saveBlocked = true;
@@ -659,6 +711,7 @@ class Store {
         if (!raw && this.backupSuspended) this.saveBlocked = true;
       }
     }
+    const onDisk = raw;
     if (!this.saveBlocked) raw = this._replayJournal(raw);
     const now = this.now();
     const doc: Record<string, unknown> = isObjectLike(raw) ? raw : {};
@@ -669,14 +722,9 @@ class Store {
     this.folders = folders.map((f) => sanitizeFolder(f, now)).filter(isPresent);
     this.vaults = vaults.map((v) => sanitizeVault(v, now)).filter(isPresent);
     this.vaults.forEach((v, i) => { if (v.home && this.vaults.findIndex((x) => x.home) !== i) v.home = false; });
-    const vaultIds = new Set(this.vaults.map((v) => v.id));
-    for (const f of this.folders) if (f.vaultId && !vaultIds.has(f.vaultId)) { f.vaultId = null; f.dirPath = null; }
-    for (const n of this.notes) if (n.vaultId && !vaultIds.has(n.vaultId)) n.vaultId = null;
-    this._repairFolderGraph();
     this.settings = sanitizeSettings(doc.settings);
-    const ids = new Set(this.folders.map((f) => f.id));
-    this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
-    this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
+    this._repairLinks();
+    this.base = libraryBase(stamp, onDisk, now);
     const version = isFiniteNumber(doc.schemaVersion) ? doc.schemaVersion : 1;
     const upgrade = raw !== null && !this.saveBlocked && version < SCHEMA_VERSION;
     if (upgrade && version < TAGS_IN_FILES_VERSION) this._moveVaultTagsIntoFiles();
@@ -696,6 +744,16 @@ class Store {
       n.body = text;
       n.tags = FM.noteTags(text);
     }
+  }
+
+  _repairLinks() {
+    const vaultIds = new Set(this.vaults.map((v) => v.id));
+    for (const f of this.folders) if (f.vaultId && !vaultIds.has(f.vaultId)) { f.vaultId = null; f.dirPath = null; }
+    for (const n of this.notes) if (n.vaultId && !vaultIds.has(n.vaultId)) n.vaultId = null;
+    this._repairFolderGraph();
+    const ids = new Set(this.folders.map((f) => f.id));
+    this.settings.expandedFolders = this.settings.expandedFolders.filter((id) => ids.has(id));
+    this.settings.treeExpanded = this.settings.treeExpanded.filter((id) => ids.has(id));
   }
 
   _repairFolderGraph() {
@@ -742,14 +800,14 @@ class Store {
       try { fs.renameSync(this.journalFile, this.journalFile + '.stale-' + this.now()); } catch (_) {  }
       if (!this.recoveredFromBackup || !isRecord(raw) || !journal.header || !isFiniteNumber(journal.header.baseMtime) || !isFiniteNumber(raw.savedAt) || journal.header.baseMtime <= raw.savedAt) return raw;
       this.journalRecords = journal.records.length;
-      return replayJournal(raw, journal.records, true);
+      return replayJournal(raw, journal.records, true, this.touched);
     }
     const baseWasEdited = !baseMatches(this.file, journal.header);
     this.journalId = journal.journalId;
     this.journalReady = !baseWasEdited;
     this.journalBytes = Buffer.byteLength(read.text);
     this.journalRecords = journal.records.length;
-    return replayJournal(raw, journal.records, baseWasEdited);
+    return replayJournal(raw, journal.records, baseWasEdited, this.touched);
   }
 
   serialize(journalId?: string | null) {
@@ -766,7 +824,8 @@ class Store {
     this._assertCanSave();
     this.revision++;
     if (change) {
-      const budget = this.journalReady && !this._compactionDue() ? Math.max(JOURNAL_MIN_BYTES, this.baseBytes * JOURNAL_SHARE_OF_BASE) - this.journalBytes : 0;
+      this._touch(change);
+      const budget = this.journalReady && this._journalIntact() && !this._compactionDue() ? Math.max(JOURNAL_MIN_BYTES, this.baseBytes * JOURNAL_SHARE_OF_BASE) - this.journalBytes : 0;
       const records = this._records(change, budget);
       if (records && !records.bytes) return this;
       if (records) {
@@ -774,13 +833,149 @@ class Store {
         return this;
       }
     }
+    this._keepOutsideEdit();
     this._compact();
     return this;
   }
 
   flush() {
+    this.syncWithDisk();
     if (this.journalRecords > 0) this.save();
     return this;
+  }
+
+  syncWithDisk(opts?: { unreadable?: 'wait' | 'set-aside' }): OutsideEdit | null {
+    if (this.saveBlocked) return null;
+    const stamp = stampOf(this.file);
+    const fileEdited = !sameStamp(stamp, this.base.stamp);
+    if (!fileEdited && (!this.journalReady || this._journalIntact())) return null;
+    const edit: OutsideEdit = fileEdited && stamp ? this._readOutsideEdit(!!opts && opts.unreadable === 'set-aside') : { kind: 'restored' };
+    if (edit.kind === 'unreadable') return edit;
+    try { this._compact(); }
+    finally { if (this.onOutsideEdit) this.onOutsideEdit(edit); }
+    return edit;
+  }
+
+  _readOutsideEdit(setAsideUnreadable: boolean): OutsideEdit {
+    const read = readWithRetry(this.file);
+    if (read.text === null && !read.error) return { kind: 'restored' };
+    const doc = read.text === null ? null : parseLine(read.text);
+    if (!isRecord(doc)) return setAsideUnreadable ? { kind: 'set-aside', file: this._setAside() } : { kind: 'unreadable' };
+    if (this.journalId === null || doc.journalId !== this.journalId) return { kind: 'set-aside', file: this._setAside() };
+    return this._mergeOutside(doc);
+  }
+
+  _mergeOutside(doc: Record<string, unknown>): OutsideEdit {
+    this.revision++;
+    const settingsBefore = structuredClone(this.settings);
+    const notes = Array.isArray(doc.notes) ? this._mergeNotes(doc.notes) : { changed: [], dropped: [], refresh: [], sealed: false };
+    const folders = Array.isArray(doc.folders) && this._mergeFolders(doc.folders);
+    const settings = isRecord(doc.settings) ? this._mergeSettings(doc.settings) : [];
+    this._repairLinks();
+    if (notes.changed.length || notes.dropped.length) {
+      this._contentChanged();
+      this._indexChanged({ notes: notes.changed, dropped: notes.dropped, purge: notes.sealed });
+    }
+    return { kind: 'merged', notes: notes.changed, dropped: notes.dropped, refresh: notes.refresh, settings, settingsBefore, folders };
+  }
+
+  _mergeNotes(rows: unknown[]) {
+    const now = this.now();
+    const theirs = new Map<string, Note>();
+    for (const raw of rows) { const n = sanitizeNote(raw, now); if (n && !theirs.has(n.id)) theirs.set(n.id, n); }
+    const changed: Note[] = [];
+    const dropped: string[] = [];
+    const refresh: string[] = [];
+    const kept: Note[] = [];
+    let sealed = false;
+    for (const n of this.notes) {
+      const t = theirs.get(n.id);
+      if (this.touched.has(n.id) || this.recycling.has(n.id) || (!t && this._fileBringsBack(n))) { kept.push(n); continue; }
+      if (!t) { dropped.push(n.id); this.relock(n.id); continue; }
+      kept.push(n);
+      const lockBefore = n.lock;
+      const taken = this._takeOutsideRow(n, t);
+      if (taken === 'same') continue;
+      changed.push(n);
+      if (taken === 'relinked') refresh.push(n.id);
+      if (n.lock && !sameValue(lockBefore, n.lock)) sealed = true;
+    }
+    const known = new Set(this.notes.map((n) => n.id));
+    const added = Array.from(theirs.values()).filter((t) => !known.has(t.id) && !this.touched.has(t.id));
+    for (const t of added) if (t.filePath) { t.fileMtime = null; refresh.push(t.id); }
+    this.notes = added.concat(kept);
+    return { changed: added.concat(changed), dropped, refresh, sealed };
+  }
+
+  _fileBringsBack(note: Note) {
+    return !!note.vaultId && isFileNote(note) && fs.existsSync(note.filePath);
+  }
+
+  _takeOutsideRow(note: Note, theirs: Note): RowTaken {
+    const relinked = !note.vaultId && !!theirs.filePath && theirs.filePath !== note.filePath;
+    const next: Note = Object.assign({}, theirs);
+    if (relinked) next.fileMtime = null;
+    else for (const k of fileOwnedFields(note)) Object.assign(next, { [k]: note[k] });
+    if (sameFields(next, note)) return 'same';
+    if (!sameValue(next.lock, note.lock)) this.relock(note.id);
+    restoreFields(note, next);
+    return relinked ? 'relinked' : 'changed';
+  }
+
+  _mergeFolders(rows: unknown[]) {
+    const now = this.now();
+    const theirs = new Map<string, Folder>();
+    for (const raw of rows) { const f = sanitizeFolder(raw, now); if (f && !theirs.has(f.id)) theirs.set(f.id, f); }
+    const base = new Map(this.base.folders.map((f) => [f.id, f]));
+    const editedOutside = (id: string) => !sameValue(base.get(id) || null, theirs.get(id) || null);
+    const editedHere = (f: Folder) => !sameValue(base.get(f.id) || null, f);
+    const ours = new Set(this.folders.map((f) => f.id));
+    let changed = false;
+    const kept: Folder[] = [];
+    for (const f of this.folders) {
+      const t = theirs.get(f.id);
+      if (f.vaultId || (t && t.vaultId) || !editedOutside(f.id) || editedHere(f)) { kept.push(f); continue; }
+      changed = true;
+      if (t) { restoreFields(f, t); kept.push(f); }
+    }
+    for (const t of theirs.values()) if (!ours.has(t.id) && !base.has(t.id) && !t.vaultId) { kept.push(t); changed = true; }
+    this.folders = kept;
+    return changed;
+  }
+
+  _mergeSettings(raw: Record<string, unknown>) {
+    const theirs = sanitizeSettings(Object.assign({}, this.base.settings, raw));
+    const base = this.base.settings;
+    const taken: (keyof Settings)[] = [];
+    const patch: SettingsPatch = {};
+    for (const key of Object.keys(raw)) {
+      if (!isSettingKey(key) || sameValue(theirs[key], base[key]) || !sameValue(this.settings[key], base[key])) continue;
+      Object.assign(patch, { [key]: theirs[key] });
+      taken.push(key);
+    }
+    if (taken.length) this.settings = sanitizeSettings(Object.assign({}, this.settings, patch));
+    return taken;
+  }
+
+  _setAside() {
+    const target = path.join(this.dir, uniqueName(this.dir, path.basename(this.file) + '.outside-' + this.now(), ''));
+    fs.copyFileSync(this.file, target);
+    return target;
+  }
+
+  _keepOutsideEdit() {
+    const stamp = stampOf(this.file);
+    if (stamp && !sameStamp(stamp, this.base.stamp)) this._setAside();
+  }
+
+  _journalIntact() {
+    const stamp = stampOf(this.journalFile);
+    return !!stamp && stamp.size === this.journalBytes;
+  }
+
+  _touch(change: Change) {
+    for (const n of change.notes || []) this.touched.add(n.id);
+    for (const id of change.dropped || []) this.touched.add(id);
   }
 
   _compactionDue() {
@@ -794,22 +989,24 @@ class Store {
     const journalId = crypto.randomUUID();
     const text = JSON.stringify(this.serialize(journalId), null, 2);
     writeFileAtomic(this.file, text);
+    const stamp = stampOf(this.file);
+    this.base = { stamp, settings: structuredClone(this.settings), folders: structuredClone(this.folders) };
+    this.touched = new Set();
     this.journalId = journalId;
     this.baseBytes = text.length;
     this.lastCompactedAt = this.now();
     this.backupSuspended = false;
     if (!overwritesUnmovedCorruptFile) this._maybeBackup();
     this.journalRecords = 0;
-    try {
-      const st = fs.statSync(this.file);
-      const header = JSON.stringify({ journalId, baseSize: st.size, baseMtime: st.mtimeMs });
-      writeFileAtomic(this.journalFile, header);
-      this.journalBytes = Buffer.byteLength(header);
-      this.journalReady = true;
-    } catch (_) {
-      this.journalReady = false;
-    }
+    this.journalReady = stamp !== null && this._startJournal(journalId, stamp);
     this._removeStaleJournals(STALE_JOURNALS_KEPT);
+  }
+
+  _startJournal(journalId: string, base: DiskStamp) {
+    const header = JSON.stringify({ journalId, baseSize: base.size, baseMtime: base.mtimeMs });
+    try { writeFileAtomic(this.journalFile, header); } catch (_) { return false; }
+    this.journalBytes = Buffer.byteLength(header);
+    return true;
   }
 
   _removeStaleJournals(keep: number) {
@@ -2454,5 +2651,5 @@ class Store {
   }
 }
 
-export type { MoveReport };
+export type { MoveReport, OutsideEdit };
 export { MOVING_MARKER, STICKY_COLORS, sanitizeSticky, Store, readLibrary, isFileNote, DEFAULT_SETTINGS, EDITOR_WIDTH, VAULT_EXT, sanitizeSettings, sanitizeNote, sanitizeFolder, sanitizeVault, cleanFolderName };
