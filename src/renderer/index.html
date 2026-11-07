@@ -701,8 +701,11 @@
         <h2 class="dialog-title" id="linkTitle">Link</h2>
         <div class="field">
           <label class="field-label" for="linkInput">Link to</label>
-          <input id="linkInput" class="input" type="text" placeholder="Paste a web address or search your notes" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="linkResults" />
-          <div id="linkResults" class="link-results" role="listbox" aria-label="Notes and web addresses"></div>
+          <input id="linkInput" class="input" type="text" placeholder="Paste a web address or search your notes" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="linkResults" />
+          <div class="link-results">
+            <div id="linkResults" class="link-list" role="listbox" aria-label="Notes and web addresses"></div>
+            <p id="linkEmpty" class="link-empty" role="status"></p>
+          </div>
         </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-small" id="linkRemoveBtn">Remove link</button>

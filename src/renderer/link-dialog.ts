@@ -7,22 +7,28 @@ import { linkChoices } from './link-choices.ts';
 import type { LinkChoice } from './link-choices.ts';
 
 const LINK_ROWS = 6;
+const NO_MATCH = 'No notes match. Paste a web address to link to a page.';
 
-export function createLinkDialog(api: NotesApi) {
-  const pick: { rows: ListRow[] | null; choices: LinkChoice[]; active: number; seq: number } = { rows: null, choices: [], active: 0, seq: 0 };
+type LinkDialogDeps = { api: NotesApi; folderNames: () => Map<string, string> };
+
+export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
+  const pick: { rows: ListRow[] | null; choices: LinkChoice[]; active: number; seq: number; existing: string | null } = { rows: null, choices: [], active: -1, seq: 0, existing: null };
+
+  const activeHref = () => (pick.active >= 0 && pick.choices[pick.active] ? pick.choices[pick.active].href : null);
 
   function open() {
     const rich = state.rich;
     if (!rich || state.sourceMode) return;
-    const existing = rich.activeLink();
+    const existing = rich.activeLink() || null;
     if (!existing && !rich.hasSelection()) { toast('Select the text to link first'); return; }
     state.linkRange = rich.selectionRange();
     const linkedNote = /^note:\/\/(.+)$/.exec(existing || '');
     const seq = ++pick.seq;
     pick.rows = null;
+    pick.existing = existing;
     el.linkInput.value = linkedNote ? '' : existing || '';
     el.linkRemoveBtn.classList.toggle('hidden', !existing);
-    render();
+    render(existing);
     el.linkDialog.showModal();
     el.linkInput.focus();
     el.linkInput.select();
@@ -31,24 +37,22 @@ export function createLinkDialog(api: NotesApi) {
       pick.rows = rows;
       const target = linkedNote ? rows.find((n) => n.id === linkedNote[1]) : null;
       if (target && !el.linkInput.value) { el.linkInput.value = H.deriveTitle(target); el.linkInput.select(); }
-      render();
+      render(activeHref() || pick.existing);
     });
   }
 
-  function render() {
+  function render(keep: string | null) {
     pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS);
-    pick.active = 0;
-    el.linkResults.replaceChildren(...pick.choices.map(choiceRow));
-    if (!pick.choices.length && pick.rows) {
-      const empty = document.createElement('div');
-      empty.className = 'link-empty';
-      empty.textContent = 'No notes match';
-      el.linkResults.append(empty);
-    }
+    const kept = keep === null ? -1 : pick.choices.findIndex((c) => c.href === keep);
+    pick.active = kept >= 0 ? kept : el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
+    const names = folderNames();
+    el.linkResults.replaceChildren(...pick.choices.map((c, i) => choiceRow(c, i, names)));
+    el.linkEmpty.textContent = pick.rows && !pick.choices.length && el.linkInput.value.trim() ? NO_MATCH : '';
+    el.linkInput.setAttribute('aria-expanded', String(pick.choices.length > 0));
     mark();
   }
 
-  function choiceRow(c: LinkChoice, i: number) {
+  function choiceRow(c: LinkChoice, i: number, names: Map<string, string>) {
     const row = document.createElement('div');
     row.className = 'inline-item';
     row.id = 'link-choice-' + i;
@@ -58,10 +62,19 @@ export function createLinkDialog(api: NotesApi) {
     const label = document.createElement('span');
     label.className = 'lbl';
     label.textContent = c.label;
+    row.append(label);
+    const folder = c.folderId ? names.get(c.folderId) : undefined;
+    if (folder) {
+      const where = document.createElement('span');
+      where.className = 'link-where';
+      where.textContent = folder;
+      where.title = folder;
+      row.append(where);
+    }
     const keys = document.createElement('span');
     keys.className = 'keys';
     keys.textContent = c.keys;
-    row.append(label, keys);
+    row.append(keys);
     row.addEventListener('mousedown', (e) => { e.preventDefault(); apply(i); });
     row.addEventListener('mousemove', () => { if (pick.active !== i) { pick.active = i; mark(); } });
     return row;
@@ -72,15 +85,14 @@ export function createLinkDialog(api: NotesApi) {
       row.classList.toggle('is-active', i === pick.active);
       row.setAttribute('aria-selected', String(i === pick.active));
     });
-    if (pick.choices.length) el.linkInput.setAttribute('aria-activedescendant', 'link-choice-' + pick.active);
+    if (pick.active >= 0) el.linkInput.setAttribute('aria-activedescendant', 'link-choice-' + pick.active);
     else el.linkInput.removeAttribute('aria-activedescendant');
-    el.linkApplyBtn.disabled = !pick.choices.length;
+    el.linkApplyBtn.disabled = pick.active < 0;
   }
 
   function move(step: number) {
     const n = pick.choices.length;
-    if (!n) return;
-    pick.active = (pick.active + step + n) % n;
+    pick.active = pick.active < 0 ? (step > 0 ? 0 : n - 1) : (pick.active + step + n) % n;
     mark();
   }
 
@@ -92,9 +104,9 @@ export function createLinkDialog(api: NotesApi) {
   }
 
   function bind() {
-    el.linkInput.addEventListener('input', render);
+    el.linkInput.addEventListener('input', () => render(null));
     el.linkInput.addEventListener('keydown', (e) => {
-      if (e.isComposing || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+      if (e.isComposing || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || !pick.choices.length) return;
       e.preventDefault();
       move(e.key === 'ArrowDown' ? 1 : -1);
     });

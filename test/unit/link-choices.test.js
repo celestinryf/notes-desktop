@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { webAddress, matchingNotes, linkChoices } = require('../../src/renderer/link-choices.ts');
 
-const row = (id, title, extra) => Object.assign({ id, title, body: '', tags: [], updatedAt: 1, trashedAt: null, locked: false }, extra);
+const row = (id, title, extra) => Object.assign({ id, title, body: '', tags: [], folderId: null, updatedAt: 1, trashedAt: null, locked: false }, extra);
 const rows = [row('a', 'Garden plan'), row('b', 'Groceries'), row('c', 'Plan for the garden shed'), row('d', 'Old', { trashedAt: 5 }), row('e', 'Secret plan', { locked: true })];
 
 test('webAddress: a scheme or www. is surely an address; a bare domain only maybe; words are not', () => {
@@ -14,7 +14,9 @@ test('webAddress: a scheme or www. is surely an address; a bare domain only mayb
   assert.deepEqual(webAddress('example.org/path'), { href: 'https://example.org/path', certain: false });
   assert.deepEqual(webAddress('localhost.dev:8080'), { href: 'https://localhost.dev:8080', certain: false });
   assert.deepEqual(webAddress('README.md'), { href: 'https://README.md', certain: false });
-  for (const text of ['', '   ', 'garden plan', 'plan', 'a.b', '1.5', 'https://has space.com']) assert.equal(webAddress(text), null, JSON.stringify(text));
+  assert.deepEqual(webAddress('tel:+15551234'), { href: 'tel:+15551234', certain: true });
+  assert.deepEqual(webAddress('file://C:/notes/a.pdf'), { href: 'file://C:/notes/a.pdf', certain: true });
+  for (const text of ['', '   ', 'garden plan', 'plan', 'a.b', '1.5', 'https://has space.com', 'www.', 'Re:Plan', 'TODO:fix', String.raw`C:\notes\a.pdf`, '#section', '../a.md']) assert.equal(webAddress(text), null, JSON.stringify(text));
 });
 
 test('matchingNotes: skips the open note and the trash, keeps the given order without a query, and ranks a title that starts with the query first', () => {
@@ -49,4 +51,27 @@ test('linkChoices: a sure address comes first; a bare domain comes after the not
 test('linkChoices: an empty field offers the most recent notes; nothing matching offers nothing', () => {
   assert.deepEqual(linkChoices('', rows, 'a', 6).map((c) => c.noteId), ['b', 'c', 'e']);
   assert.deepEqual(linkChoices('qqqq', rows, null, 6), []);
+});
+
+test('linkChoices: other spaceless text that looks like a link is offered last, as typed; a plain word is not', () => {
+  for (const text of ['#section', '../walks/a.md', 'Re:Plan', String.raw`C:\notes\a.pdf`]) {
+    const choices = linkChoices(text, rows, null, 6);
+    const last = choices[choices.length - 1];
+    assert.deepEqual([last.href, last.keys, last.noteId], [text, 'As typed', null], text);
+  }
+  assert.ok(linkChoices('garden', rows, null, 6).every((c) => c.noteId), 'a word without link characters is only a search');
+  assert.deepEqual(linkChoices('Plan:', [row('p', 'Plan: spring')], null, 6).map((c) => c.href), ['note://p', 'Plan:'], 'a matching note comes before the text as typed');
+});
+
+test('linkChoices: a sure address and matching notes share the limit, the address first', () => {
+  const many = Array.from({ length: 8 }, (_, i) => row('w' + i, 'www.example.com notes ' + i));
+  const choices = linkChoices('www.example.com', many, null, 3);
+  assert.deepEqual(choices.map((c) => c.href), ['https://www.example.com', 'note://w0', 'note://w1']);
+  assert.deepEqual(linkChoices('www.example.com', many, null, 1).map((c) => c.href), ['https://www.example.com']);
+});
+
+test('linkChoices: a note row carries its folder; an address row has none', () => {
+  const choices = linkChoices('walk', [row('x', 'Walk log', { folderId: 'f1' }), row('y', 'Walks')], null, 6);
+  assert.deepEqual(choices.map((c) => [c.noteId, c.folderId]), [['y', null], ['x', 'f1']]);
+  assert.equal(linkChoices('https://a.example', [], null, 6)[0].folderId, null);
 });

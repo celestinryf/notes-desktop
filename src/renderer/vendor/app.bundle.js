@@ -16116,6 +16116,7 @@
     linkForm: pageElement("#linkForm", HTMLFormElement),
     linkInput: pageElement("#linkInput", HTMLInputElement),
     linkResults: pageElement("#linkResults", HTMLDivElement),
+    linkEmpty: pageElement("#linkEmpty", HTMLParagraphElement),
     linkApplyBtn: pageElement("#linkApplyBtn", HTMLButtonElement),
     linkRemoveBtn: pageElement("#linkRemoveBtn", HTMLButtonElement),
     linkCancelBtn: pageElement("#linkCancelBtn", HTMLButtonElement),
@@ -20380,14 +20381,15 @@
   })();
 
   // src/renderer/link-choices.ts
-  var SCHEME = /^[a-z][a-z0-9+.-]*:\S/i;
+  var KNOWN_SCHEME = /^(?:(?:https?|ftp|file|note|attachment):\/\/|(?:mailto|tel):)\S/i;
   var BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i;
+  var LINK_LIKE = /[/#:\\.]/;
   function webAddress(text) {
     const t = text.trim();
     if (!t || /\s/.test(t)) return null;
-    if (/^www\./i.test(t)) return { href: "https://" + t, certain: true };
+    if (/^www\.\S/i.test(t)) return { href: "https://" + t, certain: true };
+    if (KNOWN_SCHEME.test(t)) return { href: t, certain: true };
     if (BARE_DOMAIN.test(t)) return { href: "https://" + t, certain: false };
-    if (SCHEME.test(t)) return { href: t, certain: true };
     return null;
   }
   function matchingNotes(rows, query, skipId, limit) {
@@ -20396,18 +20398,22 @@
     if (!q) return notes.slice(0, limit);
     return notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, limit).map((x) => x.n);
   }
+  var addressChoice = (href, keys) => ({ href, label: href, icon: "link", keys, noteId: null, folderId: null });
   function linkChoices(text, rows, skipId, limit) {
-    const web = webAddress(text);
-    const notes = matchingNotes(rows, text, skipId, web ? limit - 1 : limit).map((n) => ({
+    const t = text.trim();
+    const web = webAddress(t);
+    const asTyped = !web && t && !/\s/.test(t) && LINK_LIKE.test(t) ? t : null;
+    const notes = matchingNotes(rows, t, skipId, web || asTyped ? limit - 1 : limit).map((n) => ({
       href: "note://" + n.id,
       label: deriveTitle(n),
       icon: n.locked ? "lock" : "notebook-text",
       keys: relativeTime(n.updatedAt),
-      noteId: n.id
+      noteId: n.id,
+      folderId: n.folderId || null
     }));
-    if (!web) return notes;
-    const address = { href: web.href, label: web.href, icon: "link", keys: "Web address", noteId: null };
-    return web.certain ? [address].concat(notes) : notes.concat(address);
+    if (web) return web.certain ? [addressChoice(web.href, "Web address")].concat(notes) : notes.concat(addressChoice(web.href, "Web address"));
+    if (asTyped) return notes.concat(addressChoice(asTyped, "As typed"));
+    return notes;
   }
 
   // src/renderer/editor-view.ts
@@ -20834,12 +20840,14 @@
 
   // src/renderer/link-dialog.ts
   var LINK_ROWS = 6;
-  function createLinkDialog(api) {
-    const pick = { rows: null, choices: [], active: 0, seq: 0 };
+  var NO_MATCH = "No notes match. Paste a web address to link to a page.";
+  function createLinkDialog({ api, folderNames }) {
+    const pick = { rows: null, choices: [], active: -1, seq: 0, existing: null };
+    const activeHref = () => pick.active >= 0 && pick.choices[pick.active] ? pick.choices[pick.active].href : null;
     function open() {
       const rich = state.rich;
       if (!rich || state.sourceMode) return;
-      const existing = rich.activeLink();
+      const existing = rich.activeLink() || null;
       if (!existing && !rich.hasSelection()) {
         toast("Select the text to link first");
         return;
@@ -20848,9 +20856,10 @@
       const linkedNote = /^note:\/\/(.+)$/.exec(existing || "");
       const seq = ++pick.seq;
       pick.rows = null;
+      pick.existing = existing;
       el.linkInput.value = linkedNote ? "" : existing || "";
       el.linkRemoveBtn.classList.toggle("hidden", !existing);
-      render();
+      render(existing);
       el.linkDialog.showModal();
       el.linkInput.focus();
       el.linkInput.select();
@@ -20862,22 +20871,20 @@
           el.linkInput.value = deriveTitle(target);
           el.linkInput.select();
         }
-        render();
+        render(activeHref() || pick.existing);
       });
     }
-    function render() {
+    function render(keep) {
       pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS);
-      pick.active = 0;
-      el.linkResults.replaceChildren(...pick.choices.map(choiceRow));
-      if (!pick.choices.length && pick.rows) {
-        const empty = document.createElement("div");
-        empty.className = "link-empty";
-        empty.textContent = "No notes match";
-        el.linkResults.append(empty);
-      }
+      const kept = keep === null ? -1 : pick.choices.findIndex((c) => c.href === keep);
+      pick.active = kept >= 0 ? kept : el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
+      const names = folderNames();
+      el.linkResults.replaceChildren(...pick.choices.map((c, i) => choiceRow(c, i, names)));
+      el.linkEmpty.textContent = pick.rows && !pick.choices.length && el.linkInput.value.trim() ? NO_MATCH : "";
+      el.linkInput.setAttribute("aria-expanded", String(pick.choices.length > 0));
       mark();
     }
-    function choiceRow(c, i) {
+    function choiceRow(c, i, names) {
       const row = document.createElement("div");
       row.className = "inline-item";
       row.id = "link-choice-" + i;
@@ -20887,10 +20894,19 @@
       const label = document.createElement("span");
       label.className = "lbl";
       label.textContent = c.label;
+      row.append(label);
+      const folder = c.folderId ? names.get(c.folderId) : void 0;
+      if (folder) {
+        const where = document.createElement("span");
+        where.className = "link-where";
+        where.textContent = folder;
+        where.title = folder;
+        row.append(where);
+      }
       const keys = document.createElement("span");
       keys.className = "keys";
       keys.textContent = c.keys;
-      row.append(label, keys);
+      row.append(keys);
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         apply(i);
@@ -20908,14 +20924,13 @@
         row.classList.toggle("is-active", i === pick.active);
         row.setAttribute("aria-selected", String(i === pick.active));
       });
-      if (pick.choices.length) el.linkInput.setAttribute("aria-activedescendant", "link-choice-" + pick.active);
+      if (pick.active >= 0) el.linkInput.setAttribute("aria-activedescendant", "link-choice-" + pick.active);
       else el.linkInput.removeAttribute("aria-activedescendant");
-      el.linkApplyBtn.disabled = !pick.choices.length;
+      el.linkApplyBtn.disabled = pick.active < 0;
     }
     function move(step) {
       const n = pick.choices.length;
-      if (!n) return;
-      pick.active = (pick.active + step + n) % n;
+      pick.active = pick.active < 0 ? step > 0 ? 0 : n - 1 : (pick.active + step + n) % n;
       mark();
     }
     function apply(i) {
@@ -20925,9 +20940,9 @@
       if (state.rich) state.rich.setLink(choice.href, state.linkRange);
     }
     function bind() {
-      el.linkInput.addEventListener("input", render);
+      el.linkInput.addEventListener("input", () => render(null));
       el.linkInput.addEventListener("keydown", (e) => {
-        if (e.isComposing || e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        if (e.isComposing || e.key !== "ArrowDown" && e.key !== "ArrowUp" || !pick.choices.length) return;
         e.preventDefault();
         move(e.key === "ArrowDown" ? 1 : -1);
       });
@@ -27233,7 +27248,7 @@
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
-    const links = createLinkDialog(api);
+    const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     let listPageNumbers = false;

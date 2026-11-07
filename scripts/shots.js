@@ -295,6 +295,7 @@ const SCENES = {
   'link-dialog': { about: 'The Link dialog (Ctrl+K on selected text): one field, the six most recent notes under it', run: linkDialog('') },
   'link-dialog-query': { about: 'The Link dialog searching the notes as you type', run: linkDialog('gro') },
   'link-dialog-web': { about: 'The Link dialog with a web address typed: the address row first, active', run: linkDialog('https://example.com/trails') },
+  'link-dialog-existing': { about: 'The Link dialog reopened on a link: its address chosen, Remove link in the footer', run: steps(linkDialog('https://example.com/trails'), key('Enter'), key('Control+k')) },
   'link-dialog-none': { about: 'The Link dialog when nothing matches: one line, Apply disabled', run: linkDialog('qqqq') },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
   'table-aligned': { about: 'A table with left, right and centred columns, and a picture alone in a cell, rendered', bodies: { 'n-groceries': 'Times on the ridge loop this month.\n\n| Day     | Distance | Time  | Note        |\n| :------ | -------: | ----: | :---------: |\n| Monday  |   6.2 km | 41:10 |    easy     |\n| Friday  |  11.8 km | 79:45 | ![ridge](ridge.png) |\n| Sunday  |   8.0 km | 52:03 |   windy     |' }, run: openNote('Groceries') },

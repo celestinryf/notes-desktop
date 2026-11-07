@@ -171,6 +171,10 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
   await page.keyboard.press('Control+k');
   await page.waitForSelector('#linkDialog[open]', T);
   step('link dialog open');
+  await sleep(300);
+  assert.equal(await page.evaluate(() => !document.querySelector('#linkResults .is-active') && document.getElementById('linkApplyBtn').disabled && !document.getElementById('linkEmpty').textContent), true, 'an empty field chooses nothing and says nothing');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.getElementById('linkDialog').open), true, 'Enter on an empty field links nothing');
   await page.fill('#linkInput', 'https://example.com', T);
   await page.click('#linkApplyBtn', T);
   try {
@@ -1481,7 +1485,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await page.keyboard.press('ArrowUp');
   assert.equal(await page.evaluate(() => { const rows = document.querySelectorAll('#linkResults [role="option"]'); return rows[rows.length - 1].classList.contains('is-active'); }), true, 'Up from the first row wraps to the last');
   await page.fill('#linkInput', 'qqqq-no-such-note');
-  await waitForDom(() => document.querySelector('#linkResults .link-empty') && document.getElementById('linkApplyBtn').disabled);
+  await waitForDom(() => document.getElementById('linkEmpty').textContent.startsWith('No notes match') && document.getElementById('linkApplyBtn').disabled);
   await page.keyboard.press('Escape');
   await waitForDom(() => !document.getElementById('linkDialog').open);
   assert.equal(findNote('Gamma (copy)').body, '[see also](note://' + other.id + ')', 'closing without applying keeps the link');
@@ -1489,6 +1493,13 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await waitForDom((id) => !!document.querySelector('.note-row.is-active[data-id="' + id + '"]'), other.id);
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
+  await page.click('.rich-editor-content');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+k');
+  await page.waitForSelector('#linkDialog[open]');
+  await waitForDom(() => !document.getElementById('linkRemoveBtn').classList.contains('hidden'));
+  await page.click('#linkRemoveBtn');
+  await waitFor('link removed', () => findNote('Gamma (copy)').body === 'see also');
   await useSourceMode(true);
   await page.fill('#bodyInput', 'pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
