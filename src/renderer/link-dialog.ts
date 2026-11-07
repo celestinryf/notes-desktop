@@ -12,7 +12,7 @@ const NO_MATCH = 'No notes match. Paste a web address to link to a page.';
 type LinkDialogDeps = { api: NotesApi; folderNames: () => Map<string, string> };
 
 export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
-  const pick: { rows: ListRow[] | null; choices: LinkChoice[]; active: number; seq: number; existing: string | null } = { rows: null, choices: [], active: -1, seq: 0, existing: null };
+  const pick: { rows: ListRow[] | null; choices: LinkChoice[]; active: number; seq: number; existing: string | null; typed: boolean; folders: Map<string, string> } = { rows: null, choices: [], active: -1, seq: 0, existing: null, typed: false, folders: new Map() };
 
   const activeHref = () => (pick.active >= 0 && pick.choices[pick.active] ? pick.choices[pick.active].href : null);
 
@@ -26,6 +26,8 @@ export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
     const seq = ++pick.seq;
     pick.rows = null;
     pick.existing = existing;
+    pick.typed = false;
+    pick.folders = folderNames();
     el.linkInput.value = linkedNote ? '' : existing || '';
     el.linkRemoveBtn.classList.toggle('hidden', !existing);
     render(existing);
@@ -37,22 +39,21 @@ export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
       pick.rows = rows;
       const target = linkedNote ? rows.find((n) => n.id === linkedNote[1]) : null;
       if (target && !el.linkInput.value) { el.linkInput.value = H.deriveTitle(target); el.linkInput.select(); }
-      render(activeHref() || pick.existing);
+      render(activeHref() || (pick.typed ? null : pick.existing));
     });
   }
 
   function render(keep: string | null) {
-    pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS);
+    pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS, pick.existing);
     const kept = keep === null ? -1 : pick.choices.findIndex((c) => c.href === keep);
-    pick.active = kept >= 0 ? kept : el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
-    const names = folderNames();
-    el.linkResults.replaceChildren(...pick.choices.map((c, i) => choiceRow(c, i, names)));
+    pick.active = kept >= 0 ? kept : keep === null && el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
+    el.linkResults.replaceChildren(...pick.choices.map(choiceRow));
     el.linkEmpty.textContent = pick.rows && !pick.choices.length && el.linkInput.value.trim() ? NO_MATCH : '';
     el.linkInput.setAttribute('aria-expanded', String(pick.choices.length > 0));
     mark();
   }
 
-  function choiceRow(c: LinkChoice, i: number, names: Map<string, string>) {
+  function choiceRow(c: LinkChoice, i: number) {
     const row = document.createElement('div');
     row.className = 'inline-item';
     row.id = 'link-choice-' + i;
@@ -63,7 +64,7 @@ export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
     label.className = 'lbl';
     label.textContent = c.label;
     row.append(label);
-    const folder = c.folderId ? names.get(c.folderId) : undefined;
+    const folder = c.folderId ? pick.folders.get(c.folderId) : undefined;
     if (folder) {
       const where = document.createElement('span');
       where.className = 'link-where';
@@ -76,7 +77,7 @@ export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
     keys.textContent = c.keys;
     row.append(keys);
     row.addEventListener('mousedown', (e) => { e.preventDefault(); apply(i); });
-    row.addEventListener('mousemove', () => { if (pick.active !== i) { pick.active = i; mark(); } });
+    row.addEventListener('mousemove', (e) => { if ((e.movementX || e.movementY) && pick.active !== i) { pick.active = i; mark(); } });
     return row;
   }
 
@@ -104,7 +105,7 @@ export function createLinkDialog({ api, folderNames }: LinkDialogDeps) {
   }
 
   function bind() {
-    el.linkInput.addEventListener('input', () => render(null));
+    el.linkInput.addEventListener('input', () => { pick.typed = true; render(null); });
     el.linkInput.addEventListener('keydown', (e) => {
       if (e.isComposing || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || !pick.choices.length) return;
       e.preventDefault();

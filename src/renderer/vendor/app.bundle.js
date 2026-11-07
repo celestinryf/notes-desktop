@@ -20383,7 +20383,7 @@
   // src/renderer/link-choices.ts
   var KNOWN_SCHEME = /^(?:(?:https?|ftp|file|note|attachment):\/\/|(?:mailto|tel):)\S/i;
   var BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i;
-  var LINK_LIKE = /[/#:\\.]/;
+  var LINK_LIKE = /[/#\\]|\.[a-z][a-z0-9]{0,7}$|^[a-z][a-z0-9+.-]*:\S/i;
   function webAddress(text) {
     const t = text.trim();
     if (!t || /\s/.test(t)) return null;
@@ -20398,19 +20398,21 @@
     if (!q) return notes.slice(0, limit);
     return notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, limit).map((x) => x.n);
   }
+  var noteChoices = (rows, query, skipId, limit) => matchingNotes(rows, query, skipId, limit).map((n) => ({
+    href: "note://" + n.id,
+    label: deriveTitle(n),
+    icon: n.locked ? "lock" : "notebook-text",
+    keys: relativeTime(n.updatedAt),
+    noteId: n.id,
+    folderId: n.folderId || null
+  }));
   var addressChoice = (href, keys) => ({ href, label: href, icon: "link", keys, noteId: null, folderId: null });
-  function linkChoices(text, rows, skipId, limit) {
+  function linkChoices(text, rows, skipId, limit, current) {
     const t = text.trim();
+    if (current && t === current && !current.startsWith("note://")) return [addressChoice(current, "Current link")].concat(noteChoices(rows, t, skipId, limit - 1));
     const web = webAddress(t);
     const asTyped = !web && t && !/\s/.test(t) && LINK_LIKE.test(t) ? t : null;
-    const notes = matchingNotes(rows, t, skipId, web || asTyped ? limit - 1 : limit).map((n) => ({
-      href: "note://" + n.id,
-      label: deriveTitle(n),
-      icon: n.locked ? "lock" : "notebook-text",
-      keys: relativeTime(n.updatedAt),
-      noteId: n.id,
-      folderId: n.folderId || null
-    }));
+    const notes = noteChoices(rows, t, skipId, web || asTyped ? limit - 1 : limit);
     if (web) return web.certain ? [addressChoice(web.href, "Web address")].concat(notes) : notes.concat(addressChoice(web.href, "Web address"));
     if (asTyped) return notes.concat(addressChoice(asTyped, "As typed"));
     return notes;
@@ -20842,7 +20844,7 @@
   var LINK_ROWS = 6;
   var NO_MATCH = "No notes match. Paste a web address to link to a page.";
   function createLinkDialog({ api, folderNames }) {
-    const pick = { rows: null, choices: [], active: -1, seq: 0, existing: null };
+    const pick = { rows: null, choices: [], active: -1, seq: 0, existing: null, typed: false, folders: /* @__PURE__ */ new Map() };
     const activeHref = () => pick.active >= 0 && pick.choices[pick.active] ? pick.choices[pick.active].href : null;
     function open() {
       const rich = state.rich;
@@ -20857,6 +20859,8 @@
       const seq = ++pick.seq;
       pick.rows = null;
       pick.existing = existing;
+      pick.typed = false;
+      pick.folders = folderNames();
       el.linkInput.value = linkedNote ? "" : existing || "";
       el.linkRemoveBtn.classList.toggle("hidden", !existing);
       render(existing);
@@ -20871,20 +20875,19 @@
           el.linkInput.value = deriveTitle(target);
           el.linkInput.select();
         }
-        render(activeHref() || pick.existing);
+        render(activeHref() || (pick.typed ? null : pick.existing));
       });
     }
     function render(keep) {
-      pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS);
+      pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS, pick.existing);
       const kept = keep === null ? -1 : pick.choices.findIndex((c) => c.href === keep);
-      pick.active = kept >= 0 ? kept : el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
-      const names = folderNames();
-      el.linkResults.replaceChildren(...pick.choices.map((c, i) => choiceRow(c, i, names)));
+      pick.active = kept >= 0 ? kept : keep === null && el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
+      el.linkResults.replaceChildren(...pick.choices.map(choiceRow));
       el.linkEmpty.textContent = pick.rows && !pick.choices.length && el.linkInput.value.trim() ? NO_MATCH : "";
       el.linkInput.setAttribute("aria-expanded", String(pick.choices.length > 0));
       mark();
     }
-    function choiceRow(c, i, names) {
+    function choiceRow(c, i) {
       const row = document.createElement("div");
       row.className = "inline-item";
       row.id = "link-choice-" + i;
@@ -20895,7 +20898,7 @@
       label.className = "lbl";
       label.textContent = c.label;
       row.append(label);
-      const folder = c.folderId ? names.get(c.folderId) : void 0;
+      const folder = c.folderId ? pick.folders.get(c.folderId) : void 0;
       if (folder) {
         const where = document.createElement("span");
         where.className = "link-where";
@@ -20911,8 +20914,8 @@
         e.preventDefault();
         apply(i);
       });
-      row.addEventListener("mousemove", () => {
-        if (pick.active !== i) {
+      row.addEventListener("mousemove", (e) => {
+        if ((e.movementX || e.movementY) && pick.active !== i) {
           pick.active = i;
           mark();
         }
@@ -20940,7 +20943,10 @@
       if (state.rich) state.rich.setLink(choice.href, state.linkRange);
     }
     function bind() {
-      el.linkInput.addEventListener("input", () => render(null));
+      el.linkInput.addEventListener("input", () => {
+        pick.typed = true;
+        render(null);
+      });
       el.linkInput.addEventListener("keydown", (e) => {
         if (e.isComposing || e.key !== "ArrowDown" && e.key !== "ArrowUp" || !pick.choices.length) return;
         e.preventDefault();

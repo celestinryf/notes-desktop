@@ -60,7 +60,8 @@ test('linkChoices: other spaceless text that looks like a link is offered last, 
     assert.deepEqual([last.href, last.keys, last.noteId], [text, 'As typed', null], text);
   }
   assert.ok(linkChoices('garden', rows, null, 6).every((c) => c.noteId), 'a word without link characters is only a search');
-  assert.deepEqual(linkChoices('Plan:', [row('p', 'Plan: spring')], null, 6).map((c) => c.href), ['note://p', 'Plan:'], 'a matching note comes before the text as typed');
+  assert.deepEqual(linkChoices('Plan:2', [row('p', 'Plan:2 spring')], null, 6).map((c) => c.href), ['note://p', 'Plan:2'], 'a matching note comes before the text as typed');
+  assert.ok(!linkChoices('Plan:', rows, null, 6).some((c) => c.keys === 'As typed'), 'a colon with nothing after it is not a link');
 });
 
 test('linkChoices: a sure address and matching notes share the limit, the address first', () => {
@@ -74,4 +75,18 @@ test('linkChoices: a note row carries its folder; an address row has none', () =
   const choices = linkChoices('walk', [row('x', 'Walk log', { folderId: 'f1' }), row('y', 'Walks')], null, 6);
   assert.deepEqual(choices.map((c) => [c.noteId, c.folderId]), [['y', null], ['x', 'f1']]);
   assert.equal(linkChoices('https://a.example', [], null, 6)[0].folderId, null);
+});
+
+test('linkChoices: an existing link that is not a note opens as the first row, exactly as written, until the text changes', () => {
+  for (const current of ['foo', 'foo.com', 'my-page', 'https://example.com/a']) {
+    const choices = linkChoices(current, rows, null, 6, current);
+    assert.deepEqual([choices[0].href, choices[0].keys], [current, 'Current link'], current);
+    assert.equal(choices.filter((c) => c.href === current).length, 1, 'offered once');
+  }
+  assert.ok(!linkChoices('foo.co', rows, null, 6, 'foo.com').some((c) => c.keys === 'Current link'), 'gone once the text is edited');
+  assert.ok(!linkChoices('plan', rows, null, 6, 'note://c').some((c) => c.keys === 'Current link'), 'a note link is chosen through its note row');
+});
+
+test('linkChoices: numbers and abbreviations are searches, not links typed', () => {
+  for (const text of ['1.5', 'v1.2', 'e.g.', 'Dr.']) assert.ok(!linkChoices(text, rows, null, 6).some((c) => c.keys === 'As typed'), text);
 });
