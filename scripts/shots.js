@@ -443,6 +443,7 @@ async function shoot(theme, name, opts) {
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);
     await page.screenshot({ path: file });
+    await readingCopy(page, file);
     if (opts.screen) {
       const r = await app.evaluate(({ BrowserWindow, screen }) => {
         const w = BrowserWindow.getAllWindows()[0];
@@ -469,6 +470,24 @@ async function shoot(theme, name, opts) {
     if (refusing) await refusing.close();
     try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) {  }
   }
+}
+
+const READ_WIDTH = 640;
+async function readingCopy(page, file) {
+  const src = 'data:image/png;base64,' + fs.readFileSync(file).toString('base64');
+  const out = await page.evaluate(async ([data, width]) => {
+    const img = new Image();
+    img.src = data;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = Math.round(img.height * width / img.width);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  }, [src, READ_WIDTH]);
+  fs.writeFileSync(file.replace(/\.png$/, '-read.png'), Buffer.from(out.split(',')[1], 'base64'));
 }
 
 async function main() {
