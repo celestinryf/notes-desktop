@@ -2494,6 +2494,25 @@ test('sync with GitHub: the History dialog leads to the sign-in code, Esc cancel
   await waitForDom(() => !document.getElementById('settingsDialog').open);
 });
 
+test('a change to notes.json made outside while Notes runs reaches the page and is kept', { timeout: 30000 }, async () => {
+  const journaled = new Set(fs.readFileSync(journalFile, 'utf8').trim().split('\n').slice(1)
+    .flatMap((line) => JSON.parse(line).change.map((c) => (c.note ? c.note.id : c.drop))));
+  const doc = JSON.parse(fs.readFileSync(notesFile, 'utf8'));
+  const target = doc.notes.find((n) => !n.pinned && !n.trashedAt && n.title && !journaled.has(n.id));
+  assert.ok(target, 'a note Notes has not changed since its last full save');
+  const pinnedBefore = Number(await page.textContent('#countPinned'));
+  target.pinned = true;
+  fs.writeFileSync(notesFile + '.writing', JSON.stringify(doc, null, 2));
+  fs.renameSync(notesFile + '.writing', notesFile);
+  await waitForDom((n) => Number(document.getElementById('countPinned').textContent) === n, pinnedBefore + 1);
+  const written = JSON.parse(fs.readFileSync(notesFile, 'utf8'));
+  assert.notEqual(written.journalId, doc.journalId, 'Notes wrote the merged library at once');
+  assert.equal(written.notes.find((n) => n.id === target.id).pinned, true);
+  await typeNote('Typed after the outside change', 'saved by Notes');
+  assert.equal(readNotes().notes.find((n) => n.id === target.id).pinned, true);
+  assert.deepEqual(fs.readdirSync(dataDir).filter((f) => f.startsWith('notes.json.outside-')), []);
+});
+
 test('the top band matches the window buttons and never runs under them or the other side, at any width or zoom', { timeout: 60000 }, async () => {
   await page.mouse.move(600, 400);
   const band = () => {
