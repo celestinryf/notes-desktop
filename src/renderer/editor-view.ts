@@ -5,6 +5,7 @@ import { src, renderCodePosition } from './code-editor.ts';
 import { NotesCsv } from './csv-view.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
+import { matchingNotes } from './link-choices.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
@@ -115,9 +116,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       inline.notes = known;
       if (seq !== inline.seq) return;
       const q = t.query.trim();
-      const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
-      const scored = q ? notes.map((n) => ({ n, s: H.fuzzyScore(q, H.deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-      items = scored.slice(0, 8).map((n) => ({ id: n.id, title: H.deriveTitle(n), icon: n.locked ? 'lock' : 'notebook-text', keys: H.relativeTime(n.updatedAt), note: n }));
+      items = matchingNotes(known, q, state.currentId, 8).map((n) => ({ id: n.id, title: H.deriveTitle(n), icon: n.locked ? 'lock' : 'notebook-text', keys: H.relativeTime(n.updatedAt), note: n }));
       prefetchWikiLinks(items);
       if (q) items.push({ id: 'new', title: 'New note "' + H.truncate(q, 40) + '"', icon: 'square-pen', keys: '', create: q });
     }
@@ -360,24 +359,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     api.app.openExternal(href);
   }
 
-  function openLinkDialog() {
-    if (!state.rich || state.sourceMode) return;
-    const existing = state.rich.activeLink();
-    if (!existing && !state.rich.hasSelection()) { toast('Select the text to link first'); return; }
-    state.linkRange = state.rich.selectionRange();
-    el.linkNoteSelect.innerHTML = '<option value="">— pick a note —</option>';
-    api.notes.rows({ sort: 'title' }).then((notes) => {
-      for (const n of notes) { if (n.id === state.currentId) continue; const o = document.createElement('option'); o.value = 'note://' + n.id; o.textContent = H.truncate(H.deriveTitle(n), 60); el.linkNoteSelect.append(o); }
-      if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
-    });
-    el.linkInput.value = existing || 'https://';
-    el.linkRemoveBtn.classList.toggle('hidden', !existing);
-    el.linkDialog.showModal();
-    el.linkInput.focus();
-    el.linkInput.select();
-  }
-
   function tableStatsNow() { return tableStats; }
 
-  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret };
+  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret };
 }

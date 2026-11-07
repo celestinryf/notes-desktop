@@ -309,6 +309,14 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .inline-item.is-active { background: var(--selected); color: var(--selected-fg); }
 .inline-item.is-active .icon, .inline-item.is-active .keys { color: inherit; }
 .inline-item .keys.md { font-family: var(--font-mono); }
+.link-results { height: calc(var(--row-h) * 6); margin-top: 2px; }
+.link-list { display: flex; flex-direction: column; }
+.link-list .inline-item { min-height: var(--row-h); flex-shrink: 0; }
+.link-where { margin-left: auto; max-width: 40%; padding-left: var(--s4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); color: var(--fg-3); }
+.link-where + .keys { margin-left: 0; padding-left: var(--s3); }
+.inline-item.is-active .link-where { color: inherit; }
+.link-empty { margin: 0; padding: 0 var(--s2); line-height: var(--row-h); font-size: var(--t-sm); color: var(--fg-3); }
+.link-empty:empty { display: none; }
 .convert-menu { max-width: 340px; }
 .convert-menu .menu-note { display: block; margin-top: 2px; font-size: var(--t-xs); font-weight: 400; color: var(--fg-3); white-space: normal; }
 .convert-menu > button { flex-direction: column; align-items: flex-start; padding: 6px var(--s2); }

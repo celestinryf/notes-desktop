@@ -16115,6 +16115,9 @@
     linkDialog: pageElement("#linkDialog", HTMLDialogElement),
     linkForm: pageElement("#linkForm", HTMLFormElement),
     linkInput: pageElement("#linkInput", HTMLInputElement),
+    linkResults: pageElement("#linkResults", HTMLDivElement),
+    linkEmpty: pageElement("#linkEmpty", HTMLParagraphElement),
+    linkApplyBtn: pageElement("#linkApplyBtn", HTMLButtonElement),
     linkRemoveBtn: pageElement("#linkRemoveBtn", HTMLButtonElement),
     linkCancelBtn: pageElement("#linkCancelBtn", HTMLButtonElement),
     alignSeg: pageElement("#alignSeg", HTMLDivElement),
@@ -16272,7 +16275,6 @@
     recordBtn: pageElement("#recordBtn", HTMLButtonElement),
     historyBtn: pageElement("#historyBtn", HTMLButtonElement),
     historyKeepBtn: pageElement("#historyKeepBtn", HTMLButtonElement),
-    linkNoteSelect: pageElement("#linkNoteSelect", HTMLSelectElement),
     historyDialog: pageElement("#historyDialog", HTMLDialogElement),
     historyList: pageElement("#historyList", HTMLUListElement),
     historyPreview: pageElement("#historyPreview", HTMLPreElement),
@@ -20378,6 +20380,44 @@
     return { detectDelimiter, parse: parse2, render };
   })();
 
+  // src/renderer/link-choices.ts
+  var KNOWN_SCHEME = /^(?:(?:https?|ftp|file|note|attachment):\/\/|(?:mailto|tel):)\S/i;
+  var BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i;
+  var LINK_LIKE = /[/#\\]|\.[a-z][a-z0-9]{0,7}$|^[a-z][a-z0-9+.-]*:\S/i;
+  function webAddress(text) {
+    const t = text.trim();
+    if (!t || /\s/.test(t)) return null;
+    if (/^www\.\S/i.test(t)) return { href: "https://" + t, certain: true };
+    if (KNOWN_SCHEME.test(t)) return { href: t, certain: true };
+    if (BARE_DOMAIN.test(t)) return { href: "https://" + t, certain: false };
+    return null;
+  }
+  function matchingNotes(rows, query, skipId, limit) {
+    const q = query.trim();
+    const notes = rows.filter((n) => n.id !== skipId && !n.trashedAt);
+    if (!q) return notes.slice(0, limit);
+    return notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, limit).map((x) => x.n);
+  }
+  var noteChoices = (rows, query, skipId, limit) => matchingNotes(rows, query, skipId, limit).map((n) => ({
+    href: "note://" + n.id,
+    label: deriveTitle(n),
+    icon: n.locked ? "lock" : "notebook-text",
+    keys: relativeTime(n.updatedAt),
+    noteId: n.id,
+    folderId: n.folderId || null
+  }));
+  var addressChoice = (href, keys) => ({ href, label: href, icon: "link", keys, noteId: null, folderId: null });
+  function linkChoices(text, rows, skipId, limit, current) {
+    const t = text.trim();
+    if (current && t === current && !current.startsWith("note://")) return [addressChoice(current, "Current link")].concat(noteChoices(rows, t, skipId, limit - 1));
+    const web = webAddress(t);
+    const asTyped = !web && t && !/\s/.test(t) && LINK_LIKE.test(t) ? t : null;
+    const notes = noteChoices(rows, t, skipId, web || asTyped ? limit - 1 : limit);
+    if (web) return web.certain ? [addressChoice(web.href, "Web address")].concat(notes) : notes.concat(addressChoice(web.href, "Web address"));
+    if (asTyped) return notes.concat(addressChoice(asTyped, "As typed"));
+    return notes;
+  }
+
   // src/renderer/editor-view.ts
   var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile4 } = helpers_exports;
   function tableShown() {
@@ -20485,9 +20525,7 @@
         inline.notes = known;
         if (seq !== inline.seq) return;
         const q = t.query.trim();
-        const notes = known.filter((n) => n.id !== state.currentId && !n.trashedAt);
-        const scored = q ? notes.map((n) => ({ n, s: fuzzyScore(q, deriveTitle(n)) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.n) : notes;
-        items = scored.slice(0, 8).map((n) => ({ id: n.id, title: deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: relativeTime(n.updatedAt), note: n }));
+        items = matchingNotes(known, q, state.currentId, 8).map((n) => ({ id: n.id, title: deriveTitle(n), icon: n.locked ? "lock" : "notebook-text", keys: relativeTime(n.updatedAt), note: n }));
         prefetchWikiLinks(items);
         if (q) items.push({ id: "new", title: 'New note "' + truncate(q, 40) + '"', icon: "square-pen", keys: "", create: q });
       }
@@ -20796,35 +20834,136 @@
       }
       api.app.openExternal(href);
     }
-    function openLinkDialog() {
-      if (!state.rich || state.sourceMode) return;
-      const existing = state.rich.activeLink();
-      if (!existing && !state.rich.hasSelection()) {
-        toast("Select the text to link first");
-        return;
-      }
-      state.linkRange = state.rich.selectionRange();
-      el.linkNoteSelect.innerHTML = '<option value="">\u2014 pick a note \u2014</option>';
-      api.notes.rows({ sort: "title" }).then((notes) => {
-        for (const n of notes) {
-          if (n.id === state.currentId) continue;
-          const o = document.createElement("option");
-          o.value = "note://" + n.id;
-          o.textContent = truncate(deriveTitle(n), 60);
-          el.linkNoteSelect.append(o);
-        }
-        if (/^note:\/\//.test(existing)) el.linkNoteSelect.value = existing;
-      });
-      el.linkInput.value = existing || "https://";
-      el.linkRemoveBtn.classList.toggle("hidden", !existing);
-      el.linkDialog.showModal();
-      el.linkInput.focus();
-      el.linkInput.select();
-    }
     function tableStatsNow() {
       return tableStats;
     }
-    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret };
+    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret };
+  }
+
+  // src/renderer/link-dialog.ts
+  var LINK_ROWS = 6;
+  var NO_MATCH = "No notes match. Paste a web address to link to a page.";
+  function createLinkDialog({ api, folderNames }) {
+    const pick = { rows: null, choices: [], active: -1, seq: 0, existing: null, typed: false, folders: /* @__PURE__ */ new Map() };
+    const activeHref = () => pick.active >= 0 && pick.choices[pick.active] ? pick.choices[pick.active].href : null;
+    function open() {
+      const rich = state.rich;
+      if (!rich || state.sourceMode) return;
+      const existing = rich.activeLink() || null;
+      if (!existing && !rich.hasSelection()) {
+        toast("Select the text to link first");
+        return;
+      }
+      state.linkRange = rich.selectionRange();
+      const linkedNote = /^note:\/\/(.+)$/.exec(existing || "");
+      const seq = ++pick.seq;
+      pick.rows = null;
+      pick.existing = existing;
+      pick.typed = false;
+      pick.folders = folderNames();
+      el.linkInput.value = linkedNote ? "" : existing || "";
+      el.linkRemoveBtn.classList.toggle("hidden", !existing);
+      render(existing);
+      el.linkDialog.showModal();
+      el.linkInput.focus();
+      el.linkInput.select();
+      api.notes.rows({ sort: "updated" }).catch(() => []).then((rows) => {
+        if (seq !== pick.seq || !el.linkDialog.open) return;
+        pick.rows = rows;
+        const target = linkedNote ? rows.find((n) => n.id === linkedNote[1]) : null;
+        if (target && !el.linkInput.value) {
+          el.linkInput.value = deriveTitle(target);
+          el.linkInput.select();
+        }
+        render(activeHref() || (pick.typed ? null : pick.existing));
+      });
+    }
+    function render(keep) {
+      pick.choices = linkChoices(el.linkInput.value, pick.rows || [], state.currentId, LINK_ROWS, pick.existing);
+      const kept = keep === null ? -1 : pick.choices.findIndex((c) => c.href === keep);
+      pick.active = kept >= 0 ? kept : keep === null && el.linkInput.value.trim() && pick.choices.length ? 0 : -1;
+      el.linkResults.replaceChildren(...pick.choices.map(choiceRow));
+      el.linkEmpty.textContent = pick.rows && !pick.choices.length && el.linkInput.value.trim() ? NO_MATCH : "";
+      el.linkInput.setAttribute("aria-expanded", String(pick.choices.length > 0));
+      mark();
+    }
+    function choiceRow(c, i) {
+      const row = document.createElement("div");
+      row.className = "inline-item";
+      row.id = "link-choice-" + i;
+      row.setAttribute("role", "option");
+      if (c.noteId) row.dataset.id = c.noteId;
+      row.innerHTML = I(c.icon);
+      const label = document.createElement("span");
+      label.className = "lbl";
+      label.textContent = c.label;
+      row.append(label);
+      const folder = c.folderId ? pick.folders.get(c.folderId) : void 0;
+      if (folder) {
+        const where = document.createElement("span");
+        where.className = "link-where";
+        where.textContent = folder;
+        where.title = folder;
+        row.append(where);
+      }
+      const keys = document.createElement("span");
+      keys.className = "keys";
+      keys.textContent = c.keys;
+      row.append(keys);
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        apply(i);
+      });
+      row.addEventListener("mousemove", (e) => {
+        if ((e.movementX || e.movementY) && pick.active !== i) {
+          pick.active = i;
+          mark();
+        }
+      });
+      return row;
+    }
+    function mark() {
+      el.linkResults.querySelectorAll('[role="option"]').forEach((row, i) => {
+        row.classList.toggle("is-active", i === pick.active);
+        row.setAttribute("aria-selected", String(i === pick.active));
+      });
+      if (pick.active >= 0) el.linkInput.setAttribute("aria-activedescendant", "link-choice-" + pick.active);
+      else el.linkInput.removeAttribute("aria-activedescendant");
+      el.linkApplyBtn.disabled = pick.active < 0;
+    }
+    function move(step) {
+      const n = pick.choices.length;
+      pick.active = pick.active < 0 ? step > 0 ? 0 : n - 1 : (pick.active + step + n) % n;
+      mark();
+    }
+    function apply(i) {
+      const choice = pick.choices[i];
+      if (!choice) return;
+      el.linkDialog.close();
+      if (state.rich) state.rich.setLink(choice.href, state.linkRange);
+    }
+    function bind() {
+      el.linkInput.addEventListener("input", () => {
+        pick.typed = true;
+        render(null);
+      });
+      el.linkInput.addEventListener("keydown", (e) => {
+        if (e.isComposing || e.key !== "ArrowDown" && e.key !== "ArrowUp" || !pick.choices.length) return;
+        e.preventDefault();
+        move(e.key === "ArrowDown" ? 1 : -1);
+      });
+      el.linkForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        apply(pick.active);
+      });
+      el.linkRemoveBtn.addEventListener("click", () => {
+        el.linkDialog.close();
+        if (state.rich) state.rich.setLink("", state.linkRange);
+      });
+      el.linkCancelBtn.addEventListener("click", () => el.linkDialog.close());
+      el.linkDialog.addEventListener("close", () => focusBody());
+    }
+    return { open, bind };
   }
 
   // src/renderer/vaults-panel.ts
@@ -27114,7 +27253,8 @@
       find: "Alt+C matches the case, Alt+W whole words only."
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
-    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkDialog, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
     let listPageNumbers = false;
@@ -28059,6 +28199,7 @@
         cmd("notes-folder", "Go to", "Show the notes folder", "folder-open", "", showNotesFolder, !!(state.info && state.info.homeVaultId), "folder files explorer location markdown disk"),
         fromButton(el.pinBtn, "This note", { title: state.current && state.current.pinned ? "Unpin" : "Pin to the top", keys: "Ctrl+D" }),
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
+        cmd("link", "This note", "Link the selected text", "link", "Ctrl+K", () => links.open(), noteOpen && !!state.rich && !state.sourceMode && !src.codeOn, "url web address note reference"),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
         cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), canFindInNote()),
         cmd("find-case", "This note", "Find: match case" + (find.matchCase ? " (on)" : ""), "case-sensitive", "Alt+C", () => toggleFindOption("matchCase"), find.open, "case sensitive"),
@@ -28310,7 +28451,7 @@
               }
             } else if (bodyHasFocus() && !src.codeOn) {
               e.preventDefault();
-              openLinkDialog();
+              links.open();
             }
             return;
           default:
@@ -28671,9 +28812,6 @@
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());
       el.historyRestoreBtn.addEventListener("click", restoreVersion);
       el.historyDialog.addEventListener("close", () => focusBody());
-      el.linkNoteSelect.addEventListener("change", () => {
-        if (el.linkNoteSelect.value) el.linkInput.value = el.linkNoteSelect.value;
-      });
       el.findPrevBtn.addEventListener("click", () => runFind(false));
       el.findCloseBtn.addEventListener("click", closeFind);
       el.findInput.addEventListener("input", () => runFind(true, true));
@@ -28809,18 +28947,7 @@
           state.rich.focus("end");
         }
       });
-      el.linkForm.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const href = el.linkInput.value.trim();
-        el.linkDialog.close();
-        if (state.rich) state.rich.setLink(href && href !== "https://" ? href : "", state.linkRange);
-      });
-      el.linkRemoveBtn.addEventListener("click", () => {
-        el.linkDialog.close();
-        if (state.rich) state.rich.setLink("", state.linkRange);
-      });
-      el.linkCancelBtn.addEventListener("click", () => el.linkDialog.close());
-      el.linkDialog.addEventListener("close", () => focusBody());
+      links.bind();
       el.alignSeg.querySelectorAll("button[data-align]").forEach((b) => b.addEventListener("click", () => {
         const align = b.dataset.align;
         if (align === "left" || align === "center" || align === "right") {

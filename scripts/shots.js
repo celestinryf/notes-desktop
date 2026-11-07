@@ -228,6 +228,8 @@ const typeAtEnd = (text, newLine) => async (page) => {
   await sleep(400);
 };
 const key = (combo) => async (page) => { await page.keyboard.press(combo); await sleep(350); };
+const selectLastLine = async (page) => { await page.click('.rich-editor-content'); await page.keyboard.press('Control+End'); await page.keyboard.press('Shift+Home'); await sleep(200); };
+const linkDialog = (query) => steps(openNote('Ideas for the garden'), selectLastLine, key('Control+k'), async (page) => { if (query) await page.fill('#linkInput', query); await sleep(400); });
 const steps = (...fns) => async (page, app) => { for (const fn of fns) await fn(page, app); };
 const untilStatus = (label) => async (page) => {
   for (let i = 0; i < 60; i++) {
@@ -290,6 +292,11 @@ const SCENES = {
   'keep-out-toast': { about: 'Keeping a note out of history from the More menu: the toast with Undo', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#historyKeepBtn'); await sleep(500); }) },
   slash: { about: 'The "/" block menu in a note', run: steps(openNote('Ideas for the garden'), typeAtEnd('/', true)) },
   'slash-query': { about: 'The "/" block menu, filtered', run: steps(openNote('Ideas for the garden'), typeAtEnd('/che', true)) },
+  'link-dialog': { about: 'The Link dialog (Ctrl+K on selected text): one field, the six most recent notes under it', run: linkDialog('') },
+  'link-dialog-query': { about: 'The Link dialog searching the notes as you type', run: linkDialog('gro') },
+  'link-dialog-web': { about: 'The Link dialog with a web address typed: the address row first, active', run: linkDialog('https://example.com/trails') },
+  'link-dialog-existing': { about: 'The Link dialog reopened on a link: its address chosen, Remove link in the footer', run: steps(linkDialog('https://example.com/trails'), key('Enter'), key('Control+k')) },
+  'link-dialog-none': { about: 'The Link dialog when nothing matches: one line, Apply disabled', run: linkDialog('qqqq') },
   wikilink: { about: 'The "[[" note picker', run: steps(openNote('Ideas for the garden'), typeAtEnd(' [[gro')) },
   'table-aligned': { about: 'A table with left, right and centred columns, and a picture alone in a cell, rendered', bodies: { 'n-groceries': 'Times on the ridge loop this month.\n\n| Day     | Distance | Time  | Note        |\n| :------ | -------: | ----: | :---------: |\n| Monday  |   6.2 km | 41:10 |    easy     |\n| Friday  |  11.8 km | 79:45 | ![ridge](ridge.png) |\n| Sunday  |   8.0 km | 52:03 |   windy     |' }, run: openNote('Groceries') },
   'list-view': { about: 'The note list as one flat list (the title-row switch; folders are the default)', settings: { listMode: 'list', listLayout: 1 }, run: openNote('Q4 planning') },
@@ -443,6 +450,7 @@ async function shoot(theme, name, opts) {
     await sleep(350);
     const file = path.join(opts.out, `${name}-${theme}.png`);
     await page.screenshot({ path: file });
+    await readingCopy(page, file);
     if (opts.screen) {
       const r = await app.evaluate(({ BrowserWindow, screen }) => {
         const w = BrowserWindow.getAllWindows()[0];
@@ -469,6 +477,24 @@ async function shoot(theme, name, opts) {
     if (refusing) await refusing.close();
     try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) {  }
   }
+}
+
+const READ_WIDTH = 640;
+async function readingCopy(page, file) {
+  const src = 'data:image/png;base64,' + fs.readFileSync(file).toString('base64');
+  const out = await page.evaluate(async ([data, width]) => {
+    const img = new Image();
+    img.src = data;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = Math.round(img.height * width / img.width);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  }, [src, READ_WIDTH]);
+  fs.writeFileSync(file.replace(/\.png$/, '-read.png'), Buffer.from(out.split(',')[1], 'base64'));
 }
 
 async function main() {
