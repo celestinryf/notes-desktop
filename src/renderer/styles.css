@@ -852,6 +852,15 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-editor { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; min-height: 70vh; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
 .pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: var(--s1); border-bottom: 1px solid var(--line-2); background: var(--raised); }
 .pdf-toolbar .tool-btn.is-on { background: var(--selected); color: var(--selected-fg); }
+.pdf-format { display: none; flex-wrap: wrap; align-items: center; gap: var(--s4); padding: var(--s1) var(--s2); border-bottom: 1px solid var(--line-2); background: var(--raised); }
+.pdf-format-group { display: none; flex-wrap: wrap; align-items: center; gap: var(--s4); }
+.pdf-editor[data-tool="text"] .pdf-format, .pdf-editor[data-tool="draw"] .pdf-format, .pdf-editor[data-tool="highlight"] .pdf-format,
+.pdf-editor[data-tool="text"] .pdf-format-group[data-pdf-for="text"], .pdf-editor[data-tool="draw"] .pdf-format-group[data-pdf-for="draw"], .pdf-editor[data-tool="highlight"] .pdf-format-group[data-pdf-for="highlight"] { display: flex; }
+.pdf-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); font-weight: 500; color: var(--fg-2); }
+.pdf-field .select { height: var(--control-h); font-size: var(--t-sm); }
+.pdf-field input[type="range"] { width: 96px; height: var(--control-h); margin: 0; }
+.pdf-format .pdf-field input[type="color"] { width: 36px; height: var(--control-h); }
+.pdf-field output { min-width: 4ch; font-size: var(--t-xs); color: var(--fg-3); }
 .pdf-sep { width: 1px; align-self: stretch; margin: var(--s1) var(--s1); background: var(--line-2); }
 .pdf-grow { flex: 1; }
 .pdf-body { display: flex; flex: 1; min-height: 0; }
@@ -860,7 +869,7 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-comments { display: none; flex: 0 0 280px; max-width: 45%; flex-direction: column; min-height: 0; border-left: 1px solid var(--line-2); background: var(--paper); }
 .pdf-editor.commenting .pdf-comments { display: flex; }
 .pdf-comments.is-working { opacity: 0.6; pointer-events: none; }
-.pdf-editor.rewriting .pdf-toolbar, .pdf-editor.rewriting .pdf-stage { opacity: 0.6; pointer-events: none; }
+.pdf-editor.rewriting .pdf-toolbar, .pdf-editor.rewriting .pdf-format, .pdf-editor.rewriting .pdf-stage { opacity: 0.6; pointer-events: none; }
 .pdf-comments-bar { display: flex; align-items: center; gap: 6px; padding: var(--s1) var(--s1) var(--s1) var(--s2); border-bottom: 1px solid var(--line-2); background: var(--raised); }
 .pdf-comments-hint { margin: 0; padding: 0 var(--s2); font-size: var(--t-sm); color: var(--fg-2); }
 .pdf-comments-hint:not(:empty) { padding: 6px var(--s2); }
@@ -878,7 +887,7 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-viewport { position: absolute; inset: 0; overflow: auto; background: var(--document-bg); }
 .pdf-pages { display: none; flex: 1; flex-direction: column; min-height: 0; }
 .pdf-editor.organizing .pdf-pages { display: flex; }
-.pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-body { display: none; }
+.pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-format, .pdf-editor.organizing .pdf-body { display: none; }
 .pdf-pages.is-working { opacity: 0.6; pointer-events: none; }
 .pdf-pages-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--s1) var(--s1) var(--s1) var(--s3); border-bottom: 1px solid var(--line-2); background: var(--raised); }
 .pdf-pages-title { font-size: var(--t-sm); color: var(--fg-2); }
@@ -1131,10 +1140,10 @@ button.book-name:hover { background: var(--hover); }
 .swatch-name { padding: 0 2px; }
 .color-row { display: flex; gap: var(--s4); flex-wrap: wrap; }
 .color-field { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); font-weight: 500; }
-.color-field input { width: 48px; height: 32px; padding: 2px; border: 1px solid var(--field); border-radius: var(--r-sm); background: var(--field-bg); cursor: pointer; }
-.color-field input::-webkit-color-swatch-wrapper { padding: 0; }
-.color-field input::-webkit-color-swatch { border: none; border-radius: var(--r-xs); }
-.color-field input:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.color-field input, .pdf-field input[type="color"] { width: 48px; height: 32px; padding: 2px; border: 1px solid var(--field); border-radius: var(--r-sm); background: var(--field-bg); cursor: pointer; }
+.color-field input::-webkit-color-swatch-wrapper, .pdf-field input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.color-field input::-webkit-color-swatch, .pdf-field input[type="color"]::-webkit-color-swatch { border: none; border-radius: var(--r-xs); }
+.color-field input:focus-visible, .pdf-field input[type="color"]:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
 
 .segmented { display: inline-flex; align-self: flex-start; padding: 2px; border-radius: var(--r-md); background: var(--well); }
 .segmented button { height: 26px; padding: 0 var(--s3); border: none; border-radius: var(--r-sm); background: transparent; color: var(--fg-2); font-size: var(--t-sm); font-weight: 500; transition: background var(--dur-1); }

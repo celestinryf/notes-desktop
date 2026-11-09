@@ -87,6 +87,7 @@ Mud on the switchbacks below the ridge; the upper meadow is clear.
 `],
   'csv-wide': ['readings.csv', sampleReadings(150)],
   png: ['ridge.png', samplePng(480, 300), 'image'],
+  pdf: ['trail.pdf', samplePdf(), 'pdf'],
   js: ['trail.js', `// Elevation gain over the first loop, in metres.
 const loop = { name: 'North loop', gain: 640, open: true };
 
@@ -146,6 +147,25 @@ function sampleVault(dir) {
   fs.mkdirSync(path.join(root, 'attachments'), { recursive: true });
   fs.writeFileSync(path.join(root, 'attachments', 'ridge.png'), samplePng(480, 300));
   return { id: 'v-garden', name: 'Garden vault', path: root, remote: '', autoSync: false, syncMinutes: 5, createdAt: Date.now() };
+}
+
+function samplePdf() {
+  const lines = ['(Trail notes) Tj', '0 -28 Td (The north loop reopened on Saturday. Bring water: the spring at mile four is dry.) Tj', '0 -20 Td (Mud on the switchbacks below the ridge; the upper meadow is clear.) Tj', '0 -40 Td (Elevation: the climb gains 640 m over the first loop.) Tj'];
+  const stream = 'BT /F1 18 Tf 72 700 Td ' + lines.join(' ') + ' ET';
+  const objects = [
+    '<</Type/Catalog/Pages 2 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>',
+    '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+    '<</Length ' + stream.length + '>>stream\n' + stream + '\nendstream',
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((o, i) => { offsets.push(body.length); body += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+  const xref = body.length;
+  body += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n' + offsets.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  body += 'trailer<</Size ' + (objects.length + 1) + '/Root 1 0 R>>\nstartxref\n' + xref + '\n%%EOF\n';
+  return Buffer.from(body, 'latin1');
 }
 
 function sampleFileNote(dir, kind) {
@@ -402,6 +422,9 @@ const SCENES = {
   csv: { about: 'A CSV file as a table (Ctrl+E edits it as text)', file: 'csv', run: openNote('trail-log.csv') },
   'csv-wide': { about: 'A long, wide CSV scrolled down and right: the header and row numbers stay', file: 'csv-wide', size: { width: 900, height: 640 },
     run: steps(openNote('readings.csv'), async (page) => { await page.evaluate(() => { const v = document.getElementById('csvView'); v.scrollTop = 900; v.scrollLeft = 260; }); await sleep(300); }) },
+  'pdf-text': { about: 'A PDF with the Text tool on: the settings row shows size and colour, and a placed text box uses the default colour', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="text"]'); await sleep(400); const at = await page.$eval('#pdfEditor .pdfViewer .page', (p) => { const b = p.getBoundingClientRect(); return { x: b.left + b.width * 0.55, y: b.top + 120 }; }); await page.mouse.click(at.x, at.y); await sleep(300); await page.keyboard.type('Reviewed'); await sleep(400); }) },
+  'pdf-draw': { about: 'The Draw tool on: colour, width and opacity', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="draw"]'); await sleep(400); }) },
+  'pdf-highlight': { about: 'The Highlight tool on: colour and thickness', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="highlight"]'); await sleep(400); }) },
   image: { about: 'An image file in the image viewer', file: 'png', run: openNote('ridge.png') },
   'image-actual': { about: 'An image at its actual size', file: 'png', run: steps(openNote('ridge.png'), async (page) => { await page.click('#imageView'); await sleep(300); }) },
   dropdown: { about: 'A select open: the note list sort', run: async (page) => { await page.click('#sortSelect'); await sleep(400); } },

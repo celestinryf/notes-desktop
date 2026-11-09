@@ -1,8 +1,8 @@
 import * as H from '../shared/helpers.mts';
 import { el } from './dom.ts';
 import { state } from './state.ts';
-import { NotesPdfEditor, requireChild } from './pdf-editor.ts';
-import type { PdfController } from './pdf-editor.ts';
+import { NotesPdfEditor, requireChild, isPdfToolParam, isPdfColorParam } from './pdf-editor.ts';
+import type { PdfController, PdfToolParams } from './pdf-editor.ts';
 import { NotesPdfPages } from './pdf-pages.ts';
 import type { PdfPagesPlan } from './pdf-pages.ts';
 import { NotesPdfComments } from './pdf-comments.ts';
@@ -35,14 +35,56 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
         onDirty: (d) => { el.pdfSaveBtn.textContent = d ? 'Save' : 'Saved'; },
         onState: (s) => {
           for (const b of el.pdfEditor.querySelectorAll<HTMLElement>('[data-pdf-mode]')) b.classList.toggle('is-on', b.dataset.pdfMode === s.mode);
+          el.pdfEditor.dataset.tool = s.mode;
           el.pdfUndoBtn.disabled = !s.canUndo;
           el.pdfRedoBtn.disabled = !s.canRedo;
           el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + '%';
         },
+        onParams: showPdfParams,
         onLink: externalLinkClick,
       });
     }
     return pdf;
+  }
+
+  const pdfParamControls = () => el.pdfFormat.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-pdf-param]');
+
+  function showPdfParams(values: Partial<PdfToolParams>) {
+    for (const control of pdfParamControls()) {
+      const name = control.dataset.pdfParam;
+      if (!name || !isPdfToolParam(name)) continue;
+      const value = values[name];
+      if (value === undefined) continue;
+      const text = typeof value === 'number' ? String(value) : value.toLowerCase();
+      if (control instanceof HTMLSelectElement) keepOption(control, text);
+      if (control.value !== text) control.value = text;
+      showPdfUnit(control);
+    }
+  }
+
+  function keepOption(select: HTMLSelectElement, value: string) {
+    for (const o of select.options) if (o.dataset.odd !== undefined && o.value !== value) o.remove();
+    if (Array.from(select.options).some((o) => o.value === value)) return;
+    const odd = document.createElement('option');
+    odd.value = value;
+    odd.textContent = value;
+    odd.dataset.odd = '';
+    select.append(odd);
+  }
+
+  function showPdfUnit(control: HTMLInputElement | HTMLSelectElement) {
+    const out = control.parentElement && control.parentElement.querySelector('output');
+    if (!out) return;
+    out.textContent = out.dataset.pdfUnit === '%' ? Math.round(Number(control.value) * 100) + '%' : control.value + ' px';
+  }
+
+  function onPdfFormatInput(e: Event) {
+    const control = e.target;
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement) || !pdf) return;
+    const name = control.dataset.pdfParam;
+    if (!name || !isPdfToolParam(name)) return;
+    pdf.setParam(name, isPdfColorParam(name) ? control.value : Number(control.value));
+    showPdfUnit(control);
   }
 
   function clearPdf() {
@@ -298,6 +340,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
 
   function bindPdfEvents() {
     requireChild(el.pdfEditor, '.pdf-toolbar', HTMLElement).addEventListener('click', onPdfToolbarClick);
+    el.pdfFormat.addEventListener('input', onPdfFormatInput);
     el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });
