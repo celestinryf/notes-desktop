@@ -16215,6 +16215,7 @@
     convertMenu: pageElement("#convertMenu", HTMLDivElement),
     fileBanner: pageElement("#fileBanner", HTMLDivElement),
     pdfEditor: pageElement("#pdfEditor", HTMLDivElement),
+    pdfFormat: pageElement("#pdfFormat", HTMLDivElement),
     pdfSaveBtn: pageElement("#pdfSaveBtn", HTMLButtonElement),
     pdfUndoBtn: pageElement("#pdfUndoBtn", HTMLButtonElement),
     pdfRedoBtn: pageElement("#pdfRedoBtn", HTMLButtonElement),
@@ -22639,6 +22640,11 @@
     if (!(node instanceof type)) throw new Error("The PDF panel is missing " + selector + ".");
     return node;
   }
+  var PDF_TOOL_PARAMS = ["textSize", "textColor", "inkColor", "inkWidth", "inkOpacity", "highlightColor", "highlightThickness"];
+  var isPdfToolParam = (name) => PDF_TOOL_PARAMS.includes(name);
+  var isPdfColorParam = (name) => name.endsWith("Color");
+  var DOCUMENT_INK = "#000000";
+  var DEFAULT_PDF_TOOL_PARAMS = { textSize: 10, textColor: DOCUMENT_INK, inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: "#ffff98", highlightThickness: 12 };
   var NotesPdfEditor = (function() {
     "use strict";
     const PV = window.PdfView;
@@ -22671,6 +22677,22 @@
     }
     const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
     const isModeName = (name) => name in MODES;
+    const P = lib.AnnotationEditorParamsType;
+    const PARAM_TYPES = {
+      textSize: P.FREETEXT_SIZE,
+      textColor: P.FREETEXT_COLOR,
+      inkColor: P.INK_COLOR,
+      inkWidth: P.INK_THICKNESS,
+      inkOpacity: P.INK_OPACITY,
+      highlightColor: P.HIGHLIGHT_COLOR,
+      highlightThickness: P.HIGHLIGHT_THICKNESS
+    };
+    const PARAM_OF_TYPE = new Map(PDF_TOOL_PARAMS.map((name) => [PARAM_TYPES[name], name]));
+    const PARAMS_OF_MODE = /* @__PURE__ */ new Map([
+      [T.FREETEXT, ["textSize", "textColor"]],
+      [T.INK, ["inkColor", "inkWidth", "inkOpacity"]],
+      [T.HIGHLIGHT, ["highlightColor", "highlightThickness"]]
+    ]);
     const MARKUP = /* @__PURE__ */ new Set([
       "Text",
       "Line",
@@ -22710,6 +22732,11 @@
       let touched = false;
       const undo = { canUndo: false, canRedo: false };
       const report = () => hooks2.onState && hooks2.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
+      const params = { ...DEFAULT_PDF_TOOL_PARAMS };
+      const sendParam = (name) => eventBus.dispatch("switchannotationeditorparams", { source: null, type: PARAM_TYPES[name], value: params[name] });
+      const reportParams = (values) => {
+        if (hooks2.onParams) hooks2.onParams(values);
+      };
       let location2 = null, restore = null;
       eventBus.on("updateviewarea", (e) => {
         location2 = e.location;
@@ -22725,6 +22752,28 @@
         viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: "XYZ" }, at.left, at.top, null], allowNegativeOffset: true });
       });
       eventBus.on("scalechanging", report);
+      function setParam(name, value) {
+        params[name] = value;
+        if (doc) sendParam(name);
+      }
+      eventBus.on("annotationeditormodechanged", ({ mode: type }) => {
+        const names = PARAMS_OF_MODE.get(type);
+        if (!names) return;
+        const sent = {};
+        for (const name of names) {
+          sendParam(name);
+          sent[name] = params[name];
+        }
+        reportParams(sent);
+      });
+      eventBus.on("annotationeditorparamschanged", ({ details }) => {
+        const seen = {};
+        for (const [type, value] of details) {
+          const name = PARAM_OF_TYPE.get(type);
+          if (name && (typeof value === "string" || typeof value === "number")) seen[name] = value;
+        }
+        if (Object.keys(seen).length) reportParams(seen);
+      });
       let fittedWidth = 0;
       new ResizeObserver(() => {
         const w = container.clientWidth;
@@ -22744,6 +22793,7 @@
       eventBus.on("editingstateschanged", ({ details }) => {
         if ("hasSomethingToUndo" in details) undo.canUndo = details.hasSomethingToUndo;
         if ("hasSomethingToRedo" in details) undo.canRedo = details.hasSomethingToRedo;
+        if ("hasSelectedEditor" in details && !details.hasSelectedEditor) reportParams({ ...params });
         refreshDirty();
         report();
       });
@@ -22824,6 +22874,7 @@
         linkService.setDocument(doc, null);
         mode = "select";
         report();
+        reportParams({ ...params });
         return true;
       }
       async function close() {
@@ -22962,6 +23013,8 @@
         open,
         close,
         setMode,
+        setParam,
+        params: () => ({ ...params }),
         commit,
         placePicture,
         pickPoint,
@@ -23520,14 +23573,51 @@
           },
           onState: (s) => {
             for (const b of el.pdfEditor.querySelectorAll("[data-pdf-mode]")) b.classList.toggle("is-on", b.dataset.pdfMode === s.mode);
+            el.pdfEditor.dataset.tool = s.mode;
             el.pdfUndoBtn.disabled = !s.canUndo;
             el.pdfRedoBtn.disabled = !s.canRedo;
             el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + "%";
           },
+          onParams: showPdfParams,
           onLink: externalLinkClick
         });
       }
       return pdf;
+    }
+    const pdfParamControls = () => el.pdfFormat.querySelectorAll("[data-pdf-param]");
+    function showPdfParams(values) {
+      for (const control of pdfParamControls()) {
+        const name = control.dataset.pdfParam;
+        if (!name || !isPdfToolParam(name)) continue;
+        const value = values[name];
+        if (value === void 0) continue;
+        const text = typeof value === "number" ? String(value) : value.toLowerCase();
+        if (control instanceof HTMLSelectElement) keepOption(control, text);
+        if (control.value !== text) control.value = text;
+        showPdfUnit(control);
+      }
+    }
+    function keepOption(select, value) {
+      for (const o of select.options) if (o.dataset.odd !== void 0 && o.value !== value) o.remove();
+      if (Array.from(select.options).some((o) => o.value === value)) return;
+      const odd = document.createElement("option");
+      odd.value = value;
+      odd.textContent = value;
+      odd.dataset.odd = "";
+      select.append(odd);
+    }
+    function showPdfUnit(control) {
+      const out = control.parentElement && control.parentElement.querySelector("output");
+      if (!out) return;
+      out.textContent = out.dataset.pdfUnit === "%" ? Math.round(Number(control.value) * 100) + "%" : control.value + " px";
+    }
+    function onPdfFormatInput(e) {
+      const control = e.target;
+      if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement) || !pdf) return;
+      const name = control.dataset.pdfParam;
+      if (!name || !isPdfToolParam(name)) return;
+      pdf.setParam(name, isPdfColorParam(name) ? control.value : Number(control.value));
+      showPdfUnit(control);
     }
     function clearPdf() {
       closePdfPages();
@@ -23841,6 +23931,7 @@
     }
     function bindPdfEvents() {
       requireChild(el.pdfEditor, ".pdf-toolbar", HTMLElement).addEventListener("click", onPdfToolbarClick);
+      el.pdfFormat.addEventListener("input", onPdfFormatInput);
       el.pdfCommentsClose.addEventListener("click", () => showPdfComments(false));
       el.signForm.addEventListener("submit", (e) => {
         e.preventDefault();

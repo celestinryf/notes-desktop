@@ -6,9 +6,17 @@ export function requireChild<T extends Element>(root: ParentNode, selector: stri
   return node;
 }
 export type PdfToolState = { mode: string, canUndo: boolean, canRedo: boolean, scale: number };
+export type PdfToolParam = 'textSize' | 'textColor' | 'inkColor' | 'inkWidth' | 'inkOpacity' | 'highlightColor' | 'highlightThickness';
+export type PdfToolParams = Record<PdfToolParam, string | number>;
+export const PDF_TOOL_PARAMS: readonly PdfToolParam[] = ['textSize', 'textColor', 'inkColor', 'inkWidth', 'inkOpacity', 'highlightColor', 'highlightThickness'];
+export const isPdfToolParam = (name: string): name is PdfToolParam => (PDF_TOOL_PARAMS as readonly string[]).includes(name);
+export const isPdfColorParam = (name: PdfToolParam) => name.endsWith('Color');
+export const DOCUMENT_INK = '#000000';
+export const DEFAULT_PDF_TOOL_PARAMS: PdfToolParams = { textSize: 10, textColor: DOCUMENT_INK, inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: '#ffff98', highlightThickness: 12 };
 export type PdfEditorHooks = {
   onDirty?: (dirty: boolean) => void,
   onState?: (state: PdfToolState) => void,
+  onParams?: (values: Partial<PdfToolParams>) => void,
   onLink?: (event: MouseEvent, href: string) => void,
 };
 
@@ -51,6 +59,18 @@ export const NotesPdfEditor = (function () {
   const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
   type ModeName = keyof typeof MODES;
   const isModeName = (name: string): name is ModeName => name in MODES;
+  const P = lib.AnnotationEditorParamsType;
+  const PARAM_TYPES: Record<PdfToolParam, number> = {
+    textSize: P.FREETEXT_SIZE, textColor: P.FREETEXT_COLOR,
+    inkColor: P.INK_COLOR, inkWidth: P.INK_THICKNESS, inkOpacity: P.INK_OPACITY,
+    highlightColor: P.HIGHLIGHT_COLOR, highlightThickness: P.HIGHLIGHT_THICKNESS,
+  };
+  const PARAM_OF_TYPE = new Map(PDF_TOOL_PARAMS.map((name) => [PARAM_TYPES[name], name]));
+  const PARAMS_OF_MODE = new Map<number, PdfToolParam[]>([
+    [T.FREETEXT, ['textSize', 'textColor']],
+    [T.INK, ['inkColor', 'inkWidth', 'inkOpacity']],
+    [T.HIGHLIGHT, ['highlightColor', 'highlightThickness']],
+  ]);
   const MARKUP = new Set(['Text', 'Line', 'Square', 'Circle', 'Polygon', 'PolyLine', 'Highlight', 'Underline', 'Squiggly',
     'StrikeOut', 'Stamp', 'Caret', 'Ink', 'FileAttachment', 'Sound']);
   function refOf(id: string) {
@@ -78,6 +98,9 @@ export const NotesPdfEditor = (function () {
     let touched = false;
     const undo = { canUndo: false, canRedo: false };
     const report = () => hooks.onState && hooks.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
+    const params: PdfToolParams = { ...DEFAULT_PDF_TOOL_PARAMS };
+    const sendParam = (name: PdfToolParam) => eventBus.dispatch('switchannotationeditorparams', { source: null, type: PARAM_TYPES[name], value: params[name] });
+    const reportParams = (values: Partial<PdfToolParams>) => { if (hooks.onParams) hooks.onParams(values); };
 
     let location: ViewLocation | null = null, restore: ViewLocation | null = null;
     eventBus.on('updateviewarea', (e: { location: ViewLocation }) => { location = e.location; });
@@ -89,6 +112,26 @@ export const NotesPdfEditor = (function () {
       viewer.scrollPageIntoView({ pageNumber: Math.min(at.pageNumber, doc.numPages), destArray: [null, { name: 'XYZ' }, at.left, at.top, null], allowNegativeOffset: true });
     });
     eventBus.on('scalechanging', report);
+    function setParam(name: PdfToolParam, value: string | number) {
+      params[name] = value;
+      if (doc) sendParam(name);
+    }
+    eventBus.on('annotationeditormodechanged', ({ mode: type }: { mode: number }) => {
+      const names = PARAMS_OF_MODE.get(type);
+      if (!names) return;
+      const sent: Partial<PdfToolParams> = {};
+      for (const name of names) { sendParam(name); sent[name] = params[name]; }
+      reportParams(sent);
+    });
+    eventBus.on('annotationeditorparamschanged', ({ details }: { details: [number, unknown][] }) => {
+      const seen: Partial<PdfToolParams> = {};
+      for (const [type, value] of details) {
+        const name = PARAM_OF_TYPE.get(type);
+        if (name && (typeof value === 'string' || typeof value === 'number')) seen[name] = value;
+      }
+      if (Object.keys(seen).length) reportParams(seen);
+    });
+
     let fittedWidth = 0;
     new ResizeObserver(() => {
       const w = container.clientWidth;
@@ -100,9 +143,10 @@ export const NotesPdfEditor = (function () {
       });
     }).observe(container);
     eventBus.on('annotationlayerrendered', () => { if (!touched && doc) { savedHash = currentHash(); refreshDirty(); } });
-    eventBus.on('editingstateschanged', ({ details }: { details: { hasSomethingToUndo: boolean } | { hasSomethingToRedo: boolean } }) => {
+    eventBus.on('editingstateschanged', ({ details }: { details: { hasSomethingToUndo: boolean } | { hasSomethingToRedo: boolean } | { hasSelectedEditor: boolean } }) => {
       if ('hasSomethingToUndo' in details) undo.canUndo = details.hasSomethingToUndo;
       if ('hasSomethingToRedo' in details) undo.canRedo = details.hasSomethingToRedo;
+      if ('hasSelectedEditor' in details && !details.hasSelectedEditor) reportParams({ ...params });
       refreshDirty();
       report();
     });
@@ -181,6 +225,7 @@ export const NotesPdfEditor = (function () {
       linkService.setDocument(doc, null);
       mode = 'select';
       report();
+      reportParams({ ...params });
       return true;
     }
 
@@ -305,6 +350,8 @@ export const NotesPdfEditor = (function () {
       open,
       close,
       setMode,
+      setParam,
+      params: () => ({ ...params }),
       commit,
       placePicture,
       pickPoint,
