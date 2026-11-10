@@ -134,6 +134,7 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
     }
     const doc = await PDFDocument.load(input.bytes, { updateMetadata: false });
     if (task === 'liftMarks') {
+      if (isSigned(doc)) { port.postMessage({ ok: true, marks: [], bytes: input.bytes }); return; }
       const marks = liftTextMarks(doc);
       port.postMessage({ ok: true, marks, bytes: marks.length ? await doc.save({ useObjectStreams: false }) : input.bytes });
       return;

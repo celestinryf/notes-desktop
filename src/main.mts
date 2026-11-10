@@ -732,9 +732,11 @@ function main() {
   handle('files:pdfBytes', (_e, id) => pdfFileBytes(id));
   handle('files:pdfOpen', async (_e, id) => {
     const bytes = pdfFileBytes(id);
-    if (!bytes.includes('/' + PDF_TEXT_MARK_KEY)) return { bytes, marks: [] };
+    const mayHoldMarks = bytes.includes('/' + PDF_TEXT_MARK_KEY) || (bytes.includes('/FreeText') && bytes.includes('/ObjStm'));
+    if (!mayHoldMarks) return { bytes, marks: [] };
     const res = await runWorker<{ bytes?: Uint8Array, marks?: unknown[] }>('pdf-edit-worker.mts', { bytes, task: 'liftMarks' }, 2 * 60 * 1000, 'Reading the PDF took too long.');
-    if (!res.ok || !res.bytes) return { bytes, marks: [] };
+    if (!res.ok) throw new Error('Could not read the text boxes in this PDF: ' + res.error);
+    if (!res.bytes) return { bytes, marks: [] };
     return { bytes: Buffer.from(res.bytes), marks: (res.marks || []).map(parsePdfTextMark).filter((m) => m !== null) };
   });
 
@@ -771,8 +773,9 @@ function main() {
   }
   handle('files:savePdf', async (_e, id, bytes, expectedMtime, marks) => {
     const file = fileNoteOfKind(id, 'pdf').filePath;
+    if (!Array.isArray(marks)) throw new Error('the text boxes were missing, so nothing was written.');
     let buf = pdfBuffer(bytes);
-    if (Array.isArray(marks) && marks.length) buf = pdfBuffer(await pdfLibTask(buf, 'writeMarks', { marks }, 'Writing the text boxes'));
+    if (marks.length) buf = pdfBuffer(await pdfLibTask(buf, 'writeMarks', { marks }, 'Writing the text boxes'));
     return saveEdits(id, file, buf, expectedMtime);
   });
 

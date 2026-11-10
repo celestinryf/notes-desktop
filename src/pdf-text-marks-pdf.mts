@@ -3,7 +3,7 @@ import type { PDFDocument, PDFFont, PDFPage, Color } from 'pdf-lib';
 import { PDF_TEXT_MARK_KEY, PDF_TEXT_PADDING, MAX_PDF_TEXT_MARKS, parsePdfTextMark, wrapPdfText, pdfTextLineHeight, unwritablePdfChar } from './shared/pdf-text-marks.mts';
 import type { PdfTextMark, PdfTextFont } from './shared/pdf-text-marks.mts';
 
-const { PDFName, PDFDict, PDFArray, PDFRef, PDFString, PDFHexString, StandardFonts, rgb, degrees, drawText, drawRectangle, drawLine } = pdfLibModule;
+const { PDFName, PDFDict, PDFArray, PDFRef, PDFStream, PDFString, PDFHexString, StandardFonts, rgb, degrees, drawText, drawRectangle, drawLine } = pdfLibModule;
 
 const KEY = PDFName.of(PDF_TEXT_MARK_KEY);
 const STANDARD: Record<PdfTextFont, [string, string, string, string]> = {
@@ -49,12 +49,21 @@ export function liftTextMarks(doc: PDFDocument): PdfTextMark[] {
       let parsed: unknown = null;
       try { parsed = raw === null ? null : JSON.parse(raw); } catch (_) { parsed = null; }
       const mark = parsePdfTextMark(parsed);
+      if (!mark || marks.length >= MAX_PDF_TEXT_MARKS) continue;
       page.node.removeAnnot(ref);
       const ap = dict.lookupMaybe(PDFName.of('AP'), PDFDict);
       const normal = ap && ap.get(PDFName.of('N'));
-      if (normal instanceof PDFRef) doc.context.delete(normal);
+      if (normal instanceof PDFRef) {
+        const stream = doc.context.lookup(normal);
+        const resources = stream instanceof PDFStream ? stream.dict.lookupMaybe(PDFName.of('Resources'), PDFDict) : undefined;
+        for (const group of ['ExtGState', 'Font']) {
+          const owned = resources && resources.lookupMaybe(PDFName.of(group), PDFDict);
+          if (owned) for (const [, value] of owned.entries()) if (value instanceof PDFRef) doc.context.delete(value);
+        }
+        doc.context.delete(normal);
+      }
       doc.context.delete(ref);
-      if (mark && marks.length < MAX_PDF_TEXT_MARKS) marks.push(Object.assign(mark, { page: index }));
+      marks.push(Object.assign(mark, { page: index }));
     }
   });
   return marks;

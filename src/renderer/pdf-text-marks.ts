@@ -81,6 +81,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     if (!node) { node = buildMark(mark.id); elements.set(mark.id, node); }
     if (node.parentElement !== layer) layer.append(node);
     node.dataset.page = String(mark.page);
+    node.dataset.rotation = String(((viewport.rotation % 360) + 360) % 360);
     const [vx1, vy1] = viewport.convertToViewportPoint(mark.rect[0], mark.rect[1]);
     const [vx2, vy2] = viewport.convertToViewportPoint(mark.rect[2], mark.rect[3]);
     const left = Math.min(vx1, vx2), top = Math.min(vy1, vy2), bw = Math.abs(vx2 - vx1), bh = Math.abs(vy2 - vy1);
@@ -142,11 +143,11 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     node.addEventListener('dblclick', (e) => { e.stopPropagation(); edit(id); });
     body.addEventListener('input', () => onInput(id));
     body.addEventListener('focus', () => { if (active) { selectedId = id; editingId = id; refreshClasses(); reportSelection(); } });
-    body.addEventListener('blur', () => onBlur(id));
+    body.addEventListener('blur', (e) => onBlur(id, e.relatedTarget));
     body.addEventListener('keydown', (e) => onBodyKey(e, id));
     body.addEventListener('paste', (e) => {
       e.preventDefault();
-      const text = (e.clipboardData ? e.clipboardData.getData('text/plain') : '').replace(/\r\n?/g, '\n');
+      const text = (e.clipboardData ? e.clipboardData.getData('text/plain') : '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ');
       document.execCommand('insertText', false, text);
     });
     return node;
@@ -163,6 +164,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     if (selectedId === id) return;
     if (editingId && editingId !== id) stopEditing();
     selectedId = id;
+    if (id === null) pruneEmpty();
     refreshClasses();
     reportSelection();
   }
@@ -201,7 +203,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     const mark = byId(id), node = elements.get(id);
     if (!mark || !node) return;
     const body = bodyOf(node);
-    let text = body.innerText.replace(/\r\n?/g, '\n').replace(/\n$/, '');
+    let text = body.innerText.replace(/\r\n?/g, '\n').replace(/\n$/, '').replace(/\t/g, '    ');
     if (text.length > MAX_PDF_TEXT) { text = text.slice(0, MAX_PDF_TEXT); body.textContent = text; }
     if (textBefore === null) { textBefore = mark.text; remember(); }
     mark.text = text;
@@ -210,18 +212,28 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     reportSelection();
   }
 
-  function onBlur(id: string) {
+  let resumeEditId: string | null = null;
+  function onBlur(id: string, to: EventTarget | null) {
     const mark = byId(id);
     textBefore = null;
-    if (mark && !mark.text.trim()) { removeMark(id, false); return; }
+    const toControls = to instanceof Node && !container.contains(to);
+    resumeEditId = toControls && editingId === id ? id : null;
+    if (mark && !mark.text.trim() && !toControls && document.hasFocus()) { removeMark(id, false); return; }
     if (editingId === id) { editingId = null; refreshClasses(); }
+  }
+
+  function pruneEmpty() {
+    for (const mark of marks.slice()) if (!mark.text.trim() && mark.id !== editingId) removeMark(mark.id, false);
   }
 
   function fitHeight(mark: PdfTextMark) {
     const node = elements.get(mark.id), viewport = hooks.viewportOf(mark.page);
     if (!node || !viewport) return;
     const body = bodyOf(node);
-    const px = Math.max(body.scrollHeight, pdfTextLineHeight(mark) * viewport.scale + 2 * PDF_TEXT_PADDING * viewport.scale);
+    body.style.minHeight = '0';
+    const natural = body.scrollHeight;
+    body.style.minHeight = '';
+    const px = Math.max(natural, pdfTextLineHeight(mark) * viewport.scale + 2 * PDF_TEXT_PADDING * viewport.scale);
     const h = px / viewport.scale;
     mark.rect = [mark.rect[0], mark.rect[3] - h, mark.rect[2], mark.rect[3]];
     const layer = layerFor(mark.page);
@@ -297,6 +309,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     const viewport = hooks.viewportOf(mark.page);
     if (!viewport) return;
     stopEditing();
+    if (!byId(id)) return;
     drag = { id, startX: e.clientX, startY: e.clientY, rect: [...mark.rect], size: mark.size, handle, moved: false, viewport, remembered: false };
     trackDrag(e, false);
   }
@@ -398,9 +411,11 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     fitHeight(mark);
     changed();
     reportSelection();
+    if (resumeEditId === mark.id) { resumeEditId = null; edit(mark.id); }
   }
 
   function restore(json: string) {
+    textBefore = null;
     const parsed: unknown = JSON.parse(json);
     marks = Array.isArray(parsed) ? parsed.map(parsePdfTextMark).filter((m): m is PdfTextMark => m !== null) : [];
     selectedId = null;
@@ -435,6 +450,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     past.length = 0;
     future.length = 0;
     lastActionAt = 0;
+    textBefore = null;
     selectedId = null;
     editingId = null;
     for (const node of elements.values()) node.remove();
@@ -445,7 +461,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
 
   function setActive(on: boolean) {
     active = on;
-    if (!on) { stopEditing(); selectedId = null; refreshClasses(); }
+    if (!on) { stopEditing(); selectedId = null; pruneEmpty(); refreshClasses(); }
     for (const layer of container.querySelectorAll<HTMLElement>('.text-marks')) layer.classList.toggle('is-active', on);
     reportSelection();
   }
@@ -458,7 +474,7 @@ export function createPdfTextMarks(container: HTMLElement, hooks: Hooks) {
     layoutAll,
     setActive,
     setStyle,
-    commit: () => { if (editingId) stopEditing(); },
+    commit: () => { if (editingId) stopEditing(); pruneEmpty(); },
     deselect: () => select(null),
     hasSelection: () => !!selected(),
     canUndo: () => past.length > 0,

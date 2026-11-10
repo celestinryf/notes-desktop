@@ -861,7 +861,11 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-field input[type="range"] { width: 96px; height: var(--control-h); margin: 0; }
 .pdf-format .pdf-field input[type="color"] { width: 36px; height: var(--control-h); }
 .pdf-field output { min-width: 4ch; font-size: var(--t-xs); color: var(--fg-3); }
+.pdf-group { display: inline-flex; align-items: center; gap: var(--s3); }
+.pdf-format-group[data-pdf-for="text"] { gap: var(--s3); }
+.pdf-format-group[data-pdf-for="text"] .pdf-group + .pdf-group { padding-left: var(--s3); border-left: 1px solid var(--line-2); }
 .pdf-toggles { display: inline-flex; gap: 2px; }
+.pdf-format .pdf-field input[type="color"]::-webkit-color-swatch { border: 1px solid var(--line-2); }
 .pdf-toggles .tool-btn[aria-pressed="true"] { background: var(--selected); color: var(--selected-fg); }
 .pdf-format-note { font-size: var(--t-xs); color: var(--danger); }
 .pdf-format-note:empty { display: none; }
@@ -883,6 +887,14 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .text-mark-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
 .text-mark-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 .text-mark-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+[data-rotation="90"] .text-mark-handle[data-handle="w"], [data-rotation="270"] .text-mark-handle[data-handle="e"] { left: 50%; top: 0; cursor: ns-resize; }
+[data-rotation="90"] .text-mark-handle[data-handle="e"], [data-rotation="270"] .text-mark-handle[data-handle="w"] { left: 50%; top: 100%; cursor: ns-resize; }
+[data-rotation="180"] .text-mark-handle[data-handle="w"] { left: 100%; top: 50%; }
+[data-rotation="180"] .text-mark-handle[data-handle="e"] { left: 0; top: 50%; }
+[data-rotation="90"] .text-mark-handle[data-handle="nw"], [data-rotation="180"] .text-mark-handle[data-handle="sw"], [data-rotation="270"] .text-mark-handle[data-handle="se"] { left: 100%; top: 0; cursor: nesw-resize; }
+[data-rotation="90"] .text-mark-handle[data-handle="ne"], [data-rotation="180"] .text-mark-handle[data-handle="nw"], [data-rotation="270"] .text-mark-handle[data-handle="sw"] { left: 100%; top: 100%; cursor: nwse-resize; }
+[data-rotation="90"] .text-mark-handle[data-handle="sw"], [data-rotation="180"] .text-mark-handle[data-handle="se"], [data-rotation="270"] .text-mark-handle[data-handle="ne"] { left: 0; top: 0; cursor: nwse-resize; }
+[data-rotation="90"] .text-mark-handle[data-handle="se"], [data-rotation="180"] .text-mark-handle[data-handle="ne"], [data-rotation="270"] .text-mark-handle[data-handle="nw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .pdf-sep { width: 1px; align-self: stretch; margin: var(--s1) var(--s1); background: var(--line-2); }
 .pdf-grow { flex: 1; }
 .pdf-body { display: flex; flex: 1; min-height: 0; }

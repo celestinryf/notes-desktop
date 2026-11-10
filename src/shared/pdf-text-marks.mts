@@ -40,7 +40,8 @@ export const PDF_TEXT_FILLS: readonly { value: string, label: string }[] = [
   { value: '#53ffbc', label: 'Green' }, { value: '#80ebff', label: 'Blue' }, { value: '#ffcbe6', label: 'Pink' },
 ];
 export const DEFAULT_PDF_TEXT_STYLE: PdfTextStyle = { font: 'sans', size: 12, bold: false, italic: false, underline: false, strike: false, color: '#000000', fill: null, opacity: 1, align: 'left', lineHeight: 1.15 };
-export const PDF_TEXT_STYLE_KEYS = Object.keys(DEFAULT_PDF_TEXT_STYLE) as (keyof PdfTextStyle)[];
+export const PDF_TEXT_STYLE_KEYS: readonly (keyof PdfTextStyle)[] = ['font', 'size', 'bold', 'italic', 'underline', 'strike', 'color', 'fill', 'opacity', 'align', 'lineHeight'];
+export const PDF_RECT_LIMIT = 100000;
 export const PDF_TEXT_MARK_KEY = 'NotesTextMark';
 export const PDF_TEXT_PADDING = 2;
 export const PDF_TEXT_MIN_SIZE = 4;
@@ -49,8 +50,9 @@ export const PDF_TEXT_MIN_WIDTH = 12;
 export const MAX_PDF_TEXT = 20000;
 export const MAX_PDF_TEXT_MARKS = 2000;
 
-const isFont = (v: unknown): v is PdfTextFont => typeof v === 'string' && (PDF_TEXT_FONTS as readonly string[]).includes(v);
-const isAlign = (v: unknown): v is PdfTextAlign => typeof v === 'string' && (PDF_TEXT_ALIGNS as readonly string[]).includes(v);
+export const isPdfTextFont = (v: unknown): v is PdfTextFont => PDF_TEXT_FONTS.some((f) => f === v);
+export const isPdfTextAlign = (v: unknown): v is PdfTextAlign => PDF_TEXT_ALIGNS.some((a) => a === v);
+const isFont = isPdfTextFont, isAlign = isPdfTextAlign;
 export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -82,7 +84,7 @@ export function parsePdfTextMark(value: unknown): PdfTextMark | null {
   const { id, page, rect, text } = value;
   if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id)) return null;
   if (!Number.isInteger(page) || typeof page !== 'number' || page < 0) return null;
-  if (!Array.isArray(rect) || rect.length !== 4 || !rect.every(finite)) return null;
+  if (!Array.isArray(rect) || rect.length !== 4 || !rect.every((n) => finite(n) && Math.abs(n) <= PDF_RECT_LIMIT)) return null;
   if (typeof text !== 'string' || text.length > MAX_PDF_TEXT) return null;
   const [x1, y1, x2, y2] = rect;
   return Object.assign(parsePdfTextStyle(value), { id, page, rect: normalRect([x1, y1, x2, y2]), text });
@@ -131,7 +133,7 @@ const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”�
 export function unwritablePdfChar(text: string): string | null {
   for (const ch of text) {
     const code = ch.codePointAt(0) || 0;
-    if (code === 0x0a || code === 0x09) continue;
+    if (code === 0x0a) continue;
     if (code >= 0x20 && code <= 0x7e) continue;
     if (code >= 0xa0 && code <= 0xff) continue;
     if (WIN_ANSI_EXTRA.has(code)) continue;
@@ -140,8 +142,12 @@ export function unwritablePdfChar(text: string): string | null {
   return null;
 }
 
+export function canonicalPdfTextMark(mark: PdfTextMark): PdfTextMark {
+  return Object.assign({ id: mark.id, page: mark.page, rect: normalRect(mark.rect), text: mark.text }, pdfTextStyleOf(mark));
+}
+
 export function pdfTextMarksKey(marks: readonly PdfTextMark[]) {
-  const json = JSON.stringify(marks);
+  const json = JSON.stringify(marks.map(canonicalPdfTextMark));
   let h = 5381;
   for (let i = 0; i < json.length; i++) h = ((h * 33) ^ json.charCodeAt(i)) >>> 0;
   return marks.length + ':' + json.length + ':' + h.toString(36);

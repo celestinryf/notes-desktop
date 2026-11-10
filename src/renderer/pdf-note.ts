@@ -4,8 +4,8 @@ import { state } from './state.ts';
 import { NotesPdfEditor, requireChild, isPdfToolParam, isPdfColorParam } from './pdf-editor.ts';
 import type { PdfController, PdfToolParams } from './pdf-editor.ts';
 import type { PdfTextSelection } from './pdf-text-marks.ts';
-import { PDF_TEXT_FONTS, PDF_TEXT_FONT_LABELS, PDF_TEXT_SIZES, PDF_TEXT_FILLS, PDF_LINE_HEIGHTS, PDF_TEXT_ALIGNS, DEFAULT_PDF_TEXT_STYLE, isHexColor } from '../shared/pdf-text-marks.mts';
-import type { PdfTextStyle, PdfTextAlign } from '../shared/pdf-text-marks.mts';
+import { PDF_TEXT_FONTS, PDF_TEXT_FONT_LABELS, PDF_TEXT_SIZES, PDF_TEXT_FILLS, PDF_LINE_HEIGHTS, DEFAULT_PDF_TEXT_STYLE, isHexColor, isPdfTextFont, isPdfTextAlign } from '../shared/pdf-text-marks.mts';
+import type { PdfTextStyle } from '../shared/pdf-text-marks.mts';
 import { NotesPdfPages } from './pdf-pages.ts';
 import type { PdfPagesPlan } from './pdf-pages.ts';
 import { NotesPdfComments } from './pdf-comments.ts';
@@ -99,11 +99,9 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
 
   let textStyle: PdfTextStyle = { ...DEFAULT_PDF_TEXT_STYLE };
   const textControls = () => el.pdfFormat.querySelectorAll<HTMLElement>('[data-pdf-text]');
-  const isAlign = (v: string): v is PdfTextAlign => (PDF_TEXT_ALIGNS as readonly string[]).includes(v);
-
   function textStylePatch(name: string, raw: string): Partial<PdfTextStyle> | null {
-    if (name === 'font') return (PDF_TEXT_FONTS as readonly string[]).includes(raw) ? { font: raw === 'serif' ? 'serif' : raw === 'mono' ? 'mono' : 'sans' } : null;
-    if (name === 'align') return isAlign(raw) ? { align: raw } : null;
+    if (name === 'font') return isPdfTextFont(raw) ? { font: raw } : null;
+    if (name === 'align') return isPdfTextAlign(raw) ? { align: raw } : null;
     if (name === 'size' || name === 'opacity' || name === 'lineHeight') { const n = Number(raw); return Number.isFinite(n) ? { [name]: n } : null; }
     if (name === 'color') return isHexColor(raw) ? { color: raw } : null;
     if (name === 'fill') return raw === '' ? { fill: null } : isHexColor(raw) ? { fill: raw } : null;
@@ -408,6 +406,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     showPdfTextSelection({ style: textStyle, selected: false, issue: null });
     el.pdfFormat.addEventListener('input', onPdfFormatInput);
     el.pdfFormat.addEventListener('click', onPdfFormatClick);
+    el.pdfFormat.addEventListener('pointerdown', (e) => { if (e.target instanceof Element && e.target.closest('button[data-pdf-text]')) e.preventDefault(); });
     el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });

@@ -44,7 +44,8 @@ test('wrapPdfText wraps on spaces, keeps explicit lines, and breaks a word longe
 
 test('unwritablePdfChar flags what the standard fonts cannot write', () => {
   assert.equal(M.unwritablePdfChar('Plain text, café — “quotes” €'), null);
-  assert.equal(M.unwritablePdfChar('line\nbreak\ttab'), null);
+  assert.equal(M.unwritablePdfChar('line\nbreak'), null);
+  assert.equal(M.unwritablePdfChar('a\tb'), '\t', 'a tab is not in WinAnsi, so the editor turns tabs into spaces');
   assert.equal(M.unwritablePdfChar('π'), 'π');
   assert.equal(M.unwritablePdfChar('ok 😀'), '😀');
 });
@@ -120,7 +121,36 @@ test('liftTextMarks corrects the page of a mark whose page moved, and skips dama
   other.set(PDFName.of(M.PDF_TEXT_MARK_KEY), PDFString.of('"a string, not a mark"'));
   broken.getPage(0).node.addAnnot(broken.context.register(other));
   assert.deepEqual(P.liftTextMarks(broken), []);
-  assert.equal(broken.getPage(0).node.Annots().size(), 0, 'damaged marks are removed rather than left as stray annotations');
+  assert.equal(broken.getPage(0).node.Annots().size(), 2, 'damaged marks stay in the file for other viewers rather than vanishing');
+});
+
+test('liftTextMarks stops at the cap and leaves the rest in place', async () => {
+  const doc = await blank();
+  const many = Array.from({ length: M.MAX_PDF_TEXT_MARKS + 3 }, (_, i) => mark({ id: 'tm-' + i, rect: [10, 10 + i, 60, 30 + i] }));
+  await P.writeTextMarks(doc, many.slice(0, M.MAX_PDF_TEXT_MARKS));
+  await P.writeTextMarks(doc, many.slice(M.MAX_PDF_TEXT_MARKS));
+  const again = await PDFDocument.load(await doc.save({ useObjectStreams: false }));
+  const lifted = P.liftTextMarks(again);
+  assert.equal(lifted.length, M.MAX_PDF_TEXT_MARKS);
+  assert.equal(again.getPage(0).node.Annots().size(), 3);
+});
+
+test('writeTextMarks refuses more marks than the cap, and a tab in the text', async () => {
+  const doc = await blank();
+  const many = Array.from({ length: M.MAX_PDF_TEXT_MARKS + 1 }, (_, i) => mark({ id: 'tm-' + i }));
+  await assert.rejects(P.writeTextMarks(doc, many), /too many text boxes/);
+  await assert.rejects(P.writeTextMarks(doc, [mark({ text: 'a\tb' })]), /cannot be written/);
+  assert.equal(M.unwritablePdfChar('a\tb'), '\t');
+});
+
+test('parsePdfTextMark rejects a rect beyond the page limit and keeps a tidy key order', () => {
+  assert.equal(M.parsePdfTextMark({ id: 'x', page: 0, rect: [0, 0, 1e300, 1], text: '' }), null);
+  assert.equal(M.parsePdfTextMark({ id: 'x', page: 1.5, rect: [0, 0, 1, 1], text: '' }), null);
+  assert.equal(M.parsePdfTextMark({ id: 'has space', page: 0, rect: [0, 0, 1, 1], text: '' }), null);
+  const styleFirst = Object.assign({}, M.DEFAULT_PDF_TEXT_STYLE, { id: 'k', page: 0, rect: [0, 0, 10, 10], text: 't' });
+  const idFirst = Object.assign({ id: 'k', page: 0, rect: [0, 0, 10, 10], text: 't' }, M.DEFAULT_PDF_TEXT_STYLE);
+  assert.notEqual(JSON.stringify(styleFirst), JSON.stringify(idFirst));
+  assert.equal(M.pdfTextMarksKey([styleFirst]), M.pdfTextMarksKey([idFirst]), 'the dirty key does not depend on property order');
 });
 
 test('writeTextMarks refuses a character the standard fonts cannot write, and a page that is gone', async () => {

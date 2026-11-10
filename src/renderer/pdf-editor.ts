@@ -14,7 +14,7 @@ export type PdfToolState = { mode: string, canUndo: boolean, canRedo: boolean, s
 export type PdfToolParam = 'inkColor' | 'inkWidth' | 'inkOpacity' | 'highlightColor' | 'highlightThickness';
 export type PdfToolParams = Record<PdfToolParam, string | number>;
 export const PDF_TOOL_PARAMS: readonly PdfToolParam[] = ['inkColor', 'inkWidth', 'inkOpacity', 'highlightColor', 'highlightThickness'];
-export const isPdfToolParam = (name: string): name is PdfToolParam => (PDF_TOOL_PARAMS as readonly string[]).includes(name);
+export const isPdfToolParam = (name: string): name is PdfToolParam => PDF_TOOL_PARAMS.some((p) => p === name);
 export const isPdfColorParam = (name: PdfToolParam) => name.endsWith('Color');
 export const DOCUMENT_INK = '#000000';
 export const DEFAULT_PDF_TOOL_PARAMS: PdfToolParams = { inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: '#ffff98', highlightThickness: 12 };
@@ -115,8 +115,8 @@ export const NotesPdfEditor = (function () {
     eventBus.on('pagerendered', ({ pageNumber }: { pageNumber: number }) => textMarks.layoutPage(pageNumber - 1));
     eventBus.on('scalechanging', () => textMarks.layoutAll());
     eventBus.on('rotationchanging', () => textMarks.layoutAll());
-    const ourUndoFirst = () => textMarks.canUndo() && textMarks.lastActionAt() >= pdfActionAt;
-    const ourRedoFirst = () => textMarks.canRedo() && textMarks.lastActionAt() >= pdfActionAt;
+    const ourUndoFirst = () => textMarks.canUndo() && (!undo.canUndo || textMarks.lastActionAt() >= pdfActionAt);
+    const ourRedoFirst = () => textMarks.canRedo() && (!undo.canRedo || textMarks.lastActionAt() >= pdfActionAt);
 
     let location: ViewLocation | null = null, restore: ViewLocation | null = null;
     eventBus.on('updateviewarea', (e: { location: ViewLocation }) => { location = e.location; });
@@ -363,9 +363,11 @@ export const NotesPdfEditor = (function () {
 
     async function save() {
       if (!doc) return null;
+      textMarks.commit();
       const hash = currentHash();
+      const marks = textMarks.marks();
       const bytes = await doc.saveDocument();
-      return { bytes, hash, marks: textMarks.marks() };
+      return { bytes, hash, marks };
     }
 
     return {

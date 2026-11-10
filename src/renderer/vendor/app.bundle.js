@@ -22727,15 +22727,18 @@
     { value: "#ffcbe6", label: "Pink" }
   ];
   var DEFAULT_PDF_TEXT_STYLE = { font: "sans", size: 12, bold: false, italic: false, underline: false, strike: false, color: "#000000", fill: null, opacity: 1, align: "left", lineHeight: 1.15 };
-  var PDF_TEXT_STYLE_KEYS = Object.keys(DEFAULT_PDF_TEXT_STYLE);
+  var PDF_TEXT_STYLE_KEYS = ["font", "size", "bold", "italic", "underline", "strike", "color", "fill", "opacity", "align", "lineHeight"];
+  var PDF_RECT_LIMIT = 1e5;
   var PDF_TEXT_PADDING = 2;
   var PDF_TEXT_MIN_SIZE = 4;
   var PDF_TEXT_MAX_SIZE = 400;
   var PDF_TEXT_MIN_WIDTH = 12;
   var MAX_PDF_TEXT = 2e4;
   var MAX_PDF_TEXT_MARKS = 2e3;
-  var isFont = (v) => typeof v === "string" && PDF_TEXT_FONTS.includes(v);
-  var isAlign = (v) => typeof v === "string" && PDF_TEXT_ALIGNS.includes(v);
+  var isPdfTextFont = (v) => PDF_TEXT_FONTS.some((f) => f === v);
+  var isPdfTextAlign = (v) => PDF_TEXT_ALIGNS.some((a) => a === v);
+  var isFont = isPdfTextFont;
+  var isAlign = isPdfTextAlign;
   var isHexColor = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
   var finite = (v) => typeof v === "number" && Number.isFinite(v);
   var clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -22764,7 +22767,7 @@
     const { id, page, rect, text } = value;
     if (typeof id !== "string" || !/^[\w-]{1,64}$/.test(id)) return null;
     if (!Number.isInteger(page) || typeof page !== "number" || page < 0) return null;
-    if (!Array.isArray(rect) || rect.length !== 4 || !rect.every(finite)) return null;
+    if (!Array.isArray(rect) || rect.length !== 4 || !rect.every((n) => finite(n) && Math.abs(n) <= PDF_RECT_LIMIT)) return null;
     if (typeof text !== "string" || text.length > MAX_PDF_TEXT) return null;
     const [x1, y1, x2, y2] = rect;
     return Object.assign(parsePdfTextStyle(value), { id, page, rect: normalRect([x1, y1, x2, y2]), text });
@@ -22782,7 +22785,7 @@
   function unwritablePdfChar(text) {
     for (const ch of text) {
       const code2 = ch.codePointAt(0) || 0;
-      if (code2 === 10 || code2 === 9) continue;
+      if (code2 === 10) continue;
       if (code2 >= 32 && code2 <= 126) continue;
       if (code2 >= 160 && code2 <= 255) continue;
       if (WIN_ANSI_EXTRA.has(code2)) continue;
@@ -22790,8 +22793,11 @@
     }
     return null;
   }
+  function canonicalPdfTextMark(mark) {
+    return Object.assign({ id: mark.id, page: mark.page, rect: normalRect(mark.rect), text: mark.text }, pdfTextStyleOf(mark));
+  }
   function pdfTextMarksKey(marks) {
-    const json = JSON.stringify(marks);
+    const json = JSON.stringify(marks.map(canonicalPdfTextMark));
     let h = 5381;
     for (let i = 0; i < json.length; i++) h = (h * 33 ^ json.charCodeAt(i)) >>> 0;
     return marks.length + ":" + json.length + ":" + h.toString(36);
@@ -22868,6 +22874,7 @@
       }
       if (node.parentElement !== layer) layer.append(node);
       node.dataset.page = String(mark.page);
+      node.dataset.rotation = String((viewport.rotation % 360 + 360) % 360);
       const [vx1, vy1] = viewport.convertToViewportPoint(mark.rect[0], mark.rect[1]);
       const [vx2, vy2] = viewport.convertToViewportPoint(mark.rect[2], mark.rect[3]);
       const left = Math.min(vx1, vx2), top = Math.min(vy1, vy2), bw = Math.abs(vx2 - vx1), bh = Math.abs(vy2 - vy1);
@@ -22936,11 +22943,11 @@
           reportSelection();
         }
       });
-      body.addEventListener("blur", () => onBlur(id));
+      body.addEventListener("blur", (e) => onBlur(id, e.relatedTarget));
       body.addEventListener("keydown", (e) => onBodyKey(e, id));
       body.addEventListener("paste", (e) => {
         e.preventDefault();
-        const text = (e.clipboardData ? e.clipboardData.getData("text/plain") : "").replace(/\r\n?/g, "\n");
+        const text = (e.clipboardData ? e.clipboardData.getData("text/plain") : "").replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
         document.execCommand("insertText", false, text);
       });
       return node;
@@ -22955,6 +22962,7 @@
       if (selectedId === id) return;
       if (editingId && editingId !== id) stopEditing();
       selectedId = id;
+      if (id === null) pruneEmpty();
       refreshClasses();
       reportSelection();
     }
@@ -22993,7 +23001,7 @@
       const mark = byId(id), node = elements.get(id);
       if (!mark || !node) return;
       const body = bodyOf(node);
-      let text = body.innerText.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+      let text = body.innerText.replace(/\r\n?/g, "\n").replace(/\n$/, "").replace(/\t/g, "    ");
       if (text.length > MAX_PDF_TEXT) {
         text = text.slice(0, MAX_PDF_TEXT);
         body.textContent = text;
@@ -23007,10 +23015,13 @@
       changed();
       reportSelection();
     }
-    function onBlur(id) {
+    let resumeEditId = null;
+    function onBlur(id, to) {
       const mark = byId(id);
       textBefore = null;
-      if (mark && !mark.text.trim()) {
+      const toControls = to instanceof Node && !container.contains(to);
+      resumeEditId = toControls && editingId === id ? id : null;
+      if (mark && !mark.text.trim() && !toControls && document.hasFocus()) {
         removeMark(id, false);
         return;
       }
@@ -23019,11 +23030,17 @@
         refreshClasses();
       }
     }
+    function pruneEmpty() {
+      for (const mark of marks.slice()) if (!mark.text.trim() && mark.id !== editingId) removeMark(mark.id, false);
+    }
     function fitHeight(mark) {
       const node = elements.get(mark.id), viewport = hooks2.viewportOf(mark.page);
       if (!node || !viewport) return;
       const body = bodyOf(node);
-      const px = Math.max(body.scrollHeight, pdfTextLineHeight(mark) * viewport.scale + 2 * PDF_TEXT_PADDING * viewport.scale);
+      body.style.minHeight = "0";
+      const natural = body.scrollHeight;
+      body.style.minHeight = "";
+      const px = Math.max(natural, pdfTextLineHeight(mark) * viewport.scale + 2 * PDF_TEXT_PADDING * viewport.scale);
       const h = px / viewport.scale;
       mark.rect = [mark.rect[0], mark.rect[3] - h, mark.rect[2], mark.rect[3]];
       const layer = layerFor(mark.page);
@@ -23095,6 +23112,7 @@
       const viewport = hooks2.viewportOf(mark.page);
       if (!viewport) return;
       stopEditing();
+      if (!byId(id)) return;
       drag = { id, startX: e.clientX, startY: e.clientY, rect: [...mark.rect], size: mark.size, handle, moved: false, viewport, remembered: false };
       trackDrag(e, false);
     }
@@ -23223,8 +23241,13 @@
       fitHeight(mark);
       changed();
       reportSelection();
+      if (resumeEditId === mark.id) {
+        resumeEditId = null;
+        edit(mark.id);
+      }
     }
     function restore(json) {
+      textBefore = null;
       const parsed = JSON.parse(json);
       marks = Array.isArray(parsed) ? parsed.map(parsePdfTextMark).filter((m) => m !== null) : [];
       selectedId = null;
@@ -23256,6 +23279,7 @@
       past.length = 0;
       future.length = 0;
       lastActionAt = 0;
+      textBefore = null;
       selectedId = null;
       editingId = null;
       for (const node of elements.values()) node.remove();
@@ -23268,6 +23292,7 @@
       if (!on) {
         stopEditing();
         selectedId = null;
+        pruneEmpty();
         refreshClasses();
       }
       for (const layer of container.querySelectorAll(".text-marks")) layer.classList.toggle("is-active", on);
@@ -23283,6 +23308,7 @@
       setStyle,
       commit: () => {
         if (editingId) stopEditing();
+        pruneEmpty();
       },
       deselect: () => select(null),
       hasSelection: () => !!selected(),
@@ -23302,7 +23328,7 @@
     return node;
   }
   var PDF_TOOL_PARAMS = ["inkColor", "inkWidth", "inkOpacity", "highlightColor", "highlightThickness"];
-  var isPdfToolParam = (name) => PDF_TOOL_PARAMS.includes(name);
+  var isPdfToolParam = (name) => PDF_TOOL_PARAMS.some((p) => p === name);
   var isPdfColorParam = (name) => name.endsWith("Color");
   var DOCUMENT_INK = "#000000";
   var DEFAULT_PDF_TOOL_PARAMS = { inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: "#ffff98", highlightThickness: 12 };
@@ -23416,8 +23442,8 @@
       eventBus.on("pagerendered", ({ pageNumber }) => textMarks.layoutPage(pageNumber - 1));
       eventBus.on("scalechanging", () => textMarks.layoutAll());
       eventBus.on("rotationchanging", () => textMarks.layoutAll());
-      const ourUndoFirst = () => textMarks.canUndo() && textMarks.lastActionAt() >= pdfActionAt;
-      const ourRedoFirst = () => textMarks.canRedo() && textMarks.lastActionAt() >= pdfActionAt;
+      const ourUndoFirst = () => textMarks.canUndo() && (!undo.canUndo || textMarks.lastActionAt() >= pdfActionAt);
+      const ourRedoFirst = () => textMarks.canRedo() && (!undo.canRedo || textMarks.lastActionAt() >= pdfActionAt);
       let location2 = null, restore = null;
       eventBus.on("updateviewarea", (e) => {
         location2 = e.location;
@@ -23695,9 +23721,11 @@
       }
       async function save() {
         if (!doc) return null;
+        textMarks.commit();
         const hash = currentHash();
+        const marks = textMarks.marks();
         const bytes = await doc.saveDocument();
-        return { bytes, hash, marks: textMarks.marks() };
+        return { bytes, hash, marks };
       }
       return {
         open,
@@ -24326,10 +24354,9 @@
     }
     let textStyle = { ...DEFAULT_PDF_TEXT_STYLE };
     const textControls = () => el.pdfFormat.querySelectorAll("[data-pdf-text]");
-    const isAlign2 = (v) => PDF_TEXT_ALIGNS.includes(v);
     function textStylePatch(name, raw) {
-      if (name === "font") return PDF_TEXT_FONTS.includes(raw) ? { font: raw === "serif" ? "serif" : raw === "mono" ? "mono" : "sans" } : null;
-      if (name === "align") return isAlign2(raw) ? { align: raw } : null;
+      if (name === "font") return isPdfTextFont(raw) ? { font: raw } : null;
+      if (name === "align") return isPdfTextAlign(raw) ? { align: raw } : null;
       if (name === "size" || name === "opacity" || name === "lineHeight") {
         const n = Number(raw);
         return Number.isFinite(n) ? { [name]: n } : null;
@@ -24697,6 +24724,9 @@
       showPdfTextSelection({ style: textStyle, selected: false, issue: null });
       el.pdfFormat.addEventListener("input", onPdfFormatInput);
       el.pdfFormat.addEventListener("click", onPdfFormatClick);
+      el.pdfFormat.addEventListener("pointerdown", (e) => {
+        if (e.target instanceof Element && e.target.closest("button[data-pdf-text]")) e.preventDefault();
+      });
       el.pdfCommentsClose.addEventListener("click", () => showPdfComments(false));
       el.signForm.addEventListener("submit", (e) => {
         e.preventDefault();
