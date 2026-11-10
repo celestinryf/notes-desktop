@@ -1,0 +1,51 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import * as H from './shared/helpers.mts';
+import { pathKey } from './files.mts';
+
+export const KEEP_FILE_VERSIONS = 30;
+
+export function createFileVersions(root: string, keep = KEEP_FILE_VERSIONS) {
+  const sessionOriginals = new Map<string, string>();
+  const dirFor = (file: string) => path.join(root, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
+
+  function backUpBeforeWrite(file: string) {
+    const key = pathKey(file);
+    const dir = dirFor(file);
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = H.fileStamp();
+    let name = stamp + path.extname(file);
+    for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = stamp + '-' + n + path.extname(file);
+    const copy = path.join(dir, name);
+    const written = fs.statSync(file).mtime;
+    fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
+    fs.utimesSync(copy, written, written);
+    const first = !sessionOriginals.has(key);
+    if (first) sessionOriginals.set(key, name);
+    const kept = sessionOriginals.get(key);
+    const all = fs.readdirSync(dir).sort();
+    for (const old of all.slice(0, Math.max(0, all.length - keep))) if (old !== kept) fs.rmSync(path.join(dir, old), { force: true });
+    return { first, name };
+  }
+
+  function list(file: string): FileVersion[] {
+    const dir = dirFor(file);
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir); } catch (_) { return []; }
+    const versions: FileVersion[] = [];
+    for (const name of names) {
+      let stat: fs.Stats;
+      try { stat = fs.statSync(path.join(dir, name)); } catch (_) { continue; }
+      if (stat.isFile()) versions.push({ name, at: stat.mtimeMs, bytes: stat.size });
+    }
+    return versions.sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
+  }
+
+  function pathOf(file: string, name: unknown) {
+    if (typeof name !== 'string' || !list(file).some((v) => v.name === name)) return null;
+    return path.join(dirFor(file), name);
+  }
+
+  return { backUpBeforeWrite, list, pathOf, dirFor };
+}

@@ -15,7 +15,6 @@ import type { FileCommit } from './gitSync.mts';
 import * as windowInput from './window-input.mts';
 import { VaultManager } from './vaults.mts';
 import { drawIconBitmap } from './icon.mts';
-import crypto from 'node:crypto';
 import os from 'node:os';
 import * as H from './shared/helpers.mts';
 import * as convert from './convert.mts';
@@ -26,7 +25,8 @@ import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
 import { StickyManager } from './stickies.mts';
 import { recycle } from './recycle-bin.mts';
-import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, pathKey, TEXT_EXT, extOf } from './files.mts';
+import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, TEXT_EXT, extOf } from './files.mts';
+import { createFileVersions } from './file-versions.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -729,23 +729,7 @@ function main() {
     return fs.readFileSync(n.filePath);
   });
 
-  const FILE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'files');
-  const KEEP_FILE_VERSIONS = 10;
-  const sessionOriginals = new Map();
-  const backupDirFor = (file: string) => path.join(FILE_BACKUP_DIR, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
-  function backUpBeforeWrite(file: string) {
-    const key = pathKey(file);
-    const dir = backupDirFor(file);
-    fs.mkdirSync(dir, { recursive: true });
-    const name = H.fileStamp() + path.extname(file);
-    fs.copyFileSync(file, path.join(dir, name), fs.constants.COPYFILE_EXCL);
-    const first = !sessionOriginals.has(key);
-    if (first) sessionOriginals.set(key, name);
-    const keep = sessionOriginals.get(key);
-    const all = fs.readdirSync(dir).sort();
-    for (const old of all.slice(0, Math.max(0, all.length - KEEP_FILE_VERSIONS))) if (old !== keep) fs.rmSync(path.join(dir, old), { force: true });
-    return { first, name };
-  }
+  const fileVersions = createFileVersions(path.join(DATA_DIR, 'backups', 'files'));
   function writeInPlace(file: string, buf: Buffer) {
     const fd = fs.openSync(file, 'w');
     try {
@@ -754,7 +738,7 @@ function main() {
     } finally { fs.closeSync(fd); }
   }
   function replaceFile(id: string, file: string, buf: Buffer) {
-    const backup = backUpBeforeWrite(file);
+    const backup = fileVersions.backUpBeforeWrite(file);
     writeInPlace(file, buf);
     return { mtime: store.markFileWritten(id), backup };
   }
@@ -777,6 +761,26 @@ function main() {
     return { savedAs: copy, newCopy: true };
   }
   handle('files:savePdf', (_e, id, bytes, expectedMtime) => saveEdits(id, fileNoteOfKind(id, 'pdf').filePath, pdfBuffer(bytes), expectedMtime));
+
+  function versionedFileNote(id: string): FileNote {
+    const n = store.get(id);
+    if (!isFileNote(n) || (n.fileKind !== 'pdf' && n.fileKind !== 'docx')) throw new Error('Earlier copies are kept only for PDF and Word files.');
+    return n;
+  }
+  handle('files:versions', (_e, id) => fileVersions.list(versionedFileNote(id).filePath));
+  function restoreCopy(note: FileNote, name: unknown, expectedMtime: number | null, changedMessage: string): Ok<{ mtime: number | null }> {
+    const copy = fileVersions.pathOf(note.filePath, name);
+    if (!copy) return { ok: false, error: 'that earlier copy is gone.' };
+    if (!fs.existsSync(note.filePath)) return { ok: false, error: 'the file is no longer on disk.' };
+    if (!stillAsOpened(note.filePath, expectedMtime)) return { ok: false, error: changedMessage };
+    try {
+      const buf = fs.readFileSync(copy);
+      return { ok: true, mtime: replaceFile(note.id, note.filePath, note.fileKind === 'pdf' ? pdfBuffer(buf) : buf).mtime };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+  handle('files:restoreVersion', (_e, id, name, expectedMtime) => restoreCopy(versionedFileNote(id), name, expectedMtime, 'the file changed since you opened it. Reload it, then try again.'));
 
   const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
   const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
@@ -835,19 +839,7 @@ function main() {
     if (!Array.isArray(ops) || !ops.length || ops.length > 100) return { ok: false, error: 'that comment change was not valid.' };
     return rewritePdf(id, expectedMtime, (current) => pdfLibTask(current, 'comments', { ops, author: commentAuthor() }, 'Saving the comment'));
   });
-  handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
-    const file = fileNoteOfKind(id, 'pdf').filePath;
-    const dir = backupDirFor(file);
-    let names: string[] = [];
-    try { names = fs.readdirSync(dir); } catch (_) {  }
-    if (typeof name !== 'string' || !names.includes(name)) return { ok: false, error: 'that backup is gone.' };
-    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier versions are in the backups folder.' };
-    try {
-      return Object.assign({ ok: true }, { mtime: replaceFile(id, file, pdfBuffer(fs.readFileSync(path.join(dir, name)))).mtime });
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
+  handle('files:pdfRestore', (_e, id, name, expectedMtime) => restoreCopy(fileNoteOfKind(id, 'pdf'), name, expectedMtime, 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier copies are in History.'));
   handle('files:pdfPickPages', async () => {
     const { canceled, filePaths } = await openDialog({ title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (canceled || !filePaths.length) return { ok: false, canceled: true };

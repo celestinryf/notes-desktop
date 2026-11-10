@@ -1003,6 +1003,7 @@ button.book-name:hover { background: var(--hover); }
 .library-empty { margin: 0; max-width: 68ch; padding: var(--s3); border-radius: var(--r-md); background: var(--well); font-size: var(--t-sm); color: var(--fg-2); }
 .history-list li.is-active .when { color: inherit; opacity: 0.8; }
 .history-preview { margin: 0; overflow: auto; padding: 10px var(--s3); border-radius: var(--r-md); background: var(--well); font-family: var(--font-mono); font-size: var(--t-xs); line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.history-preview.is-copy { font-family: var(--font-sans); font-size: var(--t-sm); color: var(--fg-2); }
 .find-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1);
   position: absolute; z-index: 8; top: var(--s2); right: calc(var(--s4) + 10px);

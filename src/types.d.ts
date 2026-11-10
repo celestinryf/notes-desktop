@@ -182,6 +182,7 @@ type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: f
 type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
 
 interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
+interface FileVersion { name: string; at: number; bytes: number }
 type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string; keptOut: boolean } | { ok: false; error: string };
 
 type Ok<T = {}> = ({ ok: true } & T) | { ok: false; error?: string; canceled?: boolean };
@@ -275,6 +276,8 @@ interface IpcContract {
   'files:reveal': (id: string) => void;
   'files:openExternal': (id: string) => string;
   'files:pdfBytes': (id: string) => Buffer;
+  'files:versions': (id: string) => FileVersion[];
+  'files:restoreVersion': (id: string, name: string, expectedMtime: number | null) => Ok<{ mtime: number | null }>;
   'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number | null) => SavedFile;
   'files:pdfApplyPages': (id: string, bytes: Uint8Array | null, rotations: number[], expectedMtime: number | null) => Ok<{ mtime: number | null; backup: string }>;
   'files:pdfRestore': (id: string, name: string, expectedMtime: number | null) => Ok<{ mtime: number | null }>;
@@ -362,6 +365,7 @@ interface NotesApi {
   files: {
     openDialog: Invoker<'files:openDialog'>; link: Invoker<'files:link'>; refresh: Invoker<'files:refresh'>; reveal: Invoker<'files:reveal'>;
     openExternal: Invoker<'files:openExternal'>; pdfBytes: Invoker<'files:pdfBytes'>; savePdf: Invoker<'files:savePdf'>;
+    versions: Invoker<'files:versions'>; restoreVersion: Invoker<'files:restoreVersion'>;
     pdfApplyPages: Invoker<'files:pdfApplyPages'>; pdfRestore: Invoker<'files:pdfRestore'>; pdfComments: Invoker<'files:pdfComments'>;
     saveDocx: Invoker<'files:saveDocx'>; saveCraft: Invoker<'files:saveCraft'>; documentBytes: Invoker<'files:documentBytes'>;
     pdfPickPages: Invoker<'files:pdfPickPages'>; docxBytes: Invoker<'files:docxBytes'>; imageBytes: Invoker<'files:imageBytes'>;
