@@ -3,6 +3,9 @@ import { el } from './dom.ts';
 import { state } from './state.ts';
 import { NotesPdfEditor, requireChild, isPdfToolParam, isPdfColorParam } from './pdf-editor.ts';
 import type { PdfController, PdfToolParams } from './pdf-editor.ts';
+import type { PdfTextSelection } from './pdf-text-marks.ts';
+import { PDF_TEXT_FONTS, PDF_TEXT_FONT_LABELS, PDF_TEXT_SIZES, PDF_TEXT_FILLS, PDF_LINE_HEIGHTS, PDF_TEXT_ALIGNS, DEFAULT_PDF_TEXT_STYLE, isHexColor } from '../shared/pdf-text-marks.mts';
+import type { PdfTextStyle, PdfTextAlign } from '../shared/pdf-text-marks.mts';
 import { NotesPdfPages } from './pdf-pages.ts';
 import type { PdfPagesPlan } from './pdf-pages.ts';
 import { NotesPdfComments } from './pdf-comments.ts';
@@ -41,6 +44,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
           el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + '%';
         },
         onParams: showPdfParams,
+        onTextSelection: showPdfTextSelection,
         onLink: externalLinkClick,
       });
     }
@@ -81,10 +85,70 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
   function onPdfFormatInput(e: Event) {
     const control = e.target;
     if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement) || !pdf) return;
+    if (control.dataset.pdfText) {
+      const patch = textStylePatch(control.dataset.pdfText, control.value);
+      if (patch) pdf.setTextStyle(patch);
+      showPdfUnit(control);
+      return;
+    }
     const name = control.dataset.pdfParam;
     if (!name || !isPdfToolParam(name)) return;
     pdf.setParam(name, isPdfColorParam(name) ? control.value : Number(control.value));
     showPdfUnit(control);
+  }
+
+  let textStyle: PdfTextStyle = { ...DEFAULT_PDF_TEXT_STYLE };
+  const textControls = () => el.pdfFormat.querySelectorAll<HTMLElement>('[data-pdf-text]');
+  const isAlign = (v: string): v is PdfTextAlign => (PDF_TEXT_ALIGNS as readonly string[]).includes(v);
+
+  function textStylePatch(name: string, raw: string): Partial<PdfTextStyle> | null {
+    if (name === 'font') return (PDF_TEXT_FONTS as readonly string[]).includes(raw) ? { font: raw === 'serif' ? 'serif' : raw === 'mono' ? 'mono' : 'sans' } : null;
+    if (name === 'align') return isAlign(raw) ? { align: raw } : null;
+    if (name === 'size' || name === 'opacity' || name === 'lineHeight') { const n = Number(raw); return Number.isFinite(n) ? { [name]: n } : null; }
+    if (name === 'color') return isHexColor(raw) ? { color: raw } : null;
+    if (name === 'fill') return raw === '' ? { fill: null } : isHexColor(raw) ? { fill: raw } : null;
+    if (name === 'bold' || name === 'italic' || name === 'underline' || name === 'strike') return { [name]: !textStyle[name] };
+    return null;
+  }
+
+  function onPdfFormatClick(e: MouseEvent) {
+    const b = e.target instanceof Element ? e.target.closest<HTMLButtonElement>('button[data-pdf-text]') : null;
+    if (!b || !pdf || !b.dataset.pdfText) return;
+    const patch = textStylePatch(b.dataset.pdfText, b.dataset.pdfValue || '');
+    if (patch) pdf.setTextStyle(patch);
+  }
+
+  function showPdfTextSelection(selection: PdfTextSelection) {
+    textStyle = selection.style;
+    for (const control of textControls()) {
+      const name = control.dataset.pdfText;
+      if (!name) continue;
+      if (control instanceof HTMLButtonElement) {
+        const on = name === 'align' ? textStyle.align === control.dataset.pdfValue : name === 'bold' || name === 'italic' || name === 'underline' || name === 'strike' ? textStyle[name] : false;
+        control.setAttribute('aria-pressed', on ? 'true' : 'false');
+        continue;
+      }
+      if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) continue;
+      const value = name === 'fill' ? textStyle.fill || '' : name === 'font' || name === 'size' || name === 'opacity' || name === 'lineHeight' || name === 'color' ? String(textStyle[name]) : null;
+      if (value === null) continue;
+      if (control instanceof HTMLSelectElement) keepOption(control, value);
+      if (control.value !== value) control.value = value;
+      showPdfUnit(control);
+    }
+    el.pdfTextNote.textContent = selection.issue || '';
+    el.pdfFormat.classList.toggle('has-text-selection', selection.selected);
+  }
+
+  function fillTextSelects() {
+    const fill = (name: string, options: { value: string, label: string }[]) => {
+      const select = el.pdfFormat.querySelector<HTMLSelectElement>('select[data-pdf-text="' + name + '"]');
+      if (!select) return;
+      select.replaceChildren(...options.map((o) => { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; return opt; }));
+    };
+    fill('font', PDF_TEXT_FONTS.map((f) => ({ value: f, label: PDF_TEXT_FONT_LABELS[f] })));
+    fill('size', PDF_TEXT_SIZES.map((s) => ({ value: String(s), label: String(s) })));
+    fill('fill', PDF_TEXT_FILLS.map((f) => ({ value: f.value, label: f.label })));
+    fill('lineHeight', PDF_LINE_HEIGHTS.map((h) => ({ value: String(h), label: String(h) })));
   }
 
   function clearPdf() {
@@ -108,9 +172,9 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     const seq = ++pdfSeq;
     pdfNote = null;
     try {
-      const bytes = await api.files.pdfBytes(note.id);
+      const { bytes, marks } = await api.files.pdfOpen(note.id);
       if (seq !== pdfSeq) return;
-      if (await ctl.open(bytes, opts) && seq === pdfSeq) {
+      if (await ctl.open(new Uint8Array(bytes), marks, opts) && seq === pdfSeq) {
         pdfNote = { id: note.id, fileMtime: note.fileMtime };
         if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
       }
@@ -144,8 +208,8 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
       if (!target || !ctl) throw new Error('no PDF is open.');
       const saved = await ctl.save();
       if (!saved) throw new Error('no PDF is open.');
-      const { bytes, hash } = saved;
-      const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
+      const { bytes, hash, marks } = saved;
+      const r = await api.files.savePdf(target.id, bytes, target.fileMtime, marks);
       if (pdfNote === target) ctl.markSaved(hash);
       if (reportFileSaved(target, r, explicit, 'PDF') && pdfNote === target) pdfShownKey = target.id + ':' + r.mtime;
       return true;
@@ -340,7 +404,10 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
 
   function bindPdfEvents() {
     requireChild(el.pdfEditor, '.pdf-toolbar', HTMLElement).addEventListener('click', onPdfToolbarClick);
+    fillTextSelects();
+    showPdfTextSelection({ style: textStyle, selected: false, issue: null });
     el.pdfFormat.addEventListener('input', onPdfFormatInput);
+    el.pdfFormat.addEventListener('click', onPdfFormatClick);
     el.pdfCommentsClose.addEventListener('click', () => showPdfComments(false));
     el.signForm.addEventListener('submit', (e) => { e.preventDefault(); placeSignature(); });
     el.signClearBtn.addEventListener('click', () => { if (signPad) signPad.clear(); signSay(''); });

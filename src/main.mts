@@ -27,6 +27,7 @@ import { StickyManager } from './stickies.mts';
 import { recycle } from './recycle-bin.mts';
 import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, readImage, mtimeOf, TEXT_EXT, extOf } from './files.mts';
 import { createFileVersions } from './file-versions.mts';
+import { PDF_TEXT_MARK_KEY, parsePdfTextMark } from './shared/pdf-text-marks.mts';
 import * as claudeBin from './claude-bin.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -723,10 +724,18 @@ function main() {
   }
 
   const MAX_PDF_BYTES = 100 * 1024 * 1024;
-  handle('files:pdfBytes', (_e, id) => {
+  function pdfFileBytes(id: string) {
     const n = fileNoteOfKind(id, 'pdf');
     if (fs.statSync(n.filePath).size > MAX_PDF_BYTES) throw new Error('This PDF is larger than 100 MB.');
     return fs.readFileSync(n.filePath);
+  }
+  handle('files:pdfBytes', (_e, id) => pdfFileBytes(id));
+  handle('files:pdfOpen', async (_e, id) => {
+    const bytes = pdfFileBytes(id);
+    if (!bytes.includes('/' + PDF_TEXT_MARK_KEY)) return { bytes, marks: [] };
+    const res = await runWorker<{ bytes?: Uint8Array, marks?: unknown[] }>('pdf-edit-worker.mts', { bytes, task: 'liftMarks' }, 2 * 60 * 1000, 'Reading the PDF took too long.');
+    if (!res.ok || !res.bytes) return { bytes, marks: [] };
+    return { bytes: Buffer.from(res.bytes), marks: (res.marks || []).map(parsePdfTextMark).filter((m) => m !== null) };
   });
 
   const fileVersions = createFileVersions(path.join(DATA_DIR, 'backups', 'files'));
@@ -760,7 +769,12 @@ function main() {
     conflictCopies.set(id, { file: copy, mtime: mtimeOf(copy) });
     return { savedAs: copy, newCopy: true };
   }
-  handle('files:savePdf', (_e, id, bytes, expectedMtime) => saveEdits(id, fileNoteOfKind(id, 'pdf').filePath, pdfBuffer(bytes), expectedMtime));
+  handle('files:savePdf', async (_e, id, bytes, expectedMtime, marks) => {
+    const file = fileNoteOfKind(id, 'pdf').filePath;
+    let buf = pdfBuffer(bytes);
+    if (Array.isArray(marks) && marks.length) buf = pdfBuffer(await pdfLibTask(buf, 'writeMarks', { marks }, 'Writing the text boxes'));
+    return saveEdits(id, file, buf, expectedMtime);
+  });
 
   function versionedFileNote(id: string): FileNote {
     const n = store.get(id);

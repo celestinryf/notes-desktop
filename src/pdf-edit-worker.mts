@@ -5,8 +5,11 @@ import pdfLibModule from 'pdf-lib';
 import type { PDFPage } from 'pdf-lib';
 const { PDFDocument, PDFName, PDFNumber, PDFHexString, PDFString, PDFRef, PDFArray, PDFDict, degrees } = pdfLibModule;
 
+import { liftTextMarks, writeTextMarks } from './pdf-text-marks-pdf.mts';
+import { parsePdfTextMark } from './shared/pdf-text-marks.mts';
+
 type CommentOp = { op: 'add' | 'edit' | 'delete', page: number, x: number, y: number, text: string, ref: [number, number] };
-type WorkerTask = { bytes: Uint8Array, task: 'check' | 'rotate' | 'comments', rotations: number[], ops: CommentOp[], author: string };
+type WorkerTask = { bytes: Uint8Array, task: 'check' | 'rotate' | 'comments' | 'liftMarks' | 'writeMarks', rotations: number[], ops: CommentOp[], author: string, marks: unknown };
 
 const NOTE_SIZE = 20;
 const NOTE_FLAGS = 4 | 8 | 16;
@@ -130,8 +133,18 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
       return;
     }
     const doc = await PDFDocument.load(input.bytes, { updateMetadata: false });
+    if (task === 'liftMarks') {
+      const marks = liftTextMarks(doc);
+      port.postMessage({ ok: true, marks, bytes: marks.length ? await doc.save({ useObjectStreams: false }) : input.bytes });
+      return;
+    }
     if (isSigned(doc)) throw new Error(SIGNED);
-    if (task === 'rotate') {
+    if (task === 'writeMarks') {
+      if (!Array.isArray(input.marks)) throw new Error('the text boxes were not valid');
+      const marks = input.marks.map(parsePdfTextMark);
+      if (marks.some((m) => m === null)) throw new Error('a text box was not valid');
+      await writeTextMarks(doc, marks.filter((m) => m !== null));
+    } else if (task === 'rotate') {
       const pages = doc.getPages();
       if (pages.length !== input.rotations.length) throw new Error('the PDF has a different number of pages than expected');
       pages.forEach((page, i) => {
@@ -146,7 +159,7 @@ const COMMENT_OPS = { add: addNote, edit: editNote, delete: deleteNote };
         run(doc, op, input.author || '');
       }
     } else throw new Error('unknown task');
-    port.postMessage({ ok: true, bytes: await doc.save() });
+    port.postMessage({ ok: true, bytes: await doc.save({ useObjectStreams: false }) });
   } catch (err) {
     port.postMessage({ ok: false, error: /encrypt/i.test(err.message) ? 'this PDF is encrypted, so Notes cannot change it this way' : err.message });
   }
