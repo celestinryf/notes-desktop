@@ -239,6 +239,17 @@ const openNote = (title) => async (page) => {
   }
   await sleep(500);
 };
+const pdfTextBox = (text) => async (page) => {
+  await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 });
+  await sleep(600);
+  await page.click('[data-pdf-mode="text"]');
+  await page.waitForSelector('#pdfEditor .text-marks.is-active');
+  const at = await page.$eval('#pdfEditor .pdfViewer .page', (p) => { const b = p.getBoundingClientRect(); return { x: b.left + b.width * 0.55, y: b.top + 120 }; });
+  await page.mouse.click(at.x, at.y);
+  await page.waitForSelector('#pdfEditor .text-mark.is-editing');
+  await page.keyboard.type(text);
+  await sleep(400);
+};
 const typeAtEnd = (text, newLine) => async (page) => {
   await page.click('.rich-editor-content');
   await page.keyboard.press('Control+End');
@@ -422,7 +433,8 @@ const SCENES = {
   csv: { about: 'A CSV file as a table (Ctrl+E edits it as text)', file: 'csv', run: openNote('trail-log.csv') },
   'csv-wide': { about: 'A long, wide CSV scrolled down and right: the header and row numbers stay', file: 'csv-wide', size: { width: 900, height: 640 },
     run: steps(openNote('readings.csv'), async (page) => { await page.evaluate(() => { const v = document.getElementById('csvView'); v.scrollTop = 900; v.scrollLeft = 260; }); await sleep(300); }) },
-  'pdf-text': { about: 'A PDF with the Text tool on: the settings row shows size and colour, and a placed text box uses the default colour', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="text"]'); await sleep(400); const at = await page.$eval('#pdfEditor .pdfViewer .page', (p) => { const b = p.getBoundingClientRect(); return { x: b.left + b.width * 0.55, y: b.top + 120 }; }); await page.mouse.click(at.x, at.y); await sleep(300); await page.keyboard.type('Reviewed'); await sleep(400); }) },
+  'pdf-text': { about: 'A PDF with the Text tool on: the text settings row (font, size, style, colour, fill, alignment, spacing, opacity) and a text box being typed into', file: 'pdf', run: steps(openNote('trail.pdf'), pdfTextBox('Reviewed')) },
+  'pdf-text-styled': { about: 'A styled text box: serif, 18pt, bold, centred, yellow fill, selected with its handles after Escape', file: 'pdf', run: steps(openNote('trail.pdf'), pdfTextBox('Bring water'), async (page) => { await page.selectOption('[data-pdf-text="font"]', 'serif'); await page.selectOption('[data-pdf-text="size"]', '18'); await page.click('[data-pdf-text="bold"]'); await page.click('[data-pdf-text="align"][data-pdf-value="center"]'); await page.selectOption('[data-pdf-text="fill"]', '#ffff98'); await sleep(200); await page.keyboard.press('Escape'); await sleep(400); }) },
   'pdf-draw': { about: 'The Draw tool on: colour, width and opacity', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="draw"]'); await sleep(400); }) },
   'pdf-highlight': { about: 'The Highlight tool on: colour and thickness', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="highlight"]'); await sleep(400); }) },
   'pdf-versions': { about: 'The History dialog on a PDF: the copies kept before each save, newest first, with Restore', file: 'pdf', run: steps(openNote('trail.pdf'), async (page) => { await page.waitForSelector('#pdfEditor .pdfViewer .page canvas', { timeout: 60000 }); await sleep(600); await page.click('[data-pdf-mode="text"]'); await sleep(400); const at = await page.$eval('#pdfEditor .pdfViewer .page', (p) => { const b = p.getBoundingClientRect(); return { x: b.left + b.width * 0.55, y: b.top + 120 }; }); await page.mouse.click(at.x, at.y); await sleep(300); await page.keyboard.type('Reviewed'); await sleep(300); await page.click('[data-pdf-mode="select"]'); await sleep(300); await page.click('#pdfSaveBtn'); await sleep(1500); await page.keyboard.press('Control+Shift+h'); await sleep(800); }) },

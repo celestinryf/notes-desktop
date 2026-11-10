@@ -122,6 +122,10 @@
           "bold": '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" />',
           "italic": '<line x1="19" x2="10" y1="4" y2="4" /><line x1="14" x2="5" y1="20" y2="20" /><line x1="15" x2="9" y1="4" y2="20" />',
           "underline": '<path d="M6 4v6a6 6 0 0 0 12 0V4" /><line x1="4" x2="20" y1="20" y2="20" />',
+          "strikethrough": '<path d="M16 4H9a3 3 0 0 0-2.83 4" /><path d="M14 12a4 4 0 0 1 0 8H6" /><line x1="4" x2="20" y1="12" y2="12" />',
+          "align-left": '<path d="M21 5H3" /><path d="M15 12H3" /><path d="M17 19H3" />',
+          "align-center": '<path d="M21 5H3" /><path d="M17 12H7" /><path d="M19 19H5" />',
+          "align-right": '<path d="M21 5H3" /><path d="M21 12H9" /><path d="M21 19H7" />',
           "square-stack": '<path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" /><path d="M10 16c-1.1 0-2-.9-2-2v-4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2" /><rect width="8" height="8" x="14" y="14" rx="2" />',
           "palette": '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />',
           "cloud-check": '<path d="m17 15-5.5 5.5L9 18" /><path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327" />',
@@ -16222,6 +16226,7 @@
     fileBanner: pageElement("#fileBanner", HTMLDivElement),
     pdfEditor: pageElement("#pdfEditor", HTMLDivElement),
     pdfFormat: pageElement("#pdfFormat", HTMLDivElement),
+    pdfTextNote: pageElement("#pdfTextNote", HTMLSpanElement),
     pdfSaveBtn: pageElement("#pdfSaveBtn", HTMLButtonElement),
     pdfUndoBtn: pageElement("#pdfUndoBtn", HTMLButtonElement),
     pdfRedoBtn: pageElement("#pdfRedoBtn", HTMLButtonElement),
@@ -22702,17 +22707,631 @@
     return { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent };
   }
 
+  // src/shared/pdf-text-marks.mts
+  var PDF_TEXT_FONTS = ["sans", "serif", "mono"];
+  var PDF_TEXT_FONT_LABELS = { sans: "Sans (Helvetica)", serif: "Serif (Times)", mono: "Mono (Courier)" };
+  var PDF_TEXT_FONT_CSS = {
+    sans: 'Helvetica, Arial, "Liberation Sans", sans-serif',
+    serif: '"Times New Roman", Times, "Liberation Serif", serif',
+    mono: '"Courier New", Courier, "Liberation Mono", monospace'
+  };
+  var PDF_TEXT_ALIGNS = ["left", "center", "right"];
+  var PDF_TEXT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
+  var PDF_LINE_HEIGHTS = [1, 1.15, 1.5, 2];
+  var PDF_TEXT_FILLS = [
+    { value: "", label: "None" },
+    { value: "#ffffff", label: "White" },
+    { value: "#ffff98", label: "Yellow" },
+    { value: "#53ffbc", label: "Green" },
+    { value: "#80ebff", label: "Blue" },
+    { value: "#ffcbe6", label: "Pink" }
+  ];
+  var DEFAULT_PDF_TEXT_STYLE = { font: "sans", size: 12, bold: false, italic: false, underline: false, strike: false, color: "#000000", fill: null, opacity: 1, align: "left", lineHeight: 1.15 };
+  var PDF_TEXT_STYLE_KEYS = ["font", "size", "bold", "italic", "underline", "strike", "color", "fill", "opacity", "align", "lineHeight"];
+  var PDF_RECT_LIMIT = 1e5;
+  var PDF_TEXT_PADDING = 2;
+  var PDF_TEXT_MIN_SIZE = 4;
+  var PDF_TEXT_MAX_SIZE = 400;
+  var PDF_TEXT_MIN_WIDTH = 12;
+  var MAX_PDF_TEXT = 2e4;
+  var MAX_PDF_TEXT_MARKS = 2e3;
+  var isPdfTextFont = (v) => PDF_TEXT_FONTS.some((f) => f === v);
+  var isPdfTextAlign = (v) => PDF_TEXT_ALIGNS.some((a) => a === v);
+  var isFont = isPdfTextFont;
+  var isAlign = isPdfTextAlign;
+  var isHexColor = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
+  var finite = (v) => typeof v === "number" && Number.isFinite(v);
+  var clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  function clampPdfTextSize(size) {
+    return clamp(Math.round(size * 2) / 2, PDF_TEXT_MIN_SIZE, PDF_TEXT_MAX_SIZE);
+  }
+  function parsePdfTextStyle(value) {
+    const v = isRecord(value) ? value : {};
+    const d = DEFAULT_PDF_TEXT_STYLE;
+    return {
+      font: isFont(v.font) ? v.font : d.font,
+      size: finite(v.size) ? clampPdfTextSize(v.size) : d.size,
+      bold: v.bold === true,
+      italic: v.italic === true,
+      underline: v.underline === true,
+      strike: v.strike === true,
+      color: isHexColor(v.color) ? v.color.toLowerCase() : d.color,
+      fill: isHexColor(v.fill) ? v.fill.toLowerCase() : null,
+      opacity: finite(v.opacity) ? clamp(v.opacity, 0.05, 1) : d.opacity,
+      align: isAlign(v.align) ? v.align : d.align,
+      lineHeight: finite(v.lineHeight) ? clamp(v.lineHeight, 0.8, 4) : d.lineHeight
+    };
+  }
+  function parsePdfTextMark(value) {
+    if (!isRecord(value)) return null;
+    const { id, page, rect, text } = value;
+    if (typeof id !== "string" || !/^[\w-]{1,64}$/.test(id)) return null;
+    if (!Number.isInteger(page) || typeof page !== "number" || page < 0) return null;
+    if (!Array.isArray(rect) || rect.length !== 4 || !rect.every((n) => finite(n) && Math.abs(n) <= PDF_RECT_LIMIT)) return null;
+    if (typeof text !== "string" || text.length > MAX_PDF_TEXT) return null;
+    const [x1, y1, x2, y2] = rect;
+    return Object.assign(parsePdfTextStyle(value), { id, page, rect: normalRect([x1, y1, x2, y2]), text });
+  }
+  function normalRect([x1, y1, x2, y2]) {
+    return [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)];
+  }
+  function pdfTextStyleOf(mark) {
+    const style = {};
+    for (const key of PDF_TEXT_STYLE_KEYS) Object.assign(style, { [key]: mark[key] });
+    return parsePdfTextStyle(style);
+  }
+  var pdfTextLineHeight = (style) => style.size * style.lineHeight;
+  var WIN_ANSI_EXTRA = new Set("\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178".split("").map((c) => c.codePointAt(0) || 0));
+  function unwritablePdfChar(text) {
+    for (const ch of text) {
+      const code2 = ch.codePointAt(0) || 0;
+      if (code2 === 10) continue;
+      if (code2 >= 32 && code2 <= 126) continue;
+      if (code2 >= 160 && code2 <= 255) continue;
+      if (WIN_ANSI_EXTRA.has(code2)) continue;
+      return ch;
+    }
+    return null;
+  }
+  function canonicalPdfTextMark(mark) {
+    return Object.assign({ id: mark.id, page: mark.page, rect: normalRect(mark.rect), text: mark.text }, pdfTextStyleOf(mark));
+  }
+  function pdfTextMarksKey(marks) {
+    const json = JSON.stringify(marks.map(canonicalPdfTextMark));
+    let h = 5381;
+    for (let i = 0; i < json.length; i++) h = (h * 33 ^ json.charCodeAt(i)) >>> 0;
+    return marks.length + ":" + json.length + ":" + h.toString(36);
+  }
+
+  // src/renderer/pdf-text-marks.ts
+  var HANDLES = ["nw", "ne", "sw", "se", "w", "e"];
+  var NEW_WIDTH = 200;
+  var UNDO_LIMIT = 100;
+  var MAX_TEXT_LENGTH_NOTICE = "This text box is at its longest.";
+  var newId = () => "tm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  function createPdfTextMarks(container, hooks2) {
+    let marks = [];
+    let defaults = { ...DEFAULT_PDF_TEXT_STYLE };
+    let active = false, selectedId = null, editingId = null;
+    const past = [], future = [];
+    let lastActionAt = 0;
+    const elements = /* @__PURE__ */ new Map();
+    const snapshot = () => JSON.stringify(marks);
+    function remember() {
+      past.push(snapshot());
+      if (past.length > UNDO_LIMIT) past.shift();
+      future.length = 0;
+      lastActionAt = Date.now();
+    }
+    function changed() {
+      hooks2.onChange();
+    }
+    const byId = (id) => id ? marks.find((m) => m.id === id) || null : null;
+    const selected = () => byId(selectedId);
+    function reportSelection() {
+      const mark = selected();
+      const text = mark ? mark.text : "";
+      const bad = unwritablePdfChar(text);
+      hooks2.onSelection({
+        style: mark ? pdfTextStyleOf(mark) : { ...defaults },
+        selected: !!mark,
+        issue: bad === null ? text.length >= MAX_PDF_TEXT ? MAX_TEXT_LENGTH_NOTICE : null : '"' + bad + `" cannot be written with the PDF's fonts, so this box will not save.`
+      });
+    }
+    function layerFor(page) {
+      const pageEl = hooks2.pageElement(page);
+      if (!pageEl) return null;
+      let layer = pageEl.querySelector(":scope > .text-marks");
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.className = "text-marks";
+        layer.dataset.page = String(page);
+        layer.addEventListener("pointerdown", onLayerPointerDown);
+        pageEl.append(layer);
+      }
+      layer.classList.toggle("is-active", active);
+      return layer;
+    }
+    function layoutPage(page) {
+      const layer = layerFor(page);
+      const viewport = hooks2.viewportOf(page);
+      if (!layer || !viewport) return;
+      for (const mark of marks) if (mark.page === page) placeMark(mark, layer, viewport);
+      for (const [id, node] of elements) if (!byId(id)) {
+        node.remove();
+        elements.delete(id);
+      }
+    }
+    function layoutAll() {
+      const pages = new Set(marks.map((m) => m.page));
+      for (const page of pages) layoutPage(page);
+    }
+    function placeMark(mark, layer, viewport) {
+      let node = elements.get(mark.id);
+      if (!node) {
+        node = buildMark(mark.id);
+        elements.set(mark.id, node);
+      }
+      if (node.parentElement !== layer) layer.append(node);
+      node.dataset.page = String(mark.page);
+      node.dataset.rotation = String((viewport.rotation % 360 + 360) % 360);
+      const [vx1, vy1] = viewport.convertToViewportPoint(mark.rect[0], mark.rect[1]);
+      const [vx2, vy2] = viewport.convertToViewportPoint(mark.rect[2], mark.rect[3]);
+      const left = Math.min(vx1, vx2), top = Math.min(vy1, vy2), bw = Math.abs(vx2 - vx1), bh = Math.abs(vy2 - vy1);
+      const iw = (mark.rect[2] - mark.rect[0]) * viewport.scale, ih = (mark.rect[3] - mark.rect[1]) * viewport.scale;
+      Object.assign(node.style, { left: left + "px", top: top + "px", width: bw + "px", height: bh + "px" });
+      const inner = node.children[0];
+      if (inner instanceof HTMLElement) Object.assign(inner.style, { width: iw + "px", height: ih + "px", left: (bw - iw) / 2 + "px", top: (bh - ih) / 2 + "px", transform: viewport.rotation ? "rotate(" + viewport.rotation + "deg)" : "" });
+      styleBody(mark, bodyOf(node), viewport.scale);
+      node.classList.toggle("is-selected", mark.id === selectedId);
+      node.classList.toggle("is-editing", mark.id === editingId);
+    }
+    const bodyOf = (node) => {
+      const body = node.querySelector(".text-mark-body");
+      if (!body) throw new Error("a text box lost its body");
+      return body;
+    };
+    function styleBody(mark, body, scale) {
+      Object.assign(body.style, {
+        fontFamily: PDF_TEXT_FONT_CSS[mark.font],
+        fontSize: mark.size * scale + "px",
+        lineHeight: pdfTextLineHeight(mark) * scale + "px",
+        fontWeight: mark.bold ? "700" : "400",
+        fontStyle: mark.italic ? "italic" : "normal",
+        textDecoration: [mark.underline ? "underline" : "", mark.strike ? "line-through" : ""].filter(Boolean).join(" ") || "none",
+        color: mark.color,
+        background: mark.fill || "transparent",
+        opacity: String(mark.opacity),
+        textAlign: mark.align,
+        padding: PDF_TEXT_PADDING * scale + "px"
+      });
+      if (body.textContent !== mark.text && document.activeElement !== body) body.textContent = mark.text;
+    }
+    function buildMark(id) {
+      const node = document.createElement("div");
+      node.className = "text-mark";
+      node.dataset.id = id;
+      const inner = document.createElement("div");
+      inner.className = "text-mark-inner";
+      const body = document.createElement("div");
+      body.className = "text-mark-body";
+      body.setAttribute("contenteditable", "plaintext-only");
+      body.setAttribute("role", "textbox");
+      body.setAttribute("aria-multiline", "true");
+      body.setAttribute("aria-label", "Text box");
+      body.spellcheck = false;
+      inner.append(body);
+      node.append(inner);
+      for (const handle of HANDLES) {
+        const h = document.createElement("div");
+        h.className = "text-mark-handle";
+        h.dataset.handle = handle;
+        h.addEventListener("pointerdown", (e) => startResize(e, id, handle));
+        node.append(h);
+      }
+      node.addEventListener("pointerdown", (e) => onMarkPointerDown(e, id));
+      node.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        edit(id);
+      });
+      body.addEventListener("input", () => onInput(id));
+      body.addEventListener("focus", () => {
+        if (active) {
+          selectedId = id;
+          editingId = id;
+          refreshClasses();
+          reportSelection();
+        }
+      });
+      body.addEventListener("blur", (e) => onBlur(id, e.relatedTarget));
+      body.addEventListener("keydown", (e) => onBodyKey(e, id));
+      body.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData ? e.clipboardData.getData("text/plain") : "").replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
+        document.execCommand("insertText", false, text);
+      });
+      return node;
+    }
+    function refreshClasses() {
+      for (const [id, node] of elements) {
+        node.classList.toggle("is-selected", id === selectedId);
+        node.classList.toggle("is-editing", id === editingId);
+      }
+    }
+    function select(id) {
+      if (selectedId === id) return;
+      if (editingId && editingId !== id) stopEditing();
+      selectedId = id;
+      if (id === null) pruneEmpty();
+      refreshClasses();
+      reportSelection();
+    }
+    function edit(id) {
+      if (!active) return;
+      const node = elements.get(id);
+      if (!node) return;
+      selectedId = id;
+      editingId = id;
+      refreshClasses();
+      const body = bodyOf(node);
+      if (document.activeElement !== body) {
+        body.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNodeContents(body);
+        range.collapse(false);
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+      reportSelection();
+    }
+    function stopEditing() {
+      const id = editingId;
+      editingId = null;
+      if (id) {
+        const node = elements.get(id);
+        if (node && document.activeElement === bodyOf(node)) bodyOf(node).blur();
+      }
+      refreshClasses();
+    }
+    let textBefore = null;
+    function onInput(id) {
+      const mark = byId(id), node = elements.get(id);
+      if (!mark || !node) return;
+      const body = bodyOf(node);
+      let text = body.innerText.replace(/\r\n?/g, "\n").replace(/\n$/, "").replace(/\t/g, "    ");
+      if (text.length > MAX_PDF_TEXT) {
+        text = text.slice(0, MAX_PDF_TEXT);
+        body.textContent = text;
+      }
+      if (textBefore === null) {
+        textBefore = mark.text;
+        remember();
+      }
+      mark.text = text;
+      fitHeight(mark);
+      changed();
+      reportSelection();
+    }
+    let resumeEditId = null;
+    function onBlur(id, to) {
+      const mark = byId(id);
+      textBefore = null;
+      const toControls = to instanceof Node && !container.contains(to);
+      resumeEditId = toControls && editingId === id ? id : null;
+      if (mark && !mark.text.trim() && !toControls && document.hasFocus()) {
+        removeMark(id, false);
+        return;
+      }
+      if (editingId === id) {
+        editingId = null;
+        refreshClasses();
+      }
+    }
+    function pruneEmpty() {
+      for (const mark of marks.slice()) if (!mark.text.trim() && mark.id !== editingId) removeMark(mark.id, false);
+    }
+    function fitHeight(mark) {
+      const node = elements.get(mark.id), viewport = hooks2.viewportOf(mark.page);
+      if (!node || !viewport) return;
+      const body = bodyOf(node);
+      body.style.minHeight = "0";
+      const natural = body.scrollHeight;
+      body.style.minHeight = "";
+      const px = Math.max(natural, pdfTextLineHeight(mark) * viewport.scale + 2 * PDF_TEXT_PADDING * viewport.scale);
+      const h = px / viewport.scale;
+      mark.rect = [mark.rect[0], mark.rect[3] - h, mark.rect[2], mark.rect[3]];
+      const layer = layerFor(mark.page);
+      if (layer) placeMark(mark, layer, viewport);
+    }
+    function removeMark(id, record = true) {
+      const node = elements.get(id);
+      if (!byId(id)) return;
+      if (record) remember();
+      marks = marks.filter((m) => m.id !== id);
+      if (node) node.remove();
+      elements.delete(id);
+      if (selectedId === id) selectedId = null;
+      if (editingId === id) editingId = null;
+      changed();
+      reportSelection();
+    }
+    function pagePoint(layer, viewport, e) {
+      const r = layer.getBoundingClientRect();
+      const [x, y] = viewport.convertToPdfPoint(e.clientX - r.left, e.clientY - r.top);
+      return { x, y };
+    }
+    function onLayerPointerDown(e) {
+      if (!active || e.button !== 0 || !(e.currentTarget instanceof HTMLElement) || e.target !== e.currentTarget) return;
+      const layer = e.currentTarget;
+      const page = Number(layer.dataset.page);
+      const viewport = hooks2.viewportOf(page);
+      if (!viewport) return;
+      e.preventDefault();
+      if (selectedId) {
+        select(null);
+        return;
+      }
+      if (marks.length >= MAX_PDF_TEXT_MARKS) return;
+      const { x, y } = pagePoint(layer, viewport, e);
+      const right = Math.max(viewport.convertToPdfPoint(0, 0)[0], viewport.convertToPdfPoint(viewport.width, viewport.height)[0]);
+      const width = Math.min(NEW_WIDTH, Math.max(PDF_TEXT_MIN_WIDTH, right - x));
+      const h = pdfTextLineHeight(defaults) + 2 * PDF_TEXT_PADDING;
+      const mark = Object.assign({ id: newId(), page, rect: normalRect([x, y - h, x + width, y]), text: "" }, defaults);
+      remember();
+      marks.push(mark);
+      layoutPage(page);
+      changed();
+      edit(mark.id);
+    }
+    let drag = null;
+    function onMarkPointerDown(e, id) {
+      if (!active || e.button !== 0) return;
+      const mark = byId(id), node = elements.get(id);
+      if (!mark || !node) return;
+      e.stopPropagation();
+      const body = bodyOf(node);
+      const onBody = e.target instanceof Node && body.contains(e.target);
+      if (onBody && editingId === id) return;
+      e.preventDefault();
+      select(id);
+      const viewport = hooks2.viewportOf(mark.page);
+      if (!viewport) return;
+      drag = { id, startX: e.clientX, startY: e.clientY, rect: [...mark.rect], size: mark.size, handle: "move", moved: false, viewport, remembered: false };
+      trackDrag(e, onBody);
+    }
+    function startResize(e, id, handle) {
+      if (!active || e.button !== 0) return;
+      const mark = byId(id);
+      if (!mark) return;
+      e.preventDefault();
+      e.stopPropagation();
+      select(id);
+      const viewport = hooks2.viewportOf(mark.page);
+      if (!viewport) return;
+      stopEditing();
+      if (!byId(id)) return;
+      drag = { id, startX: e.clientX, startY: e.clientY, rect: [...mark.rect], size: mark.size, handle, moved: false, viewport, remembered: false };
+      trackDrag(e, false);
+    }
+    function trackDrag(e, clickEdits) {
+      const target = e.currentTarget instanceof HTMLElement ? e.currentTarget : container;
+      const onMove = (m) => {
+        if (drag) applyDrag(m);
+      };
+      const onUp = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+        const d = drag;
+        drag = null;
+        if (!d) return;
+        if (!d.moved && clickEdits) edit(d.id);
+        else if (d.moved) {
+          const mark = byId(d.id);
+          if (mark && d.handle !== "move") fitHeight(mark);
+          changed();
+        }
+      };
+      target.setPointerCapture(e.pointerId);
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
+    }
+    function applyDrag(m) {
+      const d = drag;
+      const mark = d && byId(d.id);
+      if (!d || !mark) return;
+      const dx = (m.clientX - d.startX) / d.viewport.scale, dy = -(m.clientY - d.startY) / d.viewport.scale;
+      if (!d.moved && Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      if (!d.remembered) {
+        remember();
+        d.remembered = true;
+      }
+      d.moved = true;
+      const [x1, y1, x2, y2] = d.rect;
+      const { dx: rx, dy: ry } = rotateDelta(dx, dy, d.viewport.rotation);
+      if (d.handle === "move") mark.rect = [x1 + rx, y1 + ry, x2 + rx, y2 + ry];
+      else if (d.handle === "e") mark.rect = [x1, y1, Math.max(x1 + PDF_TEXT_MIN_WIDTH, x2 + rx), y2];
+      else if (d.handle === "w") mark.rect = [Math.min(x2 - PDF_TEXT_MIN_WIDTH, x1 + rx), y1, x2, y2];
+      else {
+        const w0 = x2 - x1;
+        const grow = d.handle === "ne" || d.handle === "se" ? rx : -rx;
+        const factor = Math.max(PDF_TEXT_MIN_WIDTH / w0, (w0 + grow) / w0);
+        mark.size = clampPdfTextSize(d.size * factor);
+        const w = w0 * (mark.size / d.size);
+        mark.rect = d.handle === "ne" || d.handle === "se" ? [x1, y1, x1 + w, y2] : [x2 - w, y1, x2, y2];
+      }
+      const node = elements.get(mark.id);
+      if (node && node.parentElement instanceof HTMLElement) placeMark(mark, node.parentElement, d.viewport);
+      if (d.handle !== "move") {
+        fitHeight(mark);
+        reportSelection();
+      }
+    }
+    function rotateDelta(dx, dy, rotation) {
+      const r = (rotation % 360 + 360) % 360;
+      if (r === 90) return { dx: -dy, dy: dx };
+      if (r === 180) return { dx: -dx, dy: -dy };
+      if (r === 270) return { dx: dy, dy: -dx };
+      return { dx, dy };
+    }
+    function onBodyKey(e, id) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        stopEditing();
+        return;
+      }
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      const toggles2 = { b: "bold", i: "italic", u: "underline" };
+      if (key in toggles2) {
+        e.preventDefault();
+        const mark = byId(id);
+        if (mark) setStyle({ [toggles2[key]]: !mark[toggles2[key]] });
+      }
+    }
+    function onContainerKey(e) {
+      if (!active || !selectedId || editingId) return;
+      const mark = selected();
+      if (!mark) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        removeMark(mark.id);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        select(null);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "F2") {
+        e.preventDefault();
+        edit(mark.id);
+        return;
+      }
+      const step = e.shiftKey ? 10 : 1;
+      const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+      if (!(e.key in moves)) return;
+      e.preventDefault();
+      remember();
+      const [dx, dy] = moves[e.key];
+      const viewport = hooks2.viewportOf(mark.page);
+      const { dx: rx, dy: ry } = rotateDelta(dx, dy, viewport ? viewport.rotation : 0);
+      mark.rect = [mark.rect[0] + rx, mark.rect[1] + ry, mark.rect[2] + rx, mark.rect[3] + ry];
+      layoutPage(mark.page);
+      changed();
+    }
+    container.addEventListener("keydown", onContainerKey);
+    function setStyle(partial) {
+      const mark = selected();
+      if (!mark) {
+        defaults = parsePdfTextStyle({ ...defaults, ...partial });
+        reportSelection();
+        return;
+      }
+      remember();
+      const next = parsePdfTextStyle({ ...pdfTextStyleOf(mark), ...partial });
+      Object.assign(mark, next);
+      defaults = { ...next };
+      layoutPage(mark.page);
+      fitHeight(mark);
+      changed();
+      reportSelection();
+      if (resumeEditId === mark.id) {
+        resumeEditId = null;
+        edit(mark.id);
+      }
+    }
+    function restore(json) {
+      textBefore = null;
+      const parsed = JSON.parse(json);
+      marks = Array.isArray(parsed) ? parsed.map(parsePdfTextMark).filter((m) => m !== null) : [];
+      selectedId = null;
+      editingId = null;
+      for (const node of elements.values()) node.remove();
+      elements.clear();
+      layoutAll();
+      changed();
+      reportSelection();
+    }
+    function undo() {
+      const prev = past.pop();
+      if (prev === void 0) return false;
+      future.push(snapshot());
+      lastActionAt = Date.now();
+      restore(prev);
+      return true;
+    }
+    function redo() {
+      const next = future.pop();
+      if (next === void 0) return false;
+      past.push(snapshot());
+      lastActionAt = Date.now();
+      restore(next);
+      return true;
+    }
+    function load(list) {
+      marks = list.map((m) => ({ ...m, rect: normalRect(m.rect) }));
+      past.length = 0;
+      future.length = 0;
+      lastActionAt = 0;
+      textBefore = null;
+      selectedId = null;
+      editingId = null;
+      for (const node of elements.values()) node.remove();
+      elements.clear();
+      layoutAll();
+      reportSelection();
+    }
+    function setActive(on) {
+      active = on;
+      if (!on) {
+        stopEditing();
+        selectedId = null;
+        pruneEmpty();
+        refreshClasses();
+      }
+      for (const layer of container.querySelectorAll(".text-marks")) layer.classList.toggle("is-active", on);
+      reportSelection();
+    }
+    return {
+      load,
+      clear: () => load([]),
+      marks: () => marks.map((m) => ({ ...m, rect: normalRect(m.rect) })),
+      layoutPage,
+      layoutAll,
+      setActive,
+      setStyle,
+      commit: () => {
+        if (editingId) stopEditing();
+        pruneEmpty();
+      },
+      deselect: () => select(null),
+      hasSelection: () => !!selected(),
+      canUndo: () => past.length > 0,
+      canRedo: () => future.length > 0,
+      undo,
+      redo,
+      lastActionAt: () => lastActionAt,
+      count: () => marks.length
+    };
+  }
+
   // src/renderer/pdf-editor.ts
   function requireChild(root, selector, type) {
     const node = root.querySelector(selector);
     if (!(node instanceof type)) throw new Error("The PDF panel is missing " + selector + ".");
     return node;
   }
-  var PDF_TOOL_PARAMS = ["textSize", "textColor", "inkColor", "inkWidth", "inkOpacity", "highlightColor", "highlightThickness"];
-  var isPdfToolParam = (name) => PDF_TOOL_PARAMS.includes(name);
+  var PDF_TOOL_PARAMS = ["inkColor", "inkWidth", "inkOpacity", "highlightColor", "highlightThickness"];
+  var isPdfToolParam = (name) => PDF_TOOL_PARAMS.some((p) => p === name);
   var isPdfColorParam = (name) => name.endsWith("Color");
   var DOCUMENT_INK = "#000000";
-  var DEFAULT_PDF_TOOL_PARAMS = { textSize: 10, textColor: DOCUMENT_INK, inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: "#ffff98", highlightThickness: 12 };
+  var DEFAULT_PDF_TOOL_PARAMS = { inkColor: DOCUMENT_INK, inkWidth: 1, inkOpacity: 1, highlightColor: "#ffff98", highlightThickness: 12 };
   var NotesPdfEditor = (function() {
     "use strict";
     const PV = window.PdfView;
@@ -22743,12 +23362,10 @@
       canvas.style.width = Math.floor(viewport.width / ratio) + "px";
       await page.render({ canvas, viewport, annotationMode: lib.AnnotationMode.ENABLE_STORAGE }).promise;
     }
-    const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.FREETEXT, draw: T.INK, picture: T.STAMP };
+    const MODES = { select: T.NONE, highlight: T.HIGHLIGHT, text: T.NONE, draw: T.INK, picture: T.STAMP };
     const isModeName = (name) => name in MODES;
     const P = lib.AnnotationEditorParamsType;
     const PARAM_TYPES = {
-      textSize: P.FREETEXT_SIZE,
-      textColor: P.FREETEXT_COLOR,
       inkColor: P.INK_COLOR,
       inkWidth: P.INK_THICKNESS,
       inkOpacity: P.INK_OPACITY,
@@ -22757,7 +23374,6 @@
     };
     const PARAM_OF_TYPE = new Map(PDF_TOOL_PARAMS.map((name) => [PARAM_TYPES[name], name]));
     const PARAMS_OF_MODE = /* @__PURE__ */ new Map([
-      [T.FREETEXT, ["textSize", "textColor"]],
       [T.INK, ["inkColor", "inkWidth", "inkOpacity"]],
       [T.HIGHLIGHT, ["highlightColor", "highlightThickness"]]
     ]);
@@ -22799,12 +23415,35 @@
       let task = null, doc = null, seq = 0, dirty = false, mode = "select", savedHash = "", modeEpoch = 0;
       let touched = false;
       const undo = { canUndo: false, canRedo: false };
-      const report = () => hooks2.onState && hooks2.onState({ mode, canUndo: undo.canUndo, canRedo: undo.canRedo, scale: viewer.currentScale || 1 });
+      const report = () => hooks2.onState && hooks2.onState({ mode, canUndo: undo.canUndo || textMarks.canUndo(), canRedo: undo.canRedo || textMarks.canRedo(), scale: viewer.currentScale || 1 });
       const params = { ...DEFAULT_PDF_TOOL_PARAMS };
       const sendParam = (name) => eventBus.dispatch("switchannotationeditorparams", { source: null, type: PARAM_TYPES[name], value: params[name] });
       const reportParams = (values) => {
         if (hooks2.onParams) hooks2.onParams(values);
       };
+      let pdfActionAt = 0;
+      const textMarks = createPdfTextMarks(container, {
+        viewportOf: (page) => {
+          const view = doc && page < doc.numPages ? viewer.getPageView(page) : null;
+          return view ? view.viewport : null;
+        },
+        pageElement: (page) => {
+          const view = doc && page < doc.numPages ? viewer.getPageView(page) : null;
+          return view ? view.div : null;
+        },
+        onChange: () => {
+          refreshDirty();
+          report();
+        },
+        onSelection: (selection) => {
+          if (hooks2.onTextSelection) hooks2.onTextSelection(selection);
+        }
+      });
+      eventBus.on("pagerendered", ({ pageNumber }) => textMarks.layoutPage(pageNumber - 1));
+      eventBus.on("scalechanging", () => textMarks.layoutAll());
+      eventBus.on("rotationchanging", () => textMarks.layoutAll());
+      const ourUndoFirst = () => textMarks.canUndo() && (!undo.canUndo || textMarks.lastActionAt() >= pdfActionAt);
+      const ourRedoFirst = () => textMarks.canRedo() && (!undo.canRedo || textMarks.lastActionAt() >= pdfActionAt);
       let location2 = null, restore = null;
       eventBus.on("updateviewarea", (e) => {
         location2 = e.location;
@@ -22859,7 +23498,10 @@
         }
       });
       eventBus.on("editingstateschanged", ({ details }) => {
-        if ("hasSomethingToUndo" in details) undo.canUndo = details.hasSomethingToUndo;
+        if ("hasSomethingToUndo" in details) {
+          undo.canUndo = details.hasSomethingToUndo;
+          if (details.hasSomethingToUndo) pdfActionAt = Date.now();
+        }
         if ("hasSomethingToRedo" in details) undo.canRedo = details.hasSomethingToRedo;
         if ("hasSelectedEditor" in details && !details.hasSelectedEditor) reportParams({ ...params });
         refreshDirty();
@@ -22881,7 +23523,7 @@
         e.stopPropagation();
         if (hooks2.onLink) hooks2.onLink(e, a.href);
       }, true);
-      const currentHash = () => doc ? doc.annotationStorage.serializable.hash : "";
+      const currentHash = () => doc ? doc.annotationStorage.serializable.hash + "|" + pdfTextMarksKey(textMarks.marks()) : "";
       function refreshDirty() {
         const v = !!doc && currentHash() !== savedHash;
         if (dirty === v) return;
@@ -22906,6 +23548,7 @@
         closeOthers();
         viewer.setDocument(null);
         linkService.setDocument(null);
+        textMarks.clear();
         const t = task;
         task = null;
         doc = null;
@@ -22915,7 +23558,7 @@
         if (t) await t.destroy().catch(() => {
         });
       }
-      async function open(bytes, opts) {
+      async function open(bytes, marks, opts) {
         const my = ++seq;
         const at = opts && opts.keepView ? location2 : null;
         await unload();
@@ -22940,7 +23583,10 @@
         storage.onResetModified = refreshDirty;
         viewer.setDocument(doc);
         linkService.setDocument(doc, null);
+        textMarks.load(marks);
+        savedHash = currentHash();
         mode = "select";
+        textMarks.setActive(false);
         report();
         reportParams({ ...params });
         return true;
@@ -22961,6 +23607,7 @@
           if (name !== "select") touched = true;
         }
         mode = name;
+        textMarks.setActive(name === "text");
         report();
         return true;
       }
@@ -22979,7 +23626,8 @@
         });
       }
       async function commit() {
-        if (!doc || mode === "select") return;
+        textMarks.commit();
+        if (!doc || MODES[mode] === T.NONE) return;
         const m = mode, epoch = modeEpoch;
         const left = modeSwitched(T.NONE);
         if (!setMode("select", true)) return;
@@ -23073,9 +23721,11 @@
       }
       async function save() {
         if (!doc) return null;
+        textMarks.commit();
         const hash = currentHash();
+        const marks = textMarks.marks();
         const bytes = await doc.saveDocument();
-        return { bytes, hash };
+        return { bytes, hash, marks };
       }
       return {
         open,
@@ -23107,8 +23757,16 @@
         isOpen: () => !!doc,
         isDirty: () => !!doc && currentHash() !== savedHash,
         hasPendingWork: () => !!doc && (currentHash() !== savedHash || mode !== "select"),
-        undo: () => eventBus.dispatch("editingaction", { source: null, name: "undo" }),
-        redo: () => eventBus.dispatch("editingaction", { source: null, name: "redo" }),
+        undo: () => {
+          if (ourUndoFirst()) textMarks.undo();
+          else eventBus.dispatch("editingaction", { source: null, name: "undo" });
+        },
+        redo: () => {
+          if (ourRedoFirst()) textMarks.redo();
+          else eventBus.dispatch("editingaction", { source: null, name: "redo" });
+        },
+        setTextStyle: (patch) => textMarks.setStyle(patch),
+        deselectText: () => textMarks.deselect(),
         zoomIn: () => viewer.increaseScale(),
         zoomOut: () => viewer.decreaseScale(),
         fitWidth: () => {
@@ -23647,6 +24305,7 @@
             el.pdfZoomLabel.textContent = Math.round(s.scale * 100) + "%";
           },
           onParams: showPdfParams,
+          onTextSelection: showPdfTextSelection,
           onLink: externalLinkClick
         });
       }
@@ -23682,10 +24341,72 @@
     function onPdfFormatInput(e) {
       const control = e.target;
       if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement) || !pdf) return;
+      if (control.dataset.pdfText) {
+        const patch = textStylePatch(control.dataset.pdfText, control.value);
+        if (patch) pdf.setTextStyle(patch);
+        showPdfUnit(control);
+        return;
+      }
       const name = control.dataset.pdfParam;
       if (!name || !isPdfToolParam(name)) return;
       pdf.setParam(name, isPdfColorParam(name) ? control.value : Number(control.value));
       showPdfUnit(control);
+    }
+    let textStyle = { ...DEFAULT_PDF_TEXT_STYLE };
+    const textControls = () => el.pdfFormat.querySelectorAll("[data-pdf-text]");
+    function textStylePatch(name, raw) {
+      if (name === "font") return isPdfTextFont(raw) ? { font: raw } : null;
+      if (name === "align") return isPdfTextAlign(raw) ? { align: raw } : null;
+      if (name === "size" || name === "opacity" || name === "lineHeight") {
+        const n = Number(raw);
+        return Number.isFinite(n) ? { [name]: n } : null;
+      }
+      if (name === "color") return isHexColor(raw) ? { color: raw } : null;
+      if (name === "fill") return raw === "" ? { fill: null } : isHexColor(raw) ? { fill: raw } : null;
+      if (name === "bold" || name === "italic" || name === "underline" || name === "strike") return { [name]: !textStyle[name] };
+      return null;
+    }
+    function onPdfFormatClick(e) {
+      const b = e.target instanceof Element ? e.target.closest("button[data-pdf-text]") : null;
+      if (!b || !pdf || !b.dataset.pdfText) return;
+      const patch = textStylePatch(b.dataset.pdfText, b.dataset.pdfValue || "");
+      if (patch) pdf.setTextStyle(patch);
+    }
+    function showPdfTextSelection(selection) {
+      textStyle = selection.style;
+      for (const control of textControls()) {
+        const name = control.dataset.pdfText;
+        if (!name) continue;
+        if (control instanceof HTMLButtonElement) {
+          const on = name === "align" ? textStyle.align === control.dataset.pdfValue : name === "bold" || name === "italic" || name === "underline" || name === "strike" ? textStyle[name] : false;
+          control.setAttribute("aria-pressed", on ? "true" : "false");
+          continue;
+        }
+        if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) continue;
+        const value = name === "fill" ? textStyle.fill || "" : name === "font" || name === "size" || name === "opacity" || name === "lineHeight" || name === "color" ? String(textStyle[name]) : null;
+        if (value === null) continue;
+        if (control instanceof HTMLSelectElement) keepOption(control, value);
+        if (control.value !== value) control.value = value;
+        showPdfUnit(control);
+      }
+      el.pdfTextNote.textContent = selection.issue || "";
+      el.pdfFormat.classList.toggle("has-text-selection", selection.selected);
+    }
+    function fillTextSelects() {
+      const fill = (name, options) => {
+        const select = el.pdfFormat.querySelector('select[data-pdf-text="' + name + '"]');
+        if (!select) return;
+        select.replaceChildren(...options.map((o) => {
+          const opt = document.createElement("option");
+          opt.value = o.value;
+          opt.textContent = o.label;
+          return opt;
+        }));
+      };
+      fill("font", PDF_TEXT_FONTS.map((f) => ({ value: f, label: PDF_TEXT_FONT_LABELS[f] })));
+      fill("size", PDF_TEXT_SIZES.map((s) => ({ value: String(s), label: String(s) })));
+      fill("fill", PDF_TEXT_FILLS.map((f) => ({ value: f.value, label: f.label })));
+      fill("lineHeight", PDF_LINE_HEIGHTS.map((h) => ({ value: String(h), label: String(h) })));
     }
     function clearPdf() {
       closePdfPages();
@@ -23710,9 +24431,9 @@
       const seq = ++pdfSeq;
       pdfNote = null;
       try {
-        const bytes = await api.files.pdfBytes(note.id);
+        const { bytes, marks } = await api.files.pdfOpen(note.id);
         if (seq !== pdfSeq) return;
-        if (await ctl.open(bytes, opts) && seq === pdfSeq) {
+        if (await ctl.open(new Uint8Array(bytes), marks, opts) && seq === pdfSeq) {
           pdfNote = { id: note.id, fileMtime: note.fileMtime };
           if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
         }
@@ -23742,8 +24463,8 @@
         if (!target || !ctl) throw new Error("no PDF is open.");
         const saved = await ctl.save();
         if (!saved) throw new Error("no PDF is open.");
-        const { bytes, hash } = saved;
-        const r = await api.files.savePdf(target.id, bytes, target.fileMtime);
+        const { bytes, hash, marks } = saved;
+        const r = await api.files.savePdf(target.id, bytes, target.fileMtime, marks);
         if (pdfNote === target) ctl.markSaved(hash);
         if (reportFileSaved(target, r, explicit, "PDF") && pdfNote === target) pdfShownKey = target.id + ":" + r.mtime;
         return true;
@@ -23999,7 +24720,13 @@
     }
     function bindPdfEvents() {
       requireChild(el.pdfEditor, ".pdf-toolbar", HTMLElement).addEventListener("click", onPdfToolbarClick);
+      fillTextSelects();
+      showPdfTextSelection({ style: textStyle, selected: false, issue: null });
       el.pdfFormat.addEventListener("input", onPdfFormatInput);
+      el.pdfFormat.addEventListener("click", onPdfFormatClick);
+      el.pdfFormat.addEventListener("pointerdown", (e) => {
+        if (e.target instanceof Element && e.target.closest("button[data-pdf-text]")) e.preventDefault();
+      });
       el.pdfCommentsClose.addEventListener("click", () => showPdfComments(false));
       el.signForm.addEventListener("submit", (e) => {
         e.preventDefault();

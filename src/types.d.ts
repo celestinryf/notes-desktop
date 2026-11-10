@@ -276,9 +276,10 @@ interface IpcContract {
   'files:reveal': (id: string) => void;
   'files:openExternal': (id: string) => string;
   'files:pdfBytes': (id: string) => Buffer;
+  'files:pdfOpen': (id: string) => { bytes: Buffer; marks: import('./shared/pdf-text-marks.mts').PdfTextMark[] };
   'files:versions': (id: string) => FileVersion[];
   'files:restoreVersion': (id: string, name: string, expectedMtime: number | null) => Ok<{ mtime: number | null }>;
-  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number | null) => SavedFile;
+  'files:savePdf': (id: string, bytes: Uint8Array, expectedMtime: number | null, marks: import('./shared/pdf-text-marks.mts').PdfTextMark[]) => SavedFile;
   'files:pdfApplyPages': (id: string, bytes: Uint8Array | null, rotations: number[], expectedMtime: number | null) => Ok<{ mtime: number | null; backup: string }>;
   'files:pdfRestore': (id: string, name: string, expectedMtime: number | null) => Ok<{ mtime: number | null }>;
   'files:pdfComments': (id: string, ops: unknown[], expectedMtime: number | null) => Ok<{ mtime: number | null; backup: string }>;
@@ -364,7 +365,7 @@ interface NotesApi {
   signature: { get: Invoker<'signature:get'>; set: Invoker<'signature:set'>; forget: Invoker<'signature:forget'> };
   files: {
     openDialog: Invoker<'files:openDialog'>; link: Invoker<'files:link'>; refresh: Invoker<'files:refresh'>; reveal: Invoker<'files:reveal'>;
-    openExternal: Invoker<'files:openExternal'>; pdfBytes: Invoker<'files:pdfBytes'>; savePdf: Invoker<'files:savePdf'>;
+    openExternal: Invoker<'files:openExternal'>; pdfBytes: Invoker<'files:pdfBytes'>; pdfOpen: Invoker<'files:pdfOpen'>; savePdf: Invoker<'files:savePdf'>;
     versions: Invoker<'files:versions'>; restoreVersion: Invoker<'files:restoreVersion'>;
     pdfApplyPages: Invoker<'files:pdfApplyPages'>; pdfRestore: Invoker<'files:pdfRestore'>; pdfComments: Invoker<'files:pdfComments'>;
     saveDocx: Invoker<'files:saveDocx'>; saveCraft: Invoker<'files:saveCraft'>; documentBytes: Invoker<'files:documentBytes'>;

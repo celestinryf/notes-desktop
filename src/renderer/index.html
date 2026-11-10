@@ -221,7 +221,7 @@
                 <div class="pdf-toolbar" role="toolbar" aria-label="PDF tools">
                   <button class="tool-btn is-on" data-pdf-mode="select" title="Read: select text and follow links. To move or delete a mark, pick a tool first, then click the mark.">Read</button>
                   <button class="tool-btn" data-pdf-mode="highlight" title="Highlight text: drag across it">Highlight</button>
-                  <button class="tool-btn" data-pdf-mode="text" title="Add a text box: click where it goes">Text</button>
+                  <button class="tool-btn" data-pdf-mode="text" title="Add a text box: click where it goes. Drag a box to move it, a side to widen it, a corner to scale the text.">Text</button>
                   <button class="tool-btn" data-pdf-mode="draw" title="Draw freehand">Draw</button>
                   <button class="tool-btn" data-pdf-mode="picture" title="Add a picture from a file">Picture</button>
                   <button class="tool-btn" data-pdf-act="sign" title="Draw your signature and place it on the page">Sign</button>
@@ -240,13 +240,30 @@
                 </div>
                 <div class="pdf-format" id="pdfFormat" role="group" aria-label="Settings for the chosen tool">
                   <div class="pdf-format-group" data-pdf-for="text">
-                    <label class="pdf-field">Size
-                      <select class="select" data-pdf-param="textSize" aria-label="Text size, in points">
-                        <option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
-                        <option value="14">14</option><option value="16">16</option><option value="18">18</option><option value="24">24</option><option value="36">36</option><option value="48">48</option>
-                      </select>
-                    </label>
-                    <label class="pdf-field">Colour<input type="color" data-pdf-param="textColor" aria-label="Text colour" /></label>
+                    <span class="pdf-group">
+                      <label class="pdf-field">Font<select class="select" data-pdf-text="font" aria-label="Font"></select></label>
+                      <label class="pdf-field">Size<select class="select" data-pdf-text="size" aria-label="Text size, in points"></select></label>
+                    </span>
+                    <span class="pdf-group pdf-toggles" role="group" aria-label="Text style">
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="bold" data-icon="bold" aria-pressed="false" title="Bold (Ctrl+B)" aria-label="Bold"></button>
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="italic" data-icon="italic" aria-pressed="false" title="Italic (Ctrl+I)" aria-label="Italic"></button>
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="underline" data-icon="underline" aria-pressed="false" title="Underline (Ctrl+U)" aria-label="Underline"></button>
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="strike" data-icon="strikethrough" aria-pressed="false" title="Strikethrough" aria-label="Strikethrough"></button>
+                    </span>
+                    <span class="pdf-group">
+                      <label class="pdf-field">Colour<input type="color" data-pdf-text="color" aria-label="Text colour" /></label>
+                      <label class="pdf-field">Fill<select class="select" data-pdf-text="fill" aria-label="Fill behind the text"></select></label>
+                    </span>
+                    <span class="pdf-group pdf-toggles" role="group" aria-label="Alignment">
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="align" data-pdf-value="left" data-icon="align-left" aria-pressed="false" title="Align left" aria-label="Align left"></button>
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="align" data-pdf-value="center" data-icon="align-center" aria-pressed="false" title="Centre" aria-label="Centre"></button>
+                      <button type="button" class="tool-btn icon-only" data-pdf-text="align" data-pdf-value="right" data-icon="align-right" aria-pressed="false" title="Align right" aria-label="Align right"></button>
+                    </span>
+                    <span class="pdf-group">
+                      <label class="pdf-field">Line spacing<select class="select" data-pdf-text="lineHeight" aria-label="Line spacing"></select></label>
+                      <label class="pdf-field">Opacity<input type="range" min="0.1" max="1" step="0.05" data-pdf-text="opacity" aria-label="Text opacity" /><output data-pdf-unit="%"></output></label>
+                    </span>
+                    <span class="pdf-format-note" id="pdfTextNote" role="status"></span>
                   </div>
                   <div class="pdf-format-group" data-pdf-for="draw">
                     <label class="pdf-field">Colour<input type="color" data-pdf-param="inkColor" aria-label="Line colour" /></label>

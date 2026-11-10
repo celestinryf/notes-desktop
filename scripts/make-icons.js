@@ -11,7 +11,7 @@ const NAMES = [
   'sticky-note', 'bot', 'download', 'share-2', 'replace', 'refresh-cw', 'file-output', 'terminal', 'radio',
   'sun-moon', 'settings', 'check', 'circle-alert', 'save', 'pin-off', 'book', 'mail', 'list-filter', 'arrow-right-left',
   'eye', 'eye-off', 'highlighter', 'type', 'pencil', 'image', 'signature', 'message-square', 'layout-grid', 'undo-2', 'redo-2',
-  'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'square-stack', 'palette',
+  'zoom-in', 'rotate-cw', 'bold', 'italic', 'underline', 'strikethrough', 'align-left', 'align-center', 'align-right', 'square-stack', 'palette',
   'cloud-check', 'cloud-upload', 'cloud-alert', 'globe', 'log-out',
 ];
 
