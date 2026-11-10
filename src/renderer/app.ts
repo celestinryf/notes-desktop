@@ -2061,7 +2061,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
-  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: reloadCurrentFile });
+  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
   const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
@@ -2262,21 +2262,22 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (find.open) runFind(true, true, true);
   }
 
-  async function reloadCurrentFile() {
-    if (!state.current || !state.current.filePath) return;
+  async function reloadCurrentFile(quiet = false) {
+    if (!state.current || !state.current.filePath) return false;
     await commitPdf();
-    if ((state.dirty || documentDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return;
+    if ((state.dirty || documentDirty()) && !window.confirm('Discard your unsaved edits and reload from disk?')) return false;
     const id = state.currentId;
-    if (!id) return;
+    if (!id) return false;
     state.dirty = false;
     forgetShownPdf();
     forgetShownDocx();
     for (const c of Object.values(crafts)) c.forget();
     const res = await api.files.refresh(id);
     const fresh = await api.notes.get(id);
-    if (state.currentId !== id || !fresh) return;
+    if (state.currentId !== id || !fresh) return false;
     applyFreshFileBody(fresh);
-    toast(res.missing ? 'File not found on disk.' : res.changed ? 'Reloaded from disk.' : 'Already up to date.');
+    if (!quiet) toast(res.missing ? 'File not found on disk.' : res.changed ? 'Reloaded from disk.' : 'Already up to date.');
+    return !res.missing;
   }
 
   async function addAgentFiles() {
@@ -3087,7 +3088,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.fileConvertBtn.addEventListener('click', () => { if (el.convertMenu.classList.contains('hidden')) openConvertMenu(); else closeConvertMenu(); });
     el.convertMenu.addEventListener('click', (e) => { const b = closestTo(e, '[data-to]'); if (b) convertCurrent(b.dataset.to ?? ''); });
     el.fileOpenBtn.addEventListener('click', async () => { if (!state.currentId) return; const err = await api.files.openExternal(state.currentId); if (err) toast('Could not open: ' + err); });
-    el.fileReloadBtn.addEventListener('click', reloadCurrentFile);
+    el.fileReloadBtn.addEventListener('click', () => reloadCurrentFile());
     el.imageView.addEventListener('click', toggleImageSize);
     el.imageView.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleImageSize(); } });
     el.imageView.addEventListener('load', syncImageToggle);

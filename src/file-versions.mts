@@ -14,8 +14,13 @@ export function createFileVersions(root: string, keep = KEEP_FILE_VERSIONS) {
     const key = pathKey(file);
     const dir = dirFor(file);
     fs.mkdirSync(dir, { recursive: true });
-    const name = H.fileStamp() + path.extname(file);
-    fs.copyFileSync(file, path.join(dir, name), fs.constants.COPYFILE_EXCL);
+    const stamp = H.fileStamp();
+    let name = stamp + path.extname(file);
+    for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = stamp + '-' + n + path.extname(file);
+    const copy = path.join(dir, name);
+    const written = fs.statSync(file).mtime;
+    fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
+    fs.utimesSync(copy, written, written);
     const first = !sessionOriginals.has(key);
     if (first) sessionOriginals.set(key, name);
     const kept = sessionOriginals.get(key);
@@ -37,7 +42,7 @@ export function createFileVersions(root: string, keep = KEEP_FILE_VERSIONS) {
     return versions.sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
   }
 
-  function pathOf(file: string, name: string) {
+  function pathOf(file: string, name: unknown) {
     if (typeof name !== 'string' || !list(file).some((v) => v.name === name)) return null;
     return path.join(dirFor(file), name);
   }

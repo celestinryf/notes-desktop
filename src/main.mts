@@ -768,18 +768,19 @@ function main() {
     return n;
   }
   handle('files:versions', (_e, id) => fileVersions.list(versionedFileNote(id).filePath));
-  handle('files:restoreVersion', (_e, id, name, expectedMtime) => {
-    const note = versionedFileNote(id);
+  function restoreCopy(note: FileNote, name: unknown, expectedMtime: number | null, changedMessage: string): Ok<{ mtime: number | null }> {
     const copy = fileVersions.pathOf(note.filePath, name);
     if (!copy) return { ok: false, error: 'that earlier copy is gone.' };
-    if (!stillAsOpened(note.filePath, expectedMtime)) return { ok: false, error: 'the file changed since you opened it. Reload it, then try again.' };
+    if (!fs.existsSync(note.filePath)) return { ok: false, error: 'the file is no longer on disk.' };
+    if (!stillAsOpened(note.filePath, expectedMtime)) return { ok: false, error: changedMessage };
     try {
       const buf = fs.readFileSync(copy);
-      return { ok: true, mtime: replaceFile(id, note.filePath, note.fileKind === 'pdf' ? pdfBuffer(buf) : buf).mtime };
+      return { ok: true, mtime: replaceFile(note.id, note.filePath, note.fileKind === 'pdf' ? pdfBuffer(buf) : buf).mtime };
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }
+  handle('files:restoreVersion', (_e, id, name, expectedMtime) => restoreCopy(versionedFileNote(id), name, expectedMtime, 'the file changed since you opened it. Reload it, then try again.'));
 
   const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
   const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
@@ -838,17 +839,7 @@ function main() {
     if (!Array.isArray(ops) || !ops.length || ops.length > 100) return { ok: false, error: 'that comment change was not valid.' };
     return rewritePdf(id, expectedMtime, (current) => pdfLibTask(current, 'comments', { ops, author: commentAuthor() }, 'Saving the comment'));
   });
-  handle('files:pdfRestore', (_e, id, name, expectedMtime) => {
-    const file = fileNoteOfKind(id, 'pdf').filePath;
-    const copy = fileVersions.pathOf(file, name);
-    if (!copy) return { ok: false, error: 'that backup is gone.' };
-    if (!stillAsOpened(file, expectedMtime)) return { ok: false, error: 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier versions are in the backups folder.' };
-    try {
-      return Object.assign({ ok: true }, { mtime: replaceFile(id, file, pdfBuffer(fs.readFileSync(copy))).mtime });
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
+  handle('files:pdfRestore', (_e, id, name, expectedMtime) => restoreCopy(fileNoteOfKind(id, 'pdf'), name, expectedMtime, 'the PDF was saved again after that change, so undoing it would lose what was saved. Its earlier copies are in History.'));
   handle('files:pdfPickPages', async () => {
     const { canceled, filePaths } = await openDialog({ title: 'Add pages from a PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (canceled || !filePaths.length) return { ok: false, canceled: true };

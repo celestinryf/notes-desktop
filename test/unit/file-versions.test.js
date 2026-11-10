@@ -44,11 +44,45 @@ test('list is newest first with the size of each copy', () => {
 test('list is empty for a file with no copies, and pathOf rejects unknown or unsafe names', () => {
   const { file, versions } = setup();
   assert.deepEqual(versions.list(file), []);
-  assert.equal(versions.pathOf(file, 'nope.pdf'), null);
-  assert.equal(versions.pathOf(file, '..\\quiz.pdf'), null);
-  assert.equal(versions.pathOf(file, 42), null);
+  for (const bad of ['nope.pdf', '..\\quiz.pdf', '../quiz.pdf', file, '', 42, null, undefined]) assert.equal(versions.pathOf(file, bad), null, String(bad));
   const kept = versions.backUpBeforeWrite(file).name;
   assert.equal(versions.pathOf(file, kept), path.join(versions.dirFor(file), kept));
+});
+
+test('a folder inside the copies folder is neither listed nor restorable', () => {
+  const { file, versions } = setup();
+  versions.backUpBeforeWrite(file);
+  fs.mkdirSync(path.join(versions.dirFor(file), 'nested.pdf'));
+  assert.equal(versions.list(file).length, 1);
+  assert.equal(versions.pathOf(file, 'nested.pdf'), null);
+});
+
+test('a copy carries the time the file was last written, not the time of the copy', () => {
+  const { file, versions } = setup();
+  const written = new Date(Date.now() - 3600000);
+  fs.utimesSync(file, written, written);
+  const name = versions.backUpBeforeWrite(file).name;
+  const [copy] = versions.list(file);
+  assert.equal(copy.name, name);
+  assert.equal(Math.round(copy.at / 1000), Math.round(written.getTime() / 1000));
+});
+
+test('copies written at the same second sort by name, newest stamp first', () => {
+  const { file, versions } = setup();
+  const same = new Date(Date.now() - 60000);
+  fs.utimesSync(file, same, same);
+  const a = versions.backUpBeforeWrite(file).name;
+  fs.writeFileSync(file, '%PDF-1.4 v1');
+  fs.utimesSync(file, same, same);
+  const b = versions.backUpBeforeWrite(file).name;
+  assert.deepEqual(versions.list(file).map((v) => v.name), [a, b].sort().reverse());
+});
+
+test('backing up a file that is gone throws and leaves no copy', () => {
+  const { file, versions } = setup();
+  fs.rmSync(file);
+  assert.throws(() => versions.backUpBeforeWrite(file));
+  assert.deepEqual(versions.list(file), []);
 });
 
 test('old copies are pruned to the limit, and the session original stays beyond it', () => {

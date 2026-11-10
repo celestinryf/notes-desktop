@@ -17,13 +17,13 @@ interface HistoryDialogDeps {
   applyEditorMode: (source: boolean) => void;
   runFind: (forward?: boolean, fresh?: boolean, quiet?: boolean) => unknown;
   scheduleSave: () => void;
-  reloadFile: () => Promise<void>;
+  reloadFile: () => Promise<boolean>;
 }
 
 const keepsCopies = (note: PublicNote) => !!note.filePath && (note.fileKind === 'pdf' || note.fileKind === 'docx');
 
 export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }: HistoryDialogDeps) {
-  const hist: { versions: HistoryVersion[], copies: FileVersion[], index: number, noteId: string | null } = { versions: [], copies: [], index: -1, noteId: null };
+  const hist: { versions: HistoryVersion[], copies: FileVersion[], index: number, noteId: string | null, opens: number } = { versions: [], copies: [], index: -1, noteId: null, opens: 0 };
   const recordedHint = el.historyHint.textContent || '';
 
   function renderKeepOut(note: PublicNote | null) {
@@ -142,10 +142,11 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyHint.textContent = COPIES_HINT;
     el.historyRestoreBtn.textContent = 'Restore this copy';
     el.historyPreview.classList.add('is-copy');
+    const opened = ++hist.opens;
     let copies: FileVersion[];
     try { copies = await api.files.versions(note.id); }
-    catch (err) { el.historyStatus.textContent = 'Could not list the earlier copies: ' + (err.message || err); return; }
-    if (hist.noteId !== note.id) return;
+    catch (err) { if (opened === hist.opens) el.historyStatus.textContent = 'Could not list the earlier copies: ' + (err.message || err); return; }
+    if (opened !== hist.opens) return;
     hist.copies = copies;
     el.historyStatus.textContent = copies.length === 0 ? 'No earlier copies yet. One is kept each time Notes saves this file.' : copies.length === 1 ? '1 earlier copy' : copies.length + ' earlier copies';
     copies.forEach((c, i) => addRow(i, H.sizeText(c.bytes), new Date(c.at).toLocaleString(), () => showCopy(i)));
@@ -163,11 +164,12 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     const note = state.current;
     if (!c || !note) return;
     el.historyDialog.close();
-    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt) { toast('This file cannot take the restored copy right now.'); return; }
+    if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow()) { toast('This file cannot take the restored copy right now.'); return; }
     const r = await api.files.restoreVersion(note.id, c.name, note.fileMtime);
     if (!r.ok) { toast('Could not restore that copy: ' + (r.error || 'unknown error')); return; }
-    await reloadFile();
-    toast('Restored the copy from ' + new Date(c.at).toLocaleString() + '. The file you had is kept as a copy too.');
+    const when = new Date(c.at).toLocaleString();
+    if (await reloadFile()) toast('Restored the copy from ' + when + '. The file you had is kept as a copy too.');
+    else toast('The copy from ' + when + ' is in place on disk; the view still shows the file as it was. Reload it to see the copy.');
   }
 
   async function restoreVersion() {

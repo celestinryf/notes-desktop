@@ -21451,7 +21451,7 @@
   var COPIES_HINT = "A copy of this file is kept before each save: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
   var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }) {
-    const hist = { versions: [], copies: [], index: -1, noteId: null };
+    const hist = { versions: [], copies: [], index: -1, noteId: null, opens: 0 };
     const recordedHint = el.historyHint.textContent || "";
     function renderKeepOut(note) {
       const out = !!(note && note.keepOutOfHistory);
@@ -21576,14 +21576,15 @@
       el.historyHint.textContent = COPIES_HINT;
       el.historyRestoreBtn.textContent = "Restore this copy";
       el.historyPreview.classList.add("is-copy");
+      const opened = ++hist.opens;
       let copies;
       try {
         copies = await api.files.versions(note.id);
       } catch (err) {
-        el.historyStatus.textContent = "Could not list the earlier copies: " + (err.message || err);
+        if (opened === hist.opens) el.historyStatus.textContent = "Could not list the earlier copies: " + (err.message || err);
         return;
       }
-      if (hist.noteId !== note.id) return;
+      if (opened !== hist.opens) return;
       hist.copies = copies;
       el.historyStatus.textContent = copies.length === 0 ? "No earlier copies yet. One is kept each time Notes saves this file." : copies.length === 1 ? "1 earlier copy" : copies.length + " earlier copies";
       copies.forEach((c, i) => addRow(i, sizeText(c.bytes), new Date(c.at).toLocaleString(), () => showCopy(i)));
@@ -21599,7 +21600,7 @@
       const note = state.current;
       if (!c || !note) return;
       el.historyDialog.close();
-      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt) {
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow()) {
         toast("This file cannot take the restored copy right now.");
         return;
       }
@@ -21608,8 +21609,9 @@
         toast("Could not restore that copy: " + (r.error || "unknown error"));
         return;
       }
-      await reloadFile();
-      toast("Restored the copy from " + new Date(c.at).toLocaleString() + ". The file you had is kept as a copy too.");
+      const when = new Date(c.at).toLocaleString();
+      if (await reloadFile()) toast("Restored the copy from " + when + ". The file you had is kept as a copy too.");
+      else toast("The copy from " + when + " is in place on disk; the view still shows the file as it was. Reload it to see the copy.");
     }
     async function restoreVersion() {
       if (hist.copies.length) {
@@ -27453,7 +27455,7 @@
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
-    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: reloadCurrentFile });
+    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
     const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
     const library = createLibraryDialog({
       api,
@@ -27664,21 +27666,22 @@
       updateStatus(fresh);
       if (find.open) runFind(true, true, true);
     }
-    async function reloadCurrentFile() {
-      if (!state.current || !state.current.filePath) return;
+    async function reloadCurrentFile(quiet = false) {
+      if (!state.current || !state.current.filePath) return false;
       await commitPdf();
-      if ((state.dirty || documentDirty()) && !window.confirm("Discard your unsaved edits and reload from disk?")) return;
+      if ((state.dirty || documentDirty()) && !window.confirm("Discard your unsaved edits and reload from disk?")) return false;
       const id = state.currentId;
-      if (!id) return;
+      if (!id) return false;
       state.dirty = false;
       forgetShownPdf();
       forgetShownDocx();
       for (const c of Object.values(crafts)) c.forget();
       const res = await api.files.refresh(id);
       const fresh = await api.notes.get(id);
-      if (state.currentId !== id || !fresh) return;
+      if (state.currentId !== id || !fresh) return false;
       applyFreshFileBody(fresh);
-      toast(res.missing ? "File not found on disk." : res.changed ? "Reloaded from disk." : "Already up to date.");
+      if (!quiet) toast(res.missing ? "File not found on disk." : res.changed ? "Reloaded from disk." : "Already up to date.");
+      return !res.missing;
     }
     async function addAgentFiles() {
       el.agentFilesStatus.textContent = "Looking\u2026";
@@ -28774,7 +28777,7 @@
         const err = await api.files.openExternal(state.currentId);
         if (err) toast("Could not open: " + err);
       });
-      el.fileReloadBtn.addEventListener("click", reloadCurrentFile);
+      el.fileReloadBtn.addEventListener("click", () => reloadCurrentFile());
       el.imageView.addEventListener("click", toggleImageSize);
       el.imageView.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
