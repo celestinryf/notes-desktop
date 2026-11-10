@@ -2061,7 +2061,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
-  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: reloadCurrentFile });
   const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
   const library = createLibraryDialog({
     api, flushSave, updateSettings,

@@ -14766,6 +14766,7 @@
     repoNameProblem: () => repoNameProblem,
     safeFilename: () => safeFilename,
     searchHay: () => searchHay,
+    sizeText: () => sizeText,
     snippet: () => snippet,
     sortNotes: () => sortNotes,
     speechChunks: () => speechChunks,
@@ -15340,6 +15341,11 @@
     const parts = p.split("/");
     parts.pop();
     return "file:///" + parts.map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s)).join("/").replace(/^\/+/, "") + "/";
+  }
+  function sizeText(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
   function fileStamp(date) {
     return new Date(date === void 0 ? Date.now() : date).toISOString().replace(/[:.]/g, "-");
@@ -21442,8 +21448,10 @@
   // src/renderer/history-dialog.ts
   var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
   var KEPT_OUT_HINT = "Kept out of history: new changes are not recorded. The versions below still hold its old text.";
-  function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave }) {
-    const hist = { versions: [], index: -1, noteId: null };
+  var COPIES_HINT = "A copy of this file is kept before each save: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
+  var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
+  function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }) {
+    const hist = { versions: [], copies: [], index: -1, noteId: null };
     const recordedHint = el.historyHint.textContent || "";
     function renderKeepOut(note) {
       const out = !!(note && note.keepOutOfHistory);
@@ -21502,33 +21510,30 @@
       el.historyList.innerHTML = "";
       el.historyPreview.textContent = "";
       el.historyRestoreBtn.disabled = true;
+      el.historyRestoreBtn.textContent = "Restore this version";
+      el.historyPreview.classList.remove("is-copy");
       el.historyStatus.textContent = "Loading\u2026";
       renderDialogKeepOut(false);
       el.historyDialog.showModal();
+      hist.noteId = note.id;
+      hist.versions = [];
+      hist.copies = [];
+      hist.index = -1;
+      if (keepsCopies(note)) {
+        await openCopies(note);
+        return;
+      }
       const r = await api.app.historyVersions(note.id, pick ? 200 : 80);
       if (!r.ok) {
         el.historyStatus.textContent = r.error;
         return;
       }
-      hist.noteId = note.id;
       renderDialogKeepOut(r.keptOut);
       hist.versions = r.versions.filter((v) => v.body !== r.current);
-      hist.index = -1;
-      el.historyStatus.textContent = hist.versions.length ? hist.versions.length + (hist.versions.length === 1 ? " earlier version" : " earlier versions") : r.keptOut ? "No earlier versions." : "No earlier version differs from the current text yet.";
+      el.historyStatus.textContent = hist.versions.length ? countText(hist.versions.length, "earlier version") : r.keptOut ? "No earlier versions." : "No earlier version differs from the current text yet.";
       hist.versions.forEach((v, i) => {
-        const li = document.createElement("li");
-        li.setAttribute("role", "option");
-        li.dataset.index = String(i);
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
-        const when = document.createElement("span");
-        when.className = "when";
-        when.textContent = new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars";
-        const firstLine2 = document.createElement("span");
-        firstLine2.className = "first";
-        firstLine2.textContent = truncate(first, 48);
-        li.append(when, firstLine2);
-        li.addEventListener("click", () => showVersion(i));
-        el.historyList.append(li);
+        addRow(i, new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars", truncate(first, 48), () => showVersion(i));
       });
       if (hist.versions.length) {
         const at = pickIndex(pick);
@@ -21543,13 +21548,74 @@
       const before = hist.versions.findIndex((v) => v.at <= pick.at);
       return before >= 0 ? before : hist.versions.length - 1;
     }
-    function showVersion(i) {
+    const countText = (n, noun) => n + " " + noun + (n === 1 ? "" : "s");
+    function addRow(i, when, first, onPick) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.dataset.index = String(i);
+      const whenEl = document.createElement("span");
+      whenEl.className = "when";
+      whenEl.textContent = when;
+      const firstEl = document.createElement("span");
+      firstEl.className = "first";
+      firstEl.textContent = first;
+      li.append(whenEl, firstEl);
+      li.addEventListener("click", onPick);
+      el.historyList.append(li);
+    }
+    function markRow(i) {
       hist.index = i;
       for (const li of el.historyList.children) if (li instanceof HTMLElement) li.classList.toggle("is-active", Number(li.dataset.index) === i);
-      el.historyPreview.textContent = hist.versions[i].body;
       el.historyRestoreBtn.disabled = false;
     }
+    function showVersion(i) {
+      markRow(i);
+      el.historyPreview.textContent = hist.versions[i].body;
+    }
+    async function openCopies(note) {
+      el.historyHint.textContent = COPIES_HINT;
+      el.historyRestoreBtn.textContent = "Restore this copy";
+      el.historyPreview.classList.add("is-copy");
+      let copies;
+      try {
+        copies = await api.files.versions(note.id);
+      } catch (err) {
+        el.historyStatus.textContent = "Could not list the earlier copies: " + (err.message || err);
+        return;
+      }
+      if (hist.noteId !== note.id) return;
+      hist.copies = copies;
+      el.historyStatus.textContent = copies.length === 0 ? "No earlier copies yet. One is kept each time Notes saves this file." : copies.length === 1 ? "1 earlier copy" : copies.length + " earlier copies";
+      copies.forEach((c, i) => addRow(i, sizeText(c.bytes), new Date(c.at).toLocaleString(), () => showCopy(i)));
+      if (copies.length) showCopy(0);
+    }
+    function showCopy(i) {
+      markRow(i);
+      const c = hist.copies[i];
+      el.historyPreview.textContent = "The file as it was at " + new Date(c.at).toLocaleString() + ", " + sizeText(c.bytes) + ".";
+    }
+    async function restoreCopy() {
+      const c = hist.copies[hist.index];
+      const note = state.current;
+      if (!c || !note) return;
+      el.historyDialog.close();
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt) {
+        toast("This file cannot take the restored copy right now.");
+        return;
+      }
+      const r = await api.files.restoreVersion(note.id, c.name, note.fileMtime);
+      if (!r.ok) {
+        toast("Could not restore that copy: " + (r.error || "unknown error"));
+        return;
+      }
+      await reloadFile();
+      toast("Restored the copy from " + new Date(c.at).toLocaleString() + ". The file you had is kept as a copy too.");
+    }
     async function restoreVersion() {
+      if (hist.copies.length) {
+        await restoreCopy();
+        return;
+      }
       const v = hist.versions[hist.index];
       const note = state.current;
       if (!v || !note) return;
@@ -27387,7 +27453,7 @@
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
-    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave });
+    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: reloadCurrentFile });
     const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
     const library = createLibraryDialog({
       api,

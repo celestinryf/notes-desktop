@@ -572,6 +572,12 @@ function imageBaseFor(note: FileSource) {
   return 'file:///' + parts.map((s, i) => (i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s))).join('/').replace(/^\/+/, '') + '/';
 }
 
+function sizeText(bytes: number) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 function fileStamp(date?: number) {
   return new Date(date === undefined ? Date.now() : date).toISOString().replace(/[:.]/g, '-');
 }
@@ -649,6 +655,6 @@ export {
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
-  noteToMarkdown, markdownToNote, safeFilename, PANE_LIMITS, EDITOR_MIN, clampPane,
+  noteToMarkdown, markdownToNote, safeFilename, sizeText, PANE_LIMITS, EDITOR_MIN, clampPane,
   plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds, vaultLinks, linkLeaf, stemOf, wikiLinkTarget, wikiLinkName, wikiLinkLabel,
 };

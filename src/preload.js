@@ -68,6 +68,8 @@ const notesApi = {
     openExternal: invoke('files:openExternal'),
     pdfBytes: invoke('files:pdfBytes'),
     savePdf: invoke('files:savePdf'),
+    versions: invoke('files:versions'),
+    restoreVersion: invoke('files:restoreVersion'),
     pdfApplyPages: invoke('files:pdfApplyPages'),
     pdfRestore: invoke('files:pdfRestore'),
     pdfComments: invoke('files:pdfComments'),
