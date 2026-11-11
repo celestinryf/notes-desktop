@@ -14726,6 +14726,7 @@
     ZIP_DOC_EXT: () => ZIP_DOC_EXT,
     accountSentence: () => accountSentence,
     clampPane: () => clampPane,
+    countLines: () => countLines,
     countWords: () => countWords,
     deriveTitle: () => deriveTitle,
     displayAccelerator: () => displayAccelerator,
@@ -14946,6 +14947,11 @@
     const t = String(text || "").trim();
     if (!t) return 0;
     return t.split(/\s+/).length;
+  }
+  function countLines(text) {
+    const t = String(text || "");
+    if (!t) return 0;
+    return t.replace(/\r?\n$/, "").split(/\r?\n/).length;
   }
   function tokenize(query) {
     return String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
@@ -28341,6 +28347,9 @@
       if (where === "title") el.titleInput.focus();
       else if (where === "body") focusBody();
     }
+    function isCodeFile(note) {
+      return isPlainTextFile6(note) && !isTableFile(note) && !!window.NotesCode && window.NotesCode.languageFor(extOf(note.filePath)).code;
+    }
     function updateStatus(note) {
       const body = el.bodyInput.value;
       const stats = tableStatsNow();
@@ -28348,9 +28357,10 @@
         el.statusWords.textContent = stats.rows.toLocaleString() + (stats.rows === 1 ? " row" : " rows");
         el.statusChars.textContent = stats.cols + (stats.cols === 1 ? " column" : " columns");
       } else {
-        const words = countWords(body);
-        el.statusWords.textContent = words + (words === 1 ? " word" : " words");
-        el.statusChars.textContent = body.length + (body.length === 1 ? " character" : " characters");
+        const lines = isCodeFile(note);
+        const count = lines ? countLines(body) : countWords(body);
+        el.statusWords.textContent = count.toLocaleString() + (lines ? count === 1 ? " line" : " lines" : count === 1 ? " word" : " words");
+        el.statusChars.textContent = body.length.toLocaleString() + (body.length === 1 ? " character" : " characters");
       }
       el.statusUpdated.textContent = note.trashedAt ? "Trashed " + relativeTime(note.trashedAt) : "Edited " + relativeTime(note.updatedAt);
     }
