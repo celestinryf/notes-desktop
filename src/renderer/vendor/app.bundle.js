@@ -28465,7 +28465,7 @@
     function externalLinkClick(e, href) {
       if (!isOpenableLink(href)) return;
       if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
-      else toast("This link goes to " + href + ". Ctrl+click to open it.");
+      else toast((/^mailto:/i.test(href) ? "This link writes to " + href.replace(/^mailto:/i, "") : "This link goes to " + href) + ". Ctrl+click to open it.");
     }
     const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
     function fileBadge(note) {

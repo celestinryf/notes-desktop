@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, screen, Menu, shell, clipboard } from 'electron';
 import * as windowInput from './window-input.mts';
+import { isOpenableLink } from './shared/helpers.mts';
 import type { Store } from './store.mts';
 
 const THEME_BG = { light: '#f6dcc3', dark: '#2a1a12' };
@@ -67,8 +68,8 @@ class StickyManager {
       },
     });
     this.windows.set(id, w);
-    w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-    w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); });
+    w.webContents.setWindowOpenHandler(({ url }) => { if (isOpenableLink(url)) shell.openExternal(url); return { action: 'deny' }; });
+    w.webContents.on('will-navigate', (e, url) => { e.preventDefault(); if (isOpenableLink(url)) shell.openExternal(url); });
     windowInput.attachZoom(w.webContents);
     windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard });
     w.loadFile(path.join(import.meta.dirname, 'renderer', 'sticky.html'), { query: { id } });
