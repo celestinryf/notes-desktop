@@ -129,3 +129,34 @@ test('files with the same name in different folders get separate copies', () => 
   assert.deepEqual(versions.list(b), []);
   assert.notEqual(versions.dirFor(a), versions.dirFor(b));
 });
+
+test('edit saves within two minutes of the last own write keep no new copy, so a burst leaves the copy from before it', () => {
+  const { file, versions } = setup();
+  const { COALESCE_FILE_COPIES_MS } = require('../../src/file-versions.mts');
+  const t0 = Date.now();
+  const first = versions.backUpBeforeWrite(file, { coalesceAfterOwnWriteAt: null, now: t0 });
+  assert.equal(first.kept, true);
+  fs.writeFileSync(file, '%PDF-1.4 v1');
+  const written = fs.statSync(file).mtimeMs;
+  const burst = versions.backUpBeforeWrite(file, { coalesceAfterOwnWriteAt: written, now: written + 5000 });
+  assert.deepEqual(burst, { first: false, name: first.name, kept: false });
+  assert.equal(versions.list(file).length, 1);
+  const later = versions.backUpBeforeWrite(file, { coalesceAfterOwnWriteAt: written, now: written + COALESCE_FILE_COPIES_MS });
+  assert.equal(later.kept, true);
+  assert.equal(versions.list(file).length, 2);
+});
+
+test('a file last written by something other than Notes always gets a copy, and so does a save with no copy yet', () => {
+  const { file, versions } = setup();
+  const t0 = Date.now();
+  const outsideFirst = versions.backUpBeforeWrite(file, { coalesceAfterOwnWriteAt: t0 - 100, now: t0 });
+  assert.equal(outsideFirst.kept, true);
+  fs.writeFileSync(file, '%PDF-1.4 outside');
+  const written = fs.statSync(file).mtimeMs;
+  const outside = versions.backUpBeforeWrite(file, { coalesceAfterOwnWriteAt: written - 60000, now: written + 1000 });
+  assert.equal(outside.kept, true);
+  assert.equal(versions.list(file).length, 2);
+  const plain = versions.backUpBeforeWrite(file);
+  assert.equal(plain.kept, true);
+  assert.equal(versions.list(file).length, 3);
+});

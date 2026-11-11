@@ -5,15 +5,21 @@ import * as H from './shared/helpers.mts';
 import { pathKey } from './files.mts';
 
 export const KEEP_FILE_VERSIONS = 30;
+export const COALESCE_FILE_COPIES_MS = 120000;
+const SAME_WRITE_MS = 1000;
+
+type BackUpOptions = { coalesceAfterOwnWriteAt?: number | null; now?: number };
 
 export function createFileVersions(root: string, keep = KEEP_FILE_VERSIONS) {
   const sessionOriginals = new Map<string, string>();
   const dirFor = (file: string) => path.join(root, H.safeFilename(path.basename(file)) + ' ' + crypto.createHash('sha1').update(pathKey(file)).digest('hex').slice(0, 8));
 
-  function backUpBeforeWrite(file: string) {
+  function backUpBeforeWrite(file: string, opts?: BackUpOptions) {
     const key = pathKey(file);
     const dir = dirFor(file);
     fs.mkdirSync(dir, { recursive: true });
+    const burst = opts && opts.coalesceAfterOwnWriteAt != null ? burstCopy(file, opts.coalesceAfterOwnWriteAt, opts.now ?? Date.now()) : null;
+    if (burst) return { first: false, name: burst, kept: false };
     const stamp = H.fileStamp();
     let name = stamp + path.extname(file);
     for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = stamp + '-' + n + path.extname(file);
@@ -26,7 +32,15 @@ export function createFileVersions(root: string, keep = KEEP_FILE_VERSIONS) {
     const kept = sessionOriginals.get(key);
     const all = fs.readdirSync(dir).sort();
     for (const old of all.slice(0, Math.max(0, all.length - keep))) if (old !== kept) fs.rmSync(path.join(dir, old), { force: true });
-    return { first, name };
+    return { first, name, kept: true };
+  }
+
+  function burstCopy(file: string, ownWriteAt: number, now: number) {
+    const newest = list(file)[0];
+    if (!newest) return null;
+    const mtime = fs.statSync(file).mtimeMs;
+    if (Math.abs(mtime - ownWriteAt) > SAME_WRITE_MS || now - mtime >= COALESCE_FILE_COPIES_MS) return null;
+    return newest.name;
   }
 
   function list(file: string): FileVersion[] {
