@@ -599,7 +599,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.equal(readNotes().settings.editorMode, 'rendered', 'global preference untouched');
   await sleep(600);
   assert.equal(fs.readFileSync(softPath, 'utf8'), 'first line\nsecond line\n', 'file untouched by opening it');
-  assert.match(await page.textContent('#statusWords'), /4 words/, 'a text file counts words');
+  assert.match(await page.textContent('#statusWords'), /^4 words$/, 'a text file counts words');
 
   const codePath = path.join(fileDir, 'tool.py');
   fs.writeFileSync(codePath, 'import os\n\n\ndef main():\n    print(os.getcwd())\n');
@@ -610,8 +610,8 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await clickRow('tool.py');
   await waitForDom(() => document.getElementById('titleInput').value === 'tool.py');
   await waitForDom(() => document.getElementById('fileKind').textContent === 'Python');
-  await waitForDom(() => /5 lines/.test(document.getElementById('statusWords').textContent));
-  assert.match(await page.textContent('#statusChars'), /47 characters/);
+  await waitForDom(() => /^5 lines$/.test(document.getElementById('statusWords').textContent));
+  assert.match(await page.textContent('#statusChars'), /^47 characters$/);
 
   await clickRow("paper.pdf");
   await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
