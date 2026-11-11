@@ -749,9 +749,10 @@ function main() {
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
   }
-  function replaceFile(id: string, file: string, buf: Buffer) {
-    const backup = fileVersions.backUpBeforeWrite(file);
+  function replaceFile(id: string, file: string, buf: Buffer, coalesceCopies = false) {
+    const backup = fileVersions.backUpBeforeWrite(file, { coalesce: coalesceCopies });
     writeInPlace(file, buf);
+    fileVersions.noteWritten(file);
     return { mtime: store.markFileWritten(id), backup };
   }
 
@@ -759,7 +760,7 @@ function main() {
   function saveEdits(id: string, file: string, buf: Buffer, expectedMtime: number | null) {
     if (stillAsOpened(file, expectedMtime)) {
       conflictCopies.delete(id);
-      const { mtime, backup } = replaceFile(id, file, buf);
+      const { mtime, backup } = replaceFile(id, file, buf, true);
       return { mtime, backup: backup.first };
     }
     const prev = conflictCopies.get(id);

@@ -1,7 +1,7 @@
 type VersionTiming = { quietMs: number; boundaryQuietMs: number; attentionMs: number; attentionWindowMs: number; maxWaitMs: number };
 type ChangedNote = { id: string; body: string };
 
-const DEFAULT_TIMING: VersionTiming = { quietMs: 45000, boundaryQuietMs: 8000, attentionMs: 1000, attentionWindowMs: 3000, maxWaitMs: 10 * 60 * 1000 };
+const DEFAULT_TIMING: VersionTiming = { quietMs: 120000, boundaryQuietMs: 30000, attentionMs: 1000, attentionWindowMs: 3000, maxWaitMs: 10 * 60 * 1000 };
 const SEEN_LIMIT = 500;
 const BOUNDARY_END = /(?:[.!?…:][)\]"'”’»]*|\n)\s*$/u;
 const TAIL_CHARS = 16;

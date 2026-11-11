@@ -105,8 +105,9 @@ test('the memory of seen notes is bounded', () => {
 });
 
 test('the defaults are long enough to skip a thinking pause, and a uniform timing sets every delay', () => {
-  assert.ok(DEFAULT_TIMING.quietMs >= 30000);
-  assert.ok(DEFAULT_TIMING.boundaryQuietMs >= 5000);
+  assert.equal(DEFAULT_TIMING.quietMs, 120000);
+  assert.equal(DEFAULT_TIMING.boundaryQuietMs, 30000);
+  assert.equal(DEFAULT_TIMING.maxWaitMs, 600000);
   assert.ok(DEFAULT_TIMING.attentionMs <= 2000);
   assert.deepEqual(uniformTiming(10), { quietMs: 10, boundaryQuietMs: 10, attentionMs: 10, attentionWindowMs: 10, maxWaitMs: 200 });
 });

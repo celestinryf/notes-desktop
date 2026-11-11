@@ -129,3 +129,66 @@ test('files with the same name in different folders get separate copies', () => 
   assert.deepEqual(versions.list(b), []);
   assert.notEqual(versions.dirFor(a), versions.dirFor(b));
 });
+
+const saveAt = (versions, file, body, now, coalesce = true) => { const r = versions.backUpBeforeWrite(file, { coalesce, now }); fs.writeFileSync(file, body); versions.noteWritten(file); return r; };
+
+test('edit saves within two minutes of the last copy keep no new copy, so a burst leaves the copy from before it', () => {
+  const { file, versions } = setup();
+  const { COALESCE_FILE_COPIES_MS } = require('../../src/file-versions.mts');
+  const t0 = Date.now();
+  const first = saveAt(versions, file, '%PDF-1.4 v1', t0);
+  assert.equal(first.kept, true);
+  assert.equal(first.first, true);
+  const burst = saveAt(versions, file, '%PDF-1.4 v2', t0 + 5000);
+  assert.deepEqual(burst, { first: false, name: first.name, kept: false });
+  const again = saveAt(versions, file, '%PDF-1.4 v3', t0 + 60000);
+  assert.equal(again.kept, false);
+  assert.equal(versions.list(file).length, 1);
+  const later = saveAt(versions, file, '%PDF-1.4 v4', t0 + COALESCE_FILE_COPIES_MS);
+  assert.equal(later.kept, true);
+  assert.equal(versions.list(file).length, 2);
+  assert.equal(fs.readFileSync(versions.pathOf(file, later.name), 'utf8'), '%PDF-1.4 v3');
+});
+
+test('the window counts from the last copy, not from the last save, so saves every minute still give a copy every two minutes', () => {
+  const { file, versions } = setup();
+  const t0 = Date.now();
+  saveAt(versions, file, 'v1', t0);
+  for (let i = 1; i <= 6; i++) saveAt(versions, file, 'v' + (i + 1), t0 + i * 60000);
+  assert.equal(versions.list(file).length, 4);
+});
+
+test('a file written by something other than Notes since its last save always gets a copy', () => {
+  const { file, versions } = setup();
+  const t0 = Date.now();
+  saveAt(versions, file, 'v1', t0);
+  fs.writeFileSync(file, 'outside');
+  const outsideAt = new Date(fs.statSync(file).mtimeMs + 5000);
+  fs.utimesSync(file, outsideAt, outsideAt);
+  const r = saveAt(versions, file, 'v2', t0 + 10000);
+  assert.equal(r.kept, true);
+  assert.equal(fs.readFileSync(versions.pathOf(file, r.name), 'utf8'), 'outside');
+});
+
+test('the first save of a session always keeps a copy, even right after an earlier session wrote the file', () => {
+  const { file, versions } = setup();
+  const { createFileVersions } = require('../../src/file-versions.mts');
+  const root = path.dirname(versions.dirFor(file));
+  const t0 = Date.now();
+  saveAt(versions, file, 'v1', t0);
+  const fresh = createFileVersions(root);
+  const r = saveAt(fresh, file, 'v2', t0 + 1000);
+  assert.equal(r.kept, true);
+  assert.equal(r.first, true);
+  assert.equal(fresh.list(file).length, 2);
+});
+
+test('a save that does not ask to coalesce always keeps a copy, as page turns and restores do', () => {
+  const { file, versions } = setup();
+  const t0 = Date.now();
+  saveAt(versions, file, 'v1', t0);
+  const turn = saveAt(versions, file, 'v2', t0 + 1000, false);
+  assert.equal(turn.kept, true);
+  assert.equal(versions.list(file).length, 2);
+  assert.equal(fs.readFileSync(versions.pathOf(file, turn.name), 'utf8'), 'v1');
+});
