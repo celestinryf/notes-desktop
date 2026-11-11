@@ -29363,7 +29363,7 @@
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
         cmd("tree-show-all", "View", "Show every note in this folder", "list", "", () => showWholeLevel(state.view === "folder" ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === "folder" ? state.folderId : null), "see more"),
         cmd("update-check", "App", "Check for updates", "refresh-cw", "", checkForUpdates, !GUEST, "update version upgrade pull"),
-        cmd("update-apply", "App", "Update and restart Notes", "download", "", applyUpdate, !GUEST && !!appUpdate && appUpdate.state === "behind" && !appUpdate.failed, "update version upgrade restart"),
+        cmd("update-apply", "App", appUpdate && appUpdate.failed ? "Retry the update and restart Notes" : "Update and restart Notes", "download", "", applyUpdate, !GUEST && !!appUpdate && appUpdate.state === "behind", "update version upgrade restart retry"),
         cmd("tips-again", "App", "Show the tips again", "message-square", "", () => {
           hints.dismiss();
           hints.forget();

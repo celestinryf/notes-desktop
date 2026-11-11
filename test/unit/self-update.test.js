@@ -6,7 +6,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { gitBinary } = require('../../src/git-binary.mts');
 const { run } = require('../../src/git-run.mts');
-const { SelfUpdater, describe, parseResult, shortSha, RESULT_FILE, JOB_FILE } = require('../../src/self-update.mts');
+const { SelfUpdater, describe, parseResult, shortSha, cleanEnv, RESULT_FILE, JOB_FILE } = require('../../src/self-update.mts');
 const { sanitizeSettings } = require('../../src/store.mts');
 const { tmpDir, cleanup } = require('../helpers/tmp');
 
@@ -37,6 +37,7 @@ function makeRepos() {
 function updater(repos, extra) {
   return new SelfUpdater(Object.assign({ root: repos.checkout, dataDir: repos.dataDir, git: run }, extra || {}));
 }
+const AUTO = { failed: false, auto: true };
 
 test.after(cleanup);
 
@@ -51,18 +52,24 @@ test('check reports behind with the commit count, and whether the lock file chan
   commitIn(repos.upstream, 'a.txt', 'a');
   const target = commitIn(repos.upstream, 'b.txt', 'b');
   const res = await updater(repos).check();
-  assert.equal(res.state, 'behind');
-  assert.equal(res.head, repos.first);
-  assert.equal(res.target, target);
-  assert.equal(res.behind, 2);
-  assert.equal(res.lockChanged, false);
+  assert.deepEqual(res, { state: 'behind', head: repos.first, target, behind: 2, lockChanged: false });
 
   const withLock = commitIn(repos.upstream, 'package-lock.json', '{"v":2}', 'deps');
   const again = await updater(repos).check();
-  assert.equal(again.state, 'behind');
-  assert.equal(again.target, withLock);
-  assert.equal(again.behind, 3);
-  assert.equal(again.lockChanged, true);
+  assert.deepEqual(again, { state: 'behind', head: repos.first, target: withLock, behind: 3, lockChanged: true });
+});
+
+test('check compares origin/main with the commit Notes is running, not with a checkout pulled underneath it', async () => {
+  const repos = makeRepos();
+  const u = updater(repos);
+  assert.equal(await u.rememberRunning(), repos.first);
+  const target = commitIn(repos.upstream, 'package-lock.json', '{"v":2}', 'deps');
+  sh(['pull', '-q', '--ff-only', 'origin', 'main'], repos.checkout);
+  assert.equal(sh(['rev-parse', 'HEAD'], repos.checkout), target, 'someone else pulled the checkout');
+  const res = await u.check();
+  assert.deepEqual(res, { state: 'behind', head: repos.first, target, behind: 1, lockChanged: true });
+  const fresh = updater(repos);
+  assert.deepEqual(await fresh.check(), { state: 'current', head: target }, 'a Notes started on the pulled checkout is current');
 });
 
 test('check refuses a checkout with local commits or uncommitted changes to tracked files', async () => {
@@ -81,6 +88,39 @@ test('check refuses a checkout with local commits or uncommitted changes to trac
   assert.equal(diverged.head, local);
 });
 
+test('check refuses another branch, a detached head and a git operation in progress', async () => {
+  const repos = makeRepos();
+  commitIn(repos.upstream, 'a.txt', 'a');
+  sh(['checkout', '-q', '-b', 'feature/x'], repos.checkout);
+  const branch = await updater(repos).check();
+  assert.equal(branch.state, 'error');
+  assert.match(branch.error, /not on main \(feature\/x\)/);
+
+  sh(['checkout', '-q', '--detach'], repos.checkout);
+  const detached = await updater(repos).check();
+  assert.equal(detached.state, 'error');
+  assert.match(detached.error, /not on main/);
+
+  sh(['checkout', '-q', 'main'], repos.checkout);
+  const lock = path.join(repos.checkout, '.git', 'index.lock');
+  fs.writeFileSync(lock, '');
+  const busy = await updater(repos).check();
+  assert.equal(busy.state, 'error');
+  assert.match(busy.error, /in progress \(index\.lock\)/);
+  fs.unlinkSync(lock);
+  assert.equal((await updater(repos).check()).state, 'behind');
+});
+
+test('inProgress follows a worktree .git file to its git directory', () => {
+  const repos = makeRepos();
+  const wt = path.join(repos.base, 'wt');
+  sh(['worktree', 'add', '-q', wt, '-b', 'wt-branch'], repos.checkout);
+  const u = new SelfUpdater({ root: wt, dataDir: repos.dataDir, git: run });
+  assert.equal(u.inProgress(), null);
+  fs.writeFileSync(path.join(u.gitDir(), 'MERGE_HEAD'), '');
+  assert.equal(u.inProgress(), 'MERGE_HEAD');
+});
+
 test('check reports an error without a repository or without a reachable origin', async () => {
   const plain = tmpDir('notes-selfupdate-plain-');
   const noRepo = await new SelfUpdater({ root: plain, dataDir: plain, git: run }).check();
@@ -94,12 +134,15 @@ test('check reports an error without a repository or without a reachable origin'
   assert.match(gone.error, /fetch failed/);
 });
 
-test('check runs git in the checkout, never anywhere else', async () => {
+test('check runs git in the checkout only, and fetches without a credential prompt', async () => {
   const repos = makeRepos();
   const cwds = new Set();
-  const spy = (args, cwd, timeoutMs) => { cwds.add(cwd); return run(args, cwd, timeoutMs); };
+  const calls = [];
+  const spy = (args, cwd, timeoutMs, input, env) => { cwds.add(cwd); calls.push({ args, env }); return run(args, cwd, timeoutMs, input, env); };
   await updater(repos, { git: spy }).check();
   assert.deepEqual(Array.from(cwds), [repos.checkout]);
+  const fetch = calls.find((c) => c.args[0] === 'fetch');
+  assert.deepEqual(fetch.env, { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
 });
 
 test('lastResult, failedFor and markNoticed read and update the result file', () => {
@@ -109,21 +152,23 @@ test('lastResult, failedFor and markNoticed read and update the result file', ()
   assert.equal(u.failedFor('abc'), false);
   fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), 'not json');
   assert.equal(u.lastResult(), null);
-  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 5, from: 'a', to: 'abc', ok: false, error: 'pull failed' }));
-  assert.deepEqual(u.lastResult(), { at: 5, from: 'a', to: 'abc', ok: false, error: 'pull failed', installed: false, noticed: false });
-  assert.equal(u.failedFor('abc'), true);
-  assert.equal(u.failedFor('other'), false);
+  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 5, from: 'a', target: 'abc', to: 'a', ok: false, error: 'npm install failed' }));
+  assert.deepEqual(u.lastResult(), { at: 5, from: 'a', target: 'abc', to: 'a', ok: false, error: 'npm install failed', transient: false, installed: false, noticed: false });
+  assert.equal(u.failedFor('abc'), true, 'a rolled-back failure still names the target it attempted');
+  assert.equal(u.failedFor('a'), false);
   u.markNoticed();
   assert.equal(u.lastResult().noticed, true);
-  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 6, from: 'a', to: 'abc', ok: true, error: null, installed: true }));
+  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 6, from: 'a', target: 'abc', to: 'a', ok: false, error: 'index.lock', transient: true }));
+  assert.equal(u.failedFor('abc'), false, 'a transient failure may be retried');
+  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 7, from: 'a', to: 'abc', ok: true, error: null, installed: true }));
   assert.equal(u.failedFor('abc'), false, 'a success for the same target is not a failure');
 });
 
-test('parseResult rejects malformed results', () => {
+test('parseResult rejects malformed results and falls back to "to" for an old result without a target', () => {
   assert.equal(parseResult('[]'), null);
   assert.equal(parseResult('{"at":"x","from":"a","to":"b","ok":true}'), null);
   assert.equal(parseResult('{"at":1,"from":"a","to":"b"}'), null);
-  assert.deepEqual(parseResult('{"at":1,"from":"a","to":"b","ok":true,"error":7,"installed":"yes","noticed":true}'), { at: 1, from: 'a', to: 'b', ok: true, error: null, installed: false, noticed: true });
+  assert.deepEqual(parseResult('{"at":1,"from":"a","to":"b","ok":true,"error":7,"installed":"yes","noticed":true}'), { at: 1, from: 'a', target: 'b', to: 'b', ok: true, error: null, transient: false, installed: false, noticed: true });
 });
 
 test('launchHelper writes the job and starts the helper detached with node, without ELECTRON_RUN_AS_NODE', () => {
@@ -133,7 +178,7 @@ test('launchHelper writes the job and starts the helper detached with node, with
   const spawn = (file, args, opts) => { spawned.push({ file, args, opts }); return { unref() { unrefs++; } }; };
   const u = updater(repos, { spawn, helperScript: 'C:/helper.js' });
   const check = { state: 'behind', head: 'aaa', target: 'bbb', behind: 1, lockChanged: false };
-  const relaunch = { exe: 'electron.exe', args: ['root', '--hidden'], cwd: 'root', env: { PATH: 'p', ELECTRON_RUN_AS_NODE: '1', NUM: 3 } };
+  const relaunch = { exe: 'electron.exe', args: ['root', '--hidden'], cwd: 'root', env: { PATH: 'p', electron_run_as_node: '1', NUM: 3 } };
   const tools = { node: 'node.exe', npm: { file: 'node.exe', args: ['npm-cli.js'] }, git: { file: 'git.exe', env: { GIT_EXEC_PATH: 'g', ELECTRON_RUN_AS_NODE: '1' } } };
   assert.deepEqual(u.launchHelper(check, relaunch, tools), { ok: true });
   assert.equal(unrefs, 1);
@@ -147,12 +192,8 @@ test('launchHelper writes the job and starts the helper detached with node, with
   assert.equal(job.from, 'aaa');
   assert.equal(job.target, 'bbb');
   assert.deepEqual(job.git, { file: 'git.exe', env: { GIT_EXEC_PATH: 'g' } });
-  assert.equal(job.npm, null, 'npm is not needed when the lock file did not change');
+  assert.deepEqual(job.npm, { file: 'node.exe', args: ['npm-cli.js'] }, 'npm goes along even when the check saw no lock change, since the helper decides from the pulled tree');
   assert.deepEqual(job.args, ['root', '--hidden']);
-
-  const withLock = u.launchHelper({ ...check, lockChanged: true }, relaunch, tools);
-  assert.deepEqual(withLock, { ok: true });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repos.dataDir, JOB_FILE), 'utf8')).npm, { file: 'node.exe', args: ['npm-cli.js'] });
 });
 
 test('launchHelper refuses without node, and without npm when the packages changed', () => {
@@ -176,14 +217,18 @@ test('launchHelper reports a spawn failure instead of throwing', () => {
   assert.deepEqual(res, { ok: false, error: 'ENOENT node' });
 });
 
+test('cleanEnv keeps only strings and drops ELECTRON_RUN_AS_NODE in any case', () => {
+  assert.deepEqual(cleanEnv({ A: 'a', B: undefined, Electron_Run_As_Node: '1', C: '' }), { A: 'a', C: '' });
+});
+
 test('describe puts every state into one plain sentence', () => {
-  assert.equal(describe({ state: 'current', head: '0123456789' }, false), 'Notes is up to date (0123456).');
-  assert.equal(describe({ state: 'behind', head: 'a', target: 'bcdefgh123', behind: 1, lockChanged: false }, false), 'Notes has an update: 1 change behind main. It restarts on its own while hidden.');
-  assert.match(describe({ state: 'behind', head: 'a', target: 'b', behind: 3, lockChanged: false }, false), /3 changes behind/);
-  assert.match(describe({ state: 'behind', head: 'a', target: 'bcdefgh123', behind: 3, lockChanged: false }, true), /update to bcdefgh failed last time/);
-  assert.match(describe({ state: 'diverged', head: 'a', target: 'b' }, false), /its own commits/);
-  assert.equal(describe({ state: 'dirty', head: 'a', target: 'b', files: ['x', 'y', 'z', 'w'] }, false), 'Notes was not updated: the checkout has unsaved changes (x, y, z, …).');
-  assert.equal(describe({ state: 'error', error: 'fetch failed: offline' }, false), 'Could not check for updates: fetch failed: offline');
+  assert.equal(describe({ state: 'current', head: '0123456789' }, AUTO), 'Notes is up to date (0123456).');
+  assert.equal(describe({ state: 'behind', head: 'a', target: 'bcdefgh123', behind: 1, lockChanged: false }, AUTO), 'Notes has an update: 1 change behind main. It restarts on its own while hidden.');
+  assert.equal(describe({ state: 'behind', head: 'a', target: 'b', behind: 3, lockChanged: false }, { failed: false, auto: false }), 'Notes has an update: 3 changes behind main. Restart when you are ready.');
+  assert.match(describe({ state: 'behind', head: 'a', target: 'bcdefgh123', behind: 3, lockChanged: false }, { failed: true, auto: true }), /update to bcdefgh failed last time\. Retry it from the command palette/);
+  assert.match(describe({ state: 'diverged', head: 'a', target: 'b' }, AUTO), /its own commits/);
+  assert.equal(describe({ state: 'dirty', head: 'a', target: 'b', files: ['x', 'y', 'z', 'w'] }, AUTO), 'Notes was not updated: the checkout has unsaved changes (x, y, z, …).');
+  assert.equal(describe({ state: 'error', error: 'fetch failed: offline' }, AUTO), 'Could not check for updates: fetch failed: offline');
   assert.equal(shortSha('abcdefghijk'), 'abcdefg');
 });
 
