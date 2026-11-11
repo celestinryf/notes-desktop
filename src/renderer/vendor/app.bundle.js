@@ -21627,7 +21627,7 @@
   // src/renderer/history-dialog.ts
   var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
   var KEPT_OUT_HINT = "Kept out of history: new changes are not recorded. The versions below still hold its old text.";
-  var COPIES_HINT = "A copy of this file is kept before a save, at most one every two minutes: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
+  var COPIES_HINT = "A copy of this file is kept before a save, but not again within two minutes of the last copy while only Notes has written it: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
   var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }) {
     const hist = { versions: [], copies: [], current: "", index: -1, noteId: null, opens: 0, changes: [], changeAt: -1 };

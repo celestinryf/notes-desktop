@@ -750,9 +750,9 @@ function main() {
     } finally { fs.closeSync(fd); }
   }
   function replaceFile(id: string, file: string, buf: Buffer, coalesceCopies = false) {
-    const own = store.get(id);
-    const backup = fileVersions.backUpBeforeWrite(file, coalesceCopies && own && isFileNote(own) ? { coalesceAfterOwnWriteAt: own.fileMtime } : undefined);
+    const backup = fileVersions.backUpBeforeWrite(file, { coalesce: coalesceCopies });
     writeInPlace(file, buf);
+    fileVersions.noteWritten(file);
     return { mtime: store.markFileWritten(id), backup };
   }
 

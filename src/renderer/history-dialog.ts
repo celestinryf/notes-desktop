@@ -10,7 +10,7 @@ import { diffText, diffCounts, diffSummary } from '../shared/text-diff.mts';
 const { isViewerOnlyFile } = H;
 
 const KEPT_OUT_HINT = 'Kept out of history: new changes are not recorded. The versions below still hold its old text.';
-const COPIES_HINT = 'A copy of this file is kept before a save, at most one every two minutes: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.';
+const COPIES_HINT = 'A copy of this file is kept before a save, but not again within two minutes of the last copy while only Notes has written it: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.';
 
 interface HistoryDialogDeps {
   api: NotesApi;
