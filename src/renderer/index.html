@@ -576,12 +576,22 @@
       <form method="dialog" class="dialog-form" id="historyForm">
         <h2 class="dialog-title">Earlier versions</h2>
         <div class="history-hint-row">
-          <p class="field-hint" id="historyHint">Every saved change is kept in the local history. Pick a version to preview it; Restore puts that text back into the note (the current text stays in history too).</p>
+          <p class="field-hint" id="historyHint">A version is kept each time you finish a sentence, pause, or leave the window. Pick one to see how it differs: what it has is green, what it lacks is struck through. Restore puts that text back (the text now stays in history too).</p>
           <button type="button" class="btn btn-small hidden" id="historyRecordBtn">Record in history again</button>
         </div>
         <div class="history-layout">
           <ul class="history-list" id="historyList" role="listbox" aria-label="Versions"></ul>
-          <pre class="history-preview" id="historyPreview"></pre>
+          <div class="history-pane">
+            <div class="history-compare" id="historyCompare">
+              <label class="history-compare-label" for="historyCompareSelect">Changes</label>
+              <select class="select select-quiet" id="historyCompareSelect">
+                <option value="now">against the note now</option>
+                <option value="before">since the version before</option>
+              </select>
+              <span class="history-diff-summary" id="historyDiffSummary" aria-live="polite"></span>
+            </div>
+            <pre class="history-preview" id="historyPreview"></pre>
+          </div>
         </div>
         <div class="dialog-actions">
           <span class="field-hint" id="historyStatus"></span>

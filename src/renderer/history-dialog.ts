@@ -5,6 +5,7 @@ import { src } from './code-editor.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { autoGrow } from './editor-view.ts';
+import { diffText, diffCounts, diffSummary } from '../shared/text-diff.mts';
 
 const { isViewerOnlyFile } = H;
 
@@ -23,7 +24,7 @@ interface HistoryDialogDeps {
 const keepsCopies = (note: PublicNote) => !!note.filePath && (note.fileKind === 'pdf' || note.fileKind === 'docx');
 
 export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }: HistoryDialogDeps) {
-  const hist: { versions: HistoryVersion[], copies: FileVersion[], index: number, noteId: string | null, opens: number } = { versions: [], copies: [], index: -1, noteId: null, opens: 0 };
+  const hist: { versions: HistoryVersion[], copies: FileVersion[], current: string, index: number, noteId: string | null, opens: number } = { versions: [], copies: [], current: '', index: -1, noteId: null, opens: 0 };
   const recordedHint = el.historyHint.textContent || '';
 
   function renderKeepOut(note: PublicNote | null) {
@@ -78,6 +79,8 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyRestoreBtn.disabled = true;
     el.historyRestoreBtn.textContent = 'Restore this version';
     el.historyPreview.classList.remove('is-copy');
+    el.historyCompare.classList.add('hidden');
+    el.historyDiffSummary.textContent = '';
     el.historyStatus.textContent = 'Loading…';
     renderDialogKeepOut(false);
     el.historyDialog.showModal();
@@ -89,7 +92,9 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     const r = await api.app.historyVersions(note.id, pick ? 200 : 80);
     if (!r.ok) { el.historyStatus.textContent = r.error; return; }
     renderDialogKeepOut(r.keptOut);
+    hist.current = r.current;
     hist.versions = r.versions.filter((v) => v.body !== r.current);
+    el.historyCompare.classList.toggle('hidden', !hist.versions.length);
     el.historyStatus.textContent = hist.versions.length ? countText(hist.versions.length, 'earlier version') : r.keptOut ? 'No earlier versions.' : 'No earlier version differs from the current text yet.';
     hist.versions.forEach((v, i) => {
       const first = (v.body.split('\n').find((l) => l.trim()) || '(empty)').replace(/^#+\s*/, '');
@@ -135,7 +140,31 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
 
   function showVersion(i: number) {
     markRow(i);
-    el.historyPreview.textContent = hist.versions[i].body;
+    renderDiff();
+  }
+
+  function compareBase(i: number) {
+    if (el.historyCompareSelect.value === 'before') return i + 1 < hist.versions.length ? hist.versions[i + 1].body : '';
+    return hist.current;
+  }
+
+  function renderDiff() {
+    const v = hist.versions[hist.index];
+    if (!v) return;
+    const segments = diffText(compareBase(hist.index), v.body);
+    el.historyPreview.replaceChildren(...segments.map((s) => {
+      if (s.kind === 'same') return document.createTextNode(s.text);
+      const mark = document.createElement(s.kind === 'add' ? 'ins' : 'del');
+      mark.textContent = s.text;
+      return mark;
+    }));
+    el.historyDiffSummary.textContent = diffSummary(diffCounts(segments));
+    const first = el.historyPreview.querySelector('ins, del');
+    if (first) first.scrollIntoView({ block: 'center' }); else el.historyPreview.scrollTop = 0;
+  }
+
+  function changeCompare() {
+    if (hist.versions.length) renderDiff();
   }
 
   async function openCopies(note: PublicNote) {
@@ -195,5 +224,5 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
   }
 
-  return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
+  return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare };
 }

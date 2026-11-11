@@ -22,6 +22,8 @@
   --accent-text: #a83a0f;
   --danger: #a8340c;
   --ok: #3f6a2c;
+  --diff-add: color-mix(in srgb, var(--ok) 24%, transparent);
+  --diff-del: color-mix(in srgb, var(--danger) 22%, transparent);
 
   --line: rgba(42, 26, 18, 0.1);
   --line-2: rgba(42, 26, 18, 0.16);
@@ -1038,6 +1040,13 @@ button.book-name:hover { background: var(--hover); }
 .history-list li.is-active .when { color: inherit; opacity: 0.8; }
 .history-preview { margin: 0; overflow: auto; padding: 10px var(--s3); border-radius: var(--r-md); background: var(--well); font-family: var(--font-mono); font-size: var(--t-xs); line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .history-preview.is-copy { font-family: var(--font-sans); font-size: var(--t-sm); color: var(--fg-2); }
+.history-pane { display: flex; flex-direction: column; gap: var(--s1); min-height: 0; }
+.history-pane .history-preview { flex: 1; min-height: 0; }
+.history-compare { display: flex; align-items: center; gap: var(--s2); min-height: var(--control-h); }
+.history-compare-label { font-size: var(--t-sm); font-weight: 500; color: var(--fg-2); }
+.history-diff-summary { font-size: var(--t-xs); color: var(--fg-3); margin-left: auto; }
+.history-preview ins { text-decoration: none; background: var(--diff-add); }
+.history-preview del { text-decoration: line-through; background: var(--diff-del); }
 .find-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1);
   position: absolute; z-index: 8; top: var(--s2); right: calc(var(--s4) + 10px);

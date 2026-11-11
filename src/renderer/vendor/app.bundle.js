@@ -14954,10 +14954,10 @@
     return (String(note.title || "") + "\n" + String(note.body || "") + "\n" + (note.tags || []).join(" ")).toLowerCase();
   }
   function matchesQuery(note, query) {
-    const tokens = tokenize(query);
-    if (!tokens.length) return true;
+    const tokens2 = tokenize(query);
+    if (!tokens2.length) return true;
     const hay = searchHay(note);
-    return tokens.every((t) => hay.indexOf(t) !== -1);
+    return tokens2.every((t) => hay.indexOf(t) !== -1);
   }
   var titleOrder = new Intl.Collator(void 0, { sensitivity: "base" });
   var SORTS = {
@@ -15750,8 +15750,8 @@
     return seed ? derive(seed) : null;
   }
   function windowColors(settings, mode) {
-    const tokens = resolve(settings, mode);
-    return tokens ? { background: tokens.paper, foreground: tokens.fg } : BUILT_IN_WINDOW[mode === "dark" ? "dark" : "light"];
+    const tokens2 = resolve(settings, mode);
+    return tokens2 ? { background: tokens2.paper, foreground: tokens2.fg } : BUILT_IN_WINDOW[mode === "dark" ? "dark" : "light"];
   }
   function seedsOf(id, customColors, mode) {
     const m = mode === "dark" ? "dark" : "light";
@@ -15779,9 +15779,9 @@
   }
   function highlight(text, query) {
     const raw = String(text);
-    const tokens = tokenize(query);
-    if (!tokens.length) return escapeHtml(raw);
-    const re = new RegExp("(" + tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
+    const tokens2 = tokenize(query);
+    if (!tokens2.length) return escapeHtml(raw);
+    const re = new RegExp("(" + tokens2.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
     return raw.split(re).map((part, i) => i % 2 ? '<span class="mark">' + escapeHtml(part) + "</span>" : escapeHtml(part)).join("");
   }
   function trashedMessage(before, after, title) {
@@ -16290,6 +16290,9 @@
     historyDialog: pageElement("#historyDialog", HTMLDialogElement),
     historyList: pageElement("#historyList", HTMLUListElement),
     historyPreview: pageElement("#historyPreview", HTMLPreElement),
+    historyCompare: pageElement("#historyCompare", HTMLDivElement),
+    historyCompareSelect: pageElement("#historyCompareSelect", HTMLSelectElement),
+    historyDiffSummary: pageElement("#historyDiffSummary", HTMLSpanElement),
     historyStatus: pageElement("#historyStatus", HTMLSpanElement),
     historyHint: pageElement("#historyHint", HTMLParagraphElement),
     historyRecordBtn: pageElement("#historyRecordBtn", HTMLButtonElement),
@@ -21450,13 +21453,129 @@
     return { attachFiles, toggleRecording };
   }
 
+  // src/shared/text-diff.mts
+  var WORD_TOKEN = /\s+|\w+|[^\s\w]/gu;
+  var WORD_TOKEN_LIMIT = 4e4;
+  function tokens(text, byLine) {
+    if (!text) return [];
+    if (byLine) return text.split(/(?<=\n)/);
+    return text.match(WORD_TOKEN) || [];
+  }
+  function commonEnds(a, b) {
+    let head = 0;
+    const max = Math.min(a.length, b.length);
+    while (head < max && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < max - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    return { head, tail };
+  }
+  function myers(a, b) {
+    const n = a.length, m = b.length, max = n + m;
+    if (!max) return [];
+    const offset = max;
+    const v = new Int32Array(2 * max + 2);
+    const trace = [];
+    for (let d = 0; d <= max; d++) {
+      trace.push(v.slice());
+      for (let k = -d; k <= d; k += 2) {
+        let x = k === -d || k !== d && v[offset + k - 1] < v[offset + k + 1] ? v[offset + k + 1] : v[offset + k - 1] + 1;
+        let y = x - k;
+        while (x < n && y < m && a[x] === b[y]) {
+          x++;
+          y++;
+        }
+        v[offset + k] = x;
+        if (x >= n && y >= m) return backtrack(trace, d, n, m, offset);
+      }
+    }
+    return [];
+  }
+  function backtrack(trace, dEnd, n, m, offset) {
+    const ops = [];
+    let x = n, y = m;
+    for (let d = dEnd; d > 0; d--) {
+      const v = trace[d];
+      const k = x - y;
+      const prevK = k === -d || k !== d && v[offset + k - 1] < v[offset + k + 1] ? k + 1 : k - 1;
+      const prevX = v[offset + prevK];
+      const prevY = prevX - prevK;
+      while (x > prevX && y > prevY) {
+        ops.push("same");
+        x--;
+        y--;
+      }
+      if (x === prevX) {
+        ops.push("add");
+        y--;
+      } else {
+        ops.push("del");
+        x--;
+      }
+    }
+    while (x > 0 && y > 0) {
+      ops.push("same");
+      x--;
+      y--;
+    }
+    return ops.reverse();
+  }
+  function merge(segments, kind, text) {
+    const last = segments[segments.length - 1];
+    if (last && last.kind === kind) last.text += text;
+    else segments.push({ kind, text });
+  }
+  function diffText(before, after) {
+    if (before === after) return before ? [{ kind: "same", text: before }] : [];
+    let a = tokens(before, false), b = tokens(after, false);
+    if (a.length + b.length > WORD_TOKEN_LIMIT) {
+      a = tokens(before, true);
+      b = tokens(after, true);
+    }
+    const { head, tail } = commonEnds(a, b);
+    const segments = [];
+    if (head) merge(segments, "same", a.slice(0, head).join(""));
+    const midA = a.slice(head, a.length - tail), midB = b.slice(head, b.length - tail);
+    let i = 0, j = 0;
+    for (const op of myers(midA, midB)) {
+      if (op === "same") {
+        merge(segments, "same", midA[i]);
+        i++;
+        j++;
+      } else if (op === "del") {
+        merge(segments, "del", midA[i]);
+        i++;
+      } else {
+        merge(segments, "add", midB[j]);
+        j++;
+      }
+    }
+    if (tail) merge(segments, "same", a.slice(a.length - tail).join(""));
+    return segments;
+  }
+  var countWords2 = (text) => (text.match(/\w+/gu) || []).length;
+  function diffCounts(segments) {
+    let added = 0, removed = 0;
+    for (const s of segments) {
+      if (s.kind === "add") added += countWords2(s.text);
+      else if (s.kind === "del") removed += countWords2(s.text);
+    }
+    return { added, removed };
+  }
+  function diffSummary(counts) {
+    const words = (n) => n + (n === 1 ? " word" : " words");
+    if (!counts.added && !counts.removed) return "No words differ.";
+    if (!counts.removed) return words(counts.added) + " added.";
+    if (!counts.added) return words(counts.removed) + " removed.";
+    return words(counts.added) + " added, " + counts.removed + " removed.";
+  }
+
   // src/renderer/history-dialog.ts
   var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
   var KEPT_OUT_HINT = "Kept out of history: new changes are not recorded. The versions below still hold its old text.";
   var COPIES_HINT = "A copy of this file is kept before each save: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
   var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }) {
-    const hist = { versions: [], copies: [], index: -1, noteId: null, opens: 0 };
+    const hist = { versions: [], copies: [], current: "", index: -1, noteId: null, opens: 0 };
     const recordedHint = el.historyHint.textContent || "";
     function renderKeepOut(note) {
       const out = !!(note && note.keepOutOfHistory);
@@ -21517,6 +21636,8 @@
       el.historyRestoreBtn.disabled = true;
       el.historyRestoreBtn.textContent = "Restore this version";
       el.historyPreview.classList.remove("is-copy");
+      el.historyCompare.classList.add("hidden");
+      el.historyDiffSummary.textContent = "";
       el.historyStatus.textContent = "Loading\u2026";
       renderDialogKeepOut(false);
       el.historyDialog.showModal();
@@ -21534,7 +21655,9 @@
         return;
       }
       renderDialogKeepOut(r.keptOut);
+      hist.current = r.current;
       hist.versions = r.versions.filter((v) => v.body !== r.current);
+      el.historyCompare.classList.toggle("hidden", !hist.versions.length);
       el.historyStatus.textContent = hist.versions.length ? countText(hist.versions.length, "earlier version") : r.keptOut ? "No earlier versions." : "No earlier version differs from the current text yet.";
       hist.versions.forEach((v, i) => {
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
@@ -21575,7 +21698,29 @@
     }
     function showVersion(i) {
       markRow(i);
-      el.historyPreview.textContent = hist.versions[i].body;
+      renderDiff();
+    }
+    function compareBase(i) {
+      if (el.historyCompareSelect.value === "before") return i + 1 < hist.versions.length ? hist.versions[i + 1].body : "";
+      return hist.current;
+    }
+    function renderDiff() {
+      const v = hist.versions[hist.index];
+      if (!v) return;
+      const segments = diffText(compareBase(hist.index), v.body);
+      el.historyPreview.replaceChildren(...segments.map((s) => {
+        if (s.kind === "same") return document.createTextNode(s.text);
+        const mark = document.createElement(s.kind === "add" ? "ins" : "del");
+        mark.textContent = s.text;
+        return mark;
+      }));
+      el.historyDiffSummary.textContent = diffSummary(diffCounts(segments));
+      const first = el.historyPreview.querySelector("ins, del");
+      if (first) first.scrollIntoView({ block: "center" });
+      else el.historyPreview.scrollTop = 0;
+    }
+    function changeCompare() {
+      if (hist.versions.length) renderDiff();
     }
     async function openCopies(note) {
       el.historyHint.textContent = COPIES_HINT;
@@ -21646,7 +21791,7 @@
       if (ok) toast("Restored the version from " + new Date(v.at).toLocaleString() + ". The text you had is still in history.");
       else if (state.conflictShown !== note.id) toast("Could not save the restored text yet; it will be retried.");
     }
-    return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain };
+    return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare };
   }
 
   // src/renderer/library-dialog.ts
@@ -26066,10 +26211,10 @@
       syncTitleBar();
     }
     function applyColorScheme(mode, settings) {
-      const tokens = resolve(settings, mode);
+      const tokens2 = resolve(settings, mode);
       const style = document.documentElement.style;
       for (const name of TOKENS) {
-        if (tokens) style.setProperty("--" + name, tokens[name]);
+        if (tokens2) style.setProperty("--" + name, tokens2[name]);
         else style.removeProperty("--" + name);
       }
     }
@@ -28001,6 +28146,8 @@
       if (state.dirty) {
         await flushSave();
         stashIfDirty();
+        api.app.historySettle().catch(() => {
+        });
       }
       state.currentId = note.id;
       state.current = note;
@@ -28182,7 +28329,7 @@
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
-    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
+    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
     const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
     const library = createLibraryDialog({
       api,
@@ -28952,7 +29099,7 @@
       });
     }
     function filterSettings() {
-      const tokens = tokenize(el.settingsSearch.value);
+      const tokens2 = tokenize(el.settingsSearch.value);
       const ranges = [];
       let any = false;
       for (const sec of el.settingsScroll.querySelectorAll(".settings-section")) {
@@ -28960,15 +29107,15 @@
         for (const unit of sec.children) {
           if (unit.tagName === "H3") continue;
           const text = (unit.textContent || "").toLowerCase();
-          const ok = tokens.every((t) => text.includes(t));
+          const ok = tokens2.every((t) => text.includes(t));
           unit.classList.toggle("is-filtered", !ok);
           if (!ok) continue;
           hits++;
-          if (tokens.length) collectMatches(unit, tokens, ranges);
+          if (tokens2.length) collectMatches(unit, tokens2, ranges);
         }
-        sec.classList.toggle("is-filtered", tokens.length > 0 && !hits);
+        sec.classList.toggle("is-filtered", tokens2.length > 0 && !hits);
         const link = el.settingsNav.querySelector('a[href="#' + sec.id + '"]');
-        if (link) link.classList.toggle("is-dim", tokens.length > 0 && !hits);
+        if (link) link.classList.toggle("is-dim", tokens2.length > 0 && !hits);
         if (hits) any = true;
       }
       el.settingsEmpty.classList.toggle("hidden", any);
@@ -28978,11 +29125,11 @@
       }
       markSettingsSection();
     }
-    function collectMatches(root, tokens, out) {
+    function collectMatches(root, tokens2, out) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (let node; node = walker.nextNode(); ) {
         const text = (node.textContent || "").toLowerCase();
-        for (const t of tokens) {
+        for (const t of tokens2) {
           for (let i = text.indexOf(t); i !== -1; i = text.indexOf(t, i + t.length)) {
             const r = new Range();
             r.setStart(node, i);
@@ -29698,6 +29845,7 @@
       el.historyRecordBtn.addEventListener("click", recordAgain);
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());
       el.historyRestoreBtn.addEventListener("click", restoreVersion);
+      el.historyCompareSelect.addEventListener("change", changeCompare);
       el.historyDialog.addEventListener("close", () => focusBody());
       el.findPrevBtn.addEventListener("click", () => runFind(false));
       el.findCloseBtn.addEventListener("click", closeFind);

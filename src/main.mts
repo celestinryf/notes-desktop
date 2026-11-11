@@ -149,7 +149,7 @@ function main() {
       if (win && !win.isDestroyed()) win.webContents.send('git:pulled', pulled);
     },
   });
-  store.onContentChange = () => git.noteChanged();
+  store.onContentChange = (notes) => git.noteChanged(notes.filter((n) => !n.lock).map((n) => ({ id: n.id, body: n.body })));
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
   store.onIndexChange = (update) => searchIndex.changed(update);
   searchIndex.onReady = (info) => trace.write('search-index-ready', info);
@@ -281,12 +281,13 @@ function main() {
       stickies.broadcast('app:flush');
       git.flush().catch(() => {}).finally(flushStore);
     });
-    w.on('hide', () => { writeRuntime(); relockOnHide(); });
+    w.on('hide', () => { writeRuntime(); relockOnHide(); git.attentionLost(); });
     w.on('focus', () => {
       if (store.settings.alwaysOnTop && !w.isAlwaysOnTop()) w.setAlwaysOnTop(true);
       writeRuntime();
+      git.attentionBack();
     });
-    w.on('blur', () => writeRuntime());
+    w.on('blur', () => { writeRuntime(); git.attentionLost(); });
 
     w.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) shell.openExternal(url);
@@ -1189,6 +1190,7 @@ function main() {
 
   handle('git:status', () => git.status());
   handle('git:commit', () => git.commit('manual commit'));
+  handle('history:settle', () => { git.attentionLost(); });
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
   handle('git:sync', () => git.sync());

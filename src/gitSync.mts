@@ -5,6 +5,8 @@ import type { GitRun } from './git-run.mts';
 import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
 import { MAX_TEXT_BYTES, isRecord, isAuthFailure } from './shared/helpers.mts';
+import { VersionClock, DEFAULT_TIMING, uniformTiming } from './version-timing.mts';
+import type { VersionTiming, ChangedNote } from './version-timing.mts';
 
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
@@ -102,7 +104,7 @@ class GitSync {
   source: string;
   dir: string;
   snapshot: string;
-  debounceMs: number;
+  clock: VersionClock;
   now: () => number;
   timer: NodeJS.Timeout | null;
   busy: Promise<GitResult> | null;
@@ -120,13 +122,13 @@ class GitSync {
   remoteEnv: (url: string) => Record<string, string> | undefined;
   onAuthFailed: (url: string) => Promise<unknown>;
   lastSyncTry: number;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined, onAuthFailed?: (url: string) => Promise<unknown> }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, timing?: Partial<VersionTiming>, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined, onAuthFailed?: (url: string) => Promise<unknown> }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
     this.dir = path.join(dataDir, 'history');
     this.snapshot = path.join(this.dir, 'notes.json');
-    this.debounceMs = opts.debounceMs == null ? 4000 : opts.debounceMs;
+    this.clock = new VersionClock(Object.assign({}, opts.debounceMs == null ? DEFAULT_TIMING : uniformTiming(opts.debounceMs), opts.timing));
     this.now = opts.now || Date.now;
     this.timer = null;
     this.busy = null;
@@ -369,11 +371,24 @@ class GitSync {
     throw lastErr;
   }
 
-  noteChanged() {
+  noteChanged(notes?: readonly ChangedNote[]) {
     if (!this.state.enabled) return;
     this._set({ pending: true });
+    this._commitAfter(this.clock.changed(notes, this.now()));
+  }
+
+  attentionLost() {
+    const delay = this.clock.attentionLost(this.now());
+    if (delay !== null && this.state.enabled && this.state.pending) this._commitAfter(delay);
+  }
+
+  attentionBack() {
+    this.clock.attentionBack();
+  }
+
+  _commitAfter(delay: number) {
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.commit().catch(() => {}); }, this.debounceMs);
+    this.timer = setTimeout(() => { this.timer = null; this.commit().catch(() => {}); }, delay);
   }
 
   async flush() {
@@ -404,6 +419,7 @@ class GitSync {
     let add: GitRun | null;
     try { add = await this._stage(); }
     catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
+    this.clock.committed();
     if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
     if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
     const staged = await this._staged();

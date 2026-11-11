@@ -277,3 +277,58 @@ test('files outside the notes folder keep their history by id at .linked, and a 
   assert.equal(hashed[1], null, 'a file that cannot be read costs its own slot');
   assert.match(hashed[0] + hashed[2], /^[0-9a-f]{80}$/, 'the rest of the batch is still hashed');
 });
+
+test('a version waits for a long quiet mid-sentence, a short one after a sentence, and comes at once when attention leaves', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const write = (v, body) => fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({ v, notes: [{ id: 'n1', body }] }));
+  write(1, '');
+  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 60, attentionMs: 10, attentionWindowMs: 200, maxWaitMs: 20000 } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  const commits = () => sync.status().commits;
+  const untilCommits = async (n) => { for (let i = 0; i < 100 && commits() !== n; i++) await settle(50); assert.equal(commits(), n); };
+
+  write(2, 'Half a sent');
+  sync.noteChanged([{ id: 'n1', body: 'Half a sent' }]);
+  await settle(400);
+  assert.equal(commits(), 0);
+  assert.equal(sync.status().pending, true);
+
+  write(3, 'Half a sentence, finished.');
+  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished.' }]);
+  await untilCommits(1);
+  assert.equal(sync.status().pending, false);
+
+  write(4, 'Half a sentence, finished. And then mo');
+  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then mo' }]);
+  await settle(300);
+  assert.equal(commits(), 1);
+  sync.attentionLost();
+  await untilCommits(2);
+
+  sync.attentionLost();
+  await settle(300);
+  assert.equal(commits(), 2);
+  sync.attentionBack();
+
+  write(5, 'Half a sentence, finished. And then more, with a blur right after it');
+  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then more, with a blur right after it' }]);
+  sync.attentionLost();
+  write(6, 'Half a sentence, finished. And then more, with a blur right after it and a save just behind');
+  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then more, with a blur right after it and a save just behind' }]);
+  await untilCommits(3);
+  assert.equal(await sync.eachNotesAt([(await sync.history(1))[0].hash], (_i, text) => { assert.match(text, /save just behind/); }), true);
+  await sync.flush();
+});
+
+test('a change with no note named, as from a bot or a settings change, is a finished task', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 30, attentionMs: 10, attentionWindowMs: 100, maxWaitMs: 20000 } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":2}');
+  sync.noteChanged();
+  for (let i = 0; i < 100 && sync.status().commits !== 1; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(sync.status().commits, 1);
+  await sync.flush();
+});
