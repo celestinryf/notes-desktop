@@ -1047,6 +1047,10 @@ button.book-name:hover { background: var(--hover); }
 .history-diff-summary { font-size: var(--t-xs); color: var(--fg-3); margin-left: auto; }
 .history-preview ins { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; text-decoration-color: var(--fg-2); background: var(--diff-add); }
 .history-preview del { text-decoration: line-through; background: var(--diff-del); }
+.history-fold { display: block; width: 100%; min-height: 24px; margin: var(--s1) 0; padding: var(--s1) var(--s2); border: 0; border-radius: var(--r-sm); background: var(--hover); color: var(--fg-2); font: inherit; text-align: left; cursor: pointer; }
+.history-fold::before { content: '\2026  '; }
+.history-fold:hover { color: var(--fg); }
+.history-fold:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .find-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1);
   position: absolute; z-index: 8; top: var(--s2); right: calc(var(--s4) + 10px);
