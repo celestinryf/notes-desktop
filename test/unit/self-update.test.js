@@ -6,7 +6,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { gitBinary } = require('../../src/git-binary.mts');
 const { run } = require('../../src/git-run.mts');
-const { SelfUpdater, describe, parseResult, shortSha, cleanEnv, RESULT_FILE, JOB_FILE } = require('../../src/self-update.mts');
+const { SelfUpdater, describe, parseResult, shortSha, cleanEnv, RESULT_FILE, JOB_FILE, FAILURE_BACKOFF_MS } = require('../../src/self-update.mts');
 const { sanitizeSettings } = require('../../src/store.mts');
 const { tmpDir, cleanup } = require('../helpers/tmp');
 
@@ -162,6 +162,19 @@ test('lastResult, failedFor and markNoticed read and update the result file', ()
   assert.equal(u.failedFor('abc'), false, 'a transient failure may be retried');
   fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at: 7, from: 'a', to: 'abc', ok: true, error: null, installed: true }));
   assert.equal(u.failedFor('abc'), false, 'a success for the same target is not a failure');
+});
+
+test('recentFailure holds any failure back for half an hour, transient or not', () => {
+  const repos = makeRepos();
+  const u = updater(repos);
+  assert.equal(u.recentFailure(), null);
+  const at = 1000000;
+  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at, from: 'a', target: 'b', to: 'a', ok: false, error: 'Permission denied', transient: true }));
+  assert.equal(u.recentFailure(at + 1000).error, 'Permission denied');
+  assert.equal(u.recentFailure(at + FAILURE_BACKOFF_MS - 1).error, 'Permission denied');
+  assert.equal(u.recentFailure(at + FAILURE_BACKOFF_MS), null);
+  fs.writeFileSync(path.join(repos.dataDir, RESULT_FILE), JSON.stringify({ at, from: 'a', target: 'b', to: 'b', ok: true, error: null }));
+  assert.equal(u.recentFailure(at + 1000), null);
 });
 
 test('parseResult rejects malformed results and falls back to "to" for an old result without a target', () => {

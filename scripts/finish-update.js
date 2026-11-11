@@ -74,7 +74,8 @@ function startApp(job, log) {
   }
 }
 
-function isLockError(error) { return /index\.lock|unable to create|File exists/i.test(error || ''); }
+function isLockError(error) { return /index\.lock/i.test(error || ''); }
+function isFastForwardRefusal(error) { return /fast-forward|diverg|not possible/i.test(error || ''); }
 
 async function update(job, log) {
   const gitEnv = Object.assign({}, process.env, job.git.env || {}, NO_PROMPT);
@@ -83,20 +84,28 @@ async function update(job, log) {
   const result = { at: Date.now(), from: job.from, target: job.target, to: job.from, ok: false, error: null, transient: false, installed: false, noticed: false };
   const fail = (error, transient) => { result.error = error; result.transient = !!transient; log(error); return result; };
 
-  const status = await git(['status', '--porcelain', '--untracked-files=no']);
-  if (!status.ok) return fail('status failed: ' + status.error, isLockError(status.error));
-  if (status.stdout.trim()) return fail('the checkout has unsaved changes: ' + status.stdout.trim().split(/\r?\n/).slice(0, 3).join(', '));
-
-  let pulled = null;
-  for (let attempt = 0; attempt < LOCK_RETRIES; attempt++) {
-    pulled = await git(['pull', '--ff-only', '--quiet', 'origin', 'main'], PULL_TIMEOUT_MS);
-    if (pulled.ok || !isLockError(pulled.error)) break;
-    log('pull is waiting for another git process: ' + pulled.error);
-    await sleep(lockRetryMs());
+  const before = await git(['rev-parse', 'HEAD']);
+  if (!before.ok) return fail('rev-parse failed: ' + before.error, true);
+  const headBefore = before.stdout.trim();
+  const alreadyThere = (await git(['merge-base', '--is-ancestor', job.target, headBefore])).ok;
+  if (alreadyThere) {
+    log('the checkout already has ' + job.target.slice(0, 7));
+    result.to = headBefore;
+  } else {
+    const status = await git(['status', '--porcelain', '--untracked-files=no']);
+    if (!status.ok) return fail('status failed: ' + status.error, true);
+    if (status.stdout.trim()) return fail('the checkout has unsaved changes: ' + status.stdout.trim().split(/\r?\n/).slice(0, 3).join(', '), true);
+    let pulled = null;
+    for (let attempt = 0; attempt < LOCK_RETRIES; attempt++) {
+      pulled = await git(['pull', '--ff-only', '--quiet', 'origin', 'main'], PULL_TIMEOUT_MS);
+      if (pulled.ok || !isLockError(pulled.error)) break;
+      log('pull is waiting for another git process: ' + pulled.error);
+      await sleep(lockRetryMs());
+    }
+    if (!pulled.ok) return fail('pull failed: ' + pulled.error, !isFastForwardRefusal(pulled.error));
+    const head = await git(['rev-parse', 'HEAD']);
+    if (head.ok) result.to = head.stdout.trim();
   }
-  if (!pulled.ok) return fail('pull failed: ' + pulled.error, isLockError(pulled.error));
-  const head = await git(['rev-parse', 'HEAD']);
-  if (head.ok) result.to = head.stdout.trim();
   log('checkout at ' + result.to.slice(0, 7) + ' (Notes ran ' + job.from.slice(0, 7) + ')');
 
   const lock = await git(['diff', '--name-only', job.from, result.to, '--', 'package-lock.json']);
@@ -110,14 +119,14 @@ async function update(job, log) {
   return fail('npm install failed: ' + installed.error);
 
   async function rollBack() {
-    if (result.to === job.from) return;
-    const back = await git(['reset', '--keep', '--quiet', job.from]);
-    log(back.ok ? 'rolled the checkout back to ' + job.from.slice(0, 7) : 'roll back failed: ' + back.error);
+    if (result.to === headBefore) return;
+    const back = await git(['reset', '--keep', '--quiet', headBefore]);
+    log(back.ok ? 'rolled the checkout back to ' + headBefore.slice(0, 7) : 'roll back failed: ' + back.error);
     if (!back.ok) return;
-    result.to = job.from;
+    result.to = headBefore;
     if (!job.npm) return;
     const restore = await npm();
-    log(restore.ok ? 'restored the packages of ' + job.from.slice(0, 7) : 'restoring the packages failed: ' + restore.error);
+    log(restore.ok ? 'restored the packages of ' + headBefore.slice(0, 7) : 'restoring the packages failed: ' + restore.error);
   }
 }
 
@@ -133,6 +142,7 @@ async function main() {
   if (!exited) {
     log('Notes (pid ' + job.pid + ') did not exit; nothing changed');
     writeResult(job.dataDir, { at: Date.now(), from: job.from, target: job.target, to: job.from, ok: false, error: 'Notes did not exit for the update', transient: true, installed: false, noticed: false }, log);
+    startApp(job, log);
     return;
   }
   await sleep(SETTLE_MS);
@@ -153,4 +163,4 @@ if (require.main === module) {
   main().catch((err) => { console.error(err); process.exit(1); });
 }
 
-module.exports = { update, waitForExit, readJob, npmEnv, isLockError, EXIT_WAIT_MS };
+module.exports = { update, waitForExit, readJob, npmEnv, isLockError, isFastForwardRefusal, EXIT_WAIT_MS };

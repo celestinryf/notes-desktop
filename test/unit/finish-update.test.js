@@ -8,7 +8,7 @@ const { gitBinary } = require('../../src/git-binary.mts');
 const { tmpDir, cleanup } = require('../helpers/tmp');
 
 const HELPER = path.join(__dirname, '..', '..', 'scripts', 'finish-update.js');
-const { update, waitForExit, readJob, npmEnv, isLockError } = require(HELPER);
+const { update, waitForExit, readJob, npmEnv, isLockError, isFastForwardRefusal } = require(HELPER);
 
 const git = gitBinary();
 const AUTHOR = ['-c', 'user.name=t', '-c', 'user.email=t@x', '-c', 'commit.gpgsign=false'];
@@ -150,6 +150,35 @@ test('update waits out another git process holding index.lock, and reports a loc
   } finally { delete process.env.NOTES_UPDATE_LOCK_RETRY_MS; fs.unlinkSync(lock); }
   assert.equal(isLockError('fatal: Unable to create .git/index.lock: File exists.'), true);
   assert.equal(isLockError('npm ERR! boom'), false);
+  assert.equal(isLockError('error: unable to create file x: Permission denied'), false);
+  assert.equal(isFastForwardRefusal('fatal: Not possible to fast-forward, aborting.'), true);
+  assert.equal(isFastForwardRefusal('fatal: Could not resolve host: github.com'), false);
+});
+
+test('update installs and does not touch a dirty tree when the checkout already has the target', async () => {
+  const repos = makeRepos();
+  const target = commitIn(repos.upstream, 'package-lock.json', '{"v":2}', 'deps');
+  sh(['pull', '-q', '--ff-only', 'origin', 'main'], repos.checkout);
+  fs.writeFileSync(path.join(repos.checkout, 'a.txt'), 'edited');
+  sh(['add', 'a.txt'], repos.checkout);
+  const npm = fakeNpm(repos.base);
+  const res = await update(job(repos, { target, npm: npm.npm }), quiet);
+  assert.equal(res.ok, true);
+  assert.equal(res.installed, true);
+  assert.equal(res.to, target);
+  assert.equal(fs.readFileSync(path.join(repos.checkout, 'a.txt'), 'utf8'), 'edited');
+});
+
+test('update does not roll back a pull someone else made when the install fails', async () => {
+  const repos = makeRepos();
+  const target = commitIn(repos.upstream, 'package-lock.json', '{"v":2}', 'deps');
+  sh(['pull', '-q', '--ff-only', 'origin', 'main'], repos.checkout);
+  const npm = fakeNpm(repos.base, { fail: true });
+  const res = await update(job(repos, { target, npm: npm.npm }), quiet);
+  assert.equal(res.ok, false);
+  assert.equal(res.to, target);
+  assert.equal(sh(['rev-parse', 'HEAD'], repos.checkout), target);
+  assert.equal(npm.calls().length, 1, 'no restore install for a checkout this helper did not move');
 });
 
 test('waitForExit resolves when the process is gone and times out while it lives', async () => {
@@ -213,7 +242,7 @@ test('the helper starts the app again even when the update itself throws', async
   execFileSync(process.execPath, [HELPER, jobFile], { encoding: 'utf8', env: fastEnv() });
   const result = JSON.parse(fs.readFileSync(path.join(repos.dataDir, 'self-update.json'), 'utf8'));
   assert.equal(result.ok, false);
-  assert.match(result.error, /status failed/);
+  assert.match(result.error, /rev-parse failed/);
   assert.ok(await waitForFile(marker), 'Notes came back');
   assert.equal(sh(['rev-parse', 'HEAD'], repos.checkout), repos.first);
 });
@@ -222,7 +251,8 @@ test('the helper gives up without touching the checkout when Notes does not exit
   const repos = makeRepos();
   const target = commitIn(repos.upstream, 'a.txt', 'a');
   const jobFile = path.join(repos.dataDir, 'job.json');
-  fs.writeFileSync(jobFile, JSON.stringify(job(repos, { pid: process.pid, target })));
+  const marker = path.join(repos.base, 'started.txt');
+  fs.writeFileSync(jobFile, JSON.stringify(job(repos, { pid: process.pid, target, args: ['-e', 'require("fs").writeFileSync(process.argv[1], "up")', marker] })));
   execFileSync(process.execPath, [HELPER, jobFile], { encoding: 'utf8', env: fastEnv() });
   const result = JSON.parse(fs.readFileSync(path.join(repos.dataDir, 'self-update.json'), 'utf8'));
   assert.equal(result.ok, false);
@@ -230,6 +260,7 @@ test('the helper gives up without touching the checkout when Notes does not exit
   assert.match(result.error, /did not exit/);
   assert.equal(sh(['rev-parse', 'HEAD'], repos.checkout), repos.first);
   assert.equal(fs.existsSync(jobFile), true, 'the job file stays for the log');
+  assert.ok(await waitForFile(marker), 'Notes is started anyway; a second copy exits on the single-instance lock');
 });
 
 test('the helper logs a bad job file next to it and exits non-zero', () => {

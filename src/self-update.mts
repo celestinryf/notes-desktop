@@ -31,6 +31,7 @@ const JOB_FILE = 'self-update-job.json';
 const LOCK_FILE = 'package-lock.json';
 const BRANCH = 'main';
 const NO_PROMPT = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+const FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 const IN_PROGRESS = ['index.lock', 'MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD'];
 
 function shortSha(sha: string) { return sha.slice(0, 7); }
@@ -141,6 +142,11 @@ class SelfUpdater {
     return parseResult(text);
   }
 
+  recentFailure(now = Date.now()): UpdateResult | null {
+    const last = this.lastResult();
+    return last && !last.ok && now - last.at < FAILURE_BACKOFF_MS ? last : null;
+  }
+
   failedFor(target: string) {
     const last = this.lastResult();
     return !!last && !last.ok && !last.transient && last.target === target;
@@ -188,4 +194,4 @@ function describe(check: UpdateCheck, opts: { failed: boolean; auto: boolean }):
 }
 
 export type { UpdateCheck, UpdateResult, Relaunch, HelperTools, HelperJob, GitRunner };
-export { SelfUpdater, describe, parseResult, shortSha, cleanEnv, RESULT_FILE, LOG_FILE, JOB_FILE, LOCK_FILE, BRANCH, NO_PROMPT };
+export { SelfUpdater, describe, parseResult, shortSha, cleanEnv, RESULT_FILE, LOG_FILE, JOB_FILE, LOCK_FILE, BRANCH, NO_PROMPT, FAILURE_BACKOFF_MS };

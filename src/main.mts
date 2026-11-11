@@ -193,6 +193,7 @@ function main() {
   }
 
   function flushUpdateNotices() {
+    if (!rendererReady) return;
     if (updateNoticePending) sendUpdateStatus();
     noticeFailedUpdate();
     if (updateNotice && win && !win.isDestroyed() && win.isVisible()) { win.webContents.send('app:notice', updateNotice); updateNotice = null; }
@@ -214,7 +215,8 @@ function main() {
 
   function updateRelaunchBlockedBy(): string | null {
     if (!store.settings.autoUpdate) return 'auto-update is off';
-    if (win && !win.isDestroyed() && win.isVisible()) return 'the window is visible';
+    if (win && !win.isDestroyed() && (win.isVisible() || win.isMinimized())) return 'the window is visible or minimized';
+    if (updater.recentFailure()) return 'the last update failed less than half an hour ago';
     if (Date.now() - lastVisibleAt < UPDATE_QUIET_MS) return 'the window was visible less than a minute ago';
     if (BrowserWindow.getFocusedWindow()) return 'a sticky has focus';
     if (live.sessions.size) return 'a live session is open';
@@ -226,21 +228,25 @@ function main() {
     if (updateRetryTimer) { clearTimeout(updateRetryTimer); updateRetryTimer = undefined; }
     if (!SELF_UPDATE || updateApplied || quitting || !update || update.state !== 'behind' || updater.failedFor(update.target)) return;
     const blocked = updateRelaunchBlockedBy();
-    if (!blocked) { applyUpdate({ visible: false }).catch(() => {}); return; }
+    if (!blocked) { applyUpdate({ visible: false, auto: true }).catch(() => {}); return; }
     updateRetryTimer = setTimeout(maybeRelaunchForUpdate, UPDATE_RETRY_MS);
   }
 
-  function applyUpdate(opts: { visible: boolean }): Promise<{ ok: boolean; error: string | null }> {
+  function applyUpdate(opts: { visible: boolean; auto?: boolean }): Promise<{ ok: boolean; error: string | null }> {
     if (!updateApplying) updateApplying = launchUpdate(opts).finally(() => { updateApplying = null; });
     return updateApplying;
   }
 
-  async function launchUpdate(opts: { visible: boolean }): Promise<{ ok: boolean; error: string | null }> {
+  async function launchUpdate(opts: { visible: boolean; auto?: boolean }): Promise<{ ok: boolean; error: string | null }> {
     if (!SELF_UPDATE) return { ok: false, error: 'Notes does not update itself in this mode' };
     if (updateApplied) return { ok: true, error: null };
     const fresh = await checkForUpdate('apply');
     update = fresh;
     if (fresh.state !== 'behind') return { ok: false, error: describeUpdate(fresh, { failed: false, auto: !!store.settings.autoUpdate }) };
+    if (opts.auto) {
+      const blocked = updateRelaunchBlockedBy();
+      if (blocked) { updateRetryTimer = setTimeout(maybeRelaunchForUpdate, UPDATE_RETRY_MS); return { ok: false, error: blocked }; }
+    }
     const git = gitBinary();
     const node = claudeBin.resolveNode();
     const npm = node ? npmFor(node) : null;
