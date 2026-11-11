@@ -165,6 +165,9 @@ function toggleTaskAt(body: string | null | undefined, index: number) {
   return String(body || '');
 }
 
+const OPENABLE_LINK = /^(?:https?:\/\/|mailto:)\S/i;
+const isOpenableLink = (url: string | null | undefined) => OPENABLE_LINK.test(String(url || ''));
+
 function countWords(text?: string | null) {
   const t = String(text || '').trim();
   if (!t) return 0;
@@ -649,7 +652,7 @@ const msSince = (start: number) => tenths(performance.now() - start);
 export type { FrontMatterBlock };
 export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
-  isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, gitErrorText, isLinkedNotice,
+  isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, isOpenableLink, gitErrorText, isLinkedNotice,
   fuzzyScore,
   splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,

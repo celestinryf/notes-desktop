@@ -48,6 +48,12 @@ test('contextMenuTemplate: editable text gets spelling, edit actions and zoom; l
   const noteLink = W.contextMenuTemplate({ linkURL: 'note://abc' });
   assert.ok(!noteLink.some((i) => i.action === 'openLink'));
   assert.equal(noteLink[0].action, 'copyText');
+  const mail = W.contextMenuTemplate({ linkURL: 'mailto:someone@example.com' });
+  assert.equal(mail[0].action, 'openLink');
+  assert.equal(mail[0].label, 'Write to this address');
+  assert.equal(mail[1].action, 'copyText');
+  const fileLink = W.contextMenuTemplate({ linkURL: 'file:///C:/x.txt' });
+  assert.ok(!fileLink.some((i) => i.action === 'openLink'));
   const sel = W.contextMenuTemplate({ selectionText: 'hello' });
   assert.equal(sel[0].role, 'copy');
   const bare = W.contextMenuTemplate({});

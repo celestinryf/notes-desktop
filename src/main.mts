@@ -401,7 +401,7 @@ function main() {
     w.on('blur', () => { writeRuntime(); git.attentionLost(); });
 
     w.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:/i.test(url)) shell.openExternal(url);
+      if (H.isOpenableLink(url)) shell.openExternal(url);
       return { action: 'deny' };
     });
     let zoomSaveTimer: NodeJS.Timeout | undefined;
@@ -413,7 +413,7 @@ function main() {
     windowInput.attachContextMenu(w.webContents, () => w, { Menu, shell, clipboard, onZoom: rememberZoom });
     w.webContents.on('will-navigate', (e, url) => {
       e.preventDefault();
-      if (/^https?:/i.test(url)) shell.openExternal(url);
+      if (H.isOpenableLink(url)) shell.openExternal(url);
     });
 
     if (process.env.NOTES_APP_DEVTOOLS === '1') w.webContents.openDevTools({ mode: 'detach' });
@@ -1432,7 +1432,7 @@ function main() {
     if (rendererReady) w.webContents.send('app:new-note'); else pendingNewNote = true;
   }
   handle('app:openDataFolder', () => shell.openPath(DATA_DIR));
-  handle('app:openExternal', (_e, url) => { if (/^https?:/i.test(url)) shell.openExternal(url); });
+  handle('app:openExternal', (_e, url) => { if (H.isOpenableLink(url)) shell.openExternal(url); });
 
   handle('app:exportNote', async (_e, id) => {
     const out = store.exportNote(id);
