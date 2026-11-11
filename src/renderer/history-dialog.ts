@@ -168,8 +168,8 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'history-fold';
-    btn.textContent = lines + ' unchanged lines';
-    btn.title = 'Show these lines';
+    btn.innerHTML = I('chevron-right');
+    btn.append('Show ' + lines + ' unchanged lines');
     btn.addEventListener('click', () => btn.replaceWith(document.createTextNode(text)));
     return btn;
   }
