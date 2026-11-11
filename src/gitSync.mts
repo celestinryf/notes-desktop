@@ -5,6 +5,8 @@ import type { GitRun } from './git-run.mts';
 import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
 import { MAX_TEXT_BYTES, isRecord, isAuthFailure } from './shared/helpers.mts';
+import { VersionClock, DEFAULT_TIMING, uniformTiming } from './version-timing.mts';
+import type { VersionTiming, ChangedNote } from './version-timing.mts';
 
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
@@ -102,7 +104,8 @@ class GitSync {
   source: string;
   dir: string;
   snapshot: string;
-  debounceMs: number;
+  clock: VersionClock;
+  dueAt: number | null;
   now: () => number;
   timer: NodeJS.Timeout | null;
   busy: Promise<GitResult> | null;
@@ -120,15 +123,16 @@ class GitSync {
   remoteEnv: (url: string) => Record<string, string> | undefined;
   onAuthFailed: (url: string) => Promise<unknown>;
   lastSyncTry: number;
-  constructor(dataDir: string, opts?: { debounceMs?: number, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined, onAuthFailed?: (url: string) => Promise<unknown> }) {
+  constructor(dataDir: string, opts?: { debounceMs?: number, timing?: Partial<VersionTiming>, now?: () => number, onChange?: (state: GitState) => void, beforeSnapshot?: () => void, workTree?: () => string | null, linkedFiles?: () => LinkedFile[], keptOut?: () => KeptOut[], discardFile?: (absPath: string) => Promise<void>, onPulled?: (pulled: Pulled) => void | Promise<void>, remoteEnv?: (url: string) => Record<string, string> | undefined, onAuthFailed?: (url: string) => Promise<unknown> }) {
     opts = opts || {};
     this.dataDir = dataDir;
     this.source = path.join(dataDir, 'notes.json');
     this.dir = path.join(dataDir, 'history');
     this.snapshot = path.join(this.dir, 'notes.json');
-    this.debounceMs = opts.debounceMs == null ? 4000 : opts.debounceMs;
+    this.clock = new VersionClock(Object.assign({}, opts.debounceMs == null ? DEFAULT_TIMING : uniformTiming(opts.debounceMs), opts.timing));
     this.now = opts.now || Date.now;
     this.timer = null;
+    this.dueAt = null;
     this.busy = null;
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
@@ -308,6 +312,7 @@ class GitSync {
 
   async configure(settings: Settings) {
     this.state.enabled = !!settings.gitEnabled;
+    this.clock.committed();
     const wantedRemote = String(settings.gitRemote || '').trim();
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
     if (!(await this.available())) { this._set({ lastError: 'Notes could not start git.' }); return this.status(); }
@@ -369,15 +374,39 @@ class GitSync {
     throw lastErr;
   }
 
-  noteChanged() {
+  noteChanged(notes?: readonly ChangedNote[]) {
     if (!this.state.enabled) return;
     this._set({ pending: true });
+    this._commitAfter(this.clock.changed(notes, this.now()));
+  }
+
+  attentionLost() {
+    this._commitSooner(this.clock.attentionLost(this.now()));
+  }
+
+  settle() {
+    this._commitSooner(this.clock.settle(this.now()));
+  }
+
+  _commitSooner(delay: number | null) {
+    if (delay === null || !this.state.enabled || !this.state.pending) return;
+    if (this.dueAt === null || this.now() + delay < this.dueAt) this._commitAfter(delay);
+  }
+
+  attentionBack() {
+    this.clock.attentionBack();
+  }
+
+  _commitAfter(delay: number) {
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.commit().catch(() => {}); }, this.debounceMs);
+    this.dueAt = this.now() + delay;
+    this.timer = setTimeout(() => { this.timer = null; this.dueAt = null; this.commit().catch(() => {}); }, delay);
   }
 
   async flush() {
     if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.dueAt = null;
     if (this.state.pending) await this.commit(undefined, { pull: false });
     if (this.busy) await this.busy;
   }
@@ -399,6 +428,7 @@ class GitSync {
   }
 
   async _commitNow(message?: string): Promise<GitResult> {
+    this.clock.committed();
     const notReady = await this._ready();
     if (notReady) return notReady;
     let add: GitRun | null;

@@ -255,6 +255,7 @@ interface IpcContract {
   'app:exportAll': () => FileResult;
   'app:importMarkdown': () => { canceled?: boolean; count: number; firstId?: string | null; failed?: string[] };
   'history:versions': (id: string, limit?: number) => HistoryVersions;
+  'history:settle': () => void;
   'lock:set': (id: string, password: string) => PublicNote | null;
   'lock:unlock': (id: string, password: string) => PublicNote | null;
   'lock:relock': (id: string) => PublicNote | null;
@@ -403,7 +404,7 @@ interface NotesApi {
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
     dictate: Invoker<'app:dictate'>; flushDone: () => void; trace: (event: string, fields?: TraceFields) => void; openDataFolder: Invoker<'app:openDataFolder'>; openExternal: Invoker<'app:openExternal'>;
     exportNote: Invoker<'app:exportNote'>; exportAll: Invoker<'app:exportAll'>; importMarkdown: Invoker<'app:importMarkdown'>;
-    historyVersions: Invoker<'history:versions'>; titleBar: Invoker<'app:titleBar'>;
+    historyVersions: Invoker<'history:versions'>; historySettle: Invoker<'history:settle'>; titleBar: Invoker<'app:titleBar'>;
   };
   on: {
     shown: Listener<'app:shown'>; newNote: Listener<'app:new-note'>; settingsChanged: Listener<'settings:changed'>; systemTheme: Listener<'theme:system'>;

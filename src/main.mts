@@ -132,7 +132,7 @@ function main() {
   const git = new GitSync(DATA_DIR, {
     remoteEnv: (url) => github.authEnvFor(url),
     onAuthFailed: (url) => github.recheck(url),
-    debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
+    debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || undefined,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
     workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
@@ -149,7 +149,7 @@ function main() {
       if (win && !win.isDestroyed()) win.webContents.send('git:pulled', pulled);
     },
   });
-  store.onContentChange = () => git.noteChanged();
+  store.onContentChange = (notes) => git.noteChanged(notes.filter((n) => !n.lock).map((n) => ({ id: n.id, body: n.body })));
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
   store.onIndexChange = (update) => searchIndex.changed(update);
   searchIndex.onReady = (info) => trace.write('search-index-ready', info);
@@ -281,12 +281,13 @@ function main() {
       stickies.broadcast('app:flush');
       git.flush().catch(() => {}).finally(flushStore);
     });
-    w.on('hide', () => { writeRuntime(); relockOnHide(); });
+    w.on('hide', () => { writeRuntime(); relockOnHide(); git.attentionLost(); });
     w.on('focus', () => {
       if (store.settings.alwaysOnTop && !w.isAlwaysOnTop()) w.setAlwaysOnTop(true);
       writeRuntime();
+      git.attentionBack();
     });
-    w.on('blur', () => writeRuntime());
+    w.on('blur', () => { writeRuntime(); git.attentionLost(); });
 
     w.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) shell.openExternal(url);
@@ -1189,6 +1190,7 @@ function main() {
 
   handle('git:status', () => git.status());
   handle('git:commit', () => git.commit('manual commit'));
+  handle('history:settle', () => { git.settle(); });
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
   handle('git:sync', () => git.sync());

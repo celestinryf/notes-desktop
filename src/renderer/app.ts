@@ -1881,7 +1881,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (gone >= 0 && id !== state.currentId) { removeTabAt(gone); tabsChanged(); }
       return;
     }
-    if (state.dirty) { await flushSave(); stashIfDirty(); }
+    if (state.dirty) { await flushSave(); stashIfDirty(); api.app.historySettle().catch(() => {}); }
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;
@@ -2061,7 +2061,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
 
-  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
+  const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
   const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
@@ -3197,6 +3197,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.historyRecordBtn.addEventListener('click', recordAgain);
     el.historyCloseBtn.addEventListener('click', () => el.historyDialog.close());
     el.historyRestoreBtn.addEventListener('click', restoreVersion);
+    el.historyCompareSelect.addEventListener('change', changeCompare);
+    el.historyDialog.addEventListener('keydown', (e) => { if (e.key === 'F3') { e.preventDefault(); e.stopPropagation(); stepChange(e.shiftKey ? -1 : 1); } });
     el.historyDialog.addEventListener('close', () => focusBody());
     el.findPrevBtn.addEventListener('click', () => runFind(false));
     el.findCloseBtn.addEventListener('click', closeFind);
