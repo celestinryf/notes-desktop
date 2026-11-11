@@ -165,7 +165,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     closePdfPages();
     if (pdfComments) pdfComments.stop();
     const ctl = pdfController();
-    if (!ctl) { showBanner('The PDF viewer failed to load. Use "Open with…" for your PDF app.'); return; }
+    if (!ctl) { showBanner('The PDF viewer failed to load. Use "Open in default app" in the More menu for your PDF app.'); return; }
     pdfShownKey = key;
     const seq = ++pdfSeq;
     pdfNote = null;
@@ -179,7 +179,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     } catch (err) {
       if (seq !== pdfSeq) return;
       pdfShownKey = null;
-      showBanner('Could not show this PDF: ' + ipcErrorText(err) + ' Use "Open with…" for your PDF app.');
+      showBanner('Could not show this PDF: ' + ipcErrorText(err) + ' Use "Open in default app" in the More menu for your PDF app.');
     }
   }
 

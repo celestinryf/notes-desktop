@@ -319,6 +319,7 @@ const SCENES = {
   palette: { about: 'The command palette, empty query', run: key('Control+p') },
   'palette-query': { about: 'The command palette, typing', run: async (page) => { await page.keyboard.press('Control+p'); await sleep(250); await page.keyboard.type('plan'); await sleep(400); } },
   more: { about: 'The More menu of a note', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
+  'more-file': { about: 'The More menu of a file note: the "This file" group with Show in Explorer, Open with the default app and Convert to…', file: 'js', run: steps(openNote('trail.js'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
   'more-kept-out': { about: 'The More menu of a note kept out of history: the item reads "Record in history again"', keepOut: ['n-plan'], run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }) },
   'history-kept-out': { about: 'Earlier versions of a note kept out of history: the notice and the way back', keepOut: ['n-plan'], settings: { gitEnabled: true }, run: steps(openNote('Q4 planning'), key('Control+Shift+h'), async () => { await sleep(800); }) },
   'keep-out-toast': { about: 'Keeping a note out of history from the More menu: the toast with Undo', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#moreBtn'); await sleep(300); }, async (page) => { await page.click('#historyKeepBtn'); await sleep(500); }) },

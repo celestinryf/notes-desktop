@@ -1943,6 +1943,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.duplicateBtn.classList.toggle('hidden', inTrash);
     el.copyNameBtn.classList.toggle('hidden', inTrash || !note.filePath);
     el.copyPathBtn.classList.toggle('hidden', inTrash || !note.filePath);
+    el.fileRevealBtn.classList.toggle('hidden', inTrash || !note.filePath);
+    el.fileOpenBtn.classList.toggle('hidden', inTrash || !note.filePath);
     el.splitBtn.classList.toggle('hidden', inTrash);
     el.restoreBtn.classList.toggle('hidden', !inTrash);
     el.destroyBtn.classList.toggle('hidden', !inTrash);
@@ -2127,6 +2129,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (!(isFile && note.fileKind === 'pdf')) clearPdf();
     if (!(isFile && note.fileKind === 'image')) clearImage();
     closeConvertMenu();
+    el.fileConvertBtn.classList.add('hidden');
     el.editorColumn.classList.toggle('shows-document', isFile && (note.fileKind === 'pdf' || !!(note.fileKind && H.CRAFT_OF[note.fileKind])));
     el.editor.classList.toggle('shows-image', isFile && note.fileKind === 'image');
     const craft = isFile ? craftFor(note) : null;
@@ -2136,7 +2139,6 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     syncTextViews(note);
     if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
-    el.fileConvertBtn.classList.add('hidden');
     api.files.convertOptions(note.id).then((opts) => { if (state.currentId === note.id) el.fileConvertBtn.classList.toggle('hidden', !opts.length); }).catch(() => {});
     const shownPath = note.trashedAt && note.trashedFrom ? note.trashedFrom : note.filePath;
     el.filePath.textContent = shownPath;
@@ -2155,7 +2157,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       showBanner('');
       showImage(note);
     } else if (note.fileKind === 'binary') {
-      showBanner('This file type cannot be shown here. Use "Open with…" to open it in its own app.');
+      showBanner('This file type cannot be shown here. Use "Open in default app" in the More menu to open it in its own app.');
     }
   }
 
@@ -2991,7 +2993,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (!el.moreMenu.classList.contains('hidden')) { e.preventDefault(); closeMoreMenu(); el.moreBtn.focus(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); (isShown(el.shareBtn) ? el.shareBtn : el.moreBtn).focus(); return; }
-      if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.fileConvertBtn.focus(); return; }
+      if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.moreBtn.focus(); return; }
       if (!el.lockMenu.classList.contains('hidden')) { e.preventDefault(); el.lockMenu.classList.add('hidden'); el.lockBtn.focus(); return; }
       if (state.menuFolderId) { e.preventDefault(); closeFolderMenu(); return; }
       if (!el.pageMenu.classList.contains('hidden') || !el.bookMenu.classList.contains('hidden')) { e.preventDefault(); closeAllBookMenus(); return; }
@@ -3116,7 +3118,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.imageView.addEventListener('load', syncImageToggle);
     el.imageView.addEventListener('error', () => {
       if (!el.imageView.getAttribute('src')) return;
-      showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open with…" to open it.');
+      showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open in default app" in the More menu to open it.');
     });
     el.agentFilesBtn.addEventListener('click', addAgentFiles);
     el.vaultAddFolderBtn.addEventListener('click', addVaultFolder);

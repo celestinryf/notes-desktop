@@ -27,7 +27,7 @@ export function createConvertMenu({ api, flushSave, openFiles }: ConvertMenuDeps
       if (o.note) { const n = document.createElement('span'); n.className = 'menu-note'; n.textContent = o.note; b.append(n); }
       return b;
     }));
-    placePopover(el.convertMenu, el.fileConvertBtn);
+    placePopover(el.convertMenu, el.moreBtn);
     const firstItem = el.convertMenu.querySelector('button');
     if (firstItem) firstItem.focus();
   }

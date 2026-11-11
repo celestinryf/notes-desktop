@@ -24674,7 +24674,7 @@
       if (pdfComments) pdfComments.stop();
       const ctl = pdfController();
       if (!ctl) {
-        showBanner('The PDF viewer failed to load. Use "Open with\u2026" for your PDF app.');
+        showBanner('The PDF viewer failed to load. Use "Open in default app" in the More menu for your PDF app.');
         return;
       }
       pdfShownKey = key;
@@ -24690,7 +24690,7 @@
       } catch (err) {
         if (seq !== pdfSeq) return;
         pdfShownKey = null;
-        showBanner("Could not show this PDF: " + ipcErrorText(err) + ' Use "Open with\u2026" for your PDF app.');
+        showBanner("Could not show this PDF: " + ipcErrorText(err) + ' Use "Open in default app" in the More menu for your PDF app.');
       }
     }
     const pdfDirty = () => !!(pdf && pdfNote && pdf.isDirty());
@@ -25214,7 +25214,7 @@
             onOpenFailed: (err) => {
               const quiet = warming !== null;
               drop();
-              if (!quiet) showBanner(ui.label + " could not open this " + ui.what + ": " + err + '. Use "Open with\u2026" to open it in ' + ui.openWith + ".");
+              if (!quiet) showBanner(ui.label + " could not open this " + ui.what + ": " + err + '. Use "Open in default app" in the More menu to open it in ' + ui.openWith + ".");
             },
             theme: "dark",
             darkPage: true,
@@ -25317,7 +25317,7 @@
         } catch (err) {
           if (s !== seq) return;
           drop();
-          showBanner("Could not open this " + ui.what + " in " + ui.label + ": " + ipcErrorText(err) + ' Use "Open with\u2026" to open it in ' + ui.openWith + ".");
+          showBanner("Could not open this " + ui.what + " in " + ui.label + ": " + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it in ' + ui.openWith + ".");
         }
       }
       function resumeParked(k) {
@@ -25437,7 +25437,7 @@
         crafts[key].show(n);
         return;
       }
-      showBanner("Notes shows ." + extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open with\u2026" to open it in ' + CRAFT_UI[key].openWith + ".");
+      showBanner("Notes shows ." + extOf(n.filePath) + " files in " + CRAFT_UI[key].label + ', which is not available right now. Use "Open in default app" in the More menu to open it in ' + CRAFT_UI[key].openWith + ".");
     }
     return { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly };
   }
@@ -26016,7 +26016,7 @@
     function docxBannerFor(res) {
       const fixed = res.readOnly ? " " + res.readOnly + (res.readOnly === 1 ? " paragraph has" : " paragraphs have") + ' links, charts, text boxes, tracked changes or similar, and cannot be edited here; use "Open with\u2026" for those.' : "";
       if (res.editable) return "Click into the text to edit it. Ctrl+B, Ctrl+I and Ctrl+U (or the buttons) set bold, italic and underline. Save (Ctrl+S) writes your changes into the document, and the original is backed up first." + fixed;
-      return "Word document, shown as laid out in the file. It cannot be edited here: " + (res.block || "none of its text is plain enough for Notes to write back safely") + '. Use "Open with\u2026" to edit it in Word.';
+      return "Word document, shown as laid out in the file. It cannot be edited here: " + (res.block || "none of its text is plain enough for Notes to write back safely") + '. Use "Open in default app" in the More menu to edit it in Word.';
     }
     async function showDocx(note) {
       if (useWordCraft()) {
@@ -26025,7 +26025,7 @@
       }
       if (!isOoxmlWordFile(note)) {
         el.docxEditor.classList.add("hidden");
-        showBanner("Notes shows ." + extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with\u2026" to open it in Word.');
+        showBanner("Notes shows ." + extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open in default app" in the More menu to open it in Word.');
         return;
       }
       const key = note.id + ":" + note.fileMtime;
@@ -26053,7 +26053,7 @@
         if (seq !== docxSeq) return;
         docxShownKey = null;
         el.docxView.removeAttribute("srcdoc");
-        showBanner("Could not show this Word document: " + ipcErrorText(err) + ' Use "Open with\u2026" to open it in Word.');
+        showBanner("Could not show this Word document: " + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it in Word.');
       }
     }
     const docxDirty = () => !!(docx && docxNote && docx.isDirty());
@@ -26139,7 +26139,7 @@
       } catch (err) {
         if (seq !== imageSeq) return;
         clearImage();
-        showBanner("Could not show this image: " + ipcErrorText(err) + ' Use "Open with\u2026" to open it.');
+        showBanner("Could not show this image: " + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it.');
       }
     }
     function clearImage() {
@@ -26198,7 +26198,7 @@
         }
         return b;
       }));
-      placePopover(el.convertMenu, el.fileConvertBtn);
+      placePopover(el.convertMenu, el.moreBtn);
       const firstItem = el.convertMenu.querySelector("button");
       if (firstItem) firstItem.focus();
     }
@@ -28315,6 +28315,8 @@
       el.duplicateBtn.classList.toggle("hidden", inTrash);
       el.copyNameBtn.classList.toggle("hidden", inTrash || !note.filePath);
       el.copyPathBtn.classList.toggle("hidden", inTrash || !note.filePath);
+      el.fileRevealBtn.classList.toggle("hidden", inTrash || !note.filePath);
+      el.fileOpenBtn.classList.toggle("hidden", inTrash || !note.filePath);
       el.splitBtn.classList.toggle("hidden", inTrash);
       el.restoreBtn.classList.toggle("hidden", !inTrash);
       el.destroyBtn.classList.toggle("hidden", !inTrash);
@@ -28495,6 +28497,7 @@
       if (!(isFile && note.fileKind === "pdf")) clearPdf();
       if (!(isFile && note.fileKind === "image")) clearImage();
       closeConvertMenu();
+      el.fileConvertBtn.classList.add("hidden");
       el.editorColumn.classList.toggle("shows-document", isFile && (note.fileKind === "pdf" || !!(note.fileKind && CRAFT_OF[note.fileKind])));
       el.editor.classList.toggle("shows-image", isFile && note.fileKind === "image");
       const craft = isFile ? craftFor(note) : null;
@@ -28504,7 +28507,6 @@
       syncTextViews(note);
       if (!isFile) return;
       el.fileKind.textContent = fileBadge(note);
-      el.fileConvertBtn.classList.add("hidden");
       api.files.convertOptions(note.id).then((opts) => {
         if (state.currentId === note.id) el.fileConvertBtn.classList.toggle("hidden", !opts.length);
       }).catch(() => {
@@ -28526,7 +28528,7 @@
         showBanner("");
         showImage(note);
       } else if (note.fileKind === "binary") {
-        showBanner('This file type cannot be shown here. Use "Open with\u2026" to open it in its own app.');
+        showBanner('This file type cannot be shown here. Use "Open in default app" in the More menu to open it in its own app.');
       }
     }
     const { openConvertMenu, closeConvertMenu, convertCurrent } = createConvertMenu({ api, flushSave, openFiles });
@@ -29467,7 +29469,7 @@
         if (!el.convertMenu.classList.contains("hidden")) {
           e.preventDefault();
           closeConvertMenu();
-          el.fileConvertBtn.focus();
+          el.moreBtn.focus();
           return;
         }
         if (!el.lockMenu.classList.contains("hidden")) {
@@ -29788,7 +29790,7 @@
       el.imageView.addEventListener("load", syncImageToggle);
       el.imageView.addEventListener("error", () => {
         if (!el.imageView.getAttribute("src")) return;
-        showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open with\u2026" to open it.');
+        showBanner('This image could not be shown: the file may be damaged, or in a format Notes cannot show. Use "Open in default app" in the More menu to open it.');
       });
       el.agentFilesBtn.addEventListener("click", addAgentFiles);
       el.vaultAddFolderBtn.addEventListener("click", addVaultFolder);
