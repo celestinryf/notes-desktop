@@ -502,7 +502,7 @@ function sanitizeSettings(input: unknown) {
   s.fontSize = clampFontSize(s.fontSize);
   s.openAtLogin = !!s.openAtLogin;
   s.alwaysOnTop = !!s.alwaysOnTop;
-  s.autoUpdate = src.autoUpdate === undefined ? true : !!src.autoUpdate;
+  s.autoUpdate = !!s.autoUpdate;
   s.sidebarCollapsed = !!s.sidebarCollapsed;
   s.listCollapsed = !!s.listCollapsed;
   s.listMode = s.listMode === 'list' ? 'list' : 'tree';

@@ -2661,8 +2661,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   let appUpdate: UpdateStatus | null = null;
   function showUpdateStatus(status: UpdateStatus) {
     appUpdate = status;
-    if (status.state === 'behind' && !status.failed) toast(status.message, { label: 'Restart now', run: applyUpdate });
-    else toast(status.message);
+    toast(status.message, status.state === 'behind' && !status.failed ? { label: 'Restart now', run: applyUpdate } : undefined);
   }
   async function checkForUpdates() {
     toast('Checking for updates…');

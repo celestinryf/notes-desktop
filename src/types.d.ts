@@ -131,7 +131,7 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null; craftTrace: boolean;
   notesDir: string | null; homeVaultId: string | null; movedToFiles: MovedToFiles | null; filesError: string | null;
 }
-interface UpdateStatus { state: 'off' | 'unknown' | 'current' | 'behind' | 'diverged' | 'dirty' | 'error'; message: string; behind: number; target: string | null; failed: boolean; checkedAt: number | null }
+interface UpdateStatus { state: 'off' | 'unknown' | 'current' | 'behind' | 'diverged' | 'dirty' | 'error'; message: string; failed: boolean }
 interface MovedToFiles { notesDir: string; notes: number; folders: number; links: number; renamed: { kind: 'note' | 'folder'; from: string; to: string }[]; backupDir: string; at: number }
 interface FilesMove { report: MovedToFiles | null; error: string | null }
 type TraceFields = Record<string, string | number | boolean | null>;
