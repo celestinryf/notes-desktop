@@ -62,6 +62,11 @@ function resolveNode(pathDirs?: string[]) {
   return null;
 }
 
+function resolveNpm(node: string) {
+  const cli = path.join(path.dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  return exists(cli) ? { file: node, args: [cli] } : null;
+}
+
 function launchSpec(spec: { file: string, isScript: boolean }, args: string[], opts?: { node?: string | null, pathDirs?: string[] }) {
   opts = opts || {};
   if (!spec.isScript) return { file: spec.file, args: args.slice(), env: {} };
@@ -88,4 +93,4 @@ function checkSubscriptionAuth(text: unknown) {
   return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
 }
 
-export { resolveExecutable, resolveClaude, resolveNode, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
+export { resolveExecutable, resolveClaude, resolveNode, resolveNpm, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
