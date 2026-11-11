@@ -332,3 +332,41 @@ test('a change with no note named, as from a bot or a settings change, is a fini
   assert.equal(sync.status().commits, 1);
   await sync.flush();
 });
+
+test('built without a debounce, history uses the default version timing; a debounce sets every delay', () => {
+  const { DEFAULT_TIMING } = require('../../src/version-timing.mts');
+  assert.deepEqual(new GitSync(tmp()).clock.timing, DEFAULT_TIMING);
+  assert.deepEqual(new GitSync(tmp(), { debounceMs: undefined }).clock.timing, DEFAULT_TIMING);
+  assert.equal(new GitSync(tmp(), { debounceMs: 10 }).clock.timing.quietMs, 10);
+  assert.equal(new GitSync(tmp(), { debounceMs: 10, timing: { quietMs: 99 } }).clock.timing.quietMs, 99);
+});
+
+test('a failed commit attempt restarts the wait cap instead of leaving every later change due at once', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 20, attentionMs: 10, attentionWindowMs: 100, maxWaitMs: 500 }, beforeSnapshot: () => { throw new Error('no snapshot today'); } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  sync.noteChanged();
+  for (let i = 0; i < 100 && !/no snapshot today/.test(sync.status().lastError || ''); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.match(sync.status().lastError, /no snapshot today/);
+  assert.equal(sync.clock.pendingSince, null);
+  await sync.flush();
+});
+
+test('attention lost only brings a commit forward, never pushes a due one back, and does nothing while disabled', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 50, attentionMs: 2000, attentionWindowMs: 100, maxWaitMs: 20000 } });
+  sync.attentionLost();
+  assert.equal(sync.timer, null);
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":2}');
+  sync.noteChanged([{ id: 'n', body: 'Done.' }]);
+  const due = sync.dueAt;
+  sync.attentionLost();
+  assert.equal(sync.dueAt, due);
+  for (let i = 0; i < 100 && sync.status().commits !== 1; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(sync.status().commits, 1);
+  assert.equal(sync.dueAt, null);
+  await sync.flush();
+});

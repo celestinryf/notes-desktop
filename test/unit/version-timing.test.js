@@ -32,6 +32,21 @@ test('a deletion is judged by the text left before it', () => {
   assert.equal(editEndsAtBoundary('Anything', '   '), true);
 });
 
+test('a space after a word is not a boundary, but a space after a full stop is', () => {
+  assert.equal(editEndsAtBoundary('Hello', 'Hello '), false);
+  assert.equal(editEndsAtBoundary('One.', 'One. '), true);
+  assert.equal(editEndsAtBoundary('One. Two', 'One.  Two'), true);
+  assert.equal(editEndsAtBoundary('One Two', 'One  Two'), false);
+});
+
+test('a long run of one character is judged in bounded time', () => {
+  const run = 'a'.repeat(200000);
+  const started = Date.now();
+  assert.equal(editEndsAtBoundary(run, run + 'a'), false);
+  assert.equal(editEndsAtBoundary('x. ' + run, 'x. ' + run + 'a'), false);
+  assert.ok(Date.now() - started < 500);
+});
+
 test('with no earlier text known, the end of the note decides', () => {
   assert.equal(editEndsAtBoundary(null, 'Done.'), true);
   assert.equal(editEndsAtBoundary(null, 'Not don'), false);
@@ -62,6 +77,14 @@ test('attention lost commits soon, including the save that lands just after the 
   clock.attentionLost(2000);
   clock.attentionBack();
   assert.equal(clock.changed([{ id: 'a', body: 'mid-sentence still going o' }], 2010), T.quietMs);
+});
+
+test('settling (a note switch) commits soon without arming the attention window', () => {
+  const clock = new VersionClock(T);
+  assert.equal(clock.settle(0), null);
+  clock.changed([{ id: 'a', body: 'mid-sent' }], 1000);
+  assert.equal(clock.settle(1001), T.attentionMs);
+  assert.equal(clock.changed([{ id: 'a', body: 'mid-sente' }], 1005), T.quietMs);
 });
 
 test('pending changes never wait longer than the cap, and a commit resets it', () => {

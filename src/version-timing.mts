@@ -4,12 +4,16 @@ type ChangedNote = { id: string; body: string };
 const DEFAULT_TIMING: VersionTiming = { quietMs: 45000, boundaryQuietMs: 8000, attentionMs: 1000, attentionWindowMs: 3000, maxWaitMs: 10 * 60 * 1000 };
 const SEEN_LIMIT = 500;
 const BOUNDARY_END = /(?:[.!?…:][)\]"'”’»]*|\n)\s*$/u;
+const TAIL_CHARS = 16;
+const ALIGNMENT_STEPS = 64;
+
+const endsAtBoundary = (text: string) => BOUNDARY_END.test(text.slice(-TAIL_CHARS));
 
 const uniformTiming = (ms: number): VersionTiming => ({ quietMs: ms, boundaryQuietMs: ms, attentionMs: ms, attentionWindowMs: ms, maxWaitMs: ms * 20 });
 
 function editEndsAtBoundary(before: string | null, after: string): boolean {
   if (!after.trim()) return true;
-  if (before === null) return BOUNDARY_END.test(after);
+  if (before === null) return endsAtBoundary(after);
   let head = 0;
   const max = Math.min(before.length, after.length);
   while (head < max && before[head] === after[head]) head++;
@@ -17,14 +21,15 @@ function editEndsAtBoundary(before: string | null, after: string): boolean {
   while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
   const inserted = after.slice(head, after.length - tail);
   const deleted = before.slice(head, before.length - tail);
-  if (inserted && deleted) return BOUNDARY_END.test(inserted);
+  if (inserted && deleted) return endsAtBoundary(inserted);
   const edited = inserted ? after : before;
   const length = (inserted || deleted).length;
-  for (let start = head, end = head + length; ; start--, end--) {
-    const endOfEdit = inserted ? edited.slice(start, end) : after.slice(0, start);
-    if (!endOfEdit.trim() || BOUNDARY_END.test(endOfEdit)) return true;
+  for (let start = head, end = head + length, steps = 0; steps < ALIGNMENT_STEPS; start--, end--, steps++) {
+    const endOfEdit = inserted && inserted.trim() ? edited.slice(start, end) : after.slice(0, inserted ? end : start);
+    if (endsAtBoundary(endOfEdit)) return true;
     if (start === 0 || edited[start - 1] !== edited[end - 1]) return false;
   }
+  return false;
 }
 
 class VersionClock {
@@ -54,6 +59,10 @@ class VersionClock {
 
   attentionLost(now: number): number | null {
     this.attentionLostAt = now;
+    return this.settle(now);
+  }
+
+  settle(now: number): number | null {
     return this.pendingSince === null ? null : this._capped(this.timing.attentionMs, now);
   }
 

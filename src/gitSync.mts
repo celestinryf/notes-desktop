@@ -105,6 +105,7 @@ class GitSync {
   dir: string;
   snapshot: string;
   clock: VersionClock;
+  dueAt: number | null;
   now: () => number;
   timer: NodeJS.Timeout | null;
   busy: Promise<GitResult> | null;
@@ -131,6 +132,7 @@ class GitSync {
     this.clock = new VersionClock(Object.assign({}, opts.debounceMs == null ? DEFAULT_TIMING : uniformTiming(opts.debounceMs), opts.timing));
     this.now = opts.now || Date.now;
     this.timer = null;
+    this.dueAt = null;
     this.busy = null;
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
@@ -310,6 +312,7 @@ class GitSync {
 
   async configure(settings: Settings) {
     this.state.enabled = !!settings.gitEnabled;
+    this.clock.committed();
     const wantedRemote = String(settings.gitRemote || '').trim();
     if (!this.state.enabled) { this._set({ pending: false }); return this.status(); }
     if (!(await this.available())) { this._set({ lastError: 'Notes could not start git.' }); return this.status(); }
@@ -378,8 +381,16 @@ class GitSync {
   }
 
   attentionLost() {
-    const delay = this.clock.attentionLost(this.now());
-    if (delay !== null && this.state.enabled && this.state.pending) this._commitAfter(delay);
+    this._commitSooner(this.clock.attentionLost(this.now()));
+  }
+
+  settle() {
+    this._commitSooner(this.clock.settle(this.now()));
+  }
+
+  _commitSooner(delay: number | null) {
+    if (delay === null || !this.state.enabled || !this.state.pending) return;
+    if (this.dueAt === null || this.now() + delay < this.dueAt) this._commitAfter(delay);
   }
 
   attentionBack() {
@@ -388,11 +399,14 @@ class GitSync {
 
   _commitAfter(delay: number) {
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.timer = null; this.commit().catch(() => {}); }, delay);
+    this.dueAt = this.now() + delay;
+    this.timer = setTimeout(() => { this.timer = null; this.dueAt = null; this.commit().catch(() => {}); }, delay);
   }
 
   async flush() {
     if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.dueAt = null;
     if (this.state.pending) await this.commit(undefined, { pull: false });
     if (this.busy) await this.busy;
   }
@@ -414,12 +428,12 @@ class GitSync {
   }
 
   async _commitNow(message?: string): Promise<GitResult> {
+    this.clock.committed();
     const notReady = await this._ready();
     if (notReady) return notReady;
     let add: GitRun | null;
     try { add = await this._stage(); }
     catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
-    this.clock.committed();
     if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
     if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
     const staged = await this._staged();

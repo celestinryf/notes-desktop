@@ -132,7 +132,7 @@ function main() {
   const git = new GitSync(DATA_DIR, {
     remoteEnv: (url) => github.authEnvFor(url),
     onAuthFailed: (url) => github.recheck(url),
-    debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || 4000,
+    debounceMs: Number(process.env.NOTES_APP_GIT_DEBOUNCE_MS) || undefined,
     onChange: (s) => { if (win && !win.isDestroyed()) win.webContents.send('git:status', s); },
     beforeSnapshot: () => { store.flush(); },
     workTree: () => { const home = store.homeVault(); return home ? home.path : null; },
@@ -1190,7 +1190,7 @@ function main() {
 
   handle('git:status', () => git.status());
   handle('git:commit', () => git.commit('manual commit'));
-  handle('history:settle', () => { git.attentionLost(); });
+  handle('history:settle', () => { git.settle(); });
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
   handle('git:sync', () => git.sync());

@@ -21454,8 +21454,11 @@
   }
 
   // src/shared/text-diff.mts
-  var WORD_TOKEN = /\s+|\w+|[^\s\w]/gu;
+  var WORD = /[\p{L}\p{N}_]+/gu;
+  var WORD_TOKEN = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
   var WORD_TOKEN_LIMIT = 4e4;
+  var MAX_EDIT_DISTANCE = 3e3;
+  var GROUP_GAP_WORDS = 2;
   function tokens(text, byLine) {
     if (!text) return [];
     if (byLine) return text.split(/(?<=\n)/);
@@ -21470,13 +21473,13 @@
     return { head, tail };
   }
   function myers(a, b) {
-    const n = a.length, m = b.length, max = n + m;
-    if (!max) return [];
+    const n = a.length, m = b.length, max = Math.min(n + m, MAX_EDIT_DISTANCE);
+    if (!n && !m) return [];
     const offset = max;
     const v = new Int32Array(2 * max + 2);
     const trace = [];
     for (let d = 0; d <= max; d++) {
-      trace.push(v.slice());
+      trace.push(v.slice(offset - d, offset + d + 1));
       for (let k = -d; k <= d; k += 2) {
         let x = k === -d || k !== d && v[offset + k - 1] < v[offset + k + 1] ? v[offset + k + 1] : v[offset + k - 1] + 1;
         let y = x - k;
@@ -21485,19 +21488,20 @@
           y++;
         }
         v[offset + k] = x;
-        if (x >= n && y >= m) return backtrack(trace, d, n, m, offset);
+        if (x >= n && y >= m) return backtrack(trace, d, n, m);
       }
     }
-    return [];
+    return null;
   }
-  function backtrack(trace, dEnd, n, m, offset) {
+  function backtrack(trace, dEnd, n, m) {
     const ops = [];
     let x = n, y = m;
     for (let d = dEnd; d > 0; d--) {
       const v = trace[d];
+      const at = (k2) => v[k2 + d];
       const k = x - y;
-      const prevK = k === -d || k !== d && v[offset + k - 1] < v[offset + k + 1] ? k + 1 : k - 1;
-      const prevX = v[offset + prevK];
+      const prevK = k === -d || k !== d && at(k - 1) < at(k + 1) ? k + 1 : k - 1;
+      const prevX = at(prevK);
       const prevY = prevX - prevK;
       while (x > prevX && y > prevY) {
         ops.push("same");
@@ -21520,23 +21524,21 @@
     return ops.reverse();
   }
   function merge(segments, kind, text) {
+    if (!text) return;
     const last = segments[segments.length - 1];
     if (last && last.kind === kind) last.text += text;
     else segments.push({ kind, text });
   }
-  function diffText(before, after) {
-    if (before === after) return before ? [{ kind: "same", text: before }] : [];
-    let a = tokens(before, false), b = tokens(after, false);
-    if (a.length + b.length > WORD_TOKEN_LIMIT) {
-      a = tokens(before, true);
-      b = tokens(after, true);
-    }
-    const { head, tail } = commonEnds(a, b);
+  function middleSegments(midA, midB) {
     const segments = [];
-    if (head) merge(segments, "same", a.slice(0, head).join(""));
-    const midA = a.slice(head, a.length - tail), midB = b.slice(head, b.length - tail);
+    const ops = myers(midA, midB);
+    if (!ops) {
+      merge(segments, "del", midA.join(""));
+      merge(segments, "add", midB.join(""));
+      return segments;
+    }
     let i = 0, j = 0;
-    for (const op of myers(midA, midB)) {
+    for (const op of ops) {
       if (op === "same") {
         merge(segments, "same", midA[i]);
         i++;
@@ -21549,24 +21551,77 @@
         j++;
       }
     }
-    if (tail) merge(segments, "same", a.slice(a.length - tail).join(""));
     return segments;
   }
-  var countWords2 = (text) => (text.match(/\w+/gu) || []).length;
-  function diffCounts(segments) {
-    let added = 0, removed = 0;
-    for (const s of segments) {
-      if (s.kind === "add") added += countWords2(s.text);
-      else if (s.kind === "del") removed += countWords2(s.text);
+  var countWords2 = (text) => (text.match(WORD) || []).length;
+  function groupReplacements(segments) {
+    const out = [];
+    let del = "", add = "", open = false, hasDel = false, hasAdd = false;
+    const close = () => {
+      merge(out, "del", del);
+      merge(out, "add", add);
+      del = "";
+      add = "";
+      open = false;
+      hasDel = false;
+      hasAdd = false;
+    };
+    segments.forEach((s, i) => {
+      if (s.kind === "same") {
+        const next = segments[i + 1];
+        const replacing = next && (hasDel && hasAdd || hasDel && next.kind === "add" || hasAdd && next.kind === "del");
+        if (open && replacing && countWords2(s.text) <= GROUP_GAP_WORDS) {
+          del += s.text;
+          add += s.text;
+        } else {
+          if (open) close();
+          out.push({ kind: "same", text: s.text });
+        }
+        return;
+      }
+      open = true;
+      if (s.kind === "del") {
+        del += s.text;
+        hasDel = true;
+      } else {
+        add += s.text;
+        hasAdd = true;
+      }
+    });
+    if (open) close();
+    return out;
+  }
+  function diffText(before, after) {
+    if (before === after) return before ? [{ kind: "same", text: before }] : [];
+    let a = tokens(before, false), b = tokens(after, false);
+    let ends = commonEnds(a, b);
+    if (a.length + b.length - 2 * (ends.head + ends.tail) > WORD_TOKEN_LIMIT) {
+      a = tokens(before, true);
+      b = tokens(after, true);
+      ends = commonEnds(a, b);
     }
-    return { added, removed };
+    const { head, tail } = ends;
+    const segments = [];
+    merge(segments, "same", a.slice(0, head).join(""));
+    for (const s of groupReplacements(middleSegments(a.slice(head, a.length - tail), b.slice(head, b.length - tail)))) merge(segments, s.kind, s.text);
+    merge(segments, "same", a.slice(a.length - tail).join(""));
+    return segments;
+  }
+  function diffCounts(segments) {
+    let added = 0, removed = 0, places = 0;
+    segments.forEach((s, i) => {
+      if (s.kind === "same") return;
+      if (s.kind === "add") added += countWords2(s.text);
+      else removed += countWords2(s.text);
+      if (!(s.kind === "add" && i > 0 && segments[i - 1].kind === "del")) places++;
+    });
+    return { added, removed, places };
   }
   function diffSummary(counts) {
     const words = (n) => n + (n === 1 ? " word" : " words");
-    if (!counts.added && !counts.removed) return "No words differ.";
-    if (!counts.removed) return words(counts.added) + " added.";
-    if (!counts.added) return words(counts.removed) + " removed.";
-    return words(counts.added) + " added, " + counts.removed + " removed.";
+    if (!counts.added && !counts.removed) return counts.places ? "Only spacing or punctuation differs." : "No words differ.";
+    const change = !counts.removed ? words(counts.added) + " added" : !counts.added ? words(counts.removed) + " removed" : words(counts.added) + " added, " + counts.removed + " removed";
+    return counts.places > 1 ? change + ", in " + counts.places + " places. F3 steps through them." : change + ".";
   }
 
   // src/renderer/history-dialog.ts
@@ -21575,7 +21630,7 @@
   var COPIES_HINT = "A copy of this file is kept before each save: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
   var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
   function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }) {
-    const hist = { versions: [], copies: [], current: "", index: -1, noteId: null, opens: 0 };
+    const hist = { versions: [], copies: [], current: "", index: -1, noteId: null, opens: 0, changes: [], changeAt: -1 };
     const recordedHint = el.historyHint.textContent || "";
     function renderKeepOut(note) {
       const out = !!(note && note.keepOutOfHistory);
@@ -21700,10 +21755,9 @@
       markRow(i);
       renderDiff();
     }
-    function compareBase(i) {
-      if (el.historyCompareSelect.value === "before") return i + 1 < hist.versions.length ? hist.versions[i + 1].body : "";
-      return hist.current;
-    }
+    const comparingBefore = () => el.historyCompareSelect.value === "before";
+    const compareBase = (i) => comparingBefore() ? i + 1 < hist.versions.length ? hist.versions[i + 1].body : "" : hist.current;
+    const oldestLoaded = (i) => comparingBefore() && i + 1 >= hist.versions.length;
     function renderDiff() {
       const v = hist.versions[hist.index];
       if (!v) return;
@@ -21714,10 +21768,16 @@
         mark.textContent = s.text;
         return mark;
       }));
-      el.historyDiffSummary.textContent = diffSummary(diffCounts(segments));
-      const first = el.historyPreview.querySelector("ins, del");
-      if (first) first.scrollIntoView({ block: "center" });
+      el.historyDiffSummary.textContent = oldestLoaded(hist.index) ? "The oldest version loaded, so all of it reads as added." : diffSummary(diffCounts(segments));
+      hist.changes = Array.from(el.historyPreview.querySelectorAll("ins, del")).filter((m, i, all) => !(m.tagName === "INS" && i > 0 && all[i - 1].tagName === "DEL"));
+      hist.changeAt = -1;
+      if (hist.changes.length) stepChange(1);
       else el.historyPreview.scrollTop = 0;
+    }
+    function stepChange(dir) {
+      if (!hist.changes.length) return;
+      hist.changeAt = (hist.changeAt + dir + hist.changes.length) % hist.changes.length;
+      hist.changes[hist.changeAt].scrollIntoView({ block: "center" });
     }
     function changeCompare() {
       if (hist.versions.length) renderDiff();
@@ -21791,7 +21851,7 @@
       if (ok) toast("Restored the version from " + new Date(v.at).toLocaleString() + ". The text you had is still in history.");
       else if (state.conflictShown !== note.id) toast("Could not save the restored text yet; it will be retried.");
     }
-    return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare };
+    return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange };
   }
 
   // src/renderer/library-dialog.ts
@@ -28329,7 +28389,7 @@
     const { renderRemindButton, openRemindDialog, setReminder } = createReminders({ api, flushSave, refreshCurrentMeta });
     const { syncShareMenu, openShareMenu, closeShareMenu, shareAction } = createSharing({ api, flushSave, closeFind, GUEST, exportOfCurrent, exportCurrent, startLiveHost, openLiveDialog, stopLive });
     const { attachFiles, toggleRecording } = createAttachments({ api, flushSave, refresh });
-    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
+    const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
     const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
     const library = createLibraryDialog({
       api,
@@ -29846,6 +29906,13 @@
       el.historyCloseBtn.addEventListener("click", () => el.historyDialog.close());
       el.historyRestoreBtn.addEventListener("click", restoreVersion);
       el.historyCompareSelect.addEventListener("change", changeCompare);
+      el.historyDialog.addEventListener("keydown", (e) => {
+        if (e.key === "F3") {
+          e.preventDefault();
+          e.stopPropagation();
+          stepChange(e.shiftKey ? -1 : 1);
+        }
+      });
       el.historyDialog.addEventListener("close", () => focusBody());
       el.findPrevBtn.addEventListener("click", () => runFind(false));
       el.findCloseBtn.addEventListener("click", closeFind);

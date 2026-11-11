@@ -24,7 +24,7 @@ interface HistoryDialogDeps {
 const keepsCopies = (note: PublicNote) => !!note.filePath && (note.fileKind === 'pdf' || note.fileKind === 'docx');
 
 export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile }: HistoryDialogDeps) {
-  const hist: { versions: HistoryVersion[], copies: FileVersion[], current: string, index: number, noteId: string | null, opens: number } = { versions: [], copies: [], current: '', index: -1, noteId: null, opens: 0 };
+  const hist: { versions: HistoryVersion[], copies: FileVersion[], current: string, index: number, noteId: string | null, opens: number, changes: Element[], changeAt: number } = { versions: [], copies: [], current: '', index: -1, noteId: null, opens: 0, changes: [], changeAt: -1 };
   const recordedHint = el.historyHint.textContent || '';
 
   function renderKeepOut(note: PublicNote | null) {
@@ -143,10 +143,9 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     renderDiff();
   }
 
-  function compareBase(i: number) {
-    if (el.historyCompareSelect.value === 'before') return i + 1 < hist.versions.length ? hist.versions[i + 1].body : '';
-    return hist.current;
-  }
+  const comparingBefore = () => el.historyCompareSelect.value === 'before';
+  const compareBase = (i: number) => comparingBefore() ? (i + 1 < hist.versions.length ? hist.versions[i + 1].body : '') : hist.current;
+  const oldestLoaded = (i: number) => comparingBefore() && i + 1 >= hist.versions.length;
 
   function renderDiff() {
     const v = hist.versions[hist.index];
@@ -158,9 +157,16 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
       mark.textContent = s.text;
       return mark;
     }));
-    el.historyDiffSummary.textContent = diffSummary(diffCounts(segments));
-    const first = el.historyPreview.querySelector('ins, del');
-    if (first) first.scrollIntoView({ block: 'center' }); else el.historyPreview.scrollTop = 0;
+    el.historyDiffSummary.textContent = oldestLoaded(hist.index) ? 'The oldest version loaded, so all of it reads as added.' : diffSummary(diffCounts(segments));
+    hist.changes = Array.from(el.historyPreview.querySelectorAll('ins, del')).filter((m, i, all) => !(m.tagName === 'INS' && i > 0 && all[i - 1].tagName === 'DEL'));
+    hist.changeAt = -1;
+    if (hist.changes.length) stepChange(1); else el.historyPreview.scrollTop = 0;
+  }
+
+  function stepChange(dir: 1 | -1) {
+    if (!hist.changes.length) return;
+    hist.changeAt = (hist.changeAt + dir + hist.changes.length) % hist.changes.length;
+    hist.changes[hist.changeAt].scrollIntoView({ block: 'center' });
   }
 
   function changeCompare() {
@@ -224,5 +230,5 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
   }
 
-  return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare };
+  return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange };
 }

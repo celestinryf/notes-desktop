@@ -1045,7 +1045,7 @@ button.book-name:hover { background: var(--hover); }
 .history-compare { display: flex; align-items: center; gap: var(--s2); min-height: var(--control-h); }
 .history-compare-label { font-size: var(--t-sm); font-weight: 500; color: var(--fg-2); }
 .history-diff-summary { font-size: var(--t-xs); color: var(--fg-3); margin-left: auto; }
-.history-preview ins { text-decoration: none; background: var(--diff-add); }
+.history-preview ins { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; text-decoration-color: var(--fg-2); background: var(--diff-add); }
 .history-preview del { text-decoration: line-through; background: var(--diff-del); }
 .find-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1);

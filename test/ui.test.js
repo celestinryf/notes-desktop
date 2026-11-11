@@ -1467,6 +1467,8 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   await page.click('#historyList li:nth-child(' + (idx + 1) + ')');
   await waitForDom(() => { const p = document.getElementById('historyPreview'); const ins = p.querySelector('ins'), del = p.querySelector('del'); return !!ins && !!del && ins.textContent === 'one' && del.textContent === 'two' && p.textContent === 'version twoone'; });
   assert.equal(await page.$eval('#historyDiffSummary', (e) => e.textContent), '1 word added, 1 removed.');
+  await page.keyboard.press('F3');
+  assert.equal(await page.evaluate(() => document.getElementById('historyDialog').open), true);
   assert.equal(await page.$eval('#historyCompare', (e) => getComputedStyle(e).display !== 'none'), true);
   await page.selectOption('#historyCompareSelect', 'before');
   await waitForDom(() => { const p = document.getElementById('historyPreview'); const del = p.querySelector('del'); return !!p.querySelector('ins') && (!del || del.textContent !== 'two') && !/two/.test(p.textContent); });
