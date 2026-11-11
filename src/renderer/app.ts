@@ -2572,6 +2572,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.fontSizeValue.textContent = s.fontSize + 'px';
     el.openAtLoginInput.checked = s.openAtLogin;
     el.alwaysOnTopInput.checked = s.alwaysOnTop;
+    el.autoUpdateInput.checked = s.autoUpdate;
     syncAlignSeg(s.editorAlign);
     el.sidebarFloatInput.checked = !!s.sidebarCollapsed;
     el.editorFullWidthInput.checked = !s.editorWidth;
@@ -2657,9 +2658,24 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (settingsDirty()) await saveSettings(); else closeSettings();
   }
 
+  let appUpdate: UpdateStatus | null = null;
+  function showUpdateStatus(status: UpdateStatus) {
+    appUpdate = status;
+    if (status.state === 'behind' && !status.failed) toast(status.message, { label: 'Restart now', run: applyUpdate });
+    else toast(status.message);
+  }
+  async function checkForUpdates() {
+    toast('Checking for updates…');
+    showUpdateStatus(await api.app.updateCheck());
+  }
+  async function applyUpdate() {
+    const res = await api.app.updateApply();
+    if (!res.ok) toast('Could not update Notes: ' + (res.error || 'unknown error'));
+  }
+
   const SETTING_NAMES: Partial<Record<keyof Settings, string>> = {
     hotkey: 'Global hotkey', theme: 'Theme', colorScheme: 'Colour scheme', customColors: 'Custom colours', sidebarCollapsed: 'Hide the sidebar',
-    openAtLogin: 'Start at sign-in', alwaysOnTop: 'Keep above other windows', fontSize: 'Text size', editorWidth: 'Column width', editorAlign: 'Column position',
+    openAtLogin: 'Start at sign-in', alwaysOnTop: 'Keep above other windows', autoUpdate: 'Keep Notes up to date', fontSize: 'Text size', editorWidth: 'Column width', editorAlign: 'Column position',
     ttsVoice: 'Read-aloud voice', ttsRate: 'Read-aloud speed', gitEnabled: 'Git history', gitRemote: 'Git remote',
   };
 
@@ -2908,6 +2924,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('sidebar', 'View', sidebarLayout() === 'docked' ? 'Hide the sidebar' : 'Show the sidebar', 'panel-left', 'Ctrl+\\', toggleSidebar, !GUEST, 'auto hide float compact zen'),
       cmd('list', 'View', el.app.classList.contains('list-collapsed') ? 'Show the note list' : 'Hide the note list', 'list', 'Ctrl+Shift+\\', toggleList, !GUEST),
       cmd('tree-show-all', 'View', 'Show every note in this folder', 'list', '', () => showWholeLevel(state.view === 'folder' ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === 'folder' ? state.folderId : null), 'see more'),
+      cmd('update-check', 'App', 'Check for updates', 'refresh-cw', '', checkForUpdates, !GUEST, 'update version upgrade pull'),
+      cmd('update-apply', 'App', 'Update and restart Notes', 'download', '', applyUpdate, !GUEST && !!appUpdate && appUpdate.state === 'behind' && !appUpdate.failed, 'update version upgrade restart'),
       cmd('tips-again', 'App', 'Show the tips again', 'message-square', '', () => { hints.dismiss(); hints.forget(); toast('The tips will show again as you go.'); }, !GUEST && !!state.settings && state.settings.hintsShown.length > 0, 'hints help'),
       cmd('list-mode', 'View', settingsNow().listMode === 'tree' ? 'Note list: show as a list' : 'Note list: show folders with their notes', settingsNow().listMode === 'tree' ? 'list' : 'folder-open', '', () => updateSettings({ listMode: settingsNow().listMode === 'tree' ? 'list' : 'tree' }).then(() => refresh({ keepEditor: true })), !GUEST, 'tree outline view'),
       cmd('focus', 'View', 'Focus: hide the sidebar and the list', 'eye', '', () => updateSettings({ sidebarCollapsed: true, listCollapsed: true }), !GUEST && !(settingsNow().sidebarCollapsed && settingsNow().listCollapsed), 'zen distraction free writing'),
@@ -3171,6 +3189,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.remindCancelBtn.addEventListener('click', () => el.remindDialog.close());
     el.remindDialog.addEventListener('close', () => focusBody());
     api.on.notice((text) => toast(String(text)));
+    api.on.updateStatus(showUpdateStatus);
     api.on.editCommand(runEditCommand);
     api.on.reminderFired(({ id, title }) => {
       toast('⏰ ' + (title || 'Reminder'), { label: 'Open', run: async () => { await setView('all'); await openNote(id, { focus: 'body' }); } });
@@ -3364,6 +3383,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.fontSizeInput.addEventListener('change', () => setDraft({ fontSize: Number(el.fontSizeInput.value) }));
     el.openAtLoginInput.addEventListener('change', () => setDraft({ openAtLogin: el.openAtLoginInput.checked }));
     el.alwaysOnTopInput.addEventListener('change', () => setDraft({ alwaysOnTop: el.alwaysOnTopInput.checked }));
+    el.autoUpdateInput.addEventListener('change', () => setDraft({ autoUpdate: el.autoUpdateInput.checked }));
     el.importBtn.addEventListener('click', async () => {
       let res;
       try { res = await api.app.importMarkdown(); }

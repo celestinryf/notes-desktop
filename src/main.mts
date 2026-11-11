@@ -29,6 +29,10 @@ import { discoverAgentFiles, readDocumentBuffer, readDocxText, readNoteText, rea
 import { createFileVersions } from './file-versions.mts';
 import { PDF_TEXT_MARK_KEY, parsePdfTextMark } from './shared/pdf-text-marks.mts';
 import * as claudeBin from './claude-bin.mts';
+import { SelfUpdater, describe as describeUpdate } from './self-update.mts';
+import type { UpdateCheck } from './self-update.mts';
+import { run as runGit } from './git-run.mts';
+import { gitBinary } from './git-binary.mts';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
@@ -45,6 +49,11 @@ const MANAGE_LOGIN_ITEM = process.env.NOTES_APP_NO_LOGIN_ITEM !== '1';
 const USE_RECYCLE_BIN = process.env.NOTES_APP_NO_RECYCLE_BIN !== '1';
 const SYNC_EVERY_MS = 5 * 60 * 1000;
 const SYNC_ON_SHOW_MS = 60 * 1000;
+const SELF_UPDATE = process.env.NOTES_APP_NO_SELF_UPDATE !== '1' && process.env.NOTES_APP_NO_LOGIN_ITEM !== '1' && !app.isPackaged;
+const UPDATE_FIRST_CHECK_MS = 30 * 1000;
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+const UPDATE_QUIET_MS = 60 * 1000;
+const UPDATE_RETRY_MS = 60 * 1000;
 const LIBRARY_SETTLE_MS = 300;
 const LIBRARY_RETRY_MS = 1000;
 const LIBRARY_UNREADABLE_TRIES = 5;
@@ -157,6 +166,88 @@ function main() {
   let tray: Tray | null = null;
   let quitting = false;
   let pendingOpenNote: string | null = null;
+  const updater = new SelfUpdater({ root: APP_ROOT, dataDir: DATA_DIR, git: runGit });
+  let update: UpdateCheck | null = null;
+  let updateCheckedAt: number | null = null;
+  let updateChecking: Promise<UpdateCheck> | null = null;
+  let updateNoticePending = false;
+  let updateApplied = false;
+  let lastVisibleAt = Date.now();
+  let updateRetryTimer: NodeJS.Timeout | undefined;
+
+  function updateStatus(): UpdateStatus {
+    if (!SELF_UPDATE) return { state: 'off', message: 'Notes does not update itself in this mode.', behind: 0, target: null, failed: false, checkedAt: null };
+    if (!update) return { state: 'unknown', message: 'Notes has not checked for updates yet.', behind: 0, target: null, failed: false, checkedAt: updateCheckedAt };
+    const target = update.state === 'behind' || update.state === 'diverged' || update.state === 'dirty' ? update.target : null;
+    const failed = update.state === 'behind' && updater.failedFor(update.target);
+    return { state: update.state, message: describeUpdate(update, failed), behind: update.state === 'behind' ? update.behind : 0, target, failed, checkedAt: updateCheckedAt };
+  }
+
+  function sendUpdateStatus() {
+    if (!win || win.isDestroyed() || !win.isVisible()) { updateNoticePending = true; return; }
+    updateNoticePending = false;
+    win.webContents.send('update:status', updateStatus());
+  }
+
+  async function checkForUpdate(reason: 'startup' | 'timer' | 'manual'): Promise<UpdateCheck> {
+    if (updateChecking) return updateChecking;
+    updateChecking = updater.check().finally(() => { updateChecking = null; });
+    const result = await updateChecking;
+    update = result;
+    updateCheckedAt = Date.now();
+    if (result.state === 'error') console.error('[update] check failed:', result.error);
+    refreshTray();
+    if (result.state === 'behind' || reason === 'manual') sendUpdateStatus();
+    maybeRelaunchForUpdate();
+    return result;
+  }
+
+  function updateRelaunchBlockedBy(): string | null {
+    if (!store.settings.autoUpdate) return 'auto-update is off';
+    if (win && !win.isDestroyed() && win.isVisible()) return 'the window is visible';
+    if (Date.now() - lastVisibleAt < UPDATE_QUIET_MS) return 'the window was visible less than a minute ago';
+    if (BrowserWindow.getFocusedWindow()) return 'a sticky has focus';
+    if (live.sessions.size) return 'a live session is open';
+    if (botChild) return 'the agent panel is running';
+    return null;
+  }
+
+  function maybeRelaunchForUpdate() {
+    if (updateRetryTimer) { clearTimeout(updateRetryTimer); updateRetryTimer = undefined; }
+    if (!SELF_UPDATE || updateApplied || quitting || !update || update.state !== 'behind' || updater.failedFor(update.target)) return;
+    const blocked = updateRelaunchBlockedBy();
+    if (!blocked) { applyUpdate({ visible: false }); return; }
+    updateRetryTimer = setTimeout(maybeRelaunchForUpdate, UPDATE_RETRY_MS);
+  }
+
+  function applyUpdate(opts: { visible: boolean }): { ok: boolean; error: string | null } {
+    if (!SELF_UPDATE) return { ok: false, error: 'Notes does not update itself in this mode' };
+    if (updateApplied) return { ok: true, error: null };
+    if (!update || update.state !== 'behind') return { ok: false, error: update ? describeUpdate(update, false) : 'Notes has not checked for updates yet' };
+    const git = gitBinary();
+    const node = claudeBin.resolveNode();
+    const npm = node ? npmFor(node) : null;
+    const args = [APP_ROOT].concat(opts.visible ? [] : ['--hidden']);
+    const launched = updater.launchHelper(update, { exe: process.execPath, args, cwd: APP_ROOT, env: process.env }, { node, npm, git: { file: git.file, env: git.env } });
+    if (!launched.ok) { console.error('[update] could not start the update:', launched.error); return { ok: false, error: launched.error }; }
+    updateApplied = true;
+    quitting = true;
+    app.quit();
+    return { ok: true, error: null };
+  }
+
+  function npmFor(node: string) {
+    const cli = path.join(path.dirname(node), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    try { if (fs.statSync(cli).isFile()) return { file: node, args: [cli] }; } catch (_) {  }
+    return null;
+  }
+
+  function noticeFailedUpdate() {
+    const last = updater.lastResult();
+    if (!last || last.ok || last.noticed || !win || win.isDestroyed()) return;
+    updater.markNoticed();
+    win.webContents.send('app:notice', 'The last update of Notes failed: ' + (last.error || 'unknown error') + '. See self-update.log in the data folder.');
+  }
   const vaults = new VaultManager(store, {
     debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
@@ -200,6 +291,7 @@ function main() {
       focused: !!(win && !win.isDestroyed() && win.isFocused()),
       updatedAt: Date.now(),
     }, extra || {});
+    if (data.visible) lastVisibleAt = Date.now();
     try { fs.writeFileSync(path.join(DATA_DIR, 'runtime.json'), JSON.stringify(data)); } catch (_) {  }
   }
 
@@ -348,6 +440,7 @@ function main() {
     syncInBackground(SYNC_ON_SHOW_MS);
     w.webContents.send('app:shown');
     writeRuntime();
+    if (updateNoticePending) sendUpdateStatus();
     return w;
   }
 
@@ -441,6 +534,7 @@ function main() {
       { label: 'Always on top', type: 'checkbox', checked: !!store.settings.alwaysOnTop, click: (item) => { try { store.setSettings({ alwaysOnTop: item.checked }); if (win) win.setAlwaysOnTop(item.checked); } catch (_) {  } broadcastSettings(); refreshTray(); } },
       { label: 'Open data folder', click: () => shell.openPath(DATA_DIR) },
       { type: 'separator' },
+      ...(update && update.state === 'behind' ? [{ label: 'Update and restart Notes', click: () => applyUpdate({ visible: !!(win && !win.isDestroyed() && win.isVisible()) }) }] : []),
       { label: 'Quit Notes', click: () => { quitting = true; app.quit(); } },
     ]));
   }
@@ -1192,6 +1286,9 @@ function main() {
   handle('git:status', () => git.status());
   handle('git:commit', () => git.commit('manual commit'));
   handle('history:settle', () => { git.settle(); });
+  handle('update:status', () => updateStatus());
+  handle('update:check', async () => { if (SELF_UPDATE) await checkForUpdate('manual'); return updateStatus(); });
+  handle('update:apply', () => applyUpdate({ visible: true }));
   handle('git:push', () => git.push());
   handle('git:history', (_e, limit) => git.history(limit));
   handle('git:sync', () => git.sync());
@@ -1304,7 +1401,8 @@ function main() {
     if (!win || win.isDestroyed()) return { visible: false };
     const visible = win.isVisible();
     if (reloadedSinceStart) { win.webContents.send('settings:changed', store.getSettings()); win.webContents.send('notes:reloaded', { reason: 'recovered' }); }
-    if (visible) win.webContents.send('app:shown');
+    if (visible) { win.webContents.send('app:shown'); if (updateNoticePending) sendUpdateStatus(); }
+    noticeFailedUpdate();
     if (pendingNewNote) { pendingNewNote = false; win.webContents.send('app:new-note'); }
     if (pendingOpenNote) { win.webContents.send('app:open-note', pendingOpenNote); pendingOpenNote = null; }
     return { visible };
@@ -1688,6 +1786,10 @@ function main() {
     if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());
     step('stickies', () => stickies.restoreAll());
     step('reminders', () => reminders.start());
+    if (SELF_UPDATE) {
+      setTimeout(() => { checkForUpdate('startup').catch(() => {}); }, UPDATE_FIRST_CHECK_MS);
+      setInterval(() => { checkForUpdate('timer').catch(() => {}); }, UPDATE_EVERY_MS);
+    }
     live.restore().catch((err) => console.error('[live] restore failed', err));
   });
 }

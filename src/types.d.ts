@@ -18,6 +18,7 @@ interface Settings {
   fontSize: number;
   openAtLogin: boolean;
   alwaysOnTop: boolean;
+  autoUpdate: boolean;
   sort: SortKey;
   sidebarCollapsed: boolean;
   listCollapsed: boolean;
@@ -130,6 +131,7 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null; craftTrace: boolean;
   notesDir: string | null; homeVaultId: string | null; movedToFiles: MovedToFiles | null; filesError: string | null;
 }
+interface UpdateStatus { state: 'off' | 'unknown' | 'current' | 'behind' | 'diverged' | 'dirty' | 'error'; message: string; behind: number; target: string | null; failed: boolean; checkedAt: number | null }
 interface MovedToFiles { notesDir: string; notes: number; folders: number; links: number; renamed: { kind: 'note' | 'folder'; from: string; to: string }[]; backupDir: string; at: number }
 interface FilesMove { report: MovedToFiles | null; error: string | null }
 type TraceFields = Record<string, string | number | boolean | null>;
@@ -256,6 +258,9 @@ interface IpcContract {
   'app:importMarkdown': () => { canceled?: boolean; count: number; firstId?: string | null; failed?: string[] };
   'history:versions': (id: string, limit?: number) => HistoryVersions;
   'history:settle': () => void;
+  'update:status': () => UpdateStatus;
+  'update:check': () => UpdateStatus;
+  'update:apply': () => { ok: boolean; error: string | null };
   'lock:set': (id: string, password: string) => PublicNote | null;
   'lock:unlock': (id: string, password: string) => PublicNote | null;
   'lock:relock': (id: string) => PublicNote | null;
@@ -351,6 +356,7 @@ interface MainEvents {
   'live:status': [payload: { id: string; status: LiveStatus | null }];
   'lock:relocked': [ids: string[]];
   'app:editCommand': [command: 'undo' | 'redo'];
+  'update:status': [status: UpdateStatus];
 }
 type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) => void) => () => void;
 
@@ -404,14 +410,15 @@ interface NotesApi {
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
     dictate: Invoker<'app:dictate'>; flushDone: () => void; trace: (event: string, fields?: TraceFields) => void; openDataFolder: Invoker<'app:openDataFolder'>; openExternal: Invoker<'app:openExternal'>;
     exportNote: Invoker<'app:exportNote'>; exportAll: Invoker<'app:exportAll'>; importMarkdown: Invoker<'app:importMarkdown'>;
-    historyVersions: Invoker<'history:versions'>; historySettle: Invoker<'history:settle'>; titleBar: Invoker<'app:titleBar'>;
+    historyVersions: Invoker<'history:versions'>; historySettle: Invoker<'history:settle'>;
+    updateStatus: Invoker<'update:status'>; updateCheck: Invoker<'update:check'>; updateApply: Invoker<'update:apply'>; titleBar: Invoker<'app:titleBar'>;
   };
   on: {
     shown: Listener<'app:shown'>; newNote: Listener<'app:new-note'>; settingsChanged: Listener<'settings:changed'>; systemTheme: Listener<'theme:system'>;
     gitStatus: Listener<'git:status'>; gitPulled: Listener<'git:pulled'>; githubStatus: Listener<'github:status'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
     botEvent: Listener<'bot:event'>; noteChanged: Listener<'notes:changed'>; stickyChanged: Listener<'sticky:changed'>; stickiesChanged: Listener<'stickies:changed'>;
     openNote: Listener<'app:open-note'>; reminderFired: Listener<'reminder:fired'>; notice: Listener<'app:notice'>; liveStatus: Listener<'live:status'>;
-    relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>;
+    relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>; updateStatus: Listener<'update:status'>;
   };
 }
 

@@ -66,7 +66,7 @@ export const el = {
   settingsDirtyNote: pageElement('#settingsDirtyNote', HTMLSpanElement), cancelSettingsBtn: pageElement('#cancelSettingsBtn', HTMLButtonElement), saveSettingsBtn: pageElement('#saveSettingsBtn', HTMLButtonElement),
   settingsSaveDialog: pageElement('#settingsSaveDialog', HTMLDialogElement), settingsSaveKeepBtn: pageElement('#settingsSaveKeepBtn', HTMLButtonElement), settingsSaveDiscardBtn: pageElement('#settingsSaveDiscardBtn', HTMLButtonElement), settingsSaveList: pageElement('#settingsSaveList', HTMLParagraphElement),
   fontSizeInput: pageElement('#fontSizeInput', HTMLInputElement), fontSizeValue: pageElement('#fontSizeValue', HTMLSpanElement),
-  openAtLoginInput: pageElement('#openAtLoginInput', HTMLInputElement), alwaysOnTopInput: pageElement('#alwaysOnTopInput', HTMLInputElement),
+  openAtLoginInput: pageElement('#openAtLoginInput', HTMLInputElement), alwaysOnTopInput: pageElement('#alwaysOnTopInput', HTMLInputElement), autoUpdateInput: pageElement('#autoUpdateInput', HTMLInputElement),
   importBtn: pageElement('#importBtn', HTMLButtonElement), exportAllBtn: pageElement('#exportAllBtn', HTMLButtonElement), dataFolderBtn: pageElement('#dataFolderBtn', HTMLButtonElement),
   settingsInfo: pageElement('#settingsInfo', HTMLParagraphElement),
   toast: pageElement('#toast', HTMLDivElement), hintPop: pageElement('#hintPop', HTMLDivElement),

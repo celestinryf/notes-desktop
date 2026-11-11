@@ -1829,6 +1829,42 @@ test('trash with undo, restore, delete forever, empty trash', async () => {
   await page.click('.nav-item[data-view="all"]');
 });
 
+test('settings: Keep Notes up to date is on by default, saves off, and Check for updates reports the harness mode', async () => {
+  assert.equal(readNotes().settings.autoUpdate, true);
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  assert.equal(await page.isChecked('#autoUpdateInput'), true);
+  await page.uncheck('#autoUpdateInput');
+  assert.equal(await page.textContent('#settingsDirtyNote'), 'Unsaved changes');
+  await page.mouse.click(8, 8);
+  await page.waitForSelector('#settingsSaveDialog[open]');
+  assert.match(await page.textContent('#settingsSaveList'), /Keep Notes up to date/);
+  await page.click('#settingsSaveYesBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('auto-update off', () => readNotes().settings.autoUpdate === false);
+
+  await page.keyboard.press('Control+p');
+  await page.keyboard.type('>Check for updates');
+  await waitForDom(() => !!document.querySelector('.palette-item.is-active') && /Check for updates/.test(document.querySelector('.palette-item.is-active').textContent));
+  await page.keyboard.press('Enter');
+  await waitForDom(() => /does not update itself/.test(document.getElementById('toast').textContent));
+  assert.equal(await page.evaluate(() => window.notesApi.app.updateStatus().then((s) => s.state)), 'off');
+
+  await page.keyboard.press('Control+p');
+  await page.keyboard.type('>Update and restart Notes');
+  await sleep(300);
+  assert.equal(await page.$('.palette-item.is-active:has-text("Update and restart Notes")'), null, 'not offered while no update is pending');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !document.getElementById('palette').open);
+
+  await page.keyboard.press('Control+,');
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.check('#autoUpdateInput');
+  await page.click('#saveSettingsBtn');
+  await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitFor('auto-update back on', () => readNotes().settings.autoUpdate === true);
+});
+
 test('settings: changes preview on the page and are written by Save changes; theme, font size, always on top, hotkey', async () => {
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
