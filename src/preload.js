@@ -191,6 +191,9 @@ const notesApi = {
     importMarkdown: invoke('app:importMarkdown'),
     historyVersions: invoke('history:versions'),
     historySettle: invoke('history:settle'),
+    updateStatus: invoke('update:status'),
+    updateCheck: invoke('update:check'),
+    updateApply: invoke('update:apply'),
     titleBar: invoke('app:titleBar'),
   },
   on: {
@@ -214,6 +217,7 @@ const notesApi = {
     liveStatus: on('live:status'),
     relocked: on('lock:relocked'),
     editCommand: on('app:editCommand'),
+    updateStatus: on('update:status'),
   },
 };
 if (isOurPage) contextBridge.exposeInMainWorld('notesApi', notesApi);

@@ -16198,6 +16198,7 @@
     fontSizeValue: pageElement("#fontSizeValue", HTMLSpanElement),
     openAtLoginInput: pageElement("#openAtLoginInput", HTMLInputElement),
     alwaysOnTopInput: pageElement("#alwaysOnTopInput", HTMLInputElement),
+    autoUpdateInput: pageElement("#autoUpdateInput", HTMLInputElement),
     importBtn: pageElement("#importBtn", HTMLButtonElement),
     exportAllBtn: pageElement("#exportAllBtn", HTMLButtonElement),
     dataFolderBtn: pageElement("#dataFolderBtn", HTMLButtonElement),
@@ -28960,6 +28961,7 @@
       el.fontSizeValue.textContent = s.fontSize + "px";
       el.openAtLoginInput.checked = s.openAtLogin;
       el.alwaysOnTopInput.checked = s.alwaysOnTop;
+      el.autoUpdateInput.checked = s.autoUpdate;
       syncAlignSeg(s.editorAlign);
       el.sidebarFloatInput.checked = !!s.sidebarCollapsed;
       el.editorFullWidthInput.checked = !s.editorWidth;
@@ -29055,6 +29057,20 @@
       if (settingsDirty()) await saveSettings();
       else closeSettings();
     }
+    let appUpdate = null;
+    function showUpdateStatus(status) {
+      appUpdate = status;
+      if (status.state === "behind" && !status.failed) toast(status.message, { label: "Restart now", run: applyUpdate });
+      else toast(status.message);
+    }
+    async function checkForUpdates() {
+      toast("Checking for updates\u2026");
+      showUpdateStatus(await api.app.updateCheck());
+    }
+    async function applyUpdate() {
+      const res = await api.app.updateApply();
+      if (!res.ok) toast("Could not update Notes: " + (res.error || "unknown error"));
+    }
     const SETTING_NAMES = {
       hotkey: "Global hotkey",
       theme: "Theme",
@@ -29063,6 +29079,7 @@
       sidebarCollapsed: "Hide the sidebar",
       openAtLogin: "Start at sign-in",
       alwaysOnTop: "Keep above other windows",
+      autoUpdate: "Keep Notes up to date",
       fontSize: "Text size",
       editorWidth: "Column width",
       editorAlign: "Column position",
@@ -29345,6 +29362,8 @@
         cmd("sidebar", "View", sidebarLayout() === "docked" ? "Hide the sidebar" : "Show the sidebar", "panel-left", "Ctrl+\\", toggleSidebar, !GUEST, "auto hide float compact zen"),
         cmd("list", "View", el.app.classList.contains("list-collapsed") ? "Show the note list" : "Hide the note list", "list", "Ctrl+Shift+\\", toggleList, !GUEST),
         cmd("tree-show-all", "View", "Show every note in this folder", "list", "", () => showWholeLevel(state.view === "folder" ? state.folderId : null), !GUEST && treeModeActive() && !!moreRow(state.view === "folder" ? state.folderId : null), "see more"),
+        cmd("update-check", "App", "Check for updates", "refresh-cw", "", checkForUpdates, !GUEST, "update version upgrade pull"),
+        cmd("update-apply", "App", appUpdate && appUpdate.failed ? "Retry the update and restart Notes" : "Update and restart Notes", "download", "", applyUpdate, !GUEST && !!appUpdate && appUpdate.state === "behind", "update version upgrade restart retry"),
         cmd("tips-again", "App", "Show the tips again", "message-square", "", () => {
           hints.dismiss();
           hints.forget();
@@ -29895,6 +29914,7 @@
       el.remindCancelBtn.addEventListener("click", () => el.remindDialog.close());
       el.remindDialog.addEventListener("close", () => focusBody());
       api.on.notice((text) => toast(String(text)));
+      api.on.updateStatus(showUpdateStatus);
       api.on.editCommand(runEditCommand);
       api.on.reminderFired(({ id, title }) => {
         toast("\u23F0 " + (title || "Reminder"), { label: "Open", run: async () => {
@@ -30208,6 +30228,7 @@
       el.fontSizeInput.addEventListener("change", () => setDraft({ fontSize: Number(el.fontSizeInput.value) }));
       el.openAtLoginInput.addEventListener("change", () => setDraft({ openAtLogin: el.openAtLoginInput.checked }));
       el.alwaysOnTopInput.addEventListener("change", () => setDraft({ alwaysOnTop: el.alwaysOnTopInput.checked }));
+      el.autoUpdateInput.addEventListener("change", () => setDraft({ autoUpdate: el.autoUpdateInput.checked }));
       el.importBtn.addEventListener("click", async () => {
         let res;
         try {
