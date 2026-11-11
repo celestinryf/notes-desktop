@@ -5,7 +5,7 @@ import { src } from './code-editor.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { autoGrow } from './editor-view.ts';
-import { diffText, diffCounts, diffSummary } from '../shared/text-diff.mts';
+import { diffText, diffCounts, diffSummary, foldUnchanged } from '../shared/text-diff.mts';
 
 const { isViewerOnlyFile } = H;
 
@@ -151,8 +151,9 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     const v = hist.versions[hist.index];
     if (!v) return;
     const segments = diffText(compareBase(hist.index), v.body);
-    el.historyPreview.replaceChildren(...segments.map((s) => {
+    el.historyPreview.replaceChildren(...foldUnchanged(segments).map((s) => {
       if (s.kind === 'same') return document.createTextNode(s.text);
+      if (s.kind === 'fold') return foldButton(s.text, s.lines);
       const mark = document.createElement(s.kind === 'add' ? 'ins' : 'del');
       mark.textContent = s.text;
       return mark;
@@ -161,6 +162,16 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     hist.changes = Array.from(el.historyPreview.querySelectorAll('ins, del')).filter((m, i, all) => !(m.tagName === 'INS' && i > 0 && all[i - 1].tagName === 'DEL'));
     hist.changeAt = -1;
     if (hist.changes.length) stepChange(1); else el.historyPreview.scrollTop = 0;
+  }
+
+  function foldButton(text: string, lines: number) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'history-fold';
+    btn.innerHTML = I('chevron-right');
+    btn.append('Show ' + lines + ' unchanged lines');
+    btn.addEventListener('click', () => btn.replaceWith(document.createTextNode(text)));
+    return btn;
   }
 
   function stepChange(dir: 1 | -1) {

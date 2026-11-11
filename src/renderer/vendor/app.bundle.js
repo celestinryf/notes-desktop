@@ -21459,6 +21459,8 @@
   var WORD_TOKEN_LIMIT = 4e4;
   var MAX_EDIT_DISTANCE = 3e3;
   var GROUP_GAP_WORDS = 2;
+  var FOLD_CONTEXT_LINES = 3;
+  var FOLD_MIN_LINES = 4;
   function tokens(text, byLine) {
     if (!text) return [];
     if (byLine) return text.split(/(?<=\n)/);
@@ -21606,6 +21608,29 @@
     for (const s of groupReplacements(middleSegments(a.slice(head, a.length - tail), b.slice(head, b.length - tail)))) merge(segments, s.kind, s.text);
     merge(segments, "same", a.slice(a.length - tail).join(""));
     return segments;
+  }
+  function foldUnchanged(segments, context = FOLD_CONTEXT_LINES, minLines = FOLD_MIN_LINES) {
+    const out = [];
+    segments.forEach((s, i) => {
+      if (s.kind !== "same") {
+        out.push(s);
+        return;
+      }
+      const first = i === 0, last = i === segments.length - 1;
+      const units = s.text.split(/(?<=\n)/);
+      const head = first ? 0 : context + (segments[i - 1].text.endsWith("\n") ? 0 : 1);
+      const tail = last ? 0 : context + (s.text.endsWith("\n") ? 0 : 1);
+      const hidden = units.length - head - tail;
+      if (hidden < minLines) {
+        out.push(s);
+        return;
+      }
+      if (head) out.push({ kind: "same", text: units.slice(0, head).join("") });
+      const middle = units.slice(head, units.length - tail);
+      out.push({ kind: "fold", text: middle.join(""), lines: middle.length });
+      if (tail) out.push({ kind: "same", text: units.slice(units.length - tail).join("") });
+    });
+    return out;
   }
   function diffCounts(segments) {
     let added = 0, removed = 0, places = 0;
@@ -21762,8 +21787,9 @@
       const v = hist.versions[hist.index];
       if (!v) return;
       const segments = diffText(compareBase(hist.index), v.body);
-      el.historyPreview.replaceChildren(...segments.map((s) => {
+      el.historyPreview.replaceChildren(...foldUnchanged(segments).map((s) => {
         if (s.kind === "same") return document.createTextNode(s.text);
+        if (s.kind === "fold") return foldButton(s.text, s.lines);
         const mark = document.createElement(s.kind === "add" ? "ins" : "del");
         mark.textContent = s.text;
         return mark;
@@ -21773,6 +21799,15 @@
       hist.changeAt = -1;
       if (hist.changes.length) stepChange(1);
       else el.historyPreview.scrollTop = 0;
+    }
+    function foldButton(text, lines) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "history-fold";
+      btn.innerHTML = I("chevron-right");
+      btn.append("Show " + lines + " unchanged lines");
+      btn.addEventListener("click", () => btn.replaceWith(document.createTextNode(text)));
+      return btn;
     }
     function stepChange(dir) {
       if (!hist.changes.length) return;

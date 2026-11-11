@@ -1469,6 +1469,7 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   assert.equal(await page.$eval('#historyDiffSummary', (e) => e.textContent), '1 word added, 1 removed.');
   await page.keyboard.press('F3');
   assert.equal(await page.evaluate(() => document.getElementById('historyDialog').open), true);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('#historyPreview .history-fold').length), 0);
   assert.equal(await page.$eval('#historyCompare', (e) => getComputedStyle(e).display !== 'none'), true);
   await page.selectOption('#historyCompareSelect', 'before');
   await waitForDom(() => { const p = document.getElementById('historyPreview'); const del = p.querySelector('del'); return !!p.querySelector('ins') && (!del || del.textContent !== 'two') && !/two/.test(p.textContent); });

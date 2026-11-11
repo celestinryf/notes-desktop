@@ -115,3 +115,39 @@ test('counts and summary are in words and places', () => {
   assert.deepEqual(diffCounts(diffText('a.', 'a!')), { added: 0, removed: 0, places: 1 });
   assert.equal(diffCounts(diffText('pay 10 on the 3rd and 20 after', 'pay 11 on the 3rd and 21 after')).places, 2);
 });
+
+const { foldUnchanged } = require('../../src/shared/text-diff.mts');
+const unfolded = (folded) => folded.filter((s) => s.kind !== 'add').map((s) => s.text).join('');
+
+test('long unchanged runs fold, keeping three lines of context beside each change, and the text rebuilds', () => {
+  const lines = Array.from({ length: 30 }, (_, i) => 'line ' + i);
+  const before = lines.join('\n');
+  const after = lines.map((l, i) => (i === 12 ? 'changed' : l)).join('\n');
+  const segs = diffText(before, after);
+  const folded = foldUnchanged(segs);
+  assert.deepEqual(folded.map((s) => s.kind), ['fold', 'same', 'del', 'add', 'same', 'fold']);
+  assert.equal(folded[0].lines, 9);
+  assert.equal(folded[1].text, 'line 9\nline 10\nline 11\n');
+  assert.equal(folded[4].text, '\nline 13\nline 14\nline 15\n');
+  assert.equal(folded[5].lines, 14);
+  assert.equal(unfolded(folded), before);
+});
+
+test('short unchanged runs do not fold, and a middle run folds only past three lines each side plus four hidden', () => {
+  const few = diffText('a\nb\nc\nd', 'a\nb\nc\nx');
+  assert.ok(foldUnchanged(few).every((s) => s.kind !== 'fold'));
+  const nine = Array.from({ length: 9 }, (_, i) => 'm' + i).join('\n');
+  const edge = diffText('x\n' + nine + '\ny', 'z\n' + nine + '\nw');
+  assert.ok(foldUnchanged(edge).every((s) => s.kind !== 'fold'));
+  const ten = Array.from({ length: 10 }, (_, i) => 'm' + i).join('\n');
+  const folds = foldUnchanged(diffText('x\n' + ten + '\ny', 'z\n' + ten + '\nw'));
+  assert.deepEqual(folds.filter((s) => s.kind === 'fold').map((s) => s.lines), [4]);
+});
+
+test('a text with no change at all folds nothing but the whole run when it is long enough, and the first or last run keeps no context', () => {
+  const long = Array.from({ length: 12 }, (_, i) => 'l' + i).join('\n');
+  const onlyTail = foldUnchanged(diffText(long + '\nold', long + '\nnew'));
+  assert.equal(onlyTail[0].kind, 'fold');
+  assert.equal(onlyTail[0].lines, 9);
+  assert.equal(onlyTail[1].text, 'l9\nl10\nl11\n');
+});

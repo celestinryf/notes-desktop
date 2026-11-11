@@ -1,12 +1,16 @@
 type DiffKind = 'same' | 'add' | 'del';
 type DiffSegment = { kind: DiffKind; text: string };
 type DiffCounts = { added: number; removed: number; places: number };
+type FoldSegment = { kind: 'fold'; text: string; lines: number };
+type FoldedSegment = DiffSegment | FoldSegment;
 
 const WORD = /[\p{L}\p{N}_]+/gu;
 const WORD_TOKEN = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
 const WORD_TOKEN_LIMIT = 40000;
 const MAX_EDIT_DISTANCE = 3000;
 const GROUP_GAP_WORDS = 2;
+const FOLD_CONTEXT_LINES = 3;
+const FOLD_MIN_LINES = 4;
 
 function tokens(text: string, byLine: boolean): string[] {
   if (!text) return [];
@@ -117,6 +121,24 @@ function diffText(before: string, after: string): DiffSegment[] {
   return segments;
 }
 
+function foldUnchanged(segments: readonly DiffSegment[], context = FOLD_CONTEXT_LINES, minLines = FOLD_MIN_LINES): FoldedSegment[] {
+  const out: FoldedSegment[] = [];
+  segments.forEach((s, i) => {
+    if (s.kind !== 'same') { out.push(s); return; }
+    const first = i === 0, last = i === segments.length - 1;
+    const units = s.text.split(/(?<=\n)/);
+    const head = first ? 0 : context + (segments[i - 1].text.endsWith('\n') ? 0 : 1);
+    const tail = last ? 0 : context + (s.text.endsWith('\n') ? 0 : 1);
+    const hidden = units.length - head - tail;
+    if (hidden < minLines) { out.push(s); return; }
+    if (head) out.push({ kind: 'same', text: units.slice(0, head).join('') });
+    const middle = units.slice(head, units.length - tail);
+    out.push({ kind: 'fold', text: middle.join(''), lines: middle.length });
+    if (tail) out.push({ kind: 'same', text: units.slice(units.length - tail).join('') });
+  });
+  return out;
+}
+
 function diffCounts(segments: readonly DiffSegment[]): DiffCounts {
   let added = 0, removed = 0, places = 0;
   segments.forEach((s, i) => {
@@ -134,5 +156,5 @@ function diffSummary(counts: DiffCounts) {
   return counts.places > 1 ? change + ', in ' + counts.places + ' places. F3 steps through them.' : change + '.';
 }
 
-export type { DiffKind, DiffSegment, DiffCounts };
-export { diffText, diffCounts, diffSummary, WORD_TOKEN_LIMIT, MAX_EDIT_DISTANCE };
+export type { DiffKind, DiffSegment, DiffCounts, FoldSegment, FoldedSegment };
+export { diffText, diffCounts, diffSummary, foldUnchanged, WORD_TOKEN_LIMIT, MAX_EDIT_DISTANCE };
