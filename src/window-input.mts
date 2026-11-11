@@ -1,3 +1,5 @@
+import { isOpenableLink } from './shared/helpers.mts';
+
 const ZOOM_MIN = -3;
 const ZOOM_MAX = 5;
 const ZOOM_STEP = 0.5;
@@ -48,7 +50,7 @@ function contextMenuTemplate(params: Electron.ContextMenuParams) {
   }
   const link = String(p.linkURL || '');
   if (link) {
-    if (/^https?:\/\//i.test(link)) items.push({ label: 'Open link in browser', action: 'openLink', arg: link });
+    if (isOpenableLink(link)) items.push({ label: /^mailto:/i.test(link) ? 'Write to this address' : 'Open link in browser', action: 'openLink', arg: link });
     items.push({ label: 'Copy link address', action: 'copyText', arg: link });
     items.push({ type: 'separator' });
   }
@@ -91,7 +93,7 @@ function attachContextMenu(webContents: Electron.WebContents, getWindow: () => E
         switch (item.action) {
           case 'replaceMisspelling': webContents.replaceMisspelling(arg); break;
           case 'addToDictionary': webContents.session.addWordToSpellCheckerDictionary(arg); break;
-          case 'openLink': if (/^https?:\/\//i.test(arg)) shell.openExternal(arg); break;
+          case 'openLink': if (isOpenableLink(arg)) shell.openExternal(arg); break;
           case 'copyText': clipboard.writeText(arg); break;
           case 'editUndo': webContents.send('app:editCommand', 'undo'); break;
           case 'editRedo': webContents.send('app:editCommand', 'redo'); break;

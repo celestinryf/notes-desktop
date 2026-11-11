@@ -14747,6 +14747,7 @@
     isNonMarkdownFile: () => isNonMarkdownFile,
     isObjectLike: () => isObjectLike,
     isOoxmlWordFile: () => isOoxmlWordFile,
+    isOpenableLink: () => isOpenableLink,
     isPlainTextFile: () => isPlainTextFile,
     isRecord: () => isRecord,
     isRecycleBinPath: () => isRecycleBinPath,
@@ -14942,6 +14943,8 @@
     }
     return String(body || "");
   }
+  var OPENABLE_LINK = /^(?:https?:\/\/|mailto:)\S/i;
+  var isOpenableLink = (url) => OPENABLE_LINK.test(String(url || ""));
   function countWords(text) {
     const t = String(text || "").trim();
     if (!t) return 0;
@@ -28460,9 +28463,9 @@
     const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile: pollCurrentFile });
     const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
     function externalLinkClick(e, href) {
-      if (!/^https?:\/\//i.test(href)) return;
+      if (!isOpenableLink(href)) return;
       if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
-      else toast("This link goes to " + href + ". Ctrl+click to open it.");
+      else toast((/^mailto:/i.test(href) ? "This link writes to " + href.replace(/^mailto:/i, "") : "This link goes to " + href) + ". Ctrl+click to open it.");
     }
     const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
     function fileBadge(note) {

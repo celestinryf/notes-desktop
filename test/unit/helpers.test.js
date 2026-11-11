@@ -101,6 +101,24 @@ test('toggleTaskAt flips the nth task line and leaves others untouched', () => {
   assert.equal(H.toggleTaskAt('', 0), '');
 });
 
+test('isOpenableLink accepts web and mail links only', () => {
+  assert.equal(H.isOpenableLink('https://example.com'), true);
+  assert.equal(H.isOpenableLink('HTTP://example.com/a?b=c'), true);
+  assert.equal(H.isOpenableLink('mailto:someone@example.com'), true);
+  assert.equal(H.isOpenableLink('MailTo:someone@example.com?subject=hi'), true);
+  assert.equal(H.isOpenableLink('mailto:'), false);
+  assert.equal(H.isOpenableLink('mailto: x'), false);
+  assert.equal(H.isOpenableLink('https://'), false);
+  assert.equal(H.isOpenableLink('file:///C:/secret.txt'), false);
+  assert.equal(H.isOpenableLink('javascript:alert(1)'), false);
+  assert.equal(H.isOpenableLink('note://abc'), false);
+  assert.equal(H.isOpenableLink('tel:+1555'), false);
+  assert.equal(H.isOpenableLink(' https://example.com'), false);
+  assert.equal(H.isOpenableLink(''), false);
+  assert.equal(H.isOpenableLink(null), false);
+  assert.equal(H.isOpenableLink(undefined), false);
+});
+
 test('countWords', () => {
   assert.equal(H.countWords(''), 0);
   assert.equal(H.countWords('   '), 0);

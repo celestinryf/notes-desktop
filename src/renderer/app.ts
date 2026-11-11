@@ -2097,9 +2097,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
 
   function externalLinkClick(e: MouseEvent, href: string) {
-    if (!/^https?:\/\//i.test(href)) return;
+    if (!H.isOpenableLink(href)) return;
     if (e.ctrlKey || e.metaKey) api.app.openExternal(href);
-    else toast('This link goes to ' + href + '. Ctrl+click to open it.');
+    else toast((/^mailto:/i.test(href) ? 'This link writes to ' + href.replace(/^mailto:/i, '') : 'This link goes to ' + href) + '. Ctrl+click to open it.');
   }
 
   const { showImage, clearImage, toggleImageSize, syncImageToggle } = createImages({ api, showBanner });
