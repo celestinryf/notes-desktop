@@ -140,6 +140,11 @@
             <button role="menuitem" class="menu-item" id="copyPathBtn" data-icon="folder"><span class="lbl">Copy path</span></button>
             <button role="menuitem" class="menu-item" id="splitBtn" data-icon="book-plus"><span class="lbl">Split into a book…</span></button>
           </div>
+          <div class="menu-group" role="group" aria-label="This file">
+            <button role="menuitem" class="menu-item hidden" id="fileRevealBtn" data-icon="folder-open"><span class="lbl">Show in Explorer</span></button>
+            <button role="menuitem" class="menu-item hidden" id="fileOpenBtn" data-icon="external-link"><span class="lbl">Open in default app</span></button>
+            <button role="menuitem" class="menu-item hidden" id="fileConvertBtn" data-icon="file-output" aria-haspopup="menu"><span class="lbl">Convert to…</span></button>
+          </div>
           <div class="menu-group" role="group" aria-label="Add">
             <button role="menuitem" class="menu-item" id="attachBtn" data-icon="paperclip"><span class="lbl">Attach files…</span><span class="keys">Ctrl+Shift+O</span></button>
             <button role="menuitem" class="menu-item" id="recordBtn" data-icon="audio-lines"><span class="lbl">Record a voice memo</span><span class="keys">Ctrl+Shift+G</span></button>
@@ -197,10 +202,7 @@
             <div class="file-row hidden" id="fileRow">
               <span class="file-kind" id="fileKind"></span>
               <span class="file-path" id="filePath" title=""></span>
-              <button class="tool-btn" id="fileRevealBtn" title="Show in Explorer">Reveal</button>
-              <button class="tool-btn" id="fileOpenBtn" title="Open with the default app">Open with…</button>
               <button class="tool-btn" id="fileReloadBtn" title="Re-read from disk">Reload</button>
-              <button class="tool-btn" id="fileConvertBtn" title="Save a copy in another format, next to this file" aria-haspopup="menu">Convert to…</button>
             </div>
             <div class="file-banner hidden" id="fileBanner"></div>
             <form class="lock-screen hidden" id="lockScreen" aria-label="Locked note">

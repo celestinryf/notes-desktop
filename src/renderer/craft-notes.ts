@@ -49,7 +49,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
           onOpenFailed: (err) => {
             const quiet = warming !== null;
             drop();
-            if (!quiet) showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open with…" to open it in ' + ui.openWith + '.');
+            if (!quiet) showBanner(ui.label + ' could not open this ' + ui.what + ': ' + err + '. Use "Open in default app" in the More menu to open it in ' + ui.openWith + '.');
           },
           theme: 'dark',
           darkPage: true,
@@ -140,7 +140,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
       } catch (err) {
         if (s !== seq) return;
         drop();
-        showBanner('Could not open this ' + ui.what + ' in ' + ui.label + ': ' + ipcErrorText(err) + ' Use "Open with…" to open it in ' + ui.openWith + '.');
+        showBanner('Could not open this ' + ui.what + ' in ' + ui.label + ': ' + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it in ' + ui.openWith + '.');
       }
     }
     function resumeParked(k: string) {
@@ -239,7 +239,7 @@ export function createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, 
     const key = n.fileKind ? H.CRAFT_OF[n.fileKind] : undefined;
     if (!key) return;
     if (crafts[key].usable()) { showBanner(''); crafts[key].show(n); return; }
-    showBanner('Notes shows .' + H.extOf(n.filePath) + ' files in ' + CRAFT_UI[key].label + ', which is not available right now. Use "Open with…" to open it in ' + CRAFT_UI[key].openWith + '.');
+    showBanner('Notes shows .' + H.extOf(n.filePath) + ' files in ' + CRAFT_UI[key].label + ', which is not available right now. Use "Open in default app" in the More menu to open it in ' + CRAFT_UI[key].openWith + '.');
   }
 
   return { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly };

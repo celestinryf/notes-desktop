@@ -82,14 +82,14 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
   function docxBannerFor(res: DocxOpened) {
     const fixed = res.readOnly ? ' ' + res.readOnly + (res.readOnly === 1 ? ' paragraph has' : ' paragraphs have') + ' links, charts, text boxes, tracked changes or similar, and cannot be edited here; use "Open with…" for those.' : '';
     if (res.editable) return 'Click into the text to edit it. Ctrl+B, Ctrl+I and Ctrl+U (or the buttons) set bold, italic and underline. Save (Ctrl+S) writes your changes into the document, and the original is backed up first.' + fixed;
-    return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open with…" to edit it in Word.';
+    return 'Word document, shown as laid out in the file. It cannot be edited here: ' + (res.block || 'none of its text is plain enough for Notes to write back safely') + '. Use "Open in default app" in the More menu to edit it in Word.';
   }
 
   async function showDocx(note: PublicNote) {
     if (useWordCraft()) { crafts.wordcraft.show(note); return; }
     if (!H.isOoxmlWordFile(note)) {
       el.docxEditor.classList.add('hidden');
-      showBanner('Notes shows .' + H.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open with…" to open it in Word.');
+      showBanner('Notes shows .' + H.extOf(note.filePath) + ' files in WordCraft, which is not available right now. Use "Open in default app" in the More menu to open it in Word.');
       return;
     }
     const key = note.id + ':' + note.fileMtime;
@@ -114,7 +114,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
       if (seq !== docxSeq) return;
       docxShownKey = null;
       el.docxView.removeAttribute('srcdoc');
-      showBanner('Could not show this Word document: ' + ipcErrorText(err) + ' Use "Open with…" to open it in Word.');
+      showBanner('Could not show this Word document: ' + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it in Word.');
     }
   }
 

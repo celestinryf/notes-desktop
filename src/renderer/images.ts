@@ -21,7 +21,7 @@ export function createImages({ api, showBanner }: ImagesDeps) {
     } catch (err) {
       if (seq !== imageSeq) return;
       clearImage();
-      showBanner('Could not show this image: ' + ipcErrorText(err) + ' Use "Open with…" to open it.');
+      showBanner('Could not show this image: ' + ipcErrorText(err) + ' Use "Open in default app" in the More menu to open it.');
     }
   }
   function clearImage() {

@@ -575,6 +575,27 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
   assert.equal(await page.$eval('#fileRow', (r) => !r.classList.contains('hidden')), true);
   assert.equal(await page.textContent('#fileKind'), 'Markdown');
+  assert.equal(await page.$$eval('#fileRow .tool-btn', (bs) => bs.map((b) => b.textContent)).then((t) => t.join(',')), 'Reload', 'the row keeps only Reload');
+  await page.click('#moreBtn');
+  await page.waitForSelector('#moreMenu:not(.hidden)');
+  const fileItems = () => page.$$eval('#fileRevealBtn, #fileOpenBtn, #fileConvertBtn', (bs) => bs.map((b) => !b.classList.contains('hidden') && !!b.offsetParent));
+  await waitForDom(() => !document.getElementById('fileConvertBtn').classList.contains('hidden'));
+  assert.deepEqual(await fileItems(), [true, true, true], 'a file note shows the This file group in More');
+  await page.click('#fileConvertBtn');
+  await waitForDom(() => document.getElementById('moreMenu').classList.contains('hidden'));
+  await page.waitForSelector('#convertMenu:not(.hidden) button');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('convertMenu').classList.contains('hidden'));
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'moreBtn', 'Esc from Convert to returns to More');
+  await clickRow('Alpha');
+  await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
+  await page.click('#moreBtn');
+  await page.waitForSelector('#moreMenu:not(.hidden)');
+  assert.deepEqual(await fileItems(), [true, true, false], 'a vault note can be shown or opened, not converted');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('moreMenu').classList.contains('hidden'));
+  await clickRow('External note.md');
+  await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
 
   const inoBefore = fs.statSync(mdPath).ino;
   await page.fill('#bodyInput', '# From disk\n\nline one\nline two from the app\n');
@@ -1408,7 +1429,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
-test('hardening: the page cannot be navigated away, and "Open with…" refuses programs', async () => {
+test('hardening: the page cannot be navigated away, and Open in default app refuses programs', async () => {
   const opened = await page.evaluate(() => { const w = window.open('file:///C:/Windows/win.ini'); return w === null; });
   assert.equal(opened, true, 'window.open is denied');
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1, 'no extra window');
