@@ -1979,16 +1979,21 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (where === 'body') focusBody();
   }
 
-  function updateStatus(note: Pick<PublicNote, 'trashedAt' | 'updatedAt'>) {
+  function isCodeFile(note: Pick<PublicNote, 'filePath' | 'fileKind'>) {
+    return isPlainTextFile(note) && !H.isTableFile(note) && !!window.NotesCode && window.NotesCode.languageFor(H.extOf(note.filePath)).code;
+  }
+
+  function updateStatus(note: Pick<PublicNote, 'trashedAt' | 'updatedAt' | 'filePath' | 'fileKind'>) {
     const body = el.bodyInput.value;
     const stats = tableStatsNow();
     if (stats && tableShown()) {
       el.statusWords.textContent = stats.rows.toLocaleString() + (stats.rows === 1 ? ' row' : ' rows');
       el.statusChars.textContent = stats.cols + (stats.cols === 1 ? ' column' : ' columns');
     } else {
-      const words = H.countWords(body);
-      el.statusWords.textContent = words + (words === 1 ? ' word' : ' words');
-      el.statusChars.textContent = body.length + (body.length === 1 ? ' character' : ' characters');
+      const lines = isCodeFile(note);
+      const count = lines ? H.countLines(body) : H.countWords(body);
+      el.statusWords.textContent = count.toLocaleString() + (lines ? (count === 1 ? ' line' : ' lines') : (count === 1 ? ' word' : ' words'));
+      el.statusChars.textContent = body.length.toLocaleString() + (body.length === 1 ? ' character' : ' characters');
     }
     el.statusUpdated.textContent = note.trashedAt ? 'Trashed ' + H.relativeTime(note.trashedAt) : 'Edited ' + H.relativeTime(note.updatedAt);
   }

@@ -174,6 +174,12 @@ function countWords(text?: string | null) {
   return t.split(/\s+/).length;
 }
 
+function countLines(text?: string | null) {
+  const t = String(text || '');
+  if (!t) return 0;
+  return t.replace(/\r?\n$/, '').split(/\r?\n/).length;
+}
+
 function tokenize(query?: string) {
   return String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
 }
@@ -657,7 +663,7 @@ export {
   splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
-  countWords, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
+  countWords, countLines, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,
   noteToMarkdown, markdownToNote, safeFilename, sizeText, PANE_LIMITS, EDITOR_MIN, clampPane,
   plainTextFromMarkdown, speechChunks, formatWhen, mailtoFor, noteLinkIds, vaultLinks, linkLeaf, stemOf, wikiLinkTarget, wikiLinkName, wikiLinkLabel,
 };

@@ -125,6 +125,19 @@ test('countWords', () => {
   assert.equal(H.countWords('one two\nthree'), 3);
 });
 
+test('countLines counts lines the way a person does: a trailing newline adds none', () => {
+  assert.equal(H.countLines(''), 0);
+  assert.equal(H.countLines(null), 0);
+  assert.equal(H.countLines('one'), 1);
+  assert.equal(H.countLines('one\n'), 1);
+  assert.equal(H.countLines('\n'), 1);
+  assert.equal(H.countLines('one\ntwo'), 2);
+  assert.equal(H.countLines('one\ntwo\n'), 2);
+  assert.equal(H.countLines('one\n\nthree\n'), 3);
+  assert.equal(H.countLines('one\r\ntwo\r\n'), 2);
+  assert.equal(H.countLines('one\n\n'), 2);
+});
+
 test('matchesQuery requires every token across title, body, and tags', () => {
   const n = { title: 'Meeting notes', body: 'Discuss roadmap', tags: ['work'] };
   assert.equal(H.matchesQuery(n, ''), true);

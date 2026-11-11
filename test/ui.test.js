@@ -599,6 +599,19 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.equal(readNotes().settings.editorMode, 'rendered', 'global preference untouched');
   await sleep(600);
   assert.equal(fs.readFileSync(softPath, 'utf8'), 'first line\nsecond line\n', 'file untouched by opening it');
+  assert.match(await page.textContent('#statusWords'), /^4 words$/, 'a text file counts words');
+
+  const codePath = path.join(fileDir, 'tool.py');
+  fs.writeFileSync(codePath, 'import os\n\n\ndef main():\n    print(os.getcwd())\n');
+  await page.evaluate((p) => window.notesApi.files.link([p]), codePath);
+  await waitFor('code file linked', () => readNotes().notes.some((n) => n.filePath && n.filePath.endsWith('tool.py')));
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('tool.py listed', () => revealRow({ text: 'tool.py' }), 8000);
+  await clickRow('tool.py');
+  await waitForDom(() => document.getElementById('titleInput').value === 'tool.py');
+  await waitForDom(() => document.getElementById('fileKind').textContent === 'Python');
+  await waitForDom(() => /^5 lines$/.test(document.getElementById('statusWords').textContent));
+  assert.match(await page.textContent('#statusChars'), /^47 characters$/);
 
   await clickRow("paper.pdf");
   await waitForDom(() => document.getElementById('titleInput').value === 'paper.pdf');
@@ -618,7 +631,14 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.equal(await page.inputValue('[data-pdf-text="size"]'), '12');
   assert.equal(await page.inputValue('[data-pdf-text="font"]'), 'sans');
   await page.waitForSelector('#pdfEditor .text-marks.is-active');
-  const mid = await page.$eval('#pdfEditor .pdfViewer .page', (p) => { const b = p.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+  const mid = await page.$eval('#pdfEditor .pdfViewer .page', (p) => {
+    p.scrollIntoView({ block: 'center' });
+    const b = p.getBoundingClientRect();
+    const v = p.closest('.pdf-viewport').getBoundingClientRect();
+    const top = Math.max(b.top, v.top);
+    const bottom = Math.min(b.bottom, v.bottom);
+    return { x: b.left + b.width / 2, y: (top + bottom) / 2 };
+  });
   await page.mouse.click(mid.x, mid.y);
   await page.waitForSelector('#pdfEditor .text-mark.is-editing .text-mark-body');
   await page.keyboard.type('Checked');
@@ -661,6 +681,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitFor('agent files folder exists', () => readNotes().folders.some((f) => f.name === 'Agent files'));
   await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath)));
   await waitForDom(() => !document.getElementById('settingsDialog').open);
+  await waitForDomWithin(15000, () => /Agent files are in the/.test(document.getElementById('toast').textContent));
   const agentFolder = readNotes().folders.find((f) => f.name === 'Agent files');
   const globalNote = readNotes().notes.find((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath));
   assert.equal(globalNote.folderId, agentFolder.id);
@@ -668,8 +689,10 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   assert.ok(globalNote.body.includes('# Global instructions'), 'contents read from the real file');
 
   await page.click('.nav-item[data-view="all"]');
-  for (const t of ['External note.md', 'paper.pdf', 'soft.md']) {
-    await clickRow(t);
+  for (const t of ['External note.md', 'paper.pdf', 'soft.md', 'tool.py']) {
+    const id = readNotes().notes.find((n) => n.title === t).id;
+    await waitFor(t + ' listed', () => revealRow({ id }), 8000);
+    await page.evaluate((x) => document.querySelector('.note-row[data-id="' + x + '"]').click(), id);
     await waitForDom((x) => document.getElementById('titleInput').value === x, t);
     await page.keyboard.press('Control+Shift+Delete');
     await waitFor(t + ' trashed', () => readNotes().notes.find((n) => n.title === t).trashedAt);
