@@ -125,6 +125,28 @@ test.after(async () => {
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (_) {  }
 });
 
+const guestFrame = () => page.frames().find((f) => /pane=right/.test(f.url()));
+async function closeSplitIfOpen() {
+  if (!(await page.$('#panePeer'))) return;
+  await guestFrame().click('#paneCloseBtn');
+  await waitForDom(() => !document.getElementById('panePeer'));
+}
+async function removeFromNotes(files) {
+  for (const file of files) {
+    const id = (readNotes().notes.find((n) => n.filePath === file) || {}).id;
+    if (!id) continue;
+    await revealRow({ id });
+    await clickRowById(id);
+    await page.keyboard.press('Control+Shift+Delete');
+    await waitFor('in the trash: ' + path.basename(file), () => { const n = readNotes().notes.find((x) => x.filePath === file); return !n || n.trashedAt; });
+  }
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('gone from Notes', () => !readNotes().notes.some((x) => files.includes(x.filePath)));
+  await page.click('.nav-item[data-view="all"]');
+}
+
 async function typeNote(title, body) {
   await page.click('#newNoteBtn');
   await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
@@ -742,14 +764,72 @@ test('compile: a LaTeX file compiles with the TeX Notes finds, lists errors with
   assert.ok(fs.existsSync(built('pdf')) && fs.existsSync(texPath), 'the PDF and the source stay');
   assert.equal(await statusText(), 'Not compiled yet');
 
-  await page.keyboard.press('Control+Shift+Delete');
-  await waitFor('tex note in the trash', () => { const n = readNotes().notes.find((x) => x.filePath === texPath); return !n || n.trashedAt; });
-  await page.click('.nav-item[data-view="trash"]');
-  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
-  await page.click('#emptyTrashBtn');
-  await waitFor('tex note gone from Notes', () => !readNotes().notes.some((x) => x.filePath === texPath));
-  await page.click('.nav-item[data-view="all"]');
+  await closeSplitIfOpen();
+  await removeFromNotes([texPath, built('pdf')]);
   assert.ok(fs.existsSync(texPath), 'removing a linked file from Notes never deletes it');
+});
+
+test('preview: a compile opens the PDF beside the file, Ctrl+Alt+J shows the line in it, a double-click goes back, and Compile on save compiles after a pause', { timeout: 90000 }, async () => {
+  const dir = tmpDir('notes-ui-preview-');
+  const texPath = path.join(dir, 'essay.tex');
+  const pdfPath = path.join(dir, 'essay.pdf');
+  const statusText = () => page.evaluate(() => document.getElementById('compileStatus').textContent.trim());
+  const guest = guestFrame;
+  fs.writeFileSync(texPath, '\\documentclass{article}\n\\begin{document}\nFirst line of the essay\n\nSecond paragraph here\n\\end{document}\n');
+  await page.evaluate((p) => window.notesApi.files.link([p]), texPath);
+  await waitFor('essay linked', () => readNotes().notes.some((n) => n.filePath === texPath));
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('essay listed', () => revealRow({ text: 'essay.tex' }), 8000);
+  await clickRow('essay.tex');
+  await waitForDom(() => document.getElementById('titleInput').value === 'essay.tex');
+  await page.click('#compileBtn');
+  await waitFor('compiled', async () => (await statusText()) === 'Compiled', 15000);
+
+  await waitFor('the split opened with the PDF on the right', async () => {
+    const g = guest();
+    return !!g && await g.evaluate(() => document.getElementById('titleInput').value === 'essay.pdf' && !!document.querySelector('#pdfEditor .pdfViewer .page canvas')).catch(() => false);
+  }, 20000);
+  assert.equal(await page.evaluate(() => document.getElementById('titleInput').value), 'essay.tex', 'the source stays on the left');
+
+  await page.click('#codeHost .cm-line >> nth=4');
+  await page.keyboard.press('Control+Alt+j');
+  await waitFor('the line flashed in the PDF', () => guest().evaluate(() => !!document.querySelector('#pdfEditor .sync-flash')), 8000);
+  await page.waitForSelector('#syncArrows:not(.hidden)');
+  await waitFor('the flash gone', () => guest().evaluate(() => !document.querySelector('#pdfEditor .sync-flash')), 8000);
+  await page.click('#syncForwardBtn');
+  await waitFor('the arrow shows the line in the PDF too', () => guest().evaluate(() => !!document.querySelector('#pdfEditor .sync-flash')), 8000);
+
+  await page.click('#codeHost .cm-line >> nth=0');
+  const pageBox = await guest().evaluate(() => {
+    const pageEl = document.querySelector('#pdfEditor .page[data-page-number="1"]');
+    pageEl.scrollIntoView({ block: 'start' });
+    const r = pageEl.getBoundingClientRect();
+    return { scale: (r.width - pageEl.clientLeft * 2) / 595, inset: pageEl.clientTop };
+  });
+  await guest().locator('#pdfEditor .page[data-page-number="1"]').dblclick({ position: { x: pageBox.inset + 200 * pageBox.scale, y: pageBox.inset + (72 + 18 * 3 - 4) * pageBox.scale } });
+  await waitForDom(() => /^Ln 3,/.test(document.getElementById('statusCode').textContent));
+
+  await page.click('#compileMenuBtn');
+  await page.click('#compileAutoBtn');
+  await waitFor('compile on save kept', () => ((readNotes().notes.find((n) => n.filePath === texPath) || {}).texOptions || {}).compileOnSave === true);
+  const before = fs.statSync(pdfPath).mtimeMs;
+  const zoomOf = () => guest().evaluate(() => document.getElementById('pdfZoom').textContent);
+  const zoomBefore = await zoomOf();
+  await guest().click('[data-pdf-act="zoom-in"]');
+  await guest().click('[data-pdf-act="zoom-in"]');
+  await waitFor('zoomed in', async () => (await zoomOf()) !== zoomBefore);
+  const zoomed = await zoomOf();
+  await page.click('#codeHost .cm-line >> nth=2');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' and more');
+  await waitFor('compiled again by itself', () => fs.statSync(pdfPath).mtimeMs > before, 15000);
+  await waitFor('status back to compiled', async () => (await statusText()) === 'Compiled', 15000);
+  await waitFor('the PDF reloaded with the new file', () => guest().evaluate(() => !!document.querySelector('#pdfEditor .pdfViewer .page canvas')), 8000);
+  await sleep(1500);
+  assert.equal(await zoomOf(), zoomed, 'the zoom survives the silent reload');
+
+  await closeSplitIfOpen();
+  await removeFromNotes([texPath, pdfPath]);
 });
 
 test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
@@ -2918,7 +2998,7 @@ test('the top band matches the window buttons and never runs under them or the o
   const guestRight = () => Math.max(0, ...[...document.querySelectorAll('.tab-bar button')].filter((b) => b.offsetParent && !b.closest('.tab')).map((b) => b.getBoundingClientRect().right));
   const setZoom = (level) => app.evaluate(({ BrowserWindow }, l) => BrowserWindow.getAllWindows()[0].webContents.setZoomLevel(l), level);
   const setWidth = (w) => app.evaluate(({ BrowserWindow }, width) => { const win = BrowserWindow.getAllWindows()[0]; if (win.isMaximized()) win.unmaximize(); win.setContentSize(width, 800); }, w);
-  const guest = () => page.frames().find((f) => /pane=right/.test(f.url()));
+  const guest = guestFrame;
   const openSplit = async () => {
     if (await page.isVisible('#splitViewBtn')) { await page.click('#splitViewBtn'); return; }
     await page.click('#moreBtn');

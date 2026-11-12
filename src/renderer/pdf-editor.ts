@@ -297,6 +297,50 @@ export const NotesPdfEditor = (function () {
     }
 
     let picking: ((value: PdfPoint | null) => void) | null = null;
+    function pageHeightOf(page: number) {
+      const view = doc && page >= 0 && page < doc.numPages ? viewer.getPageView(page) : null;
+      return view ? view.pdfPage.view[3] - view.pdfPage.view[1] : 0;
+    }
+
+    function pdfPointOf(e: MouseEvent): PdfPoint | null {
+      const pageEl = e.target instanceof Element ? e.target.closest<HTMLElement>('.page[data-page-number]') : null;
+      if (!doc || !pageEl) return null;
+      const page = Number(pageEl.dataset.pageNumber) - 1;
+      const view = viewer.getPageView(page);
+      const r = pageEl.getBoundingClientRect();
+      const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
+      return { page, x, y };
+    }
+
+    function pointAt(e: MouseEvent): PdfPoint | null {
+      const p = pdfPointOf(e);
+      return p ? { page: p.page, x: p.x, y: pageHeightOf(p.page) - p.y } : null;
+    }
+
+    function topOfView(): PdfPoint | null {
+      if (!doc || !location) return null;
+      const page = Math.min(location.pageNumber, doc.numPages) - 1;
+      return { page, x: location.left + 36, y: Math.max(0, pageHeightOf(page) - location.top + 24) };
+    }
+
+    function reveal(page: number, box: { left: number, top: number, right: number, bottom: number }) {
+      if (!doc || page < 0 || page >= doc.numPages) return false;
+      const height = pageHeightOf(page);
+      viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: 'XYZ' }, box.left - 40, height - box.top + 60, null], allowNegativeOffset: true });
+      requestAnimationFrame(() => {
+        const view = viewer.getPageView(page);
+        if (!view || !view.div) return;
+        const [x1, y1] = view.viewport.convertToViewportPoint(box.left, height - box.top);
+        const [x2, y2] = view.viewport.convertToViewportPoint(Math.max(box.right, box.left + 24), height - box.bottom);
+        const flash = document.createElement('div');
+        flash.className = 'sync-flash';
+        Object.assign(flash.style, { left: Math.min(x1, x2) - 4 + 'px', top: Math.min(y1, y2) - 3 + 'px', width: Math.abs(x2 - x1) + 8 + 'px', height: Math.abs(y2 - y1) + 6 + 'px' });
+        view.div.append(flash);
+        setTimeout(() => flash.remove(), 1600);
+      });
+      return true;
+    }
+
     function pickPoint(): Promise<PdfPoint | null> {
       cancelPick();
       if (!doc) return Promise.resolve(null);
@@ -304,17 +348,14 @@ export const NotesPdfEditor = (function () {
       root.classList.add('picking');
       return new Promise((resolve) => {
         const onDown = (e: PointerEvent) => {
-          const pageEl = e.button === 0 && e.target instanceof Element ? e.target.closest<HTMLElement>('.page[data-page-number]') : null;
-          if (!pageEl) return;
+          const point = e.button === 0 ? pdfPointOf(e) : null;
+          if (!point) return;
           e.preventDefault();
           e.stopPropagation();
-          const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
-          const r = pageEl.getBoundingClientRect();
-          const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
           const eat = (c: MouseEvent) => { c.preventDefault(); c.stopPropagation(); };
           container.addEventListener('click', eat, true);
           setTimeout(() => container.removeEventListener('click', eat, true), 400);
-          finish({ page: view.id - 1, x, y });
+          finish(point);
         };
         const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); } };
         function finish(value: PdfPoint | null) {
@@ -382,6 +423,9 @@ export const NotesPdfEditor = (function () {
       cancelPick,
       comments,
       goTo,
+      pointAt,
+      topOfView,
+      reveal,
       save,
       pageCount: () => (doc ? doc.numPages : 0),
       drawPage: (i: number, canvas: HTMLCanvasElement, width: number) => (doc ? drawPage(doc, i, canvas, width) : Promise.resolve()),

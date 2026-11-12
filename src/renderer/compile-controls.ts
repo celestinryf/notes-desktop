@@ -12,9 +12,13 @@ type Deps = {
   api: NotesApi,
   flushSave: () => Promise<unknown>,
   openFile: (filePath: string) => Promise<unknown>,
+  showOutput: (pdfPath: string) => Promise<unknown>,
+  revealInPdf: (box: TexBox) => Promise<unknown>,
 };
 
-export function createCompileControls({ api, flushSave, openFile }: Deps) {
+const AUTO_COMPILE_MS = 2000;
+
+export function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }: Deps) {
   const results = new Map<string, TexCompileResult>();
   const edited = new Set<string>();
   const visited = new Map<string, number>();
@@ -22,6 +26,8 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   let saving = false;
   let stopBeforeStart = false;
   let editedDuring = false;
+  let autoTimer: ReturnType<typeof setTimeout> | undefined;
+  let compileAgain = false;
   let pendingLine: { filePath: string, line: number } | null = null;
 
   const isTex = (n: PublicNote | null): n is PublicNote & { filePath: string } => !!n && !n.trashedAt && H.isTexFile(n);
@@ -56,9 +62,11 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
     el.compileStatus.title = result && result.ok ? 'Compiled with ' + ENGINE_LABELS[result.engine] + ' in ' + (result.ms / 1000).toFixed(1) + ' s. Show the results.' : 'Show the compile results';
   }
 
-  async function compile() {
+  async function compile(auto?: boolean) {
     const n = state.current;
     if (!isTex(n)) return;
+    clearTimeout(autoTimer);
+    if (auto && running) { compileAgain = running === n.id; return; }
     if (running === n.id) {
       if (saving) stopBeforeStart = true;
       else await api.tex.stop(n.id).catch(() => false);
@@ -86,7 +94,32 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
     results.set(n.id, result);
     render();
     if (state.currentId !== n.id) return;
-    if (!result.ok && (result.reason === 'failed' || result.reason === 'no-tex')) openResults();
+    if (result.ok && result.pdf) showOutput(result.pdf).catch(() => {});
+    if (!auto && !result.ok && (result.reason === 'failed' || result.reason === 'no-tex')) openResults();
+    if (compileAgain) { compileAgain = false; compile(true); }
+  }
+
+  function caretLine() {
+    const at = src.selectionStart || 0;
+    let line = 1;
+    for (let i = src.value.indexOf('\n'); i !== -1 && i < at; i = src.value.indexOf('\n', i + 1)) line++;
+    return line;
+  }
+
+  async function showLineInPdf() {
+    const n = state.current;
+    if (!isTex(n)) return;
+    let box: TexBox | null = null;
+    try { box = await api.tex.forward(n.id, caretLine()); } catch (_) { box = null; }
+    if (!box) { toast(resultOf(n) ? 'The PDF has no place for this line. Compile again to bring it up to date.' : 'Compile first (Ctrl+Enter), then this line can be found in the PDF.'); return; }
+    await revealInPdf(box);
+  }
+
+  function goToSource(source: TexSource) {
+    const n = state.current;
+    if (n && n.filePath && samePath(n.filePath, source.filePath)) { goToLine(source.line); return; }
+    pendingLine = { filePath: source.filePath, line: source.line };
+    openFile(source.filePath);
   }
 
   function issueButton(issue: TexIssue, root: string | null) {
@@ -155,6 +188,9 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
     const options = optionsOf(n);
     const program = readMagic(src.value).program;
     el.compileEngines.replaceChildren(...ENGINES.map((e) => engineItem(e, program || options.engine, !!program)));
+    el.compileAutoBtn.setAttribute('aria-checked', String(options.compileOnSave));
+    el.compileAutoBtn.classList.toggle('is-on', options.compileOnSave);
+    setIcon(el.compileAutoBtn, options.compileOnSave ? 'square-check' : 'square');
     el.compileHaltBtn.setAttribute('aria-checked', String(options.haltOnError));
     el.compileHaltBtn.classList.toggle('is-on', options.haltOnError);
     setIcon(el.compileHaltBtn, options.haltOnError ? 'square-check' : 'square');
@@ -170,6 +206,7 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
       const fresh = await api.tex.setOptions(n.id, patch);
       if (fresh && state.current && state.current.id === fresh.id) state.current.texOptions = fresh.texOptions;
       if (patch.engine) toast('This file compiles with ' + ENGINE_LABELS[patch.engine] + '.');
+      if (patch.compileOnSave !== undefined) toast(patch.compileOnSave ? 'This file compiles by itself 2 seconds after you stop typing.' : 'This file compiles only when you ask.');
       if (patch.haltOnError !== undefined) toast(patch.haltOnError ? 'Compiling stops at the first error.' : 'Compiling goes on past errors.');
     } catch (err) { toast('Could not change the compile options: ' + ipcErrorText(err)); }
   }
@@ -260,6 +297,7 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   el.moreCompileBtn.addEventListener('click', () => { compile(); });
   el.compileMenuBtn.addEventListener('click', () => { if (el.compileMenu.classList.contains('hidden')) openMenu(); else closeMenus(); });
   el.compileStatus.addEventListener('click', () => { if (el.compileResults.classList.contains('hidden')) openResults(); else closeMenus(); });
+  el.compileAutoBtn.addEventListener('click', () => { closeMenus(); const n = state.current; if (isTex(n)) setOptions({ compileOnSave: !optionsOf(n).compileOnSave }); });
   el.compileHaltBtn.addEventListener('click', () => { closeMenus(); const n = state.current; if (isTex(n)) setOptions({ haltOnError: !optionsOf(n).haltOnError }); });
   el.compileLogBtn.addEventListener('click', () => { showLog(); });
   el.compileResultsLogBtn.addEventListener('click', () => { showLog(); });
@@ -271,6 +309,7 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   el.bodyInput.addEventListener('input', () => {
     const n = state.current;
     if (!isTex(n)) return;
+    if (optionsOf(n).compileOnSave) { clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (state.current && state.current.id === n.id) compile(true); }, AUTO_COMPILE_MS); }
     if (running === n.id) { editedDuring = true; return; }
     if (edited.has(n.id) || !results.has(n.id)) return;
     edited.add(n.id);
@@ -291,12 +330,14 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
     const options = n && tex ? optionsOf(n) : DEFAULT_TEX_OPTIONS;
     const program = tex ? readMagic(src.value).program : null;
     return [
-      { id: 'tex-stop', title: 'Stop compiling', icon: 'square', keys: 'Ctrl+Enter', run: compile, ok: tex && busy, keywords: 'latex tex cancel' },
+      { id: 'tex-stop', title: 'Stop compiling', icon: 'square', keys: 'Ctrl+Enter', run: () => compile(false), ok: tex && busy, keywords: 'latex tex cancel' },
       { id: 'tex-next', title: 'Go to the next compile error', icon: 'arrow-down', keys: 'F8', run: () => stepIssue(1), ok: tex && !!resultOf(n), keywords: 'latex tex error warning problem' },
       { id: 'tex-previous', title: 'Go to the previous compile error', icon: 'arrow-up', keys: 'Shift+F8', run: () => stepIssue(-1), ok: tex && !!resultOf(n), keywords: 'latex tex error warning problem' },
       { id: 'tex-results', title: 'Show the compile results', icon: 'circle-alert', keys: '', run: openResults, ok: tex && !!resultOf(n), keywords: 'latex tex errors warnings log' },
       { id: 'tex-log', title: 'Show the full compile log', icon: 'scroll-text', keys: '', run: showLog, ok: tex && !!logPathOf(resultOf(n)), keywords: 'latex tex log' },
       { id: 'tex-pdf', title: 'Open the compiled PDF', icon: 'file-text', keys: '', run: openPdf, ok: tex && (() => { const r = resultOf(n); return !!(r && r.ok && r.pdf); })(), keywords: 'latex tex pdf output' },
+      { id: 'tex-forward', title: 'Show this line in the PDF', icon: 'arrow-right', keys: 'Ctrl+Alt+J', run: showLineInPdf, ok: tex, keywords: 'latex tex synctex forward search jump pdf' },
+      { id: 'tex-auto', title: options.compileOnSave ? 'Stop compiling on save' : 'Compile on save', icon: 'play', keys: '', run: () => setOptions({ compileOnSave: !options.compileOnSave }), ok: tex, keywords: 'latex tex auto compile automatic' },
       { id: 'tex-halt', title: options.haltOnError ? 'Compile past errors' : 'Stop compiling at the first error', icon: 'circle-alert', keys: '', run: () => setOptions({ haltOnError: !options.haltOnError }), ok: tex, keywords: 'latex tex halt-on-error' },
       ...ENGINES.map((e) => ({ id: 'tex-engine-' + e, title: 'Compile with ' + ENGINE_LABELS[e], icon: 'play', keys: '', run: () => setOptions({ engine: e }), ok: tex && !program && options.engine !== e, keywords: 'latex tex engine compiler' })),
       { id: 'tex-clean', title: 'Clear build files', icon: 'eraser', keys: '', run: clean, ok: tex, keywords: 'latex tex aux log synctex clean' },
@@ -304,5 +345,5 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
     ];
   }
 
-  return { render, compile, noteShown, closeMenus, openNow, commands, stepIssue, canCompile: () => isTex(state.current) };
+  return { render, compile: () => compile(false), noteShown, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
 }

@@ -14,6 +14,7 @@ import { NotesSignPad } from './sign-pad.ts';
 import { oneAtATime } from './one-at-a-time.ts';
 import { ipcErrorText } from './text.ts';
 import { toast } from './toast.ts';
+import { samePath } from '../shared/tex-results.mts';
 
 type PdfOnShow = { id: string, fileMtime: number | null };
 type FlushOptions = { commit?: boolean, explicit?: boolean };
@@ -25,12 +26,14 @@ type PdfNoteDeps = {
   externalLinkClick: (e: MouseEvent, href: string) => void,
   showBanner: (text: string) => void,
   openFiles: (paths?: string[]) => Promise<unknown>,
+  showSource: (source: TexSource) => void,
 };
 
-export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }: PdfNoteDeps) {
+export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, showSource }: PdfNoteDeps) {
 
   let pdf: PdfController | null = null;
   let pdfShownKey: string | null = null, pdfSeq = 0, pdfNote: PdfOnShow | null = null;
+  let pendingReveal: TexBox | null = null;
 
   function pdfController() {
     if (!pdf && NotesPdfEditor) {
@@ -162,6 +165,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
   async function showPdf(note: PublicNote, opts?: { keepView?: boolean }) {
     const key = note.id + ':' + note.fileMtime;
     if (pdfShownKey === key) return;
+    const sameNote = !!pdfShownKey && pdfShownKey.startsWith(note.id + ':');
     closePdfPages();
     if (pdfComments) pdfComments.stop();
     const ctl = pdfController();
@@ -172,8 +176,10 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     try {
       const { bytes, marks } = await api.files.pdfOpen(note.id);
       if (seq !== pdfSeq) return;
-      if (await ctl.open(new Uint8Array(bytes), marks, opts) && seq === pdfSeq) {
+      if (await ctl.open(new Uint8Array(bytes), marks, { keepView: opts && opts.keepView !== undefined ? opts.keepView : sameNote }) && seq === pdfSeq) {
         pdfNote = { id: note.id, fileMtime: note.fileMtime };
+        const reveal = pendingReveal;
+        if (reveal && note.filePath && samePath(reveal.pdf, note.filePath)) { pendingReveal = null; setTimeout(() => { if (pdf && pdfNote && pdfNote.id === note.id) pdf.reveal(reveal.page, reveal); }, 120); }
         if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
       }
     } catch (err) {
@@ -400,7 +406,31 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
   function pdfOpen() { return !!pdfNote; }
   function forgetShownPdf() { pdfShownKey = null; }
 
+  function revealSync(box: TexBox) {
+    const n = state.current;
+    if (pdf && pdfNote && n && n.id === pdfNote.id && n.filePath && samePath(n.filePath, box.pdf) && pdf.reveal(box.page, box)) return;
+    pendingReveal = box;
+  }
+
+  async function sourceAt(point: { page: number, x: number, y: number } | null) {
+    const n = state.current;
+    if (!point || !n || !n.filePath || !pdfNote || pdfNote.id !== n.id) return false;
+    let found: TexSource | null = null;
+    try { found = await api.tex.inverse(n.filePath, point.page, point.x, point.y); } catch (_) { found = null; }
+    if (!found) return false;
+    showSource(found);
+    return true;
+  }
+
+  async function sourceOfView() {
+    if (!(await sourceAt(pdf ? pdf.topOfView() : null))) toast('This PDF has no SyncTeX data beside it. Compile its LaTeX file in Notes first.');
+  }
+
   function bindPdfEvents() {
+    requireChild(el.pdfEditor, '.pdf-viewport', HTMLElement).addEventListener('dblclick', (e) => {
+      if (!pdf || el.pdfEditor.dataset.tool !== 'select') return;
+      sourceAt(pdf.pointAt(e));
+    });
     requireChild(el.pdfEditor, '.pdf-toolbar', HTMLElement).addEventListener('click', onPdfToolbarClick);
     fillTextSelects();
     showPdfTextSelection({ style: textStyle, selected: false, issue: null });
@@ -426,5 +456,5 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles }:
     });
   }
 
-  return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
+  return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents, revealSync, sourceOfView };
 }

@@ -51,6 +51,19 @@ function onePagePdf(text) {
   return Buffer.from(out, 'latin1');
 }
 
+const SP_PER_BP = 65781.76;
+function syncTex(file, lines) {
+  const sp = (bp) => Math.round(bp * SP_PER_BP);
+  const out = ['SyncTeX Version:1', 'Input:1:./' + file, 'Output:pdf', 'Magnification:1000', 'Unit:1', 'X Offset:0', 'Y Offset:0', 'Content:', '{1', '[1,1:' + sp(72) + ',' + sp(770) + ':' + sp(450) + ',' + sp(700) + ',0'];
+  lines.forEach((l, i) => {
+    if (!l.trim()) return;
+    const base = 72 + 18 * (i + 1);
+    out.push('(1,' + (i + 1) + ':' + sp(72) + ',' + sp(base) + ':' + sp(450) + ',' + sp(10) + ',' + sp(2), 'h1,' + (i + 1) + ':' + sp(72) + ',' + sp(base) + ':' + sp(450) + ',' + sp(10) + ',' + sp(2), ')');
+  });
+  out.push(']', '}1', 'Postamble:', 'Count:' + lines.length, 'Post scriptum:');
+  return out.join('\n') + '\n';
+}
+
 const delay = Number(process.env.FAKE_TEX_DELAY_MS || 0);
 setTimeout(async () => {
   fs.writeFileSync(path.join(cwd, stem + '.runs'), String(runs));
@@ -60,6 +73,7 @@ setTimeout(async () => {
   if (!fatal) {
     const title = (lines.find((l) => l.trim() && !l.trim().startsWith('%') && !l.trim().startsWith('\\')) || stem).slice(0, 60);
     fs.writeFileSync(path.join(cwd, stem + '.pdf'), onePagePdf(title));
+    fs.writeFileSync(path.join(cwd, stem + '.synctex.gz'), require('zlib').gzipSync(syncTex(file, lines)));
   }
   process.exit(errorAt !== -1 || fatal ? 1 : 0);
 }, delay);

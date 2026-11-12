@@ -184,6 +184,8 @@ type TexEngineName = 'pdflatex' | 'xelatex' | 'lualatex';
 interface TexNoteOptions { engine: TexEngineName; haltOnError: boolean; compileOnSave: boolean }
 interface TexIssue { kind: 'error' | 'warning' | 'badbox'; file: string | null; line: number | null; message: string; detail: string }
 interface TexLog { issues: TexIssue[]; errors: number; warnings: number; badBoxes: number; rerun: boolean; fatal: boolean }
+interface TexBox { pdf: string; page: number; left: number; top: number; right: number; bottom: number }
+interface TexSource { filePath: string; line: number }
 type TexStatus = { found: true; distribution: string; dir: string; latexmk: boolean } | { found: false; looked: string[]; problem: string | null };
 type TexCompileResult =
   | { ok: true; root: string; pdf: string | null; engine: TexEngineName; log: TexLog; ms: number; steps: string[] }
@@ -311,6 +313,9 @@ interface IpcContract {
   'tex:stop': (id: string) => boolean;
   'tex:clean': (id: string) => number;
   'tex:setOptions': (id: string, patch: Partial<TexNoteOptions>) => PublicNote | null;
+  'tex:forward': (id: string, line: number) => TexBox | null;
+  'tex:inverse': (pdfPath: string, page: number, x: number, y: number) => TexSource | null;
+  'tex:sourceFor': (pdfPath: string) => string | null;
   'signature:get': () => Uint8Array<ArrayBuffer> | null;
   'signature:set': (bytes: Uint8Array) => Ok;
   'signature:forget': () => Ok;
@@ -394,7 +399,7 @@ interface NotesApi {
     pathFor: (file: File) => string | null;
   };
   agentFiles: { discover: Invoker<'agentFiles:discover'>; link: Invoker<'agentFiles:link'> };
-  tex: { status: Invoker<'tex:status'>; compile: Invoker<'tex:compile'>; stop: Invoker<'tex:stop'>; clean: Invoker<'tex:clean'>; setOptions: Invoker<'tex:setOptions'> };
+  tex: { status: Invoker<'tex:status'>; compile: Invoker<'tex:compile'>; stop: Invoker<'tex:stop'>; clean: Invoker<'tex:clean'>; setOptions: Invoker<'tex:setOptions'>; forward: Invoker<'tex:forward'>; inverse: Invoker<'tex:inverse'>; sourceFor: Invoker<'tex:sourceFor'> };
   live: { host: Invoker<'live:host'>; join: Invoker<'live:join'>; stop: Invoker<'live:stop'>; status: Invoker<'live:status'> };
   attachments: {
     pick: Invoker<'attachments:pick'>; addPaths: Invoker<'attachments:addPaths'>; saveRecording: Invoker<'attachments:saveRecording'>;

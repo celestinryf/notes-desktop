@@ -77,6 +77,7 @@
     "pdfjs-dist": "6.3.289",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "synctex-js": "1.0.0",
     "tiptap-markdown": "^0.8.10",
     "turndown": "7.2.4",
     "turndown-plugin-gfm": "1.0.2"

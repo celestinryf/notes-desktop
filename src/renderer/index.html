@@ -382,7 +382,12 @@
       </div>
       <div class="activity" id="activityBar" role="status" aria-label="Running"></div>
       <div class="hint-pop hidden" id="hintPop" role="status" aria-live="polite"></div>
-      <div class="split-divider hidden" id="splitDivider" title="Drag to resize. Double-click to make both sides equal."></div>
+      <div class="split-divider hidden" id="splitDivider" title="Drag to resize. Double-click to make both sides equal.">
+        <div class="sync-arrows hidden" id="syncArrows" role="group" aria-label="Move between the LaTeX file and its PDF">
+          <button type="button" class="sync-arrow" id="syncForwardBtn" data-icon="arrow-right"></button>
+          <button type="button" class="sync-arrow" id="syncBackwardBtn" data-icon="arrow-left"></button>
+        </div>
+      </div>
     </section>
 
     <dialog id="settingsDialog" class="modal dialog-settings" aria-labelledby="settingsTitle">
@@ -813,6 +818,7 @@
     <div class="popover menu compile-menu hidden" id="compileMenu" role="menu" aria-label="Compile options">
       <div class="menu-group" role="group" aria-label="Engine" id="compileEngines"></div>
       <div class="menu-group" role="group" aria-label="Options">
+        <button role="menuitemcheckbox" class="menu-item" id="compileAutoBtn" aria-checked="false"><span class="lbl">Compile on save</span><span class="keys">after a pause</span></button>
         <button role="menuitemcheckbox" class="menu-item" id="compileHaltBtn" aria-checked="false"><span class="lbl">Stop on the first error</span></button>
       </div>
       <div class="menu-group" role="group" aria-label="Build files">
