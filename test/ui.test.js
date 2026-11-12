@@ -201,6 +201,7 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
   await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
   assert.equal(readNotes().settings.editorMode, 'source', 'mode persists');
   assert.match(await page.inputValue('#bodyInput'), /^## \[Big heading\]/);
+  assert.match(await page.textContent('#codeHost .cm-content'), /\[Big heading\]\(https:\/\/example\.com\)/, 'the code editor shows the rich-mode edit');
   step('source view');
   await fillBody('# From source\n\n- [ ] one', T);
   await page.keyboard.press('Control+e');
@@ -831,6 +832,7 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await waitFor('a body edit after a tag edit keeps the tag', () => /^---\ntags: \[alpha, beta\]\n---\n\nTagged body more!\n?$/.test(fs.readFileSync(tagged, 'utf8')));
   await useSourceMode(true);
   assert.match(await page.inputValue('#bodyInput'), /^---\ntags: \[alpha, beta\]\n---/);
+  assert.equal(await page.$$eval('#codeHost .cm-frontMatter', (ls) => ls.map((l) => l.textContent)).then((t) => t.join('|')), '---|tags: [alpha, beta]|---', 'the front matter lines are marked so they can recede');
 
   await clickRow("Groceries");
   await waitForDom(() => document.getElementById('titleInput').value === 'Groceries');
@@ -1040,24 +1042,24 @@ test('find in note counts and steps through matches; print asks the system to pr
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await fillBody('needle one\nhay\nneedle two\n');
-  await waitFor('body saved', () => findNote('Gamma (copy)').body === 'needle one\nhay\nneedle two\n');
+  await fillBody('- needle one\n- hay\n- needle two\n');
+  await waitFor('body saved', () => findNote('Gamma (copy)').body === '- needle one\n- hay\n- needle two\n');
   await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'needle');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   await page.keyboard.press('Enter');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
-  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['needle one\nhay\n'.length, 'needle one\nhay\nneedle'.length], 'source view selects the active match');
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['- needle one\n- hay\n- '.length, '- needle one\n- hay\n- needle'.length], 'source view selects the active match');
   assert.equal(await page.evaluate(() => !!document.activeElement.closest('#codeHost')), true, 'focus moves to the text so the selection is visible');
   await page.keyboard.press('Shift+F3');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
-  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [0, 6]);
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [2, 8]);
   await page.keyboard.press('Enter');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
   await page.keyboard.press('Shift+Enter');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
-  assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), 'needle one\nhay\nneedle two\n', 'text untouched by stepping');
+  assert.equal(await page.evaluate(() => document.getElementById('bodyInput').value), '- needle one\n- hay\n- needle two\n', 'text untouched by stepping: Enter steps the match instead of continuing the list');
   await page.click('#findInput');
   await page.keyboard.press('Escape');
   await useSourceMode(false);

@@ -20181,6 +20181,10 @@
       const c = shown();
       if (c) c.setValue(el.bodyInput.value, { history: false });
     },
+    forgetHistory() {
+      const c = shown();
+      if (c) c.forgetHistory();
+    },
     get readOnly() {
       return el.bodyInput.readOnly;
     },
@@ -20203,6 +20207,7 @@
         c.setRangeText(text, from, to, mode);
         el.bodyInput.value = c.value;
       } else el.bodyInput.setRangeText(text, from, to, mode);
+      el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
     },
     focus() {
       const c = shown();
@@ -21274,6 +21279,7 @@
       if (!keepTyping) {
         state.dirty = false;
         src.reload(updated.body);
+        src.forgetHistory();
         if (state.rich) {
           state.currentLossless = state.rich.setMarkdown(updated.body);
           if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) {
@@ -26266,7 +26272,6 @@
         src.setRangeText(before + selected + after, s, e, "select");
         src.setSelectionRange(s + before.length, s + before.length + selected.length);
       }
-      scheduleSave();
     }
     function handleEditorKeydown(e) {
       if (e.isComposing || e.keyCode === 229) return;

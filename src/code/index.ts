@@ -1,5 +1,6 @@
-import { EditorState, EditorSelection, Compartment, Annotation, Transaction, type TransactionSpec, type Extension } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder } from '@codemirror/view';
+import { EditorState, EditorSelection, Compartment, Annotation, Transaction, StateField, RangeSetBuilder, type TransactionSpec, type Extension, type Text } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder, Decoration, type DecorationSet } from '@codemirror/view';
+import { readFrontMatter } from '../shared/helpers.mts';
 import { history, historyKeymap, standardKeymap, indentMore, indentLess, toggleComment, undo, redo } from '@codemirror/commands';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, indentUnit, bracketMatching, type StreamParser } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -62,7 +63,7 @@ for (const [name, mode, exts] of LANGUAGES) {
   const known: Known = { name, code: true, make: () => StreamLanguage.define(mode) };
   for (const ext of exts) BY_EXT.set(ext, known);
 }
-const MARKDOWN: Known = { name: 'Markdown', code: false, make: () => markdown() };
+const MARKDOWN: Known = { name: 'Markdown', code: false, make: () => markdown({ addKeymap: false }) };
 for (const ext of ['md', 'markdown']) BY_EXT.set(ext, MARKDOWN);
 
 const found = (ext: string | null | undefined) => BY_EXT.get(String(ext || '').toLowerCase());
@@ -102,6 +103,27 @@ export function detectIndent(text: string) {
 }
 
 const fromNotes = Annotation.define();
+
+const FRONT_MATTER_LOOKAHEAD = 4000;
+const frontMatterLine = Decoration.line({ class: 'cm-frontMatter' });
+
+function frontMatterLines(doc: Text) {
+  const front = readFrontMatter(doc.sliceString(0, FRONT_MATTER_LOOKAHEAD));
+  if (!front) return Decoration.none;
+  const builder = new RangeSetBuilder<Decoration>();
+  const lines = Math.min(front.inner.length + 2, doc.lines);
+  for (let n = 1; n <= lines; n++) {
+    const line = doc.line(n);
+    builder.add(line.from, line.from, frontMatterLine);
+  }
+  return builder.finish();
+}
+
+const frontMatter = StateField.define<DecorationSet>({
+  create: (s) => frontMatterLines(s.doc),
+  update: (deco, tr) => (tr.docChanged ? frontMatterLines(tr.state.doc) : deco),
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 const lineIsIndented = (state: EditorState) => {
   const { from, to } = state.selection.main;
@@ -150,6 +172,7 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
         lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(), history(), bracketMatching(),
         EditorView.lineWrapping, EditorState.tabSize.of(2), syntaxHighlighting(highlight),
         language.of(lang.language || []),
+        found(opts.ext) === MARKDOWN ? frontMatter : [],
         words.of(EditorView.contentAttributes.of({ spellcheck: lang.code ? 'false' : 'true', 'aria-label': 'Text of ' + (opts.label || 'the file') })),
         writable.of([EditorState.readOnly.of(!!opts.readOnly), EditorView.editable.of(!opts.readOnly)]),
         hint.of(opts.placeholder ? placeholder(opts.placeholder) : []),
@@ -163,12 +186,14 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
     });
   };
 
+  let loaded: LoadOptions = {};
   const view = new EditorView({ parent, state: stateFor('', {}) });
   const clamp = (n: unknown) => Math.max(0, Math.min(Number(n) || 0, view.state.doc.length));
 
   return {
     dom: view.dom,
-    load(text: string, opts?: LoadOptions) { view.setState(stateFor(String(text || ''), opts || {})); },
+    load(text: string, opts?: LoadOptions) { loaded = opts || {}; view.setState(stateFor(String(text || ''), loaded)); },
+    forgetHistory() { view.setState(stateFor(view.state.doc.toString(), loaded)); },
     get value() { return view.state.doc.toString(); },
     setValue(text: string, { history = true } = {}) {
       const next = String(text || '').replace(/\r\n?/g, '\n'), prev = view.state.doc.toString();

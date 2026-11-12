@@ -759,6 +759,7 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .code-host .cm-editor .cm-matchingBracket { background: var(--selected); color: inherit; outline: none; }
 .code-host .cm-editor .cm-nonmatchingBracket { background: transparent; color: var(--danger); }
 .code-host .cm-editor .cm-placeholder { color: var(--fg-3); }
+.code-host .cm-frontMatter, .code-host .cm-frontMatter span { color: var(--fg-3); font-weight: 400; font-style: normal; }
 .status-code { margin-left: auto; color: var(--fg-3); }
 .status-code:not(.hidden) + .status-right { margin-left: 0; }
 

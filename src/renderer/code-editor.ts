@@ -20,6 +20,7 @@ export const src = {
   get value() { return el.bodyInput.value; },
   set value(text: string) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value); },
   reload(text: string) { el.bodyInput.value = text; const c = shown(); if (c) c.setValue(el.bodyInput.value, { history: false }); },
+  forgetHistory() { const c = shown(); if (c) c.forgetHistory(); },
   get readOnly() { return el.bodyInput.readOnly; },
   get selectionStart() { const c = shown(); return c ? c.selectionStart : el.bodyInput.selectionStart; },
   get selectionEnd() { const c = shown(); return c ? c.selectionEnd : el.bodyInput.selectionEnd; },
@@ -28,6 +29,7 @@ export const src = {
     const c = shown();
     if (c) { c.setRangeText(text, from, to, mode); el.bodyInput.value = c.value; }
     else el.bodyInput.setRangeText(text, from, to, mode);
+    el.bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
   },
   focus() { const c = shown(); if (c) c.focus(); else el.bodyInput.focus(); },
   hasFocus() { const c = shown(); return c ? c.hasFocus() : document.activeElement === el.bodyInput; },

@@ -16,7 +16,6 @@ export function createEditorText({ runFind, scheduleSave }: EditorTextDeps) {
       src.setRangeText(before + selected + after, s, e, 'select');
       src.setSelectionRange(s + before.length, s + before.length + selected.length);
     }
-    scheduleSave();
   }
 
   function handleEditorKeydown(e: KeyboardEvent) {
