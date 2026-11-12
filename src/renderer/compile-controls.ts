@@ -68,7 +68,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     if (!isTex(n)) return;
     clearTimeout(autoTimer);
     if (auto && !optionsOf(n).compileOnSave) return;
-    if (auto && running) { compileAgain = running === n.id; return; }
+    if (auto && running) { if (running === n.id) compileAgain = true; return; }
     if (running === n.id) {
       if (saving) stopBeforeStart = true;
       else await api.tex.stop(n.id).catch(() => false);

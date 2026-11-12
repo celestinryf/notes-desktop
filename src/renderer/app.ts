@@ -1689,7 +1689,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
         return;
       case 'changed':
+        peerKind = null;
         await onPeerWrite();
+        renderSyncArrows();
         return;
       case 'pdfReveal':
         if (state.current && state.current.filePath && samePath(state.current.filePath, m.box.pdf)) await pollCurrentFile(true);
@@ -2092,7 +2094,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const seq = ++syncSeq;
     const peerId = !GUEST && tabs.split ? tabs.peerCurrent : null;
     if (peerId && (!peerKind || peerKind.id !== peerId)) {
-      const note = await api.notes.get(peerId).catch(() => null);
+      let note: PublicNote | null = null;
+      try { note = await api.notes.get(peerId); } catch (_) { return; }
       if (seq !== syncSeq) return;
       peerKind = { id: peerId, kind: syncKind(note) };
     }
@@ -2325,9 +2328,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (documentBusy()) return;
     if (state.currentId !== note.id) return;
     if (res.missing) { showBanner(missingFileText(note)); return; }
-    if (res.changed && !state.dirty) {
+    if ((res.changed || quiet) && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
+      if (!res.changed && fresh.fileMtime === note.fileMtime) return;
       applyFreshFileBody(fresh);
       if (!quiet) toast('Reloaded from disk: the file changed outside Notes.');
     }

@@ -17,6 +17,7 @@ import { toast } from './toast.ts';
 import { samePath } from '../shared/tex-results.mts';
 
 type PdfOnShow = { id: string, fileMtime: number | null };
+const REVEAL_WAIT_MS = 10000;
 type FlushOptions = { commit?: boolean, explicit?: boolean };
 type SavedAsCopy = Extract<SavedFile, { savedAs: string }>;
 type CallFailure = { ok: false, error: string, canceled?: undefined };
@@ -33,7 +34,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
 
   let pdf: PdfController | null = null;
   let pdfShownKey: string | null = null, pdfSeq = 0, pdfNote: PdfOnShow | null = null;
-  let pendingReveal: TexBox | null = null;
+  let pendingReveal: { box: TexBox, at: number } | null = null;
   let loadingPdf = false;
 
   function pdfController() {
@@ -159,6 +160,8 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
     pdfShownKey = null;
     pdfSeq++;
     pdfNote = null;
+    loadingPdf = false;
+    pendingReveal = null;
     el.pdfEditor.classList.add('hidden');
     if (pdf) pdf.close();
   }
@@ -411,7 +414,9 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
 
   function applyPendingReveal() {
     const n = state.current;
-    const box = pendingReveal;
+    const pending = pendingReveal;
+    if (pending && Date.now() - pending.at > REVEAL_WAIT_MS) { pendingReveal = null; return; }
+    const box = pending ? pending.box : null;
     if (!box || loadingPdf || !pdf || !pdfNote || !n || n.id !== pdfNote.id || !n.filePath || !samePath(n.filePath, box.pdf)) return;
     pendingReveal = null;
     const ctl = pdf;
@@ -419,7 +424,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
   }
 
   function revealSync(box: TexBox) {
-    pendingReveal = box;
+    pendingReveal = { box, at: Date.now() };
     applyPendingReveal();
   }
 

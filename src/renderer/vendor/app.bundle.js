@@ -17048,7 +17048,7 @@
       clearTimeout(autoTimer);
       if (auto && !optionsOf(n).compileOnSave) return;
       if (auto && running) {
-        compileAgain = running === n.id;
+        if (running === n.id) compileAgain = true;
         return;
       }
       if (running === n.id) {
@@ -25368,6 +25368,7 @@
   }
 
   // src/renderer/pdf-note.ts
+  var REVEAL_WAIT_MS = 1e4;
   function createPdfNote({ api, externalLinkClick, showBanner, openFiles, showSource }) {
     let pdf = null;
     let pdfShownKey = null, pdfSeq = 0, pdfNote = null;
@@ -25496,6 +25497,8 @@
       pdfShownKey = null;
       pdfSeq++;
       pdfNote = null;
+      loadingPdf = false;
+      pendingReveal = null;
       el.pdfEditor.classList.add("hidden");
       if (pdf) pdf.close();
     }
@@ -25807,14 +25810,19 @@
     }
     function applyPendingReveal() {
       const n = state.current;
-      const box = pendingReveal;
+      const pending = pendingReveal;
+      if (pending && Date.now() - pending.at > REVEAL_WAIT_MS) {
+        pendingReveal = null;
+        return;
+      }
+      const box = pending ? pending.box : null;
       if (!box || loadingPdf || !pdf || !pdfNote || !n || n.id !== pdfNote.id || !n.filePath || !samePath(n.filePath, box.pdf)) return;
       pendingReveal = null;
       const ctl = pdf;
       setTimeout(() => ctl.reveal(box.page, box), 120);
     }
     function revealSync(box) {
-      pendingReveal = box;
+      pendingReveal = { box, at: Date.now() };
       applyPendingReveal();
     }
     async function sourceAt(point) {
@@ -28865,7 +28873,9 @@
           await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
           return;
         case "changed":
+          peerKind = null;
           await onPeerWrite();
+          renderSyncArrows();
           return;
         case "pdfReveal":
           if (state.current && state.current.filePath && samePath(state.current.filePath, m.box.pdf)) await pollCurrentFile(true);
@@ -29325,7 +29335,12 @@
       const seq = ++syncSeq;
       const peerId = !GUEST && tabs.split ? tabs.peerCurrent : null;
       if (peerId && (!peerKind || peerKind.id !== peerId)) {
-        const note = await api.notes.get(peerId).catch(() => null);
+        let note = null;
+        try {
+          note = await api.notes.get(peerId);
+        } catch (_) {
+          return;
+        }
         if (seq !== syncSeq) return;
         peerKind = { id: peerId, kind: syncKind(note) };
       }
@@ -29568,9 +29583,10 @@
         showBanner(missingFileText(note));
         return;
       }
-      if (res.changed && !state.dirty) {
+      if ((res.changed || quiet) && !state.dirty) {
         const fresh = await api.notes.get(note.id);
         if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
+        if (!res.changed && fresh.fileMtime === note.fileMtime) return;
         applyFreshFileBody(fresh);
         if (!quiet) toast("Reloaded from disk: the file changed outside Notes.");
       }
