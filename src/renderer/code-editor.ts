@@ -4,7 +4,7 @@ import { find } from './find-state.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 
-const { isPlainTextFile } = H;
+const { isPlainTextFile, isViewerOnlyFile } = H;
 
 let code: CodeEditor | null = null;
 let codeOn = false;
@@ -29,6 +29,7 @@ export const src = {
   reveal(at: number) { const c = shown(); if (c) c.reveal(at); else hooks.scrollTextareaToSelection(at); },
   dispatchEvent(event: Event) { return el.bodyInput.dispatchEvent(event); },
   get codeOn() { return !!shown(); },
+  sync() { const c = shown(); if (c) c.setValue(el.bodyInput.value, { history: false }); },
   undoRedo(cmd: 'undo' | 'redo') {
     const c = shown();
     if (!c || !c.contains(document.activeElement)) return false;
@@ -39,6 +40,7 @@ export const src = {
 
 const PROSE_EXT = new Set(['txt', 'text']);
 const isProseFile = (note: PublicNote) => isPlainTextFile(note) && PROSE_EXT.has(H.extOf(note.filePath));
+const isMarkdownNote = (note: PublicNote) => !isPlainTextFile(note) && !isViewerOnlyFile(note) && !H.isTableFile(note);
 
 function codeEditor(): CodeEditor {
   if (!code) {
@@ -54,10 +56,11 @@ function codeEditor(): CodeEditor {
 }
 
 function showCode(note: PublicNote, readOnly: boolean) {
-  codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile(note) && !isProseFile(note);
+  const markdown = isMarkdownNote(note);
+  codeOn = !!window.NotesCode && !codeFailed && (markdown || (isPlainTextFile(note) && !isProseFile(note)));
   if (codeOn) {
     try {
-      codeEditor().load(el.bodyInput.value, { ext: H.extOf(note.filePath), readOnly, placeholder: 'Plain text.', label: H.deriveTitle(note) });
+      codeEditor().load(el.bodyInput.value, { ext: markdown ? 'md' : H.extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : 'Plain text.', label: H.deriveTitle(note) });
     } catch (err) {
       console.error('The code editor could not start:', err);
       codeFailed = true;

@@ -1,4 +1,4 @@
-import { EditorState, EditorSelection, Compartment, Annotation, Transaction, type TransactionSpec } from '@codemirror/state';
+import { EditorState, EditorSelection, Compartment, Annotation, Transaction, type TransactionSpec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, placeholder } from '@codemirror/view';
 import { history, historyKeymap, standardKeymap, indentMore, indentLess, toggleComment, undo, redo } from '@codemirror/commands';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, indentUnit, bracketMatching, type StreamParser } from '@codemirror/language';
@@ -23,6 +23,7 @@ import { properties } from '@codemirror/legacy-modes/mode/properties';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { r } from '@codemirror/legacy-modes/mode/r';
 import { perl } from '@codemirror/legacy-modes/mode/perl';
+import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
 
 const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
   ['LaTeX', stex, ['tex', 'latex', 'sty', 'cls', 'ltx']],
@@ -55,22 +56,34 @@ const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
   ['R', r, ['r']],
   ['Perl', perl, ['pl']],
 ];
-const BY_EXT = new Map<string, { name: string, mode: StreamParser<unknown>, language?: StreamLanguage<unknown> }>();
-for (const [name, mode, exts] of LANGUAGES) for (const ext of exts) BY_EXT.set(ext, { name, mode });
+type Known = { name: string, code: boolean, make: () => Extension, language?: Extension };
+const BY_EXT = new Map<string, Known>();
+for (const [name, mode, exts] of LANGUAGES) {
+  const known: Known = { name, code: true, make: () => StreamLanguage.define(mode) };
+  for (const ext of exts) BY_EXT.set(ext, known);
+}
+const MARKDOWN: Known = { name: 'Markdown', code: false, make: () => markdown() };
+for (const ext of ['md', 'markdown']) BY_EXT.set(ext, MARKDOWN);
+
+const found = (ext: string | null | undefined) => BY_EXT.get(String(ext || '').toLowerCase());
 
 export function languageFor(ext: string | null | undefined) {
-  const found = BY_EXT.get(String(ext || '').toLowerCase());
-  if (!found) return { name: 'Plain text', language: null, code: false };
-  if (!found.language) found.language = StreamLanguage.define(found.mode);
-  return { name: found.name, language: found.language, code: true };
+  const known = found(ext);
+  if (!known) return { name: 'Plain text', language: null, code: false };
+  if (!known.language) known.language = known.make();
+  return { name: known.name, language: known.language, code: known.code };
 }
 
 const highlight = HighlightStyle.define([
   { tag: [t.keyword, t.tagName, t.controlKeyword, t.definitionKeyword, t.moduleKeyword, t.operatorKeyword], color: 'var(--syn-keyword)' },
   { tag: [t.string, t.special(t.string), t.regexp, t.character], color: 'var(--syn-string)' },
   { tag: [t.atom, t.bool, t.number, t.literal, t.typeName, t.className, t.attributeName, t.propertyName, t.labelName], color: 'var(--syn-atom)' },
-  { tag: [t.comment, t.lineComment, t.blockComment, t.meta, t.processingInstruction], color: 'var(--syn-comment)', fontStyle: 'italic' },
-  { tag: [t.bracket, t.punctuation, t.separator, t.operator, t.angleBracket, t.squareBracket, t.paren, t.brace], color: 'var(--syn-punct)' },
+  { tag: [t.comment, t.lineComment, t.blockComment, t.meta], color: 'var(--syn-comment)', fontStyle: 'italic' },
+  { tag: [t.bracket, t.punctuation, t.separator, t.operator, t.angleBracket, t.squareBracket, t.paren, t.brace, t.processingInstruction, t.contentSeparator], color: 'var(--syn-punct)' },
+  { tag: [t.link, t.url], color: 'var(--syn-string)' },
+  { tag: t.monospace, color: 'var(--syn-atom)' },
+  { tag: t.quote, color: 'var(--syn-comment)' },
+  { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: t.heading, fontWeight: '600' },
   { tag: t.strong, fontWeight: '650' },
   { tag: t.emphasis, fontStyle: 'italic' },
@@ -141,7 +154,7 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
         writable.of([EditorState.readOnly.of(!!opts.readOnly), EditorView.editable.of(!opts.readOnly)]),
         hint.of(opts.placeholder ? placeholder(opts.placeholder) : []),
         indent.of(indentUnit.of(detectIndent(text))),
-        keymap.of([...keys, ...historyKeymap, ...standardKeymap]),
+        keymap.of([...keys, ...(found(opts.ext) === MARKDOWN ? markdownKeymap : []), ...historyKeymap, ...standardKeymap]),
         EditorView.updateListener.of((u) => {
           if (u.docChanged && onChange && !u.transactions.some((tr) => tr.annotation(fromNotes))) onChange(u.state.doc.toString());
           if ((u.docChanged || u.selectionSet) && onSelection) onSelection();

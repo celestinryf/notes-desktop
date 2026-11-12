@@ -290,6 +290,7 @@ const SCENES = {
   empty: { about: 'No note open (the last tab closed)', run: key('Control+w') },
   main: { about: 'A long, rich note open with the list and sidebar', run: openNote('Q4 planning') },
   'short-note': { about: 'A short checklist note', run: openNote('Groceries') },
+  source: { about: 'The Markdown source of a note (Ctrl+E): headings, list marks, emphasis and code spans as text', run: steps(openNote('Q4 planning'), key('Control+e')) },
   focus: { about: 'Sidebar and list hidden: the writing view', run: steps(openNote('Notes on writing tools'), key('Control+\\'), key('Control+Shift+\\')) },
   find: { about: 'Find and replace in a note', run: steps(openNote('Q4 planning'), key('Control+h')) },
   'find-options': { about: 'Find with Match case on: the pressed cell, and the count narrowed', run: steps(openNote('Q4 planning'), key('Control+f'), async (page) => { await page.fill('#findInput', 'the'); await sleep(200); await page.click('#findCaseBtn'); await sleep(300); }) },

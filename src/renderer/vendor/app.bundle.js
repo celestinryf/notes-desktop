@@ -20158,7 +20158,7 @@
   }
 
   // src/renderer/code-editor.ts
-  var { isPlainTextFile: isPlainTextFile3 } = helpers_exports;
+  var { isPlainTextFile: isPlainTextFile3, isViewerOnlyFile: isViewerOnlyFile3 } = helpers_exports;
   var code = null;
   var codeOn = false;
   var codeFailed = false;
@@ -20217,6 +20217,10 @@
     get codeOn() {
       return !!shown();
     },
+    sync() {
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value, { history: false });
+    },
     undoRedo(cmd) {
       const c = shown();
       if (!c || !c.contains(document.activeElement)) return false;
@@ -20226,6 +20230,7 @@
   };
   var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
   var isProseFile = (note) => isPlainTextFile3(note) && PROSE_EXT.has(extOf(note.filePath));
+  var isMarkdownNote = (note) => !isPlainTextFile3(note) && !isViewerOnlyFile3(note) && !isTableFile(note);
   function codeEditor() {
     if (!code) {
       if (!window.NotesCode) throw new Error("the code editor bundle did not load");
@@ -20246,10 +20251,11 @@
     return code;
   }
   function showCode(note, readOnly) {
-    codeOn = !!window.NotesCode && !codeFailed && isPlainTextFile3(note) && !isProseFile(note);
+    const markdown = isMarkdownNote(note);
+    codeOn = !!window.NotesCode && !codeFailed && (markdown || isPlainTextFile3(note) && !isProseFile(note));
     if (codeOn) {
       try {
-        codeEditor().load(el.bodyInput.value, { ext: extOf(note.filePath), readOnly, placeholder: "Plain text.", label: deriveTitle(note) });
+        codeEditor().load(el.bodyInput.value, { ext: markdown ? "md" : extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : "Plain text.", label: deriveTitle(note) });
       } catch (err) {
         console.error("The code editor could not start:", err);
         codeFailed = true;
@@ -20443,7 +20449,7 @@
   }
 
   // src/renderer/editor-view.ts
-  var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile4 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile4, isPlainTextFile: isPlainTextFile4 } = helpers_exports;
   function tableShown() {
     return !el.csvView.classList.contains("hidden");
   }
@@ -20711,7 +20717,7 @@
       }
     }
     function syncTextViews(note) {
-      const none = lockedNow() || isViewerOnlyFile3(note);
+      const none = lockedNow() || isViewerOnlyFile4(note);
       const isTable = isTableFile(note);
       const table = isTable && !state.sourceMode && !none;
       el.richEditor.classList.toggle("hidden", none || state.sourceMode || isTable);
@@ -20755,12 +20761,14 @@
       syncSourceButton();
       syncTextViews(state.current);
       renderCodePosition();
-      if (state.sourceMode) autoGrow();
-      else if (state.rich && state.currentId && !isViewerOnlyFile3(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
+      if (state.sourceMode) {
+        src.sync();
+        autoGrow();
+      } else if (state.rich && state.currentId && !isViewerOnlyFile4(state.current) && !isPlainTextFile4(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
     }
     function toggleSource(force) {
       const next = typeof force === "boolean" ? force : !state.sourceMode;
-      if (isViewerOnlyFile3(state.current)) {
+      if (isViewerOnlyFile4(state.current)) {
         toast("This file is shown as it is; it has no Markdown view to switch to.");
         return;
       }
@@ -21159,7 +21167,7 @@
   }
 
   // src/renderer/locking.ts
-  var { isViewerOnlyFile: isViewerOnlyFile4, isPlainTextFile: isPlainTextFile5 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile5, isPlainTextFile: isPlainTextFile5 } = helpers_exports;
   function createLocking({ api, renderFileRow, flushSave, applyEditorMode, runFind, scheduleSave, renderStickyButton, updateStatus, refreshRow }) {
     function renderLockState(note) {
       const locked = !!(note && note.locked);
@@ -21177,7 +21185,7 @@
         if (state.rich) state.rich.setEditable(false);
       } else if (note) {
         renderFileRow(note);
-        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile4(note) && !isPlainTextFile5(note));
+        if (state.rich) state.rich.setEditable(!note.trashedAt && !isViewerOnlyFile5(note) && !isPlainTextFile5(note));
       }
     }
     function onLockButton() {
@@ -21320,7 +21328,7 @@
   }
 
   // src/renderer/attachments.ts
-  var { isViewerOnlyFile: isViewerOnlyFile5 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
   var failed = (x) => "error" in x && !!x.error;
   var attached = (x) => !!x && !failed(x);
   function createAttachments({ api, flushSave, refresh }) {
@@ -21356,7 +21364,7 @@
       }
     }
     async function attachFiles() {
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile5(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile6(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -21374,7 +21382,7 @@
         return;
       }
       const target = await api.notes.get(forNote);
-      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile5(target)) {
+      if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile6(target)) {
         const links = ok.map((it) => "[\u{1F4CE} " + it.name.replace(/[[\]]/g, "") + "](" + it.href + ")").join("\n");
         await api.notes.update(forNote, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + links + "\n" });
         toast('Attached to "' + truncate(deriveTitle(target), 30) + '", the note that was open when you chose the files.');
@@ -21388,7 +21396,7 @@
         return;
       }
       if (rec.starting) return;
-      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile5(state.current)) {
+      if (!state.current || lockedNow() || state.current.trashedAt || isViewerOnlyFile6(state.current)) {
         toast("Open an editable, unlocked note first.");
         return;
       }
@@ -21438,7 +21446,7 @@
             toast("Voice memo saved (" + mm + ":" + ss + "). Ctrl+click the link to play it.");
           } else {
             const target = await api.notes.get(rec.noteId);
-            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile5(target)) {
+            if (target && !target.locked && !target.trashedAt && !isViewerOnlyFile6(target)) {
               await api.notes.update(rec.noteId, { body: (target.body ? target.body.replace(/\s*$/, "") + "\n\n" : "") + "[" + label + "](" + saved.href + ")\n" });
               toast('Voice memo saved into "' + truncate(deriveTitle(target), 30) + '", the note it was recorded in.');
               refresh({ keepEditor: true });
@@ -21659,7 +21667,7 @@
   }
 
   // src/renderer/history-dialog.ts
-  var { isViewerOnlyFile: isViewerOnlyFile6 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile7 } = helpers_exports;
   var KEPT_OUT_HINT = "Kept out of history: new changes are not recorded. The versions below still hold its old text.";
   var COPIES_HINT = "A copy of this file is kept before a save, but not again within two minutes of the last copy while only Notes has written it: the last 30, and the one from before your first change this session. Restore puts a copy back in place; the file as it is now is kept too.";
   var keepsCopies = (note) => !!note.filePath && (note.fileKind === "pdf" || note.fileKind === "docx");
@@ -21876,7 +21884,7 @@
       const note = state.current;
       if (!v || !note) return;
       el.historyDialog.close();
-      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile6(note)) {
+      if (state.currentId !== hist.noteId || note.id !== hist.noteId || note.trashedAt || lockedNow() || isViewerOnlyFile7(note)) {
         toast("This note cannot take the restored text right now.");
         return;
       }
@@ -22488,7 +22496,7 @@
   }
 
   // src/renderer/speech.ts
-  var { isViewerOnlyFile: isViewerOnlyFile7, isNonMarkdownFile: isNonMarkdownFile3 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile8, isNonMarkdownFile: isNonMarkdownFile3 } = helpers_exports;
   function createSpeech({ api }) {
     const tts = { active: false, queue: [], index: 0 };
     function selectedTextForSpeech() {
@@ -22578,7 +22586,7 @@
       el.ttsVoiceSelect.value = voices.some((v) => v.name === current) ? current : "";
     }
     async function startDictation() {
-      if (!state.current || isViewerOnlyFile7(state.current) || state.current.trashedAt) {
+      if (!state.current || isViewerOnlyFile8(state.current) || state.current.trashedAt) {
         toast("Open an editable note first.");
         return;
       }
@@ -22659,7 +22667,7 @@
   }
 
   // src/renderer/find-bar.ts
-  var { isViewerOnlyFile: isViewerOnlyFile8 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile9 } = helpers_exports;
   function canFindInNote() {
     return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
   }
@@ -22701,7 +22709,7 @@
     function replaceCurrent() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile8(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile9(state.current)) return;
       if (state.sourceMode) {
         const wanted = find.active;
         runFind(true, true, true);
@@ -22775,7 +22783,7 @@
     function replaceAll() {
       const q = el.findInput.value;
       const text = el.replaceInput.value;
-      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile8(state.current)) return;
+      if (!q || lockedNow() || !state.current || state.current.trashedAt || isViewerOnlyFile9(state.current)) return;
       let n = 0;
       if (state.sourceMode) {
         const ta = src;
@@ -26300,7 +26308,7 @@
   (function() {
     "use strict";
     const api = withPeerNotice(window.notesApi, peerChanged);
-    const { isViewerOnlyFile: isViewerOnlyFile9, isPlainTextFile: isPlainTextFile6, isNonMarkdownFile: isNonMarkdownFile4 } = helpers_exports;
+    const { isViewerOnlyFile: isViewerOnlyFile10, isPlainTextFile: isPlainTextFile6, isNonMarkdownFile: isNonMarkdownFile4 } = helpers_exports;
     const closestTo = (e, selector) => e.target instanceof Element ? e.target.closest(selector) : null;
     function effectiveTheme(settings) {
       const s = settings || state.settings;
@@ -28266,7 +28274,7 @@
       const hasPending = applyPendingTo(note);
       if (hasPending && fileKeepsTags(note)) el.tagsInput.value = noteTags(el.bodyInput.value).join(", ");
       const plainFile = isPlainTextFile6(note);
-      const markdown = !plainFile && !isViewerOnlyFile9(note);
+      const markdown = !plainFile && !isViewerOnlyFile10(note);
       let lossless = true;
       if (state.rich) {
         lossless = state.rich.setMarkdown(markdown ? el.bodyInput.value : "");
@@ -28283,7 +28291,7 @@
       }
       autoGrow();
       const inTrash = !!note.trashedAt;
-      const fileReadOnly = isViewerOnlyFile9(note);
+      const fileReadOnly = isViewerOnlyFile10(note);
       el.sourceBtn.classList.toggle("hidden", plainFile && !isTableFile(note) || fileReadOnly);
       syncSourceButton();
       [el.titleInput, el.tagsInput].forEach((i) => {
@@ -28630,7 +28638,7 @@
       showSavedTags({ title: fresh.title }, fresh);
       if (!state.dirty) state.pending.delete(fresh.id);
       src.reload(fresh.body);
-      if (isViewerOnlyFile9(fresh)) {
+      if (isViewerOnlyFile10(fresh)) {
         showCode2(fresh, true);
         renderFileRow(fresh);
         updateStatus(fresh);
@@ -28691,7 +28699,7 @@
     }
     function currentPatch() {
       const patch = { title: el.titleInput.value, body: el.bodyInput.value, tags: state.tagsEdited ? el.tagsInput.value : void 0 };
-      if (isViewerOnlyFile9(state.current)) delete patch.body;
+      if (isViewerOnlyFile10(state.current)) delete patch.body;
       if (lockedNow()) delete patch.body;
       return patch;
     }
@@ -30348,7 +30356,7 @@
             state.current.title = fresh.title;
             refreshRow(fresh);
           }
-          if (fresh && state.current && isViewerOnlyFile9(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
+          if (fresh && state.current && isViewerOnlyFile10(fresh) && fresh.fileMtime !== state.current.fileMtime) applyFreshFileBody(fresh);
           else if (fresh && fresh.body !== el.bodyInput.value) {
             if (reason === "live") {
               if (!state.dirty && !state.inflight.has(state.currentId) || Date.now() - state.lastTypedAt > 1500) {
