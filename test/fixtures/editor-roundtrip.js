@@ -79,6 +79,8 @@ function probe(input) {
     ed.setMarkdown('Area ');
     caretAtEnd(ed);
     ed.insertMath('inline');
+    const started = Date.now();
+    while (Date.now() - started < 600) { }
     e.seen.edit.preview('x^');
     e.seen.edit.preview('x^2');
     e.seen.edit.finish('x^2');

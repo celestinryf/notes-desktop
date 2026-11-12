@@ -115,7 +115,7 @@ export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptio
     if (transaction.before !== known) return;
     if (transaction.docChanged) at = transaction.mapping.map(at, 1);
     if (transaction.docChanged && transaction.getMeta('addToHistory') !== false) othersInHistory = true;
-    known = transaction.doc;
+    known = editor.state.doc;
   };
   const endListeners: (() => void)[] = [];
   let open = true;
@@ -147,7 +147,7 @@ export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptio
       const saved = savedForm(kind, latex);
       write(original, false);
       if (isEmptySaved(saved)) {
-        if (fresh && !othersInHistory) editor.commands.undo();
+        if (fresh && !othersInHistory && locate()) editor.commands.undo();
         else remove(!fresh);
       } else {
         write(saved, joinsInsertion());
@@ -159,7 +159,7 @@ export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptio
     remove: () => {
       if (!open) return;
       write(original, false);
-      if (fresh && !othersInHistory) editor.commands.undo();
+      if (fresh && !othersInHistory && locate()) editor.commands.undo();
       else remove(!fresh);
       close();
       editor.view.focus();
