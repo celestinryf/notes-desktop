@@ -14,7 +14,7 @@ type CodeEditorHooks = { runFind: (forward?: boolean) => void, autoGrow: () => v
 
 let hooks: CodeEditorHooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {} };
 
-const shown = () => (codeOn ? code : null);
+const shown = () => (codeOn && state.sourceMode ? code : null);
 
 export const src = {
   get value() { return el.bodyInput.value; },
@@ -24,6 +24,11 @@ export const src = {
   get selectionStart() { const c = shown(); return c ? c.selectionStart : el.bodyInput.selectionStart; },
   get selectionEnd() { const c = shown(); return c ? c.selectionEnd : el.bodyInput.selectionEnd; },
   setSelectionRange(from: number, to: number) { const c = shown(); if (c) c.setSelectionRange(from, to); else el.bodyInput.setSelectionRange(from, to); },
+  setRangeText(text: string, from: number, to: number, mode: 'select' | 'start' | 'end' | 'preserve') {
+    const c = shown();
+    if (c) { c.setRangeText(text, from, to, mode); el.bodyInput.value = c.value; }
+    else el.bodyInput.setRangeText(text, from, to, mode);
+  },
   focus() { const c = shown(); if (c) c.focus(); else el.bodyInput.focus(); },
   hasFocus() { const c = shown(); return c ? c.hasFocus() : document.activeElement === el.bodyInput; },
   reveal(at: number) { const c = shown(); if (c) c.reveal(at); else hooks.scrollTextareaToSelection(at); },
@@ -48,11 +53,16 @@ function codeEditor(): CodeEditor {
     code = window.NotesCode.create({
       parent: el.codeHost,
       onChange: (text: string) => { el.bodyInput.value = text; el.bodyInput.dispatchEvent(new Event('input', { bubbles: true })); },
-      onSelection: renderCodePosition,
+      onSelection: () => { mirrorSelection(); renderCodePosition(); },
       onEnter: (shift: boolean) => { if (!find.open) return false; hooks.runFind(!shift); return true; },
     });
   }
   return code;
+}
+
+function mirrorSelection() {
+  const c = shown();
+  if (c) el.bodyInput.setSelectionRange(c.selectionStart, c.selectionEnd);
 }
 
 function showCode(note: PublicNote, readOnly: boolean) {
@@ -76,7 +86,7 @@ function showCode(note: PublicNote, readOnly: boolean) {
 }
 
 export function renderCodePosition() {
-  const c = state.sourceMode ? shown() : null;
+  const c = shown();
   el.statusCode.classList.toggle('hidden', !c);
   if (!c) return;
   const at = c.position();

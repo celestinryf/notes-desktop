@@ -45,6 +45,10 @@ const rendererErrors = [];
 let runningTest = '';
 const duringTest = (text) => text + (runningTest ? ' [during: ' + runningTest + ']' : '');
 const waitForDom = (fn, arg) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn, arg));
+const sourceBox = async () => (await page.$eval('#bodyInput', (t) => t.classList.contains('uses-code'))) ? '#codeHost .cm-content' : '#bodyInput';
+const fillBody = async (text, opts) => page.fill(await sourceBox(), text, opts);
+const focusBody = async () => page.focus(await sourceBox());
+const clickBody = async (opts) => page.click(await sourceBox(), opts);
 const waitForDomWithin = (timeout, fn) => waitFor('DOM condition ' + fn.toString().slice(0, 80), () => page.evaluate(fn), timeout);
 const revealRow = (match) => page.evaluate(async (m) => {
   const matches = (r) => (m.id ? r.dataset.id === m.id : r.textContent.toLowerCase().includes(m.text.toLowerCase()));
@@ -124,7 +128,7 @@ async function typeNote(title, body) {
   await page.click('#newNoteBtn');
   await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
   await page.fill('#titleInput', title);
-  await page.fill('#bodyInput', body);
+  await fillBody(body);
   await waitFor('note "' + title + '" saved', () => { const n = findNote(title); return n && n.body === body; });
   return findNote(title);
 }
@@ -198,7 +202,7 @@ test('rendered editor: ## becomes a heading, lists and checklists render, Markdo
   assert.equal(readNotes().settings.editorMode, 'source', 'mode persists');
   assert.match(await page.inputValue('#bodyInput'), /^## \[Big heading\]/);
   step('source view');
-  await page.fill('#bodyInput', '# From source\n\n- [ ] one', T);
+  await fillBody('# From source\n\n- [ ] one', T);
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor h1:has-text("From source")', T);
   assert.equal(await page.$$eval('#richEditor li[data-type="taskItem"]', (l) => l.length), 1);
@@ -222,7 +226,7 @@ test('first run opens on a fresh note and typing autosaves', async () => {
   await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
   await useSourceMode(true);
   await page.fill('#titleInput', 'Alpha');
-  await page.fill('#bodyInput', 'first body');
+  await fillBody('first body');
   await waitFor('Alpha saved', () => { const n = findNote('Alpha'); return n && n.body === 'first body'; });
   assert.equal(await page.textContent('#statusSaved'), 'Saved');
   assert.match(await page.textContent('#statusWords'), /2 words/);
@@ -293,8 +297,9 @@ test('duplicate creates a copy and selects it', async () => {
 test('Ctrl+B / Ctrl+I / Ctrl+K wrap the selection and toggle off again', async () => {
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
-  await page.focus('#bodyInput');
-  await page.evaluate(() => { const t = document.getElementById('bodyInput'); t.setSelectionRange(0, 4); });
+  await focusBody();
+  await page.keyboard.press('Control+Home');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowRight');
   await page.keyboard.press('Control+b');
   assert.equal(await page.inputValue('#bodyInput'), '**pure** text');
   await page.keyboard.press('Control+b');
@@ -308,8 +313,8 @@ test('Ctrl+B / Ctrl+I / Ctrl+K wrap the selection and toggle off again', async (
 });
 
 test('Tab indents, Shift+Tab outdents, Enter continues lists', async () => {
-  await page.fill('#bodyInput', '- item one');
-  await page.focus('#bodyInput');
+  await fillBody('- item one');
+  await focusBody();
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.type('item two');
@@ -323,11 +328,35 @@ test('Tab indents, Shift+Tab outdents, Enter continues lists', async () => {
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
-  assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two  \n', 'empty bullet ends the list');
+  assert.equal(await page.inputValue('#bodyInput'), '- item one\n- item two\n', 'empty bullet ends the list; the Markdown keymap trims the trailing spaces');
+});
+
+test('the Markdown source view is the code editor: line numbers, Ln/Col, highlighted marks, spellcheck on, word counts kept', async () => {
+  await useSourceMode(true);
+  await fillBody('# Head\n\nplain **bold** [site](https://example.com)\n');
+  await waitFor('source saved', () => findNote('Gamma (copy)').body.startsWith('# Head'));
+  assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('uses-code')), true, 'the textarea hands over to the code editor');
+  assert.equal(await page.isVisible('#codeHost .cm-editor'), true);
+  assert.equal(await page.$$eval('#codeHost .cm-lineNumbers .cm-gutterElement', (g) => g.some((e) => e.textContent === '3')), true, 'line numbers show');
+  assert.equal(await page.$eval('#codeHost .cm-content', (c) => c.getAttribute('spellcheck')), 'true', 'Markdown keeps spellcheck');
+  assert.equal(await page.$$eval('#codeHost .cm-line', (ls) => ls.filter((l) => l.querySelector('span')).length >= 2), true, 'headings and marks are highlighted spans');
+  await clickBody();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await waitForDom(() => document.getElementById('statusCode').textContent === 'Ln 3, Col 43');
+  assert.match(await page.textContent('#statusWords'), /^5 words$/, 'a Markdown note still counts words');
+  await page.keyboard.press('Control+e');
+  await waitForDom(() => document.getElementById('bodyInput').classList.contains('hidden'));
+  assert.equal(await page.isVisible('#codeHost .cm-editor'), false, 'the code editor hides with the source view');
+  assert.equal(await page.$eval('#statusCode', (s) => s.classList.contains('hidden')), true);
+  await page.keyboard.press('Control+e');
+  await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
 });
 
 test('switching source to rendered shows the same Markdown and checkbox clicks write back', async () => {
-  await page.fill('#bodyInput', '# Head\n\n- [ ] alpha\n- [x] beta\n\n[site](https://example.com)');
+  await fillBody('# Head\n\n- [ ] alpha\n- [x] beta\n\n[site](https://example.com)');
   await waitFor('source saved', () => findNote('Gamma (copy)').body.startsWith('# Head'));
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) h1');
@@ -338,7 +367,7 @@ test('switching source to rendered shows the same Markdown and checkbox clicks w
   await waitFor('checkbox toggled in source', () => findNote('Gamma (copy)').body.includes('- [x] alpha'));
   assert.equal(await page.$eval('#richEditor li[data-type="taskItem"] >> nth=0', (li) => li.dataset.checked), 'true');
   await page.keyboard.press('Control+e');
-  await page.waitForSelector('#bodyInput:not(.hidden)');
+  await waitForDom(() => !document.getElementById('bodyInput').classList.contains('hidden'));
 });
 
 test('tables and images render; Markdown the rendered view would alter opens as source and is not rewritten', async () => {
@@ -348,7 +377,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.fill('#titleInput', 'Rich constructs');
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
   const table = '| Name | Qty |\n| --- | --- |\n| Apple | 3 |\n\n![Diagram](' + png + ')\n\nDone.';
-  await page.fill('#bodyInput', table);
+  await fillBody(table);
   await waitFor('table note saved', () => findNote('Rich constructs') && findNote('Rich constructs').body === table);
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) table', { timeout: 8000 });
@@ -372,7 +401,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.fill('#titleInput', 'Soft breaks');
   await useSourceMode(true);
   const soft = 'line one\nline two\n\nx -> y and a > b\n\n* star bullet\n* another';
-  await page.fill('#bodyInput', soft);
+  await fillBody(soft);
   await waitFor('soft note saved', () => findNote('Soft breaks') && findNote('Soft breaks').body === soft);
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) p', { timeout: 8000 });
@@ -403,7 +432,7 @@ test('tables and images render; Markdown the rendered view would alter opens as 
   await page.fill('#titleInput', 'Lossy');
   await useSourceMode(true);
   const lossy = 'Keyboard: <kbd>Ctrl</kbd>+<kbd>K</kbd>\n\nA claim.[^1]\n\n[^1]: The footnote text.';
-  await page.fill('#bodyInput', lossy);
+  await fillBody(lossy);
   await waitFor('lossy note saved', () => findNote('Lossy') && findNote('Lossy').body === lossy);
   await clickRow("Rich constructs");
   await waitForDom(() => document.getElementById('titleInput').value === 'Rich constructs');
@@ -446,7 +475,7 @@ test('a picture whose path has spaces shows in the rendered view, and an edit ke
   await page.fill('#titleInput', 'Spaced pictures');
   await useSourceMode(true);
   const body = 'Shots:\n\n![Feed cards](my shots/one.png)\n\n![Cards [2]](my shots/two (b).png)\n\nDone.';
-  await page.fill('#bodyInput', body);
+  await fillBody(body);
   await waitFor('spaced picture note saved', () => findNote('Spaced pictures') && findNote('Spaced pictures').body === body);
   const dir = path.dirname(homeNoteFile('Spaced pictures'));
   fs.mkdirSync(path.join(dir, 'my shots'), { recursive: true });
@@ -461,7 +490,7 @@ test('a picture whose path has spaces shows in the rendered view, and an edit ke
     assert.match(imgs[0].src, /^file:\/\/\/.*\/my%20shots\/one\.png$/);
     assert.match(imgs[1].src, /^file:\/\/\/.*\/my%20shots\/two%20\(b\)\.png$/);
     await waitForDom(() => { const all = [...document.querySelectorAll('#richEditor img[data-src]')]; return all.length === 2 && all.every((i) => i.complete && i.naturalWidth === 1); });
-    assert.equal(await page.isVisible('#bodyInput'), false, 'the note is not sent to the source view');
+    assert.equal(await page.$eval('#bodyInput', (t) => t.classList.contains('hidden')), true, 'the note is not sent to the source view');
     assert.equal(await page.evaluate(() => document.getElementById('richEditor').textContent.includes('](')), false, 'no link text left on the page');
 
     await page.click('#richEditor p >> nth=-1');
@@ -483,19 +512,19 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   await useSourceMode(true);
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
-  await page.fill('#bodyInput', 'before lock');
+  await fillBody('before lock');
   await waitFor('baseline saved', () => findNote('Gamma (copy)').body === 'before lock');
   const alphaBefore = findNote('Alpha').body;
   const gammaFile = homeNoteFile('Gamma (copy)');
   setSavesReadOnly(true, [gammaFile, homeNoteFile('Alpha')]);
   try {
-    await page.fill('#bodyInput', 'typed while locked');
+    await fillBody('typed while locked');
     await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await clickRow("Alpha");
     await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
     assert.equal(findNote('Gamma (copy)').body, 'before lock', 'nothing reached disk while locked');
     assert.equal(fs.readFileSync(gammaFile, 'utf8'), 'before lock', 'the note file is unchanged too');
-    await page.fill('#bodyInput', 'alpha edited while locked');
+    await fillBody('alpha edited while locked');
     await waitForDomWithin(8000, () => document.getElementById('statusSaved').textContent === 'Save failed');
     await clickRow("Gamma (copy)");
     await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
@@ -511,11 +540,11 @@ test('an edit that cannot be saved survives switching notes and lands once the d
   }
   await waitFor('both pending edits landed after unlock', () => findNote('Gamma (copy)').body === 'typed while locked' && findNote('Alpha').body === 'alpha edited while locked', 15000);
   await waitForDom(() => document.getElementById('statusSaved').textContent === 'Saved');
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('restored body', () => findNote('Gamma (copy)').body === 'pure text');
   await clickRow("Alpha");
   await waitForDom(() => document.getElementById('titleInput').value === 'Alpha');
-  await page.fill('#bodyInput', alphaBefore);
+  await fillBody(alphaBefore);
   await waitFor('alpha restored', () => findNote('Alpha').body === alphaBefore);
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
@@ -527,7 +556,7 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   await page.fill('#titleInput', 'Entities');
   await useSourceMode(true);
   const md = 'Fish & chips, 1 < 2 && 3 > 2, <3\n\n1. one\n1. two\n1. three';
-  await page.fill('#bodyInput', md);
+  await fillBody(md);
   await waitFor('entities note saved', () => findNote('Entities') && findNote('Entities').body === md);
   await page.keyboard.press('Control+e');
   await page.waitForSelector('#richEditor:not(.hidden) ol', { timeout: 8000 });
@@ -598,7 +627,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
 
   const inoBefore = fs.statSync(mdPath).ino;
-  await page.fill('#bodyInput', '# From disk\n\nline one\nline two from the app\n');
+  await fillBody('# From disk\n\nline one\nline two from the app\n');
   await waitFor('edit reached the file', () => fs.readFileSync(mdPath, 'utf8').includes('line two from the app'));
   assert.equal(fs.statSync(mdPath).ino, inoBefore, 'written in place');
 
@@ -607,7 +636,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('replaced by another program'));
 
   const outside = '# From disk\n\nwritten by another program while typing\n';
-  await page.focus('#bodyInput');
+  await focusBody();
   await page.keyboard.press('Control+End');
   await page.keyboard.type('x');
   fs.writeFileSync(mdPath, outside);
@@ -773,7 +802,7 @@ test('vaults: a folder of Markdown becomes notes; new note writes a file; rename
   await page.keyboard.press('Control+n');
   await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
   await page.fill('#titleInput', 'Shopping');
-  await page.fill('#bodyInput', '- eggs\n');
+  await fillBody('- eggs\n');
   await waitFor('file created from note', () => fs.existsSync(path.join(vaultDir, 'Shopping.md')) && fs.readFileSync(path.join(vaultDir, 'Shopping.md'), 'utf8') === '- eggs\n');
   await page.fill('#titleInput', 'Groceries');
   await waitFor('file renamed', () => fs.existsSync(path.join(vaultDir, 'Groceries.md')) && !fs.existsSync(path.join(vaultDir, 'Shopping.md')));
@@ -839,7 +868,7 @@ test('bot: runs Claude Code in the notes folder, streams output, and its edits c
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'bot target body');
+  await fillBody('bot target body');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'bot target body');
   await page.keyboard.press('Control+Shift+a');
   await page.waitForSelector('#botPanel:not(.hidden)');
@@ -877,7 +906,7 @@ test('bot: runs Claude Code in the notes folder, streams output, and its edits c
   await waitForDomWithin(15000, () => document.getElementById('bodyInput').value.includes('typed in a terminal'));
   const botNote = readNotes().notes.find((n) => n.filePath === botFile);
   await page.evaluate(async (id) => { await window.notesApi.notes.trash(id); await window.notesApi.notes.destroy(id); }, botNote.id);
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
   await page.keyboard.press('Control+Shift+a');
   await waitForDom(() => document.getElementById('botPanel').classList.contains('hidden'));
@@ -887,7 +916,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', '- [ ] buy milk\n');
+  await fillBody('- [ ] buy milk\n');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === '- [ ] buy milk\n');
   assert.equal(await toolLabel('#stickyBtn'), 'Stick to the desktop');
 
@@ -909,7 +938,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await waitFor('sticky edit saved', () => /eggs/.test(findNote('Gamma (copy)').body), 8000);
   await waitForDomWithin(8000, () => /eggs/.test(document.getElementById('bodyInput').value));
 
-  await page.fill('#bodyInput', '- [x] done from main\n');
+  await fillBody('- [x] done from main\n');
   await waitFor('main edit saved', () => findNote('Gamma (copy)').body === '- [x] done from main\n');
   await waitFor('sticky reloaded', () => sticky.evaluate(() => /done from main/.test(document.querySelector('#stickyEditor').textContent)), 8000);
 
@@ -944,7 +973,7 @@ test('stickies: a note becomes a desktop window; edits flow both ways; colour an
   await waitFor('window closed by trash', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
   await page.evaluate((id) => window.notesApi.notes.destroy(id), fresh.id);
 
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -953,7 +982,7 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   const lossy = '~~~\nfenced with tildes\n~~~\n\nbody\n';
-  await page.fill('#bodyInput', lossy);
+  await fillBody(lossy);
   await waitFor('lossy body saved', () => findNote('Gamma (copy)').body === lossy);
   const opened = app.waitForEvent('window', { timeout: 15000 });
   await page.evaluate((id) => window.notesApi.stickies.open(id), findNote('Gamma (copy)').id);
@@ -968,7 +997,7 @@ test('stickies: a note the rendered view cannot reproduce opens read-only instea
   await sticky.click('#stickyCloseBtn');
   await waitFor('removed', () => !findNote('Gamma (copy)').sticky);
   await waitFor('window closed', () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length).then((n) => n === 1));
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -976,7 +1005,7 @@ test('undo after switching notes does nothing; typing with the find bar open doe
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'gamma text');
+  await fillBody('gamma text');
   await waitFor('gamma saved', () => findNote('Gamma (copy)').body === 'gamma text');
   await useSourceMode(false);
   const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && n.vaultId === homeVaultId());
@@ -996,14 +1025,14 @@ test('undo after switching notes does nothing; typing with the find bar open doe
   await page.waitForSelector('#findBar:not(.hidden)');
   await page.fill('#findInput', 'gamma');
   await waitForDom(() => document.getElementById('findCount').textContent === '1/1');
-  await page.click('#bodyInput');
+  await clickBody();
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' plus gamma');
   await waitFor('typed intact', () => findNote('Gamma (copy)').body === 'gamma text plus gamma');
   await waitForDom(() => /\/2$/.test(document.getElementById('findCount').textContent));
   await page.keyboard.press('Escape');
   await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1011,7 +1040,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'needle one\nhay\nneedle two\n');
+  await fillBody('needle one\nhay\nneedle two\n');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'needle one\nhay\nneedle two\n');
   await page.keyboard.press('Control+f');
   await page.waitForSelector('#findBar:not(.hidden)');
@@ -1020,7 +1049,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   await page.keyboard.press('Enter');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '2/2');
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), ['needle one\nhay\n'.length, 'needle one\nhay\nneedle'.length], 'source view selects the active match');
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'bodyInput', 'focus moves to the text so the selection is visible');
+  assert.equal(await page.evaluate(() => !!document.activeElement.closest('#codeHost')), true, 'focus moves to the text so the selection is visible');
   await page.keyboard.press('Shift+F3');
   await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === '1/2');
   assert.deepEqual(await page.evaluate(() => [document.getElementById('bodyInput').selectionStart, document.getElementById('bodyInput').selectionEnd]), [0, 6]);
@@ -1061,7 +1090,7 @@ test('find in note counts and steps through matches; print asks the system to pr
   assert.equal(visible, true, 'Escape in the find bar must not hide the app');
   await page.keyboard.press('Control+Shift+p');
   await waitForDomWithin(8000, () => /Print: dry run/.test(document.getElementById('toast').textContent));
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1070,7 +1099,7 @@ test('find in note: match case and whole word narrow the matches by button, Alt+
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
   const body = 'Needle needle needles NEEDLE\n';
-  await page.fill('#bodyInput', body);
+  await fillBody(body);
   await waitFor('body saved', () => findNote('Gamma (copy)').body === body);
   const total = (n) => waitFor('find total ' + n, async () => (await page.$eval('#findCount', (e) => e.textContent)).endsWith('/' + n));
   const pressed = (sel) => page.$eval(sel, (b) => b.getAttribute('aria-pressed') === 'true' && b.classList.contains('is-on'));
@@ -1159,7 +1188,7 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', '# Head\n\n**bold** text\n');
+  await fillBody('# Head\n\n**bold** text\n');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === '# Head\n\n**bold** text\n');
   const pdfPath = path.join(dataDir, 'share-out.pdf');
   const htmlPath = path.join(dataDir, 'share-out.html');
@@ -1199,7 +1228,7 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   await page.keyboard.press('Escape');
   await waitForDom(() => document.getElementById('shareMenu').classList.contains('hidden'));
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true);
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1207,7 +1236,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'the launch code is 4242-flamingo');
+  await fillBody('the launch code is 4242-flamingo');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'the launch code is 4242-flamingo');
   const id = findNote('Gamma (copy)').id;
   await page.keyboard.press('Control+l');
@@ -1222,7 +1251,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   assert.ok(!savedText().includes('flamingo'), 'no plaintext in notes.json, its journal, or any file in the notes folder');
   await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Unlocked');
   assert.equal(await page.inputValue('#bodyInput'), 'the launch code is 4242-flamingo', 'still readable right after locking');
-  await page.fill('#bodyInput', 'the launch code is 9999-pelican');
+  await fillBody('the launch code is 9999-pelican');
   await sleep(900);
   await waitFor('edit encrypted', () => !savedText().includes('pelican') && findNote('Gamma (copy)').body === '');
   await clickTool('#lockBtn');
@@ -1264,7 +1293,7 @@ test('locking: a password locks the note, the file holds no plaintext, wrong pas
   await page.click('#lockSubmitBtn');
   await waitFor('lock removed', () => { const n = findNote('Gamma (copy)'); return !n.lock && n.body === 'the launch code is 9999-pelican'; });
   await waitForDom(() => document.querySelector('#lockBtn .lbl').textContent === 'Lock');
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
   void id;
 });
@@ -1388,7 +1417,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'shared v1');
+  await fillBody('shared v1');
   await waitFor('body saved', () => findNote('Gamma (copy)').body === 'shared v1');
   const id = findNote('Gamma (copy)').id;
   await page.keyboard.press('Control+Shift+s');
@@ -1408,7 +1437,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   const es = await new Promise((resolve, reject) => { const req = http.get(local + '/events', (res) => { res.setEncoding('utf8'); let buf = ''; res.on('data', (ch) => { buf += ch; let i; while ((i = buf.indexOf('\n\n')) !== -1) { const f = buf.slice(0, i); buf = buf.slice(i + 2); const d = f.split('\n').find((l) => l.startsWith('data: ')); if (d) events.push(JSON.parse(d.slice(6))); } }); resolve(req); }); req.on('error', reject); });
   await waitFor('initial state event', () => events.length >= 1);
   await waitForDom(() => /1 person connected/.test(document.getElementById('liveText').textContent));
-  await page.fill('#bodyInput', 'shared v2 from app');
+  await fillBody('shared v2 from app');
   await waitFor('participant got v2', () => events.some((e) => e.body === 'shared v2 from app'), 8000);
   await sleep(1600);
   const post = (u, data) => new Promise((resolve, reject) => { const body = Buffer.from(JSON.stringify(data)); const req = http.request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': body.length } }, (res) => { let t = ''; res.on('data', (d) => (t += d)); res.on('end', () => resolve({ status: res.statusCode, text: t })); }); req.on('error', reject); req.end(body); });
@@ -1435,7 +1464,7 @@ test('live share: the app hosts a note; another participant over HTTP sees edits
   await page.click('#liveCancelBtn');
   assert.equal(readNotes().notes.length, before, 'no note created for a failed join');
   void id;
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1461,7 +1490,7 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'İstanbul foo bar foo');
+  await fillBody('İstanbul foo bar foo');
   await waitFor('turkish saved', () => findNote('Gamma (copy)').body === 'İstanbul foo bar foo');
   await page.keyboard.press('Control+h');
   await page.waitForSelector('#replaceRow:not(.hidden)');
@@ -1471,7 +1500,7 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await page.click('#replaceAllBtn');
   await waitFor('offsets intact', () => findNote('Gamma (copy)').body === 'İstanbul X bar X');
   await page.keyboard.press('Escape');
-  await page.fill('#bodyInput', 'cat sat\ncat ran\ncat hid\n');
+  await fillBody('cat sat\ncat ran\ncat hid\n');
   await waitFor('saved', () => findNote('Gamma (copy)').body === 'cat sat\ncat ran\ncat hid\n');
   await page.keyboard.press('Control+h');
   await page.waitForSelector('#replaceRow:not(.hidden)');
@@ -1498,7 +1527,7 @@ test('replace in note: one at a time and all, in source and rendered views', asy
   await waitFor('rendered all replaced', () => findNote('Gamma (copy)').body.replace(/\\\n/g, '\n').replace(/\n$/, '') === 'fox sat\nfox ran\nfox hid', 8000);
   await page.keyboard.press('Escape');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1506,10 +1535,10 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'version one');
+  await fillBody('version one');
   await waitFor('v1 saved', () => findNote('Gamma (copy)').body === 'version one');
   await waitFor('v1 in the history', () => historyAt('HEAD', 'Gamma (copy).md') === 'version one', 15000);
-  await page.fill('#bodyInput', 'version two');
+  await fillBody('version two');
   await waitFor('v2 saved', () => findNote('Gamma (copy)').body === 'version two');
   await sleep(1200);
   await page.keyboard.press('Control+Shift+h');
@@ -1532,7 +1561,7 @@ test('history: earlier versions are listed and one can be restored', { timeout: 
   await page.click('#historyRestoreBtn');
   await waitFor('restored', () => findNote('Gamma (copy)').body === 'version one');
   assert.equal(await page.inputValue('#bodyInput'), 'version one');
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1540,7 +1569,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await clickRow("Gamma (copy)");
   await waitForDom(() => document.getElementById('titleInput').value === 'Gamma (copy)');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'files:');
+  await fillBody('files:');
   await waitFor('saved', () => findNote('Gamma (copy)').body === 'files:');
   const src = path.join(dataDir, 'budget.csv');
   fs.writeFileSync(src, 'a,b\n1,2\n');
@@ -1570,7 +1599,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await waitFor('memo linked', () => /🎙 Voice memo \d\d:\d\d\]\(attachment:\/\/Recording/.test(findNote('Gamma (copy)').body));
   const other = readNotes().notes.find((n) => n.title !== 'Gamma (copy)' && !n.trashedAt && n.vaultId === homeVaultId() && !n.lock);
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'see also');
+  await fillBody('see also');
   await waitFor('saved2', () => findNote('Gamma (copy)').body === 'see also');
   await useSourceMode(false);
   await page.click('.rich-editor-content');
@@ -1613,7 +1642,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await page.click('#linkRemoveBtn');
   await waitFor('link removed', () => findNote('Gamma (copy)').body === 'see also');
   await useSourceMode(true);
-  await page.fill('#bodyInput', '[kept](foo.com)');
+  await fillBody('[kept](foo.com)');
   await waitFor('a link without a scheme saved', () => findNote('Gamma (copy)').body === '[kept](foo.com)');
   await useSourceMode(false);
   await page.click('.rich-editor-content');
@@ -1627,7 +1656,7 @@ test('attachments and voice memos: files are copied in and linked; links open th
   await sleep(300);
   assert.equal(findNote('Gamma (copy)').body, '[kept](foo.com)', 'Enter keeps it as written');
   await useSourceMode(true);
-  await page.fill('#bodyInput', 'pure text');
+  await fillBody('pure text');
   await waitFor('body restored', () => findNote('Gamma (copy)').body === 'pure text');
 });
 
@@ -1649,7 +1678,7 @@ test('zoom: Ctrl+= zooms in, Ctrl+- out, Ctrl+0 resets, and the level is remembe
   await waitFor('reset remembered', () => readNotes().settings.zoomLevel === 0);
   await app.evaluate(({ Menu }) => { global.__menus = []; const orig = Menu.prototype.popup; Menu.prototype.popup = function () { global.__menus.push(this.items.map((i) => i.label).filter(Boolean)); }; global.__restorePopup = () => { Menu.prototype.popup = orig; }; });
   await useSourceMode(true);
-  await page.click('#bodyInput', { button: 'right' });
+  await clickBody({ button: 'right' });
   await waitFor('menu shown', () => app.evaluate(() => global.__menus.length).then((n) => n >= 1));
   const labels = await app.evaluate(() => global.__menus[global.__menus.length - 1]);
   for (const l of ['Cut', 'Copy', 'Paste', 'Select all', 'Zoom in']) assert.ok(labels.includes(l), 'menu has ' + l + ': ' + labels.join(', '));
@@ -1813,7 +1842,7 @@ test('git history: edits are committed to a repo in the data folder', async () =
   await useSourceMode(true);
   await waitFor('at least one commit exists', () => count() >= 1, 10000);
   const before = count();
-  await page.fill('#bodyInput', 'committed text ' + Date.now());
+  await fillBody('committed text ' + Date.now());
   await waitFor('new commit after an edit', () => count() > before, 10000);
   const tracked = execFileSync('git', ['-C', repoDir, 'ls-files'], { encoding: 'utf8' }).trim().split('\n').sort();
   assert.ok(tracked.includes('Gamma (copy).md') && !tracked.includes('notes.json'), 'the notes folder\'s files are tracked, not notes.json: ' + tracked.join(', '));
@@ -1835,7 +1864,7 @@ test('git history: edits are committed to a repo in the data folder', async () =
 test('Alt+Arrow moves between notes', async () => {
   await page.click('.note-row >> nth=0');
   const first = await page.inputValue('#titleInput');
-  await page.focus('#bodyInput');
+  await focusBody();
   await page.keyboard.press('Alt+ArrowDown');
   await waitForDom((f) => document.getElementById('titleInput').value !== f, first);
   const second = await page.inputValue('#titleInput');
@@ -2570,7 +2599,7 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   assert.equal(await page.$eval('#noteList .note-row.is-active', (r) => r.getAttribute('aria-posinset')), '1', 'Alt+Up reaches the first note');
   await clickRow("Scroll filler 0");
   await useSourceMode(true);
-  await page.fill('#bodyInput', Array.from({ length: 150 }, (_, i) => 'line ' + i).join('\n'));
+  await fillBody(Array.from({ length: 150 }, (_, i) => 'line ' + i).join('\n'));
   await page.evaluate(() => { document.querySelector('.editor-scroll').scrollTop = 0; });
   const edBox = await page.evaluate(() => { const r = document.querySelector('.editor-scroll').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await page.mouse.move(edBox.x, edBox.y);

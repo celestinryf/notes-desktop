@@ -20166,7 +20166,7 @@
   }, autoGrow: () => {
   }, scrollTextareaToSelection: () => {
   } };
-  var shown = () => codeOn ? code : null;
+  var shown = () => codeOn && state.sourceMode ? code : null;
   var src = {
     get value() {
       return el.bodyInput.value;
@@ -20196,6 +20196,13 @@
       const c = shown();
       if (c) c.setSelectionRange(from, to);
       else el.bodyInput.setSelectionRange(from, to);
+    },
+    setRangeText(text, from, to, mode) {
+      const c = shown();
+      if (c) {
+        c.setRangeText(text, from, to, mode);
+        el.bodyInput.value = c.value;
+      } else el.bodyInput.setRangeText(text, from, to, mode);
     },
     focus() {
       const c = shown();
@@ -20240,7 +20247,10 @@
           el.bodyInput.value = text;
           el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
         },
-        onSelection: renderCodePosition,
+        onSelection: () => {
+          mirrorSelection();
+          renderCodePosition();
+        },
         onEnter: (shift) => {
           if (!find.open) return false;
           hooks.runFind(!shift);
@@ -20249,6 +20259,10 @@
       });
     }
     return code;
+  }
+  function mirrorSelection() {
+    const c = shown();
+    if (c) el.bodyInput.setSelectionRange(c.selectionStart, c.selectionEnd);
   }
   function showCode(note, readOnly) {
     const markdown = isMarkdownNote(note);
@@ -20275,7 +20289,7 @@
     hooks.autoGrow();
   }
   function renderCodePosition() {
-    const c = state.sourceMode ? shown() : null;
+    const c = shown();
     el.statusCode.classList.toggle("hidden", !c);
     if (!c) return;
     const at = c.position();
@@ -26242,16 +26256,15 @@
   // src/renderer/editor-text.ts
   function createEditorText({ runFind, scheduleSave }) {
     function wrapSelection(before, after) {
-      const ta = el.bodyInput;
-      if (ta.readOnly) return;
-      const { selectionStart: s, selectionEnd: e, value } = ta;
+      if (src.readOnly) return;
+      const s = src.selectionStart, e = src.selectionEnd, value = src.value;
       const selected = value.slice(s, e);
       const already = value.slice(s - before.length, s) === before && value.slice(e, e + after.length) === after;
       if (already) {
-        ta.setRangeText(selected, s - before.length, e + after.length, "select");
+        src.setRangeText(selected, s - before.length, e + after.length, "select");
       } else {
-        ta.setRangeText(before + selected + after, s, e, "select");
-        ta.setSelectionRange(s + before.length, s + before.length + selected.length);
+        src.setRangeText(before + selected + after, s, e, "select");
+        src.setSelectionRange(s + before.length, s + before.length + selected.length);
       }
       scheduleSave();
     }
@@ -29598,19 +29611,19 @@
             }
             return;
           case "b":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile6(state.current)) {
+            if (src.hasFocus() && !isPlainTextFile6(state.current)) {
               e.preventDefault();
               wrapSelection("**", "**");
             }
             return;
           case "i":
-            if (document.activeElement === el.bodyInput && !isPlainTextFile6(state.current)) {
+            if (src.hasFocus() && !isPlainTextFile6(state.current)) {
               e.preventDefault();
               wrapSelection("_", "_");
             }
             return;
           case "k":
-            if (document.activeElement === el.bodyInput) {
+            if (src.hasFocus()) {
               if (!isPlainTextFile6(state.current)) {
                 e.preventDefault();
                 wrapSelection("[", "](url)");

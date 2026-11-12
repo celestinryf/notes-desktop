@@ -3026,10 +3026,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         case ',': e.preventDefault(); openSettings(); return;
         case '\\': e.preventDefault(); toggleSidebar(); return;
         case 'delete': if (!inTextField()) { e.preventDefault(); trashCurrent(); } return;
-        case 'b': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('**', '**'); } return;
-        case 'i': if (document.activeElement === el.bodyInput && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
+        case 'b': if (src.hasFocus() && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('**', '**'); } return;
+        case 'i': if (src.hasFocus() && !isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('_', '_'); } return;
         case 'k':
-          if (document.activeElement === el.bodyInput) { if (!isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('[', '](url)'); } }
+          if (src.hasFocus()) { if (!isPlainTextFile(state.current)) { e.preventDefault(); wrapSelection('[', '](url)'); } }
           else if (bodyHasFocus() && !src.codeOn) { e.preventDefault(); links.open(); }
           return;
         default: break;
