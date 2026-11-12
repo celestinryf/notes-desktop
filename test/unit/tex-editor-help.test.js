@@ -179,3 +179,31 @@ test('error marks: each lands on its line from the first non-space character, li
   assert.deepEqual(marks.map((m) => m.severity), ['error', 'warning', 'info']);
   assert.equal(marks[0].message, 'Undefined control sequence.');
 });
+
+test('the environment before the caret: arguments with nested braces and brackets count, anything else after them does not', () => {
+  assert.equal(L.environmentBefore('\\begin{tabular}{@{}ll@{}}'), 'tabular');
+  assert.equal(L.environmentBefore('\\begin{tabular}{p{3cm}c}'), 'tabular');
+  assert.equal(L.environmentBefore('\\begin{minipage}[t]{0.5\\linewidth}  '), 'minipage');
+  assert.equal(L.environmentBefore('\\begin{tabular}{l\\}l}'), 'tabular', 'an escaped brace is not a close');
+  assert.equal(L.environmentBefore('\\begin{tabular}{ll'), null, 'an argument still being typed');
+  assert.equal(L.environmentBefore('\\begin{itemize} \\item'), null);
+  assert.equal(L.environmentBefore('\\begin{a}\\end{a} \\begin{b}'), 'b', 'the last \\begin on the line');
+  assert.equal(L.environmentBefore('no environment'), null);
+  assert.equal(enter('\\begin{tabular}{@{}ll@{}}|').text, '\\begin{tabular}{@{}ll@{}}\n  \n\\end{tabular}');
+});
+
+test('completion: \\bibliography{ after a comma replaces only the name being typed', async () => {
+  const many = await complete('\\bibliography{refs, mo|');
+  assert.equal(many.result.from, many.pos - 2);
+  assert.deepEqual(many.labels, ['refs']);
+  assert.ok(many.result.validFor.test('more'));
+  assert.ok(!many.result.validFor.test('a,b'));
+  const one = await complete('\\includegraphics{figures/pl|');
+  assert.equal(one.result.from, one.pos - 'figures/pl'.length);
+});
+
+test('folding: a line that ends one environment and begins another of the same name folds the new one', () => {
+  const { state } = at('\\begin{proof}\na\n\\end{proof}\\begin{proof}\nb\nc\n\\end{proof}');
+  assert.deepEqual(foldAt(state, 3), { from: lineRange(state, 3).to, to: lineRange(state, 5).to });
+  assert.deepEqual(foldAt(state, 1), { from: lineRange(state, 1).to, to: lineRange(state, 2).to }, 'the first one ends where the next begins');
+});

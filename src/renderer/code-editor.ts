@@ -16,6 +16,9 @@ type CodeEditorHooks = { runFind: (forward?: boolean) => void, autoGrow: () => v
 let hooks: CodeEditorHooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {}, texHelp: () => null };
 
 const shown = () => (codeOn && state.sourceMode ? code : null);
+const escapesTaken = new WeakSet<Event>();
+
+export const editorTookEscape = (e: KeyboardEvent) => escapesTaken.has(e);
 
 export const src = {
   get value() { return el.bodyInput.value; },
@@ -62,6 +65,7 @@ function codeEditor(): CodeEditor {
       onSelection: () => { mirrorSelection(); renderCodePosition(); },
       onEnter: (shift: boolean) => { if (!find.open) return false; hooks.runFind(!shift); return true; },
     });
+    el.codeHost.addEventListener('keydown', (e) => { if (e.key === 'Escape' && code && code.suggesting()) escapesTaken.add(e); }, true);
   }
   return code;
 }

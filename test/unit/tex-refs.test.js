@@ -99,9 +99,10 @@ function project() {
   return { dir, main, write };
 }
 
-test('references: labels from the \\input and \\include chain, citations from the named .bib files, commands, environments and the project\'s files', () => {
+
+test('references: labels from the \\input and \\include chain, citations from the named .bib files, commands, environments and the project\'s files', async () => {
   const { main } = project();
-  const found = F.referencesFor(main);
+  const found = await F.referencesFor(main);
   assert.deepEqual(keys(found.labels), ['top', 'sec:intro', 'sec:end']);
   assert.deepEqual(keys(found.citations), ['one', 'two']);
   assert.equal(found.citations[0].detail, 'One', 'the first .bib named wins a repeated key');
@@ -110,35 +111,65 @@ test('references: labels from the \\input and \\include chain, citations from th
   assert.deepEqual(found.files, ['chapters/end.tex', 'chapters/intro.tex', 'figures/plot.png', 'main.tex', 'more.bib', 'refs.bib', 'secret.tex']);
 });
 
-test('references: with no \\bibliography, every .bib beside the root is read; a missing named one is skipped', () => {
-  const { dir, write } = project();
+test('references: with no \\bibliography, every .bib beside the root is read; a missing named one is skipped', async () => {
+  const { write } = project();
   const lone = write('lone.tex', '\\cite{x}\n');
-  const all = F.referencesFor(lone).citations;
+  const all = (await F.referencesFor(lone)).citations;
   assert.deepEqual(keys(all), ['two', 'one'], 'more.bib comes before refs.bib');
   assert.equal(all[1].detail, 'Again');
   const named = write('named.tex', '\\addbibresource{gone.bib}\n\\addbibresource[label=x]{refs.bib}\n');
-  assert.deepEqual(keys(F.referencesFor(named).citations), ['one']);
-  assert.ok(fs.existsSync(path.join(dir, 'more.bib')));
+  assert.deepEqual(keys((await F.referencesFor(named)).citations), ['one']);
 });
 
-test('references: files over 4 MB are not read', () => {
+test('references: files over 4 MB are not read', async () => {
   const { write } = project();
   write('big.bib', '@book{big, title = {Big}}\n' + ' '.repeat(4 * 1024 * 1024 + 10));
   const root = write('big.tex', '\\bibliography{big}\n');
-  assert.deepEqual(F.referencesFor(root).citations, []);
+  assert.deepEqual((await F.referencesFor(root)).citations, []);
 });
 
-test('references: a root that cannot be read gives empty lists, not an error', () => {
-  const found = F.referencesFor(path.join(tmpDir('notes-tex-refs-none-'), 'gone.tex'));
+test('references: a root that cannot be read gives empty lists, not an error', async () => {
+  const found = await F.referencesFor(path.join(tmpDir('notes-tex-refs-none-'), 'gone.tex'));
   assert.deepEqual(found.labels, []);
   assert.deepEqual(found.citations, []);
 });
 
-test('the service reads references from the root a "% !TEX root" names, and from the file itself when that root is missing', () => {
+test('references: a folder linked into the project that points outside it is not read', async (t) => {
+  const { dir, write } = project();
+  const outside = tmpDir('notes-tex-refs-outside-');
+  fs.writeFileSync(path.join(outside, 'leak.tex'), '\\label{leaked}\n');
+  fs.writeFileSync(path.join(outside, 'leak.bib'), '@book{leaked, title = {Leak}}\n');
+  try { fs.symlinkSync(outside, path.join(dir, 'linked'), 'junction'); } catch (err) { t.skip('cannot make a junction here: ' + err.code); return; }
+  const root = write('linked-root.tex', '\\input{linked/leak}\n\\bibliography{linked/leak}\n\\label{own}\n');
+  const found = await F.referencesFor(root);
+  assert.deepEqual(keys(found.labels), ['own']);
+  assert.deepEqual(found.citations, []);
+  assert.ok(!found.files.some((f) => f.startsWith('linked/')), 'the walk does not enter the link');
+});
+
+test('references: the folder walk stops after its entry budget, so a .tex in a huge folder stays quick', async () => {
+  const dir = tmpDir('notes-tex-refs-wide-');
+  for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(dir, 'a' + String(i).padStart(2, '0') + '.txt'), 'x');
+  fs.writeFileSync(path.join(dir, 'z-late.tex'), 'x');
+  assert.deepEqual(await F.projectFilesOf(dir, 20), []);
+  assert.deepEqual(await F.projectFilesOf(dir, 100), ['z-late.tex']);
+});
+
+test('references: the reader stops once its byte budget is spent', async () => {
+  const dir = tmpDir('notes-tex-refs-budget-');
+  fs.writeFileSync(path.join(dir, 'a.tex'), 'aaaaaa');
+  fs.writeFileSync(path.join(dir, 'b.tex'), 'bbbbbb');
+  const read = F.projectReader(dir, 10);
+  assert.equal(await read(path.join(dir, 'a.tex')), 'aaaaaa');
+  assert.equal(await read(path.join(dir, 'b.tex')), null);
+  assert.equal(await F.projectReader(dir)(path.join(dir, 'gone.tex')), null);
+});
+
+test('the service reads references from the root a "% !TEX root" names, and from the file itself when that root is missing', async () => {
   const { write } = project();
   const chapter = write('chapters/part.tex', '% !TEX root = ../main.tex\n\\label{sec:part}\n');
   const tex = new TexService({});
-  assert.ok(keys(tex.references(chapter).labels).includes('top'), 'the root\'s labels');
+  assert.ok(keys((await tex.references(chapter)).labels).includes('top'), 'the root\'s labels');
   const orphan = write('chapters/orphan.tex', '% !TEX root = ../nowhere.tex\n\\label{sec:orphan}\n');
-  assert.deepEqual(keys(tex.references(orphan).labels), ['sec:orphan']);
+  assert.deepEqual(keys((await tex.references(orphan)).labels), ['sec:orphan']);
 });

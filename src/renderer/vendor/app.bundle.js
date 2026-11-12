@@ -16818,6 +16818,8 @@
   }, scrollTextareaToSelection: () => {
   }, texHelp: () => null };
   var shown = () => codeOn && state.sourceMode ? code : null;
+  var escapesTaken = /* @__PURE__ */ new WeakSet();
+  var editorTookEscape = (e) => escapesTaken.has(e);
   var src = {
     get value() {
       return el.bodyInput.value;
@@ -16925,6 +16927,9 @@
           return true;
         }
       });
+      el.codeHost.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && code && code.suggesting()) escapesTaken.add(e);
+      }, true);
     }
     return code;
   }
@@ -17147,7 +17152,7 @@
       running = null;
       if (editedDuring && result.ok) edited.add(n.id);
       results.set(n.id, result);
-      if (result.root) byRoot.set(result.root.toLowerCase(), result);
+      if (result.root) byRoot.set(result.root.toLowerCase(), { result, stale: editedDuring });
       references = null;
       showMarks();
       const again = compileAgain;
@@ -17305,8 +17310,11 @@
       if (!isTex(n)) return;
       try {
         const removed = await api.tex.clean(n.id);
+        const cleared = results.get(n.id);
         results.delete(n.id);
+        for (const [root, kept] of byRoot) if (kept.result === cleared) byRoot.delete(root);
         render();
+        showMarks();
         toast(removed ? "Removed " + plural(removed, "build file") + ". The PDF and your files are kept." : "There were no build files to remove.");
       } catch (err) {
         toast("Could not clear the build files: " + ipcErrorText(err));
@@ -17369,8 +17377,8 @@
     }
     function marksFor(filePath) {
       const marks = [];
-      for (const result of byRoot.values()) {
-        if (!result.root || !result.log) continue;
+      for (const { result, stale } of byRoot.values()) {
+        if (stale || !result.root || !result.log) continue;
         for (const issue of result.log.issues) {
           if (!issue.line) continue;
           const file = issue.file ? joinPath(dirOf(result.root), issue.file) : result.root;
@@ -30548,7 +30556,7 @@
       }
       if (e.key === "Escape") {
         if (inDialog) return;
-        if (e.defaultPrevented && e.target instanceof Node && el.codeHost.contains(e.target)) return;
+        if (editorTookEscape(e)) return;
         if (el.pdfEditor.contains(document.activeElement)) return;
         if (find.open) {
           e.preventDefault();

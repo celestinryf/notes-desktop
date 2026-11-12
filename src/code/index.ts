@@ -25,7 +25,7 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { r } from '@codemirror/legacy-modes/mode/r';
 import { perl } from '@codemirror/legacy-modes/mode/perl';
 import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
-import { autocompletion, startCompletion } from '@codemirror/autocomplete';
+import { autocompletion, startCompletion, completionStatus } from '@codemirror/autocomplete';
 import { foldAll, unfoldAll, foldCode, unfoldCode } from '@codemirror/language';
 import { bibtex, bibtexCompletionSource } from 'codemirror-lang-bib';
 import { texHelp, marksTransaction, type TexHelp, type TexMark } from './latex.ts';
@@ -237,6 +237,7 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
     setMarks(marks: TexMark[]) { view.dispatch(marksTransaction(view.state, marks)); },
     fold(how: 'all' | 'none' | 'here' | 'open') { view.focus(); return (how === 'all' ? foldAll : how === 'none' ? unfoldAll : how === 'here' ? foldCode : unfoldCode)(view); },
     suggest() { view.focus(); return startCompletion(view); },
+    suggesting() { return completionStatus(view.state) !== null; },
     position() {
       const head = view.state.selection.main.head, line = view.state.doc.lineAt(head);
       return { line: line.number, col: head - line.from + 1 };

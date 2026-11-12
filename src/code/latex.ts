@@ -103,6 +103,32 @@ function environmentsClosed(state: EditorState, name: string) {
   return count('\\end{' + name + '}') >= count('\\begin{' + name + '}');
 }
 
+function argumentsEnd(text: string, from: number) {
+  let at = from;
+  for (;;) {
+    while (at < text.length && /\s/.test(text[at])) at++;
+    const open = text[at];
+    if (open !== '[' && open !== '{') return at;
+    const close = open === '[' ? ']' : '}';
+    let depth = 0;
+    for (; at < text.length; at++) {
+      if (text[at] === '\\') { at++; continue; }
+      if (text[at] === open) depth++;
+      else if (text[at] === close && --depth === 0) break;
+    }
+    if (at >= text.length) return -1;
+    at++;
+  }
+}
+
+export function environmentBefore(text: string) {
+  const begins = [...text.matchAll(/\\begin\{([^}\s]+)\}/g)];
+  const last = begins[begins.length - 1];
+  if (!last) return null;
+  const end = argumentsEnd(text, (last.index || 0) + last[0].length);
+  return end === text.length ? last[1] : null;
+}
+
 export function closeEnvironment(view: EditorView) {
   const { state } = view;
   const range = state.selection.main;
@@ -111,13 +137,12 @@ export function closeEnvironment(view: EditorView) {
   const before = line.text.slice(0, range.head - line.from);
   if (line.text.slice(range.head - line.from).trim()) return false;
   if (withoutComments(before) !== before) return false;
-  const begun = /\\begin\{([^}\s]+)\}(?:\[[^\]]*\]|\{[^}]*\})*\s*$/.exec(before);
-  if (!begun) return false;
-  if (environmentsClosed(state, begun[1])) return false;
+  const name = environmentBefore(before);
+  if (!name || environmentsClosed(state, name)) return false;
   const indent = (/^[ \t]*/.exec(line.text) || [''])[0];
   const inner = '\n' + indent + state.facet(indentUnit);
   view.dispatch({
-    changes: { from: range.head, insert: inner + '\n' + indent + '\\end{' + begun[1] + '}' },
+    changes: { from: range.head, insert: inner + '\n' + indent + '\\end{' + name + '}' },
     selection: { anchor: range.head + inner.length },
     scrollIntoView: true,
     userEvent: 'input',
@@ -143,8 +168,10 @@ export function texCompletions(help: TexHelp) {
     }
     const file = FILE_ARG.exec(before);
     if (file) {
+      const listed = file[1] === 'bibliography';
+      const typed = listed ? file[2].slice(file[2].lastIndexOf(',') + 1).trimStart() : file[2];
       const found = await refs();
-      return { from: context.pos - file[2].length, options: fileOptions(file[1], found.files), validFor: /^[^}]*$/ };
+      return { from: context.pos - typed.length, options: fileOptions(file[1], found.files), validFor: listed ? /^[^,}]*$/ : /^[^}]*$/ };
     }
     const begin = BEGIN.exec(before);
     if (begin) {
@@ -165,22 +192,31 @@ export function texCompletions(help: TexHelp) {
 const SECTION_LEVELS: Record<string, number> = { part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5, subparagraph: 6 };
 const SECTION = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*[[{]/;
 const SECTION_END = /\\end\{document\}|\\(bibliography|bibliographystyle|printbibliography|appendix)\b/;
-const BEGIN_LINE = /\\begin\{([^}]+)\}/;
+const ENV_TOKEN = /\\(begin|end)\{([^}]+)\}/g;
+
+function openEnvironment(text: string) {
+  const open: string[] = [];
+  for (const m of text.matchAll(ENV_TOKEN)) {
+    if (m[1] === 'begin') open.push(m[2]);
+    else { const at = open.lastIndexOf(m[2]); if (at >= 0) open.splice(at, 1); }
+  }
+  return open.find((name) => name !== 'document') || null;
+}
 
 export function foldTex(state: EditorState, lineStart: number, lineEnd: number) {
   const doc = state.doc;
   const first = doc.lineAt(lineStart);
   const text = withoutComments(first.text);
-  const begin = BEGIN_LINE.exec(text);
-  if (begin && begin[1] !== 'document' && !text.includes('\\end{' + begin[1] + '}')) {
-    const open = '\\begin{' + begin[1] + '}', close = '\\end{' + begin[1] + '}';
+  const name = openEnvironment(text);
+  if (name) {
     let depth = 0;
     for (let n = first.number + 1; n <= doc.lines; n++) {
-      const line = withoutComments(doc.line(n).text);
-      depth += line.split(open).length - 1;
-      if (!line.includes(close)) continue;
-      depth -= line.split(close).length - 1;
-      if (depth < 0) return n > first.number + 1 ? { from: lineEnd, to: doc.line(n - 1).to } : null;
+      for (const m of withoutComments(doc.line(n).text).matchAll(ENV_TOKEN)) {
+        if (m[2] !== name) continue;
+        if (m[1] === 'begin') depth++;
+        else if (depth > 0) depth--;
+        else return n > first.number + 1 ? { from: lineEnd, to: doc.line(n - 1).to } : null;
+      }
     }
     return null;
   }

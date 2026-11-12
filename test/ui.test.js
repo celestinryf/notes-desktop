@@ -890,6 +890,15 @@ test('editor help: LaTeX suggests citations and labels, closes \\begin on Enter,
   assert.match(await page.$eval('#codeHost .cm-lintRange-error', (m) => m.closest('.cm-line').textContent), /FAKEERROR/);
   assert.equal(await page.$$eval('#codeHost .cm-lint-marker-error', (ms) => ms.length), 1, 'one dot in the gutter');
 
+  await page.keyboard.press('Control+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.keyboard.type('More');
+  await page.click('#codeHost .cm-line >> nth=0');
+  await page.keyboard.press('Shift+End');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'one Escape closed find, with text selected in the editor');
+
   await page.keyboard.press('Control+p');
   await page.keyboard.type('fold all');
   await waitForDom(() => [...document.querySelectorAll('#paletteList [role="option"]')].some((o) => /Fold all sections/.test(o.textContent)));

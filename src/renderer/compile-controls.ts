@@ -24,7 +24,7 @@ const REFERENCES_MS = 2000;
 
 export function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }: Deps) {
   const results = new Map<string, TexCompileResult>();
-  const byRoot = new Map<string, TexCompileResult>();
+  const byRoot = new Map<string, { result: TexCompileResult, stale: boolean }>();
   let references: { id: string, at: number, found: Promise<TexReferences> } | null = null;
   const edited = new Set<string>();
   const visited = new Map<string, number>();
@@ -99,7 +99,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     running = null;
     if (editedDuring && result.ok) edited.add(n.id);
     results.set(n.id, result);
-    if (result.root) byRoot.set(result.root.toLowerCase(), result);
+    if (result.root) byRoot.set(result.root.toLowerCase(), { result, stale: editedDuring });
     references = null;
     showMarks();
     const again = compileAgain;
@@ -245,8 +245,11 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     if (!isTex(n)) return;
     try {
       const removed = await api.tex.clean(n.id);
+      const cleared = results.get(n.id);
       results.delete(n.id);
+      for (const [root, kept] of byRoot) if (kept.result === cleared) byRoot.delete(root);
       render();
+      showMarks();
       toast(removed ? 'Removed ' + plural(removed, 'build file') + '. The PDF and your files are kept.' : 'There were no build files to remove.');
     } catch (err) { toast('Could not clear the build files: ' + ipcErrorText(err)); }
   }
@@ -298,8 +301,8 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
 
   function marksFor(filePath: string): TexMark[] {
     const marks: TexMark[] = [];
-    for (const result of byRoot.values()) {
-      if (!result.root || !result.log) continue;
+    for (const { result, stale } of byRoot.values()) {
+      if (stale || !result.root || !result.log) continue;
       for (const issue of result.log.issues) {
         if (!issue.line) continue;
         const file = issue.file ? joinPath(dirOf(result.root), issue.file) : result.root;

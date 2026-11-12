@@ -73,7 +73,7 @@ export class TexService {
     return source && syncFileFor(pdfPath) ? source : null;
   }
 
-  references(filePath: string) {
+  async references(filePath: string) {
     const target = this.rootOf(filePath);
     return referencesFor('error' in target ? filePath : target.root);
   }
