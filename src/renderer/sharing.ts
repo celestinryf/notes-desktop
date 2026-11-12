@@ -51,7 +51,7 @@ export function createSharing({ api, flushSave, closeFind, GUEST, exportOfCurren
     try {
       if (action === 'copy-md') { await api.app.copy({ text: H.noteToMarkdown(note) }); toast('Copied as Markdown'); }
       else if (action === 'copy-text') { await api.app.copy({ text: titleLine + H.plainTextFromMarkdown(el.bodyInput.value) }); toast('Copied as plain text'); }
-      else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml() }); toast('Copied as rich text'); }
+      else if (action === 'copy-html') { await api.app.copy({ text: H.noteToMarkdown(note), html: (note.title ? '<h1>' + escapeHtml(note.title) + '</h1>' : '') + currentHtml({ formulasAsTex: true }) }); toast('Copied as rich text'); }
       else if (action === 'copy-note-link') { await api.app.copy({ text: '[' + (H.deriveTitle(note) || 'Note') + '](note://' + note.id + ')' }); toast('Copied. Paste it into another note to link here.'); }
       else if (action === 'email') { const r = await api.app.emailNote(note.id); toast(r.ok ? (r.truncated ? 'Opened your mail app. The note was long, so the email holds the first part; attach a PDF for the rest.' : 'Opened your mail app with the note.') : 'Could not open mail: ' + r.error); }
       else if (action === 'pdf') {

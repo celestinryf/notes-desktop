@@ -1,3 +1,5 @@
+import { mathAsText } from './math.mts';
+
 const UNTITLED = 'Untitled';
 
 type TitleSource = Partial<Pick<Note, 'title' | 'body'>> | null | undefined;
@@ -371,9 +373,10 @@ function mailtoFor(note: Pick<Note, 'title' | 'body'>, limit?: number) {
   return { url: head + encodeURIComponent(points.slice(0, lo).join('') + notice), truncated: true };
 }
 
-function plainTextFromMarkdown(md: string) {
+function plainTextFromMarkdown(md: string, formulas: 'tex' | 'skip' = 'tex') {
   let s = String(md || '').replace(/\r\n/g, '\n');
   s = s.replace(/```[\s\S]*?```/g, ' code block omitted. ');
+  s = mathAsText(s, formulas === 'tex');
   s = s.replace(/`([^`\n]+)`/g, '$1');
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + '. ' : '');
   s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');

@@ -10,6 +10,7 @@ import type MarkdownIt from 'markdown-it';
 import type { Token } from 'markdown-it';
 import type { ParagraphChild, IParagraphOptions, IRunOptions, Paragraph, Table } from 'docx';
 import { isFileNote } from './store.mts';
+import { KATEX_OPTIONS, addMath, escapeMathOpeners, hasMath, mathSource } from './shared/math.mts';
 
 const requireWhenNeeded = createRequire(import.meta.url);
 
@@ -58,8 +59,14 @@ const LOSS: Record<string, Record<string, string>> = {
 function options(note: Note | null) {
   const src = sourceOf(note);
   if (!src) return [];
-  return Object.keys(FORMATS).filter((to) => to !== src).map((to) => ({ to, label: FORMATS[to], note: LOSS[src][to] || '' }));
+  const formulas = src === 'md' && !!note && hasMath(note.body);
+  return Object.keys(FORMATS).filter((to) => to !== src).map((to) => ({ to, label: FORMATS[to], note: [LOSS[src][to] || '', formulas ? FORMULA_LOSS[to] || '' : ''].filter(Boolean).join(' ') }));
 }
+
+const FORMULA_LOSS: Record<string, string> = {
+  txt: 'Formulas stay as TeX between dollar signs.',
+  docx: 'Formulas stay as TeX between dollar signs; Word does not draw them.',
+};
 
 function escapeMarkdownLine(line: string) {
   return line
@@ -73,7 +80,7 @@ function textToMarkdown(text: string) {
   return String(text).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:\n[ \t]*)*\n/)
     .map((p) => p.replace(/^\n+|\n+$/g, ''))
     .filter((p) => p.trim())
-    .map((p) => p.split('\n').map(escapeMarkdownLine).join('\\\n'))
+    .map((p) => escapeMathOpeners(p.split('\n').map(escapeMarkdownLine).join('\\\n')))
     .join('\n\n') + '\n';
 }
 
@@ -168,12 +175,30 @@ async function toMarkdown(note: FileNote, imagesDir?: { parent: string, folder: 
   return { markdown: textToMarkdown(body), warning: '' };
 }
 
+type Katex = { renderToString: (latex: string, options: object) => string };
+let katex: Katex | null = null;
+function loadKatex(): Katex {
+  const loaded: Katex = requireWhenNeeded('katex');
+  requireWhenNeeded('katex/contrib/mhchem');
+  katex = loaded;
+  return loaded;
+}
+
+function renderFormula(latex: string, display: boolean) {
+  return (katex || loadKatex()).renderToString(latex.trim(), Object.assign({ displayMode: display }, KATEX_OPTIONS));
+}
+
 let markdownIt: MarkdownIt | null = null;
 function md(): MarkdownIt {
   if (!markdownIt) {
     const createMarkdownIt: typeof MarkdownIt = requireWhenNeeded('markdown-it');
     markdownIt = createMarkdownIt({ html: true, linkify: false });
     addSpacedImages(markdownIt);
+    addMath(markdownIt, {
+      inline: (latex, display) => renderFormula(latex, display),
+      block: (latex) => '<div class="math-block">' + renderFormula(latex, true) + '</div>\n',
+      dollar: () => '$',
+    });
   }
   return markdownIt;
 }
@@ -201,6 +226,8 @@ function inlineRuns(tok: Token | null): Run[] {
     else if (c.type === 's_open') st.s++;
     else if (c.type === 's_close') st.s--;
     else if (c.type === 'code_inline') push(c.content, { code: true });
+    else if (c.type === 'math_inline') push(c.markup + c.content + c.markup);
+    else if (c.type === 'math_dollar') push('$');
     else if (c.type === 'link_open') st.href = c.attrGet('href');
     else if (c.type === 'link_close') st.href = null;
     else if (c.type === 'image') runs.push({ img: c.attrGet('src'), alt: c.content });
@@ -249,6 +276,7 @@ function markdownBlocks(src: string) {
       case 'list_item_close': case 'bullet_list_close': case 'ordered_list_close': case 'blockquote_close': stack.pop(); break;
       case 'fence': case 'code_block': topBlocks().push({ t: 'code', lang: String(t.info || '').trim().split(/\s+/)[0], text: t.content.replace(/\n$/, '') }); break;
       case 'hr': topBlocks().push({ t: 'hr' }); break;
+      case 'math_block': topBlocks().push({ t: 'p', runs: [{ text: mathSource(t.content, true) }] }); break;
       case 'html_block': {
         if (/^\s*<(style|script)\b/i.test(t.content)) break;
         const text = stripTags(t.content).trim();
@@ -436,10 +464,23 @@ async function blocksToDocx(blocks: Block[], opts: { baseDir: string, title: str
 
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 const escHtml = (s: string) => String(s).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
+const KATEX_DIR = path.join(import.meta.dirname, 'renderer', 'vendor', 'katex');
+let formulaCss: string | null = null;
+function formulaStylesheet() {
+  if (formulaCss === null) {
+    formulaCss = fs.readFileSync(path.join(KATEX_DIR, 'katex.min.css'), 'utf8').replace(/url\((fonts\/[^)]+\.woff2)\)/g, (_m: string, font: string) =>
+      'url(data:font/woff2;base64,' + fs.readFileSync(path.join(KATEX_DIR, font)).toString('base64') + ')') +
+      ':root{--danger:#a8340c}.math-block{margin:1em 0;overflow-x:auto;overflow-y:hidden}.math-block .katex-display{margin:0}';
+  }
+  return formulaCss;
+}
+
 function htmlDocument(title: string, bodyHtml: string, extraCss?: string) {
+  const body = String(bodyHtml || '');
+  const formulas = body.includes('class="katex') ? formulaStylesheet() : '';
   return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escHtml(title) + '</title>\n' +
-    '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + (extraCss || '') + '</style></head>\n' +
-    '<body>' + String(bodyHtml || '') + '</body></html>\n';
+    '<style>body{max-width:760px;margin:40px auto;padding:0 20px;font:16px/1.6 Georgia,serif;color:#2a1a12;background:#fbf1e4}h1,h2,h3{line-height:1.2}pre,code{font-family:ui-monospace,Consolas,monospace;font-size:.95em}pre{background:#f6dcc3;padding:12px;border-radius:8px;overflow:auto}blockquote{border-left:4px solid #f47b3e;margin:0;padding:4px 14px;color:#6b5546}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #c9b8a8;padding:4px 8px}ul[data-type="taskList"]{list-style:none;padding-left:0}' + formulas + (extraCss || '') + '</style></head>\n' +
+    '<body>' + body + '</body></html>\n';
 }
 const PRINT_CSS = '@media print{body{background:#fff;margin:0;max-width:none;padding:0}pre{white-space:pre-wrap}}';
 

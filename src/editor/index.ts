@@ -18,6 +18,8 @@ import Image from '@tiptap/extension-image';
 import { NotesTable, NotesTableCell, NotesTableHeader } from './tables.ts';
 import TableRow from '@tiptap/extension-table-row';
 import { Markdown } from 'tiptap-markdown';
+import { BlockMath, EscapedDollar, InlineMath, endMathEdit, hasEscapedDollar, insertMath, mathError, renderMath, type MathEdit, type MathKind } from './math.ts';
+import { mathOpeners, mathSource } from '../shared/math.mts';
 
 function fingerprint(md: string | null | undefined) {
   let s = String(md || '').replace(/\r/g, '');
@@ -34,6 +36,48 @@ function fingerprint(md: string | null | undefined) {
   return s.split('\n').map((l) => l.replace(/[^\p{L}\p{N}:/.<>]+/gu, '').toLowerCase()).filter(Boolean).join('\n');
 }
 
+const dollarsToEscapeByBlock = new WeakMap<PMNode, Map<number, Set<number>>>();
+
+function dollarsToEscape(state: MarkdownSerializerState, parent: PMNode) {
+  const known = dollarsToEscapeByBlock.get(parent);
+  if (known) return known;
+  let markdown = '';
+  const atoms = new Map<number, number>();
+  const texts: { index: number, start: number, end: number }[] = [];
+  parent.forEach((child, _offset, index) => {
+    const start = markdown.length;
+    if (child.isText) {
+      const escaped = state.esc(String(child.text), false);
+      markdown += hasEscapedDollar(child) ? escaped.split('$').join('\\$') : escaped;
+      texts.push({ index, start, end: markdown.length });
+      return;
+    }
+    if (child.type.name === 'hardBreak') { markdown += '\\\n'; return; }
+    markdown += child.type.name === 'inlineMath' ? mathSource(String(child.attrs.latex), child.attrs.display === true) : '￼';
+    atoms.set(start, markdown.length);
+  });
+  const found = new Map<number, Set<number>>();
+  for (const at of mathOpeners(markdown, (i) => atoms.get(i) ?? -1)) {
+    const text = texts.find((t) => at >= t.start && at < t.end);
+    if (!text) continue;
+    const ordinal = markdown.slice(text.start, at).split('$').length - 1;
+    const set = found.get(text.index) || new Set<number>();
+    set.add(ordinal);
+    found.set(text.index, set);
+  }
+  dollarsToEscapeByBlock.set(parent, found);
+  return found;
+}
+
+function writeText(state: MarkdownSerializerState, text: string, node: PMNode, parent: PMNode, index: number) {
+  const escaped = state.esc(text, 'atBlockStart' in state && state.atBlockStart === true);
+  if (!escaped.includes('$')) { state.text(escaped, false); return; }
+  const all = hasEscapedDollar(node);
+  const chosen = all ? null : dollarsToEscape(state, parent).get(index);
+  const parts = escaped.split('$');
+  state.text(parts.reduce((out, part, k) => out + ((all || (chosen && chosen.has(k - 1))) ? '\\$' : '$') + part), false);
+}
+
 const PlainText = Text.extend({
   addStorage() {
     return {
@@ -42,7 +86,7 @@ const PlainText = Text.extend({
           const text = String(node.text).replace(/&(?=[A-Za-z]+;|#\d+;|#x[0-9A-Fa-f]+;)/g, '&amp;').replace(/<(?=[A-Za-z/!?])/g, '&lt;');
           const next = parent.maybeChild(index + 1);
           const beforeLink = !!next && next.type.name === 'wikiLink' && !next.attrs.embed && text.endsWith('!');
-          state.text(beforeLink ? text.slice(0, -1) : text);
+          writeText(state, beforeLink ? text.slice(0, -1) : text, node, parent, index);
           if (beforeLink) state.write('\\!');
         },
         parse: {},
@@ -382,22 +426,24 @@ function caretLink(state: EditorState): LinkAtCaret {
   return link && link.attrs.href ? { href: String(link.attrs.href) } : null;
 }
 
-function caretLinkWatch(onLinkAtCaret: ((on: boolean) => void) | undefined) {
+const mathSelected = (state: EditorState) => state.selection instanceof NodeSelection && /^(inline|block)Math$/.test(state.selection.node.type.name);
+
+function caretWatch(name: string, isAt: (state: EditorState) => boolean, report: ((on: boolean) => void) | undefined) {
   return Extension.create({
-    name: 'caretLinkWatch',
+    name,
     addProseMirrorPlugins() {
       let on = false;
       return [new Plugin({
-        key: new PluginKey('caretLinkWatch'),
+        key: new PluginKey(name),
         view: () => ({
           update: (view) => {
-            const next = view.hasFocus() && caretLink(view.state) !== null;
+            const next = view.hasFocus() && isAt(view.state);
             if (next === on) return;
             on = next;
-            if (onLinkAtCaret) onLinkAtCaret(on);
+            if (report) report(on);
           },
         }),
-        props: { handleDOMEvents: { blur: () => { if (on) { on = false; if (onLinkAtCaret) onLinkAtCaret(false); } return false; } } },
+        props: { handleDOMEvents: { blur: () => { if (on) { on = false; if (report) report(false); } return false; } } },
       })];
     },
   });
@@ -469,7 +515,12 @@ export type EditorOptions = TriggerOptions & {
   resolveWikiLinks?: WikiLinkResolver,
   resolvePictures?: WikiLinkResolver,
   onLinkAtCaret?: (on: boolean) => void,
+  onMathAtCaret?: (on: boolean) => void,
+  onEditMath?: (edit: MathEdit) => void,
 };
+
+export type { MathEdit, MathKind };
+export { renderMath, mathError };
 
 export function create(element: HTMLElement, options: EditorOptions) {
   options = options || {};
@@ -489,6 +540,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
     }
     return hit;
   } : null;
+  const mathOptions = { onEditMath: options.onEditMath || null };
   const editor = new Editor({
     element,
     extensions: [
@@ -510,7 +562,11 @@ export function create(element: HTMLElement, options: EditorOptions) {
       triggers(options),
       WikiLink.configure({ picture }),
       wikiLinkStatus(options.resolveWikiLinks, wikiRequests),
-      caretLinkWatch(options.onLinkAtCaret),
+      caretWatch('caretLinkWatch', (s) => caretLink(s) !== null, options.onLinkAtCaret),
+      caretWatch('caretMathWatch', mathSelected, options.onMathAtCaret),
+      EscapedDollar,
+      InlineMath.configure(mathOptions),
+      BlockMath.configure(mathOptions),
     ],
     content: options.content || '',
     autofocus: false,
@@ -539,6 +595,7 @@ export function create(element: HTMLElement, options: EditorOptions) {
 
   let lastExact = true;
   function setMarkdown(md: string, opts?: { keepSelection?: boolean }) {
+    endMathEdit(editor);
     const keepSelection = !!(opts && opts.keepSelection);
     const parts = splitFrontMatter(md || '');
     front = parts.front;
@@ -591,11 +648,13 @@ export function create(element: HTMLElement, options: EditorOptions) {
     insertLink: (text: string, href: string) => editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run(),
     hasSelection: () => { const r = currentRange(); return r.from !== r.to; },
     insertBlock: (range: TextRange, kind: string) => {
+      if (kind === 'math') return editor.chain().focus().deleteRange(range).run() && insertMath(editor, 'block', null, mathOptions);
       const make = BLOCKS[kind];
       if (!make) return false;
       return make(editor.chain().focus().deleteRange(range)).run();
     },
-    blockKinds: () => Object.keys(BLOCKS),
+    blockKinds: () => Object.keys(BLOCKS).concat('math'),
+    insertMath: (kind: MathKind) => insertMath(editor, kind, null, mathOptions),
     textAt: (range: TextRange) => { try { return editor.state.doc.textBetween(range.from, range.to, undefined, '\ufffc'); } catch (_) { return null; } },
     insertTextAt: (range: TextRange, text: string) => editor.chain().focus().deleteRange(range).insertContent(text).run(),
     insertLinkAt: (range: TextRange, text: string, href: string) => editor.chain().focus().deleteRange(range)
@@ -604,6 +663,6 @@ export function create(element: HTMLElement, options: EditorOptions) {
       .insertContent([{ type: 'wikiLink', attrs: { raw } }, { type: 'text', text: ' ' }]).run(),
     linkAtCaret: () => caretLink(editor.state),
     refreshWikiLinks: () => wikiRequests.reset(),
-    destroy: () => editor.destroy(),
+    destroy: () => { endMathEdit(editor); editor.destroy(); },
   };
 }

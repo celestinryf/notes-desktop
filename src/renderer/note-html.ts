@@ -3,10 +3,23 @@ import { state } from './state.ts';
 import * as H from '../shared/helpers.mts';
 import { escapeHtml } from './text.ts';
 
-export function currentHtml() {
+export function currentHtml(opts?: { formulasAsTex?: boolean }) {
   const live = !state.sourceMode && state.rich ? el.richEditor.querySelector('.rich-editor-content') : null;
-  if (live) return live.innerHTML;
-  return markdownToHtml(el.bodyInput.value, state.current);
+  const html = live ? live.innerHTML : markdownToHtml(el.bodyInput.value, state.current);
+  return opts && opts.formulasAsTex ? formulasAsTex(html) : html;
+}
+
+function formulasAsTex(html: string) {
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  for (const f of Array.from(host.querySelectorAll<HTMLElement>('.math-inline, .math-block'))) {
+    const latex = f.getAttribute('data-latex') || '';
+    const block = f.classList.contains('math-block');
+    const tex = document.createElement(block ? 'p' : 'span');
+    tex.textContent = block ? '$$' + latex.trim() + '$$' : (f.hasAttribute('data-display') ? '$$' + latex + '$$' : '$' + latex + '$');
+    f.replaceWith(tex);
+  }
+  return host.innerHTML;
 }
 
 export function markdownToHtml(md: string, note: Parameters<typeof H.imageBaseFor>[0]) {

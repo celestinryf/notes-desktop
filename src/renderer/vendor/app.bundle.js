@@ -42,6 +42,7 @@
         const PATHS = {
           "panel-left": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />',
           "panel-right-close": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M15 3v18" /><path d="m8 9 3 3-3 3" />',
+          "sigma": '<path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2" />',
           "list": '<path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />',
           "folder-tree": '<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M3 5a2 2 0 0 0 2 2h3" /><path d="M3 3v13a2 2 0 0 0 2 2h3" />',
           "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M12 3v18" />',
@@ -14791,6 +14792,109 @@
     wikiLinkName: () => wikiLinkName,
     wikiLinkTarget: () => wikiLinkTarget
   });
+
+  // src/shared/math.mts
+  var DOLLAR = 36;
+  var isSpace = (c) => c === " " || c === "	" || c === "\n" || c === "\r" || c === "\f";
+  var isDigit = (c) => c !== void 0 && c >= "0" && c <= "9";
+  function blankLineAfter(src2, newline, max) {
+    for (let i = newline + 1; i < max; i++) {
+      const c = src2[i];
+      if (c === "\n") return true;
+      if (c !== " " && c !== "	" && c !== "\r") return false;
+    }
+    return true;
+  }
+  function inlineAt(src2, pos, max) {
+    const start = pos + 1;
+    if (start >= max || isSpace(src2[start])) return null;
+    for (let i = start; i < max; i++) {
+      const c = src2[i];
+      if (c === "\n") return null;
+      if (c === "\\") {
+        if (src2[i + 1] === "\n") return null;
+        i++;
+        continue;
+      }
+      if (c !== "$") continue;
+      if (isSpace(src2[i - 1]) || i + 1 < max && isDigit(src2[i + 1])) return null;
+      return { end: i + 1, latex: src2.slice(start, i), display: false };
+    }
+    return null;
+  }
+  function displayAt(src2, pos, max) {
+    const start = pos + 2;
+    for (let i = start; i < max; i++) {
+      const c = src2[i];
+      if (c === "\n") {
+        if (blankLineAfter(src2, i, max)) return null;
+        continue;
+      }
+      if (c === "\\") {
+        i++;
+        continue;
+      }
+      if (c !== "$" || src2[i + 1] !== "$" || i + 1 >= max) continue;
+      if (i === start) return null;
+      return { end: i + 2, latex: src2.slice(start, i), display: true };
+    }
+    return null;
+  }
+  function mathAt(src2, pos, max) {
+    const end = max === void 0 ? src2.length : Math.min(max, src2.length);
+    if (src2.charCodeAt(pos) !== DOLLAR) return null;
+    return src2.charCodeAt(pos + 1) === DOLLAR ? displayAt(src2, pos, end) : inlineAt(src2, pos, end);
+  }
+  function codeSpanEnd(s, at) {
+    let run = 0;
+    while (s[at + run] === "`") run++;
+    for (let i = at + run; i < s.length; i++) {
+      if (s[i] !== "`") continue;
+      let close = 0;
+      while (s[i + close] === "`") close++;
+      if (close === run) return i + close;
+      i += close - 1;
+    }
+    return at + run;
+  }
+  function eachMath(md, onText, onMath) {
+    const s = String(md || "");
+    let from = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "`") {
+        i = codeSpanEnd(s, i) - 1;
+        continue;
+      }
+      if (c === "\\") {
+        if (s[i + 1] === "$") {
+          onText(s.slice(from, i));
+          from = i + 1;
+        }
+        i++;
+        continue;
+      }
+      const span = c === "$" ? mathAt(s, i) : null;
+      if (!span) continue;
+      onText(s.slice(from, i));
+      onMath(span);
+      from = span.end;
+      i = span.end - 1;
+    }
+    onText(s.slice(from));
+  }
+  function mathAsText(md, keep) {
+    if (!String(md || "").includes("$")) return String(md || "");
+    let out = "";
+    eachMath(md, (text) => {
+      out += text;
+    }, (span) => {
+      if (keep) out += span.latex.replace(/\s+/g, " ").trim();
+    });
+    return out;
+  }
+
+  // src/shared/helpers.mts
   var UNTITLED = "Untitled";
   var FENCE_LINE = /^---[ \t]*$/;
   var YAML_KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*)|[ \t]*)$/;
@@ -15142,9 +15246,10 @@
     }
     return { url: head + encodeURIComponent(points.slice(0, lo).join("") + notice), truncated: true };
   }
-  function plainTextFromMarkdown(md) {
+  function plainTextFromMarkdown(md, formulas = "tex") {
     let s = String(md || "").replace(/\r\n/g, "\n");
     s = s.replace(/```[\s\S]*?```/g, " code block omitted. ");
+    s = mathAsText(s, formulas === "tex");
     s = s.replace(/`([^`\n]+)`/g, "$1");
     s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => alt ? alt + ". " : "");
     s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
@@ -16232,6 +16337,11 @@
     docxSaveBtn: pageElement("#docxSaveBtn", HTMLButtonElement),
     fileConvertBtn: pageElement("#fileConvertBtn", HTMLButtonElement),
     convertMenu: pageElement("#convertMenu", HTMLDivElement),
+    mathEditor: pageElement("#mathEditor", HTMLDivElement),
+    mathSource: pageElement("#mathSource", HTMLTextAreaElement),
+    mathError: pageElement("#mathError", HTMLParagraphElement),
+    mathHint: pageElement("#mathHint", HTMLSpanElement),
+    mathDone: pageElement("#mathDone", HTMLButtonElement),
     fileBanner: pageElement("#fileBanner", HTMLDivElement),
     pdfEditor: pageElement("#pdfEditor", HTMLDivElement),
     pdfFormat: pageElement("#pdfFormat", HTMLDivElement),
@@ -16634,10 +16744,22 @@
   }
 
   // src/renderer/note-html.ts
-  function currentHtml() {
+  function currentHtml(opts) {
     const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
-    if (live) return live.innerHTML;
-    return markdownToHtml(el.bodyInput.value, state.current);
+    const html = live ? live.innerHTML : markdownToHtml(el.bodyInput.value, state.current);
+    return opts && opts.formulasAsTex ? formulasAsTex(html) : html;
+  }
+  function formulasAsTex(html) {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    for (const f of Array.from(host.querySelectorAll(".math-inline, .math-block"))) {
+      const latex = f.getAttribute("data-latex") || "";
+      const block = f.classList.contains("math-block");
+      const tex = document.createElement(block ? "p" : "span");
+      tex.textContent = block ? "$$" + latex.trim() + "$$" : f.hasAttribute("data-display") ? "$$" + latex + "$$" : "$" + latex + "$";
+      f.replaceWith(tex);
+    }
+    return host.innerHTML;
   }
   function markdownToHtml(md, note) {
     if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
@@ -17351,7 +17473,7 @@
           await api.app.copy({ text: titleLine + plainTextFromMarkdown(el.bodyInput.value) });
           toast("Copied as plain text");
         } else if (action === "copy-html") {
-          await api.app.copy({ text: noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
+          await api.app.copy({ text: noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml({ formulasAsTex: true }) });
           toast("Copied as rich text");
         } else if (action === "copy-note-link") {
           await api.app.copy({ text: "[" + (deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
@@ -20467,6 +20589,123 @@
     return notes;
   }
 
+  // src/renderer/math-editor.ts
+  var MAX_SOURCE_LINES = 8;
+  var GAP = 8;
+  function createMathEditor() {
+    let current = null;
+    const isOpen = () => current !== null;
+    function grow() {
+      const ta = el.mathSource;
+      ta.style.height = "auto";
+      const cs = getComputedStyle(ta);
+      const borders = ta.offsetHeight - ta.clientHeight;
+      const most = (parseFloat(cs.lineHeight) || 20) * MAX_SOURCE_LINES + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + borders;
+      ta.style.height = Math.min(ta.scrollHeight + borders, most) + "px";
+    }
+    function showError() {
+      const message = window.NotesEditor ? window.NotesEditor.mathError(el.mathSource.value) : null;
+      el.mathError.textContent = message || "";
+      el.mathError.classList.toggle("hidden", !message);
+      el.mathHint.classList.toggle("hidden", !!message);
+      el.mathSource.setAttribute("aria-invalid", message ? "true" : "false");
+    }
+    function hide() {
+      el.mathEditor.classList.add("hidden");
+      el.mathSource.value = "";
+      el.mathError.classList.add("hidden");
+      el.mathHint.classList.remove("hidden");
+    }
+    function place(anchor) {
+      const pop = el.mathEditor;
+      pop.style.left = "0px";
+      pop.style.top = "0px";
+      pop.classList.remove("hidden");
+      const at = anchor.getBoundingClientRect();
+      const column = (anchor.closest(".rich-editor-content") || anchor).getBoundingClientRect();
+      const width = pop.offsetWidth, height = pop.offsetHeight;
+      const x = Math.max(GAP, column.left, Math.min(at.left, window.innerWidth - width - GAP));
+      const below = at.bottom + GAP;
+      const y = below + height <= window.innerHeight - GAP ? below : Math.max(GAP, at.top - height - GAP);
+      pop.style.left = Math.round(x) + "px";
+      pop.style.top = Math.round(y) + "px";
+    }
+    function open(edit) {
+      if (current) finish();
+      current = edit;
+      edit.onEnd(() => {
+        if (current === edit) {
+          current = null;
+          hide();
+        }
+      });
+      el.mathEditor.dataset.kind = edit.kind;
+      el.mathSource.setAttribute("aria-label", edit.kind === "block" ? "Formula block in TeX" : "Formula in TeX");
+      el.mathSource.value = edit.latex;
+      el.mathEditor.classList.remove("hidden");
+      showError();
+      grow();
+      place(edit.anchor);
+      el.mathSource.focus();
+      el.mathSource.setSelectionRange(edit.latex.length, edit.latex.length);
+    }
+    function finish() {
+      const edit = current;
+      if (!edit) return;
+      current = null;
+      const latex = el.mathSource.value;
+      hide();
+      edit.finish(latex);
+    }
+    function remove() {
+      const edit = current;
+      if (!edit) return;
+      current = null;
+      hide();
+      edit.remove();
+    }
+    el.mathSource.addEventListener("input", () => {
+      if (!current) return;
+      grow();
+      showError();
+      current.preview(el.mathSource.value);
+      place(current.anchor);
+    });
+    el.mathSource.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        finish();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        finish();
+        return;
+      }
+      if (e.key === "Backspace" && !el.mathSource.value) {
+        e.preventDefault();
+        remove();
+        return;
+      }
+      e.stopPropagation();
+    });
+    el.mathEditor.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        finish();
+      }
+    });
+    el.mathDone.addEventListener("click", finish);
+    el.mathEditor.addEventListener("focusout", (e) => {
+      if (e.relatedTarget instanceof Node && el.mathEditor.contains(e.relatedTarget)) return;
+      finish();
+    });
+    return { open, finish, isOpen };
+  }
+
   // src/renderer/editor-view.ts
   var { isViewerOnlyFile: isViewerOnlyFile4, isPlainTextFile: isPlainTextFile4 } = helpers_exports;
   function tableShown() {
@@ -20491,6 +20730,7 @@
     ta.style.height = Math.max(320, ta.scrollHeight + 2) + "px";
   }
   function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }) {
+    const formulas = createMathEditor();
     function createRichEditor() {
       if (!window.NotesEditor) {
         toast("Rendered editor failed to load; showing Markdown source.");
@@ -20512,7 +20752,9 @@
           const rels = await api.notes.resolvePictures(id, names);
           return state.currentId === id ? rels : null;
         },
-        onLinkAtCaret: (on) => showLinkHint(on),
+        onLinkAtCaret: (on) => showCaretHint(LINK_HINT, on),
+        onMathAtCaret: (on) => showCaretHint(FORMULA_HINT, on),
+        onEditMath: (edit) => formulas.open(edit),
         onTrigger: (t) => showInlineMenu(t),
         onTriggerKey: (e) => inlineMenuKey(e),
         onUpdate: (md) => {
@@ -20550,6 +20792,7 @@
       { kind: "code", title: "Code block", icon: "code-xml", keys: "```", words: "snippet pre monospace" },
       { kind: "table", title: "Table", icon: "layout-grid", keys: "", words: "grid rows columns" },
       { kind: "divider", title: "Divider", icon: "minus", keys: "---", words: "rule line separator hr" },
+      { kind: "math", title: "Formula", icon: "sigma", keys: "$$ ", words: "math equation latex tex katex" },
       { kind: "date", title: "Today's date", icon: "bell", keys: "", words: "now day time" },
       { kind: "link", title: "Link to a note", icon: "link", keys: "[[", words: "note reference wiki" }
     ];
@@ -20814,17 +21057,22 @@
       focusBody();
     }
     const LINK_HINT = "Alt+Enter opens the link";
-    function showLinkHint(on) {
+    const FORMULA_HINT = "Enter edits the formula";
+    function showCaretHint(hint, on) {
       if (on && (state.sourceMode || el.richEditor.classList.contains("hidden"))) return;
       if (on) {
-        el.statusCode.textContent = LINK_HINT;
+        el.statusCode.textContent = hint;
         el.statusCode.classList.remove("hidden");
         return;
       }
-      if (el.statusCode.textContent === LINK_HINT) {
+      if (el.statusCode.textContent === hint) {
         el.statusCode.textContent = "";
         el.statusCode.classList.add("hidden");
       }
+    }
+    function insertFormula(kind) {
+      if (state.sourceMode || !state.rich || isPlainTextFile4(state.current)) return false;
+      return state.rich.insertMath(kind);
     }
     async function followWikiLink(raw) {
       const id = state.currentId;
@@ -20888,7 +21136,7 @@
     function tableStatsNow() {
       return tableStats;
     }
-    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret };
+    return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen: formulas.isOpen };
   }
 
   // src/renderer/link-dialog.ts
@@ -22534,7 +22782,7 @@
       if (selected) return selected;
       const title = el.titleInput.value.trim();
       const note = state.current;
-      const body = isNonMarkdownFile3(note) ? el.bodyInput.value : plainTextFromMarkdown(el.bodyInput.value);
+      const body = isNonMarkdownFile3(note) ? el.bodyInput.value : plainTextFromMarkdown(el.bodyInput.value, "skip");
       return (title ? title + ".\n" : "") + body;
     }
     function pickVoice() {
@@ -22688,6 +22936,7 @@
 
   // src/renderer/find-bar.ts
   var { isViewerOnlyFile: isViewerOnlyFile9 } = helpers_exports;
+  var FORMULA_NODES = ".math-inline, .math-block";
   function canFindInNote() {
     return !!state.current && state.current.fileKind !== "binary" && !lockedNow() && !el.editor.classList.contains("hidden") && !el.editorColumn.classList.contains("shows-document") && !el.editor.classList.contains("shows-image");
   }
@@ -22858,7 +23107,9 @@
     function findRangesIn(root, q) {
       const nodes = [];
       let text = "";
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+        acceptNode: (n) => n instanceof Element && n.matches(FORMULA_NODES) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+      });
       const blockOf = (n) => {
         let e = n.parentElement;
         while (e && e !== root && getComputedStyle(e).display === "inline") e = e.parentElement;
@@ -28375,6 +28626,18 @@
       if (where === "title") el.titleInput.focus();
       else if (where === "body") focusBody();
     }
+    function canAddFormula() {
+      const n = state.current;
+      return !!n && !n.trashedAt && !lockedNow() && !isNonMarkdownFile(n) && !formulaEditorOpen() && (state.sourceMode || !!state.rich && el.richEditor.querySelector('.rich-editor-content[contenteditable="true"]') !== null);
+    }
+    function addFormula() {
+      if (state.sourceMode) {
+        src.focus();
+        wrapSelection("$", "$");
+        return;
+      }
+      insertFormula("inline");
+    }
     function isCodeFile(note) {
       return isPlainTextFile6(note) && !isTableFile(note) && !!window.NotesCode && window.NotesCode.languageFor(extOf(note.filePath)).code;
     }
@@ -28420,7 +28683,7 @@
       find: "Alt+C matches the case, Alt+W whole words only."
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
-    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
     const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
@@ -29381,6 +29644,8 @@
         fromButton(el.sourceBtn, "This note", { title: state.sourceMode ? "Show the rendered view" : "Show Markdown source", keys: "Ctrl+E" }),
         cmd("link", "This note", "Link the selected text", "link", "Ctrl+K", () => links.open(), noteOpen && !!state.rich && !state.sourceMode && !src.codeOn, "url web address note reference"),
         cmd("open-link", "This note", "Open link at caret", "external-link", "Alt+Enter", openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, "follow wikilink"),
+        cmd("formula", "This note", "Insert a formula", "sigma", "Ctrl+Shift+E", addFormula, noteOpen && canAddFormula(), "math equation latex tex katex dollar inline"),
+        cmd("formula-block", "This note", "Insert a formula block", "sigma", "", () => insertFormula("block"), noteOpen && canAddFormula() && !state.sourceMode, "math equation display latex tex katex"),
         cmd("find", "This note", "Find in this note", "search", "Ctrl+F", () => openFind(), canFindInNote()),
         cmd("find-case", "This note", "Find: match case" + (find.matchCase ? " (on)" : ""), "case-sensitive", "Alt+C", () => toggleFindOption("matchCase"), find.open, "case sensitive"),
         cmd("find-word", "This note", "Find: whole word" + (find.wholeWord ? " (on)" : ""), "whole-word", "Alt+W", () => toggleFindOption("wholeWord"), find.open, "whole word"),
@@ -29663,6 +29928,13 @@
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "r") {
         e.preventDefault();
         toggleReadAloud();
+        return;
+      }
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === "e") {
+        if (bodyHasFocus() && canAddFormula()) {
+          e.preventDefault();
+          addFormula();
+        }
         return;
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "a") {

@@ -31,7 +31,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
     "build:app": "node scripts/build-renderer.js",
     "notices": "node scripts/make-notices.js",
-    "bench": "node --expose-gc scripts/bench-scale.js"
+    "bench": "node --expose-gc scripts/bench-scale.js",
+    "vendor:katex": "node scripts/vendor-katex.js"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
@@ -69,6 +70,7 @@
     "docx-preview": "^0.4.1",
     "dugite": "^3.3.2",
     "jszip": "3.10.2",
+    "katex": "0.19.1",
     "mammoth": "^1.13.0",
     "markdown-it": "14.3.3",
     "pdf-lib": "1.17.1",

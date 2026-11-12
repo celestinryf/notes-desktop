@@ -29,7 +29,7 @@ export function createSpeech({ api }: SpeechDeps) {
     if (selected) return selected;
     const title = el.titleInput.value.trim();
     const note = state.current;
-    const body = isNonMarkdownFile(note) ? el.bodyInput.value : H.plainTextFromMarkdown(el.bodyInput.value);
+    const body = isNonMarkdownFile(note) ? el.bodyInput.value : H.plainTextFromMarkdown(el.bodyInput.value, 'skip');
     return (title ? title + '.\n' : '') + body;
   }
 

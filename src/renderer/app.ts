@@ -1981,6 +1981,16 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     else if (where === 'body') focusBody();
   }
 
+  function canAddFormula() {
+    const n = state.current;
+    return !!n && !n.trashedAt && !lockedNow() && !H.isNonMarkdownFile(n) && !formulaEditorOpen() && (state.sourceMode || (!!state.rich && el.richEditor.querySelector('.rich-editor-content[contenteditable="true"]') !== null));
+  }
+
+  function addFormula() {
+    if (state.sourceMode) { src.focus(); wrapSelection('$', '$'); return; }
+    insertFormula('inline');
+  }
+
   function isCodeFile(note: Pick<PublicNote, 'filePath' | 'fileKind'>) {
     return isPlainTextFile(note) && !H.isTableFile(note) && !!window.NotesCode && window.NotesCode.languageFor(H.extOf(note.filePath)).code;
   }
@@ -2024,7 +2034,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   };
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
-  const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
   const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
@@ -2910,6 +2920,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       fromButton(el.sourceBtn, 'This note', { title: state.sourceMode ? 'Show the rendered view' : 'Show Markdown source', keys: 'Ctrl+E' }),
       cmd('link', 'This note', 'Link the selected text', 'link', 'Ctrl+K', () => links.open(), noteOpen && !!state.rich && !state.sourceMode && !src.codeOn, 'url web address note reference'),
       cmd('open-link', 'This note', 'Open link at caret', 'external-link', 'Alt+Enter', openLinkAtCaret, noteOpen && !!state.rich && !state.sourceMode, 'follow wikilink'),
+      cmd('formula', 'This note', 'Insert a formula', 'sigma', 'Ctrl+Shift+E', addFormula, noteOpen && canAddFormula(), 'math equation latex tex katex dollar inline'),
+      cmd('formula-block', 'This note', 'Insert a formula block', 'sigma', '', () => insertFormula('block'), noteOpen && canAddFormula() && !state.sourceMode, 'math equation display latex tex katex'),
       cmd('find', 'This note', 'Find in this note', 'search', 'Ctrl+F', () => openFind(), canFindInNote()),
       cmd('find-case', 'This note', 'Find: match case' + (find.matchCase ? ' (on)' : ''), 'case-sensitive', 'Alt+C', () => toggleFindOption('matchCase'), find.open, 'case sensitive'),
       cmd('find-word', 'This note', 'Find: whole word' + (find.wholeWord ? ' (on)' : ''), 'whole-word', 'Alt+W', () => toggleFindOption('wholeWord'), find.open, 'whole word'),
@@ -3048,6 +3060,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     if (ctrl && e.shiftKey && !e.altKey && e.code === 'Backslash') { e.preventDefault(); toggleList(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
+    if (ctrl && e.shiftKey && e.key.toLowerCase() === 'e') { if (bodyHasFocus() && canAddFormula()) { e.preventDefault(); addFormula(); } return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); searchList(); return; }

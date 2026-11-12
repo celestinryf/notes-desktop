@@ -586,6 +586,101 @@ test('entity-looking text and numbered lists round-trip in the rendered view', a
   await useSourceMode(true);
 });
 
+test('formulas: $ and $$ render with KaTeX, a click or Enter edits them in a popover, Ctrl+Shift+E and /formula insert them, and the Markdown keeps its shape', { timeout: 60000 }, async () => {
+  const md = '# Formulas\n\nEnergy is $E = mc^2$ and costs $5 and $10 stay text.\n\n$$\n\\int_0^1 x\\,dx\n$$\n\nBroken $\\frac{1}{$ here.';
+  await page.click('#newNoteBtn');
+  await waitForDom(() => document.activeElement && document.activeElement.id === 'titleInput');
+  await page.fill('#titleInput', 'Formulas');
+  await useSourceMode(true);
+  await fillBody(md);
+  await waitFor('formulas note saved', () => findNote('Formulas') && findNote('Formulas').body === md);
+  await useSourceMode(false);
+  await page.waitForSelector('#richEditor .math-block .katex-display', { timeout: 8000 });
+  assert.equal(await page.$$eval('#richEditor .math-inline', (k) => k.length), 2, 'two inline formulas');
+  assert.equal(await page.$$eval('#richEditor .math-inline .katex', (k) => k.length), 1, 'one drawn by KaTeX');
+  assert.equal(await page.$$eval('#richEditor .math-inline .katex-error', (k) => k.length), 1, 'the broken one shows as an error');
+  assert.match(await page.$eval('#richEditor p:nth-of-type(1)', (p) => p.textContent), /costs \$5 and \$10 stay text/, 'prices stay text');
+  assert.equal(await page.$eval('#richEditor .math-inline .katex-error', (k) => getComputedStyle(k).color), await page.evaluate(() => { const s = document.createElement('span'); s.style.color = 'var(--danger)'; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; }), 'the error colour is --danger');
+
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForSelector('#shareMenu:not(.hidden)');
+  await page.click('#shareMenu [data-action="copy-html"]');
+  const copied = await waitFor('formulas copied as rich text', () => { const html = require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], { encoding: 'utf8' }).stdout || ''; return html.includes('mc^2') ? html : null; }, 10000);
+  assert.ok(copied.includes('$E = mc^2$') && copied.includes('$$\\int_0^1 x\\,dx$$'), 'formulas paste as their TeX: ' + copied.slice(0, 300));
+  assert.doesNotMatch(copied, /katex/, 'no KaTeX markup on the clipboard');
+
+  await page.click('#richEditor .math-inline >> nth=0');
+  await page.waitForSelector('#mathEditor:not(.hidden)');
+  assert.equal(await page.inputValue('#mathSource'), 'E = mc^2');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'mathSource');
+  await page.fill('#mathSource', 'E = mc^3');
+  await waitForDom(() => document.querySelector('#richEditor .math-inline').getAttribute('data-latex') === 'E = mc^3');
+  await page.fill('#mathSource', '\\frac{1}{');
+  await page.waitForSelector('#mathError:not(.hidden)');
+  assert.equal(await page.getAttribute('#mathSource', 'aria-invalid'), 'true');
+  await page.fill('#mathSource', 'E = mc^3');
+  await page.waitForSelector('#mathError.hidden', { state: 'attached' });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#mathEditor.hidden', { state: 'attached' });
+  await waitFor('the edited formula saved', () => findNote('Formulas').body.includes('Energy is $E = mc^3$ and costs'));
+  assert.equal(findNote('Formulas').body, md.replace('mc^2', 'mc^3'), 'nothing else changed');
+  await page.keyboard.press('Control+z');
+  await waitFor('one undo puts the formula back', () => findNote('Formulas').body === md);
+
+  await page.click('#richEditor h1');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Area ');
+  await page.keyboard.press('Control+Shift+E');
+  await page.waitForSelector('#mathEditor:not(.hidden)');
+  assert.equal(await page.inputValue('#mathSource'), '');
+  await page.keyboard.type('\\pi r^2');
+  await page.keyboard.press('Enter');
+  await waitFor('the inserted formula saved', () => findNote('Formulas').body.startsWith('# Formulas\n\nArea $\\pi r^2$\n\nEnergy'));
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/formula');
+  await page.waitForSelector('#inlineMenu:not(.hidden)');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#mathEditor:not(.hidden)');
+  await page.keyboard.type('\\sum_i i');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('= n');
+  await page.keyboard.press('Enter');
+  await waitFor('the formula block saved', () => findNote('Formulas').body.includes('Area $\\pi r^2$\n\n$$\n\\sum_i i\n= n\n$$\n\nEnergy'));
+  await waitForDom(() => document.getElementById('statusCode').textContent === 'Enter edits the formula');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#mathEditor:not(.hidden)');
+  assert.equal(await page.inputValue('#mathSource'), '\\sum_i i\n= n', 'Enter on a selected formula opens it without the outer newlines');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#mathEditor.hidden', { state: 'attached' });
+  assert.equal(await page.evaluate(() => document.getElementById('app').classList.contains('hidden') || !document.hasFocus()), false, 'Esc closed the popover, not the window');
+
+  await page.click('#richEditor .math-inline >> nth=0');
+  await page.waitForSelector('#mathEditor:not(.hidden)');
+  await page.fill('#mathSource', '');
+  await page.keyboard.press('Backspace');
+  await page.waitForSelector('#mathEditor.hidden', { state: 'attached' });
+  await waitFor('Backspace in an empty formula removes it', () => findNote('Formulas').body.startsWith('# Formulas\n\nArea \n\n$$'));
+
+  await page.keyboard.press('Control+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.fill('#findInput', 'mc');
+  await waitForDomWithin(8000, () => document.getElementById('findCount').textContent === 'No matches');
+  await page.keyboard.press('Escape');
+
+  const saved = findNote('Formulas').body;
+  await useSourceMode(true);
+  await waitFor('the source view shows the saved Markdown', async () => (await page.inputValue('#bodyInput')) === saved);
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('formulas note trashed', () => findNote('Formulas').trashedAt);
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('formulas note destroyed', () => !findNote('Formulas'));
+  await page.click('.nav-item[data-view="all"]');
+});
+
 test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
   const fileDir = tmpDir('notes-ui-files-');
   const mdPath = path.join(fileDir, 'External note.md');

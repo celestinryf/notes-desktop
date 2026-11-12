@@ -222,6 +222,17 @@ function seed(now) {
     n('b1', 'Getting started', 'This guide collects what we learned on the trail.\n\nEach page covers one region.', { folderId: 'f-book' }),
     n('b2', 'Birds of the ridge', 'Ravens nest on the north face. Listen for the knocking call in the early morning.', { folderId: 'f-book' }),
     n('b3', 'Wildflowers', 'Lupine blooms in late June above the tree line.', { folderId: 'f-book' }),
+    n('n-math', 'Physics revision', String.raw`## Kinematics
+A ball dropped from rest falls $d = \tfrac{1}{2} g t^2$ after $t$ seconds, with $g \approx 9.81\,\mathrm{m/s^2}$.
+
+$$
+v^2 = u^2 + 2as
+$$
+
+## Chemistry
+Burning methane: $\ce{CH4 + 2O2 -> CO2 + 2H2O}$.
+
+The lab kit costs $40 and the goggles $12, so the club pays the rest.`, { tags: ['school'] }),
   ];
   return { schemaVersion: 1, settings: { hotkey: 'Control+Alt+Shift+F7', openAtLogin: false, gitEnabled: false }, folders, vaults: [], notes };
 }
@@ -291,6 +302,9 @@ const SCENES = {
   main: { about: 'A long, rich note open with the list and sidebar', run: openNote('Q4 planning') },
   'short-note': { about: 'A short checklist note', run: openNote('Groceries') },
   source: { about: 'The Markdown source of a note (Ctrl+E): headings, list marks, emphasis and code spans as text', run: steps(openNote('Q4 planning'), key('Control+e')) },
+  math: { about: 'A note with formulas: inline math in a sentence, a display block, a chemistry line, and prices that stay text', run: openNote('Physics revision') },
+  'math-edit': { about: 'The formula popover open on an inline formula: the TeX field, the hint and Done', run: steps(openNote('Physics revision'), async (page) => { await page.click('#richEditor .math-inline >> nth=0'); await sleep(400); }) },
+  'math-error': { about: 'The formula popover on a display block with a TeX mistake: the error line under the field, and the block drawn in the error colour', run: steps(openNote('Physics revision'), async (page) => { await page.click('#richEditor .math-block'); await sleep(300); await page.keyboard.press('End'); await page.keyboard.type(' \\fracc{1}{2}'); await sleep(400); }) },
   focus: { about: 'Sidebar and list hidden: the writing view', run: steps(openNote('Notes on writing tools'), key('Control+\\'), key('Control+Shift+\\')) },
   find: { about: 'Find and replace in a note', run: steps(openNote('Q4 planning'), key('Control+h')) },
   'find-options': { about: 'Find with Match case on: the pressed cell, and the count narrowed', run: steps(openNote('Q4 planning'), key('Control+f'), async (page) => { await page.fill('#findInput', 'the'); await sleep(200); await page.click('#findCaseBtn'); await sleep(300); }) },
