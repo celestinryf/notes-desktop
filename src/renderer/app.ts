@@ -11,6 +11,7 @@ import { toast } from './toast.ts';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.ts';
 import { placePopover } from './popover.ts';
 import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.ts';
+import { createCompileControls } from './compile-controls.ts';
 import { fitBand, captionSize, watchBand, applyPeerCaption, isShown } from './band.ts';
 import { createBooks } from './books.ts';
 import { createRelated } from './related.ts';
@@ -2035,6 +2036,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]) });
   const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
@@ -2147,6 +2149,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.editorColumn.classList.toggle('shows-craft', inCraft);
     el.editor.classList.toggle('shows-craft', inCraft);
     syncTextViews(note);
+    compiling.noteShown();
     if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
     api.files.convertOptions(note.id).then((opts) => { if (state.currentId === note.id) el.fileConvertBtn.classList.toggle('hidden', !opts.length); }).catch(() => {});
@@ -2928,6 +2931,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('image-size', 'This note', 'Image: actual size, or fitted to the pane', 'zoom-in', 'Enter on the picture', () => toggleImageSize(), !!(state.current && state.current.fileKind === 'image'), 'zoom 100% fit picture'),
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
       ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
+      ...compiling.commands(noteOpen).map((c) => Object.assign({ group: 'This file' }, c)),
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
       ...[...el.shareMenu.querySelectorAll<HTMLButtonElement>('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action ?? '') })),
@@ -2995,6 +2999,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (inDialog) return;
       if (el.pdfEditor.contains(document.activeElement)) return;
       if (find.open) { e.preventDefault(); closeFind(); return; }
+      if (compiling.openNow()) { e.preventDefault(); compiling.closeMenus(); return; }
       if (!el.moreMenu.classList.contains('hidden')) { e.preventDefault(); closeMoreMenu(); el.moreBtn.focus(); return; }
       if (!el.shareMenu.classList.contains('hidden')) { e.preventDefault(); closeShareMenu(); (isShown(el.shareBtn) ? el.shareBtn : el.moreBtn).focus(); return; }
       if (!el.convertMenu.classList.contains('hidden')) { e.preventDefault(); closeConvertMenu(); el.moreBtn.focus(); return; }
@@ -3060,6 +3065,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     if (ctrl && e.shiftKey && !e.altKey && e.code === 'Backslash') { e.preventDefault(); toggleList(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
+    if (ctrl && !e.shiftKey && !e.altKey && e.key === 'Enter' && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.compile(); return; }
+    if (e.key === 'F8' && !ctrl && !e.altKey && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.stepIssue(e.shiftKey ? -1 : 1); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'e') { if (bodyHasFocus() && canAddFormula()) { e.preventDefault(); addFormula(); } return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }

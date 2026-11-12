@@ -59,6 +59,9 @@ const LIBRARY_RETRY_MS = 1000;
 const LIBRARY_UNREADABLE_TRIES = 5;
 const HOTKEY_FALLBACKS = ['CommandOrControl+Alt+N', 'CommandOrControl+Shift+Alt+N', 'CommandOrControl+Alt+J', 'CommandOrControl+Alt+F12'];
 import * as Themes from './shared/themes.mts';
+import { TexService } from './tex-service.mts';
+import { stopAllCompiles } from './tex-compile.mts';
+import { DEFAULT_TEX_OPTIONS } from './tex-build.mts';
 const TITLE_BAR_H = 39;
 const APP_ID = 'com.celestinryf.notes';
 const FIRST_PAGE_ROWS = 120;
@@ -1587,6 +1590,18 @@ function main() {
     if (!isFileNote(n) || !convert.sourceOf(n)) return { ok: false, error: 'this kind of file has no text to show' };
     try { return { ok: true, markdown: convert.inlinePicturesOnly((await convert.toMarkdown(n)).markdown) }; } catch (err) { return { ok: false, error: err.message }; }
   });
+  const tex = new TexService(process.env);
+  const texNote = (id: unknown) => {
+    const note = typeof id === 'string' ? store.get(id) : null;
+    if (!note || !isFileNote(note) || !H.isTexFile(note)) throw new Error('This note is not a LaTeX file.');
+    if (note.trashedAt) throw new Error('A file in the trash is not compiled.');
+    return note;
+  };
+  handle('tex:status', (_e, again) => tex.status(again === true));
+  handle('tex:compile', (_e, id) => { const note = texNote(id); return tex.compile(note.id, note.filePath, note.texOptions || DEFAULT_TEX_OPTIONS); });
+  handle('tex:stop', (_e, id) => (typeof id === 'string' ? tex.stop(id) : false));
+  handle('tex:clean', (_e, id) => { const note = texNote(id); return tex.clean(note.id, note.filePath); });
+  handle('tex:setOptions', (_e, id, patch) => store.publicNote(store.setTexOptions(texNote(id).id, patch)));
   handle('files:convert', async (_e, id, to) => {
     try { const r = await convert.convertFile(store.get(id), to, printers); return { ok: true, filePath: r.filePath, warning: r.warning }; }
     catch (err) { return { ok: false, error: err.message }; }
@@ -1775,7 +1790,7 @@ function main() {
       .catch(() => {})
       .finally(() => { flushStore(); searchIndex.stop(); reminders.stop(); if (botChild) killTree(botChild); for (const s of live.sessions.values()) { if (s.role === 'host') { try { s.server?.close(); } catch (_) {  } } } vaults.closeAll(); stickies.closeAll(); app.quit(); });
   });
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); searchIndex.stop(); writeRuntime({ visible: false, exiting: true }); });
+  app.on('will-quit', () => { stopAllCompiles(); globalShortcut.unregisterAll(); searchIndex.stop(); writeRuntime({ visible: false, exiting: true }); });
   app.on('window-all-closed', () => {  });
   app.on('activate', showWindow);
 

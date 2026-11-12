@@ -1,0 +1,18 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2024) (preloaded format=pdflatex 2024.4.1)  12 NOV 2026 09:40
+entering extended mode
+**main.tex
+(./main.tex
+LaTeX2e <2023-11-01> patch level 1
+(c:/texlive/2024/texmf-dist/tex/latex/base/article.cls
+Document Class: article 2023/05/17 v1.4n Standard LaTeX document class
+)
+(./sections/a-section-with-a-rather-long-name-that-makes-the-path-wrap-in-the-l
+og-file.tex
+! Undefined control sequence.
+l.4 \oops
+
+The control sequence at the end of the top line
+of your error message was never \def'ed.
+
+) [1] (./main.aux) )
+Output written on main.pdf (1 page, 12000 bytes).

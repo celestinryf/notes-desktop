@@ -1,4 +1,5 @@
 import { mathAsText } from './math.mts';
+import { TEX_FILE } from './tex-magic.mts';
 
 const UNTITLED = 'Untitled';
 
@@ -500,6 +501,10 @@ function isNonMarkdownFile(note: FileSource) {
   return isPlainTextFile(note) || isViewerOnlyFile(note);
 }
 
+function isTexFile(note: FileSource) {
+  return isPlainTextFile(note) && /\.(tex|ltx|latex)$/i.test(String(note && note.filePath));
+}
+
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 const WORD_EXT = new Set(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt']);
 const OOXML_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']);
@@ -663,7 +668,7 @@ export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
   isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, isOpenableLink, gitErrorText, isLinkedNotice,
   fuzzyScore,
-  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
+  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTexFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, countLines, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,

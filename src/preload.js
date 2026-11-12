@@ -89,6 +89,13 @@ const notesApi = {
     discover: invoke('agentFiles:discover'),
     link: invoke('agentFiles:link'),
   },
+  tex: {
+    status: invoke('tex:status'),
+    compile: invoke('tex:compile'),
+    stop: invoke('tex:stop'),
+    clean: invoke('tex:clean'),
+    setOptions: invoke('tex:setOptions'),
+  },
   live: {
     host: invoke('live:host'),
     join: invoke('live:join'),
