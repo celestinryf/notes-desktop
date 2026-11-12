@@ -7,6 +7,7 @@
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
   <link rel="stylesheet" href="../../node_modules/pdfjs-dist/web/pdf_viewer.css" />
+  <link rel="stylesheet" href="vendor/katex/katex.min.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -802,6 +803,14 @@
     </div>
     <div class="popover convert-menu hidden" id="convertMenu" role="menu" aria-label="Convert to"></div>
     <div class="popover inline-menu hidden" id="inlineMenu" role="listbox" aria-label="Insert"></div>
+    <div class="popover math-editor hidden" id="mathEditor" role="dialog" aria-label="Edit formula">
+      <textarea class="input math-source" id="mathSource" rows="1" spellcheck="false" autocomplete="off" aria-label="Formula in TeX" aria-describedby="mathError mathHint" placeholder="TeX, for example \frac{a}{b}"></textarea>
+      <div class="math-editor-foot">
+        <p class="math-error hidden" id="mathError" role="status" aria-live="polite"></p>
+        <span class="math-hint" id="mathHint">Enter finishes. Shift+Enter adds a line.</span>
+        <button type="button" class="btn btn-small btn-primary" id="mathDone">Done</button>
+      </div>
+    </div>
     <div class="popover hidden" id="lockMenu" role="menu" aria-label="Lock">
       <button role="menuitem" data-action="relock">Lock now</button>
       <button role="menuitem" data-action="remove" class="danger">Remove lock…</button>

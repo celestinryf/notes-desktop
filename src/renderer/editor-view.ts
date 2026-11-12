@@ -6,6 +6,7 @@ import { NotesCsv } from './csv-view.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { matchingNotes } from './link-choices.ts';
+import { createMathEditor } from './math-editor.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
@@ -48,6 +49,8 @@ type EditorViewDeps = {
 };
 
 export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }: EditorViewDeps) {
+  const formulas = createMathEditor();
+
   function createRichEditor() {
     if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
     state.rich = window.NotesEditor.create(el.richEditor, {
@@ -65,7 +68,9 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
         const rels = await api.notes.resolvePictures(id, names);
         return state.currentId === id ? rels : null;
       },
-      onLinkAtCaret: (on: boolean) => showLinkHint(on),
+      onLinkAtCaret: (on: boolean) => showCaretHint(LINK_HINT, on),
+      onMathAtCaret: (on: boolean) => showCaretHint(FORMULA_HINT, on),
+      onEditMath: (edit) => formulas.open(edit),
       onTrigger: (t: InlineTrigger | null) => showInlineMenu(t),
       onTriggerKey: (e: KeyboardEvent) => inlineMenuKey(e),
       onUpdate: (md: string) => {
@@ -97,6 +102,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     { kind: 'code', title: 'Code block', icon: 'code-xml', keys: '```', words: 'snippet pre monospace' },
     { kind: 'table', title: 'Table', icon: 'layout-grid', keys: '', words: 'grid rows columns' },
     { kind: 'divider', title: 'Divider', icon: 'minus', keys: '---', words: 'rule line separator hr' },
+    { kind: 'math', title: 'Formula', icon: 'sigma', keys: '$$ ', words: 'math equation latex tex katex' },
     { kind: 'date', title: "Today's date", icon: 'bell', keys: '', words: 'now day time' },
     { kind: 'link', title: 'Link to a note', icon: 'link', keys: '[[', words: 'note reference wiki' },
   ];
@@ -311,10 +317,16 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
   }
 
   const LINK_HINT = 'Alt+Enter opens the link';
-  function showLinkHint(on: boolean) {
+  const FORMULA_HINT = 'Enter edits the formula';
+  function showCaretHint(hint: string, on: boolean) {
     if (on && (state.sourceMode || el.richEditor.classList.contains('hidden'))) return;
-    if (on) { el.statusCode.textContent = LINK_HINT; el.statusCode.classList.remove('hidden'); return; }
-    if (el.statusCode.textContent === LINK_HINT) { el.statusCode.textContent = ''; el.statusCode.classList.add('hidden'); }
+    if (on) { el.statusCode.textContent = hint; el.statusCode.classList.remove('hidden'); return; }
+    if (el.statusCode.textContent === hint) { el.statusCode.textContent = ''; el.statusCode.classList.add('hidden'); }
+  }
+
+  function insertFormula(kind: 'inline' | 'block') {
+    if (state.sourceMode || !state.rich || isPlainTextFile(state.current)) return false;
+    return state.rich.insertMath(kind);
   }
 
   async function followWikiLink(raw: string) {
@@ -361,5 +373,5 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
 
   function tableStatsNow() { return tableStats; }
 
-  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret };
+  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen: formulas.isOpen };
 }

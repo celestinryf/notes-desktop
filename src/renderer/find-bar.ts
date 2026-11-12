@@ -11,6 +11,7 @@ import type { FindOptions } from './find-text.ts';
 import { tableShown, focusBody } from './editor-view.ts';
 
 const { isViewerOnlyFile } = H;
+const FORMULA_NODES = '.math-inline, .math-block';
 
 type FindBarDeps = { api: NotesApi, flushSave: () => Promise<unknown>, GUEST: boolean, onOpen?: () => void };
 
@@ -152,7 +153,9 @@ export function createFindBar({ api, flushSave, GUEST, onOpen }: FindBarDeps) {
 
   function findRangesIn(root: HTMLDivElement, q: string) {
     const nodes: ({ node: Node; start: number; })[] = []; let text = '';
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (n) => (n instanceof Element && n.matches(FORMULA_NODES) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
     const blockOf = (n: Node) => { let e = n.parentElement; while (e && e !== root && getComputedStyle(e).display === 'inline') e = e.parentElement; return e; };
     let lastBlock = null;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
