@@ -32,6 +32,7 @@ async function bundledPackages() {
   }
   found.set('lucide-static', new Set(['src/renderer/icons.js']));
   found.set('dugite', new Set(['src/git-binary.mts (the main process)']));
+  found.set('synctex-js', new Set(['src/tex-sync.mts (the main process)']));
   return found;
 }
 

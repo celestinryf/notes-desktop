@@ -12,6 +12,7 @@ import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setR
 import { placePopover } from './popover.ts';
 import { openMoreMenu, closeMoreMenu, bindMenuKeys } from './more-menu.ts';
 import { createCompileControls } from './compile-controls.ts';
+import { samePath } from '../shared/tex-results.mts';
 import { fitBand, captionSize, watchBand, applyPeerCaption, isShown } from './band.ts';
 import { createBooks } from './books.ts';
 import { createRelated } from './related.ts';
@@ -66,7 +67,11 @@ type PeerMessage =
   | { type: 'release'; seq: number; id: string }
   | { type: 'reply'; seq: number; ok: boolean }
   | { type: 'command'; name: string; title?: string }
-  | { type: 'drag'; id: string | null };
+  | { type: 'drag'; id: string | null }
+  | { type: 'pdfReveal'; box: TexBox }
+  | { type: 'texGoTo'; source: TexSource }
+  | { type: 'reloadFile'; path: string }
+  | { type: 'syncStep'; forward: boolean };
 type MainEventName = keyof NotesApi['on'];
 type MainEventArgsMap = { [N in MainEventName]: Parameters<Parameters<NotesApi['on'][N]>[0]> };
 type MainEventArgs<N extends MainEventName> = MainEventArgsMap[N];
@@ -1624,6 +1629,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     tabs.peerDrag = null;
     el.editorPane.classList.remove('is-split');
     el.splitDivider.classList.add('hidden');
+    peerKind = null;
+    renderSyncArrows();
     tabs.active = 'left';
     el.paneMain.classList.remove('is-active-side');
     renderTabs();
@@ -1671,13 +1678,32 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         tabs.peerIds = Array.isArray(m.ids) ? m.ids : [];
         tabs.peerCurrent = m.current || null;
         saveLayoutSoon();
+        renderSyncArrows();
+        return;
+      case 'syncStep':
+        if (m.forward) compiling.showLineInPdf();
+        else sourceOfView();
         return;
       case 'open':
         if (!GUEST && m.focus) { setActiveSide('left'); window.focus(); }
         await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
         return;
       case 'changed':
+        peerKind = null;
         await onPeerWrite();
+        renderSyncArrows();
+        return;
+      case 'pdfReveal':
+        if (state.current && state.current.filePath && samePath(state.current.filePath, m.box.pdf)) await pollCurrentFile(true);
+        revealSync(m.box);
+        return;
+      case 'texGoTo':
+        if (!GUEST) setActiveSide('left');
+        window.focus();
+        compiling.goToSource(m.source);
+        return;
+      case 'reloadFile':
+        if (state.current && state.current.filePath && samePath(state.current.filePath, m.path)) pollCurrentFile(true);
         return;
       case 'settings':
         applySettings(m.settings, { fromPeer: true });
@@ -1817,6 +1843,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     el.paneMain.addEventListener('focusin', () => setActiveSide('left'));
     el.paneMain.addEventListener('pointerdown', () => setActiveSide('left'), true);
+    for (const [btn, forward] of [[el.syncForwardBtn, true], [el.syncBackwardBtn, false]] as const) {
+      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      btn.addEventListener('dblclick', (e) => e.stopPropagation());
+      btn.addEventListener('click', () => syncStep(forward));
+    }
     el.splitDivider.addEventListener('pointerdown', (e) => {
       if (!tabs.split) return;
       e.preventDefault();
@@ -2036,7 +2067,62 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
-  const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]) });
+  const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]), showOutput: showBeside, revealInPdf });
+
+  async function showBeside(pdfPath: string, manual: boolean) {
+    if (!manual) { toPeer({ type: 'reloadFile', path: pdfPath }); return; }
+    const linked = await api.files.link([pdfPath]);
+    if (!linked.firstId) return;
+    const opened = !GUEST && !tabs.split;
+    if (opened) openSplit(false);
+    toPeer({ type: 'open', id: linked.firstId });
+    toPeer({ type: 'reloadFile', path: pdfPath });
+    if (opened) setActiveSide('left');
+  }
+
+  async function revealInPdf(box: TexBox) {
+    await showBeside(box.pdf, true);
+    toPeer({ type: 'pdfReveal', box });
+  }
+
+  type SyncSides = { tex: 'left' | 'right', pdf: 'left' | 'right' } | null;
+  let syncSides: SyncSides = null;
+  let syncSeq = 0;
+  let peerKind: { id: string, kind: 'tex' | 'pdf' | null } | null = null;
+  const syncKind = (n: PublicNote | null) => (n && H.isTexFile(n) && !n.trashedAt ? 'tex' : n && n.fileKind === 'pdf' && !n.trashedAt ? 'pdf' : null);
+  async function renderSyncArrows() {
+    const seq = ++syncSeq;
+    const peerId = !GUEST && tabs.split ? tabs.peerCurrent : null;
+    if (peerId && (!peerKind || peerKind.id !== peerId)) {
+      let note: PublicNote | null = null;
+      try { note = await api.notes.get(peerId); } catch (_) { return; }
+      if (seq !== syncSeq) return;
+      peerKind = { id: peerId, kind: syncKind(note) };
+    }
+    const left = syncKind(state.current), right = peerId && peerKind ? peerKind.kind : null;
+    syncSides = left === 'tex' && right === 'pdf' ? { tex: 'left', pdf: 'right' } : left === 'pdf' && right === 'tex' ? { tex: 'right', pdf: 'left' } : null;
+    el.syncArrows.classList.toggle('hidden', !syncSides);
+    const towardPdf = syncSides && syncSides.pdf === 'right' ? 'arrow-right' : 'arrow-left';
+    setIcon(el.syncForwardBtn, towardPdf);
+    setIcon(el.syncBackwardBtn, towardPdf === 'arrow-right' ? 'arrow-left' : 'arrow-right');
+    el.syncForwardBtn.title = 'Show the line at the caret in the PDF (Ctrl+Alt+J)';
+    el.syncBackwardBtn.title = 'Show the source of the PDF page in view (Ctrl+Alt+J)';
+    el.syncForwardBtn.setAttribute('aria-label', el.syncForwardBtn.title);
+    el.syncBackwardBtn.setAttribute('aria-label', el.syncBackwardBtn.title);
+  }
+
+  function syncStep(forward: boolean) {
+    if (!syncSides) return;
+    const side = forward ? syncSides.tex : syncSides.pdf;
+    if (side === 'right') { toPeer({ type: 'syncStep', forward }); return; }
+    if (forward) compiling.showLineInPdf();
+    else sourceOfView();
+  }
+
+  function showSourceBeside(source: TexSource) {
+    if (hasPeer()) toPeer({ type: 'texGoTo', source });
+    else compiling.goToSource(source);
+  }
   const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
 
   const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
@@ -2109,7 +2195,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api });
 
-  const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
+  const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents, revealSync, sourceOfView } = createPdfNote({ api, externalLinkClick, showBanner, openFiles, showSource: showSourceBeside });
 
   const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile: pollCurrentFile });
 
@@ -2150,6 +2236,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     el.editor.classList.toggle('shows-craft', inCraft);
     syncTextViews(note);
     compiling.noteShown();
+    renderSyncArrows();
     if (!isFile) return;
     el.fileKind.textContent = fileBadge(note);
     api.files.convertOptions(note.id).then((opts) => { if (state.currentId === note.id) el.fileConvertBtn.classList.toggle('hidden', !opts.length); }).catch(() => {});
@@ -2159,6 +2246,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (note.fileKind === 'pdf') {
       el.pdfEditor.classList.remove('hidden');
       showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
+      if (note.filePath) api.tex.sourceFor(note.filePath).then((source) => {
+        if (source && state.currentId === note.id) showBanner('Made by Compile from ' + H.fileNameOf(source) + ': edits here are replaced at the next compile. Double-click to see the source.');
+      }).catch(() => {});
       showPdf(note);
     } else if (note.fileKind === 'docx') {
       el.docxEditor.classList.toggle('hidden', useWordCraft());
@@ -2230,7 +2320,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     toast((res.linked.length ? 'Opened ' + res.linked.length + (res.linked.length === 1 ? ' file' : ' files') : 'Nothing opened') + failed);
   }
 
-  async function pollCurrentFile() {
+  async function pollCurrentFile(quiet?: boolean) {
     const note = state.current;
     if (!note || !note.filePath || state.dirty || document.hidden || documentBusy()) return;
     let res;
@@ -2238,11 +2328,12 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (documentBusy()) return;
     if (state.currentId !== note.id) return;
     if (res.missing) { showBanner(missingFileText(note)); return; }
-    if (res.changed && !state.dirty) {
+    if ((res.changed || quiet) && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
+      if (!res.changed && fresh.fileMtime === note.fileMtime) return;
       applyFreshFileBody(fresh);
-      toast('Reloaded from disk: the file changed outside Notes.');
+      if (!quiet) toast('Reloaded from disk: the file changed outside Notes.');
     }
   }
 
@@ -2932,6 +3023,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       cmd('replace', 'This note', 'Find and replace', 'replace', 'Ctrl+H', () => { if (!find.open) openFind(); toggleReplace(true); }, canFindInNote()),
       ...[...el.moreMenu.querySelectorAll<HTMLButtonElement>('.menu-item')].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, 'This note')),
       ...compiling.commands(noteOpen).map((c) => Object.assign({ group: 'This file' }, c)),
+      cmd('pdf-source', 'This file', 'Show the source of this PDF page', 'arrow-left', 'Ctrl+Alt+J', sourceOfView, noteOpen && !!state.current && state.current.fileKind === 'pdf', 'latex tex synctex inverse search source'),
       fromButton(el.restoreBtn, 'This note'),
       fromButton(el.destroyBtn, 'This note'),
       ...[...el.shareMenu.querySelectorAll<HTMLButtonElement>('button[data-action]')].map((b) => ({ id: 'share-' + b.dataset.action, group: 'Share', title: (b.textContent || '').trim(), icon: 'share-2', keys: '', ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains('hidden'), run: () => shareAction(b.dataset.action ?? '') })),
@@ -3066,6 +3158,10 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (ctrl && e.shiftKey && !e.altKey && e.code === 'Backslash') { e.preventDefault(); toggleList(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
     if (ctrl && !e.shiftKey && !e.altKey && e.key === 'Enter' && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.compile(); return; }
+    if (ctrl && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j' && !inDialog) {
+      if (compiling.canCompile()) { e.preventDefault(); compiling.showLineInPdf(); return; }
+      if (state.current && state.current.fileKind === 'pdf') { e.preventDefault(); sourceOfView(); return; }
+    }
     if (e.key === 'F8' && !ctrl && !e.altKey && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.stepIssue(e.shiftKey ? -1 : 1); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'e') { if (bodyHasFocus() && canAddFormula()) { e.preventDefault(); addFormula(); } return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }

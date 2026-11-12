@@ -567,6 +567,11 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .pane-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .split-divider { flex: none; width: 5px; cursor: col-resize; background: var(--line); touch-action: none; transition: background var(--dur-1); }
 .split-divider:hover, .split-divider.is-dragging { background: var(--accent); }
+.split-divider { position: relative; }
+.sync-arrows { position: absolute; z-index: 5; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; gap: 2px; padding: 2px; border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow); background: var(--raised); cursor: default; }
+.sync-arrow { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--r-sm); background: transparent; color: var(--fg-2); }
+.sync-arrow:hover { background: var(--hover); color: var(--fg); }
+.sync-arrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pane-peer { flex: 0 0 var(--peer-w, 50%); min-width: calc(var(--caption-w) + 2 * var(--cell-w)); border: none; background: var(--paper); }
 .editor-pane.is-resizing .pane-peer { pointer-events: none; }
 
@@ -960,6 +965,9 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .pdf-comment-acts { display: flex; justify-content: flex-end; gap: var(--s1); margin-top: 6px; }
 .pdf-comment-acts:empty { display: none; }
 .pdf-viewport { position: absolute; inset: 0; overflow: auto; background: var(--document-bg); }
+.pdf-viewport .sync-flash { position: absolute; z-index: 6; pointer-events: none; border-radius: var(--r-xs); background: color-mix(in srgb, var(--accent) 30%, transparent); animation: sync-flash 1600ms var(--ease) both; }
+@keyframes sync-flash { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pdf-viewport .sync-flash { animation: none; } }
 .pdf-pages { display: none; flex: 1; flex-direction: column; min-height: 0; }
 .pdf-editor.organizing .pdf-pages { display: flex; }
 .pdf-editor.organizing .pdf-toolbar, .pdf-editor.organizing .pdf-format, .pdf-editor.organizing .pdf-body { display: none; }

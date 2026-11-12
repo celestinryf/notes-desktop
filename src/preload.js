@@ -95,6 +95,9 @@ const notesApi = {
     stop: invoke('tex:stop'),
     clean: invoke('tex:clean'),
     setOptions: invoke('tex:setOptions'),
+    forward: invoke('tex:forward'),
+    inverse: invoke('tex:inverse'),
+    sourceFor: invoke('tex:sourceFor'),
   },
   live: {
     host: invoke('live:host'),

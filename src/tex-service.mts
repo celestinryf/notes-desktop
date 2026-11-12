@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { detectTex, runQuietly, type TexDetection, type Runner } from './tex-engine.mts';
 import { compileTex, isCompiling, stopCompile } from './tex-compile.mts';
-import { buildFiles, readMagic, rootFor } from './tex-build.mts';
+import { buildFiles, pdfFor, readMagic, rootFor } from './tex-build.mts';
+import { forwardSearch, inverseSearch, loadBoxes, syncFileFor } from './tex-sync.mts';
+import { stemOf } from './shared/tex-magic.mts';
 
 export const NO_TEX = 'Notes could not find TeX on this PC. It looked on PATH and in the MiKTeX and TeX Live folders. Install MiKTeX or TeX Live, then compile again.';
 
@@ -48,6 +50,26 @@ export class TexService {
     if ('error' in target) return failure(target.error);
     this.roots.set(noteId, target.root);
     return compileTex({ root: target.root, magic: target.magic, install: found.install, options: { engine: options.engine, haltOnError: options.haltOnError }, capMs });
+  }
+
+  forward(filePath: string, line: number): TexBox | null {
+    const target = this.rootOf(filePath);
+    if ('error' in target) return null;
+    const boxes = loadBoxes(target.root);
+    const box = boxes ? forwardSearch(boxes, filePath, line) : null;
+    return box ? Object.assign({ pdf: pdfFor(target.root) }, box) : null;
+  }
+
+  inverse(pdfPath: string, page: number, x: number, y: number): TexSource | null {
+    const boxes = loadBoxes(pdfPath);
+    const found = boxes ? inverseSearch(boxes, page, x, y) : null;
+    return found && fs.existsSync(found.filePath) ? found : null;
+  }
+
+  sourceFor(pdfPath: string) {
+    const stem = stemOf(pdfPath);
+    const source = ['.tex', '.ltx', '.latex'].map((ext) => stem + ext).find((f) => fs.existsSync(f));
+    return source && syncFileFor(pdfPath) ? source : null;
   }
 
   stop(noteId: string) {

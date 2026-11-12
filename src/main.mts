@@ -1601,6 +1601,14 @@ function main() {
   handle('tex:compile', (_e, id) => { const note = texNote(id); return tex.compile(note.id, note.filePath, note.texOptions || DEFAULT_TEX_OPTIONS); });
   handle('tex:stop', (_e, id) => (typeof id === 'string' ? tex.stop(id) : false));
   handle('tex:clean', (_e, id) => { const note = texNote(id); return tex.clean(note.id, note.filePath); });
+  handle('tex:forward', (_e, id, line) => (typeof line === 'number' && line > 0 ? tex.forward(texNote(id).filePath, Math.floor(line)) : null));
+  const knownPdf = (pdfPath: unknown): pdfPath is string => typeof pdfPath === 'string' && path.isAbsolute(pdfPath) && /\.pdf$/i.test(pdfPath) && !!store.findByPath(pdfPath);
+  handle('tex:inverse', (_e, pdfPath, page, x, y) => {
+    if (!knownPdf(pdfPath)) return null;
+    if (![page, x, y].every((v) => typeof v === 'number' && Number.isFinite(v))) return null;
+    return tex.inverse(pdfPath, Math.floor(page), x, y);
+  });
+  handle('tex:sourceFor', (_e, pdfPath) => (knownPdf(pdfPath) ? tex.sourceFor(pdfPath) : null));
   handle('tex:setOptions', (_e, id, patch) => store.publicNote(store.setTexOptions(texNote(id).id, patch)));
   handle('files:convert', async (_e, id, to) => {
     try { const r = await convert.convertFile(store.get(id), to, printers); return { ok: true, filePath: r.filePath, warning: r.warning }; }

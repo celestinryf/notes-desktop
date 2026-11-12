@@ -16264,6 +16264,9 @@
     editorEmpty: pageElement("#editorEmpty", HTMLDivElement),
     editor: pageElement("#editor", HTMLDivElement),
     editorPane: pageElement("#editorPane", HTMLElement),
+    syncArrows: pageElement("#syncArrows", HTMLDivElement),
+    syncForwardBtn: pageElement("#syncForwardBtn", HTMLButtonElement),
+    syncBackwardBtn: pageElement("#syncBackwardBtn", HTMLButtonElement),
     paneMain: pageElement("#paneMain", HTMLDivElement),
     tabBar: pageElement("#tabBar", HTMLDivElement),
     tabList: pageElement("#tabList", HTMLDivElement),
@@ -16380,6 +16383,7 @@
     compileMenu: pageElement("#compileMenu", HTMLDivElement),
     compileEngines: pageElement("#compileEngines", HTMLDivElement),
     compileHaltBtn: pageElement("#compileHaltBtn", HTMLButtonElement),
+    compileAutoBtn: pageElement("#compileAutoBtn", HTMLButtonElement),
     compileLogBtn: pageElement("#compileLogBtn", HTMLButtonElement),
     compileCleanBtn: pageElement("#compileCleanBtn", HTMLButtonElement),
     compileFindBtn: pageElement("#compileFindBtn", HTMLButtonElement),
@@ -16989,7 +16993,9 @@
   }
 
   // src/renderer/compile-controls.ts
-  function createCompileControls({ api, flushSave, openFile }) {
+  var AUTO_COMPILE_MS = 2e3;
+  var PENDING_LINE_MS = 1e4;
+  function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }) {
     const results = /* @__PURE__ */ new Map();
     const edited = /* @__PURE__ */ new Set();
     const visited = /* @__PURE__ */ new Map();
@@ -16997,6 +17003,8 @@
     let saving = false;
     let stopBeforeStart = false;
     let editedDuring = false;
+    let autoTimer;
+    let compileAgain = false;
     let pendingLine = null;
     const isTex = (n) => !!n && !n.trashedAt && isTexFile(n);
     const optionsOf = (n) => n.texOptions || DEFAULT_TEX_OPTIONS;
@@ -17034,9 +17042,15 @@
       }
       el.compileStatus.title = result && result.ok ? "Compiled with " + ENGINE_LABELS[result.engine] + " in " + (result.ms / 1e3).toFixed(1) + " s. Show the results." : "Show the compile results";
     }
-    async function compile() {
+    async function compile(auto) {
       const n = state.current;
       if (!isTex(n)) return;
+      clearTimeout(autoTimer);
+      if (auto && !optionsOf(n).compileOnSave) return;
+      if (auto && running) {
+        if (running === n.id) compileAgain = true;
+        return;
+      }
       if (running === n.id) {
         if (saving) stopBeforeStart = true;
         else await api.tex.stop(n.id).catch(() => false);
@@ -17067,9 +17081,44 @@
       running = null;
       if (editedDuring && result.ok) edited.add(n.id);
       results.set(n.id, result);
+      const again = compileAgain;
+      compileAgain = false;
       render();
       if (state.currentId !== n.id) return;
-      if (!result.ok && (result.reason === "failed" || result.reason === "no-tex")) openResults();
+      if (result.ok && result.pdf) showOutput(result.pdf, !auto).catch(() => {
+      });
+      if (!auto && !result.ok && (result.reason === "failed" || result.reason === "no-tex")) openResults();
+      if (again && !(!result.ok && result.reason === "stopped")) compile(true);
+    }
+    function caretLine() {
+      const at = src.selectionStart || 0;
+      let line = 1;
+      for (let i = src.value.indexOf("\n"); i !== -1 && i < at; i = src.value.indexOf("\n", i + 1)) line++;
+      return line;
+    }
+    async function showLineInPdf() {
+      const n = state.current;
+      if (!isTex(n)) return;
+      let box = null;
+      try {
+        box = await api.tex.forward(n.id, caretLine());
+      } catch (_) {
+        box = null;
+      }
+      if (!box) {
+        toast(resultOf(n) ? "The PDF has no place for this line. Compile again to bring it up to date." : "Compile first (Ctrl+Enter), then this line can be found in the PDF.");
+        return;
+      }
+      await revealInPdf(box);
+    }
+    function goToSource(source) {
+      const n = state.current;
+      if (n && n.filePath && samePath(n.filePath, source.filePath)) {
+        goToLine(source.line);
+        return;
+      }
+      pendingLine = { filePath: source.filePath, line: source.line, at: Date.now() };
+      openFile(source.filePath);
     }
     function issueButton(issue, root) {
       const b = document.createElement("button");
@@ -17145,6 +17194,9 @@
       const options = optionsOf(n);
       const program = readMagic(src.value).program;
       el.compileEngines.replaceChildren(...ENGINES.map((e) => engineItem(e, program || options.engine, !!program)));
+      el.compileAutoBtn.setAttribute("aria-checked", String(options.compileOnSave));
+      el.compileAutoBtn.classList.toggle("is-on", options.compileOnSave);
+      setIcon(el.compileAutoBtn, options.compileOnSave ? "square-check" : "square");
       el.compileHaltBtn.setAttribute("aria-checked", String(options.haltOnError));
       el.compileHaltBtn.classList.toggle("is-on", options.haltOnError);
       setIcon(el.compileHaltBtn, options.haltOnError ? "square-check" : "square");
@@ -17159,6 +17211,7 @@
         const fresh = await api.tex.setOptions(n.id, patch);
         if (fresh && state.current && state.current.id === fresh.id) state.current.texOptions = fresh.texOptions;
         if (patch.engine) toast("This file compiles with " + ENGINE_LABELS[patch.engine] + ".");
+        if (patch.compileOnSave !== void 0) toast(patch.compileOnSave ? "This file compiles by itself 2 seconds after you stop typing." : "This file compiles only when you ask.");
         if (patch.haltOnError !== void 0) toast(patch.haltOnError ? "Compiling stops at the first error." : "Compiling goes on past errors.");
       } catch (err) {
         toast("Could not change the compile options: " + ipcErrorText(err));
@@ -17225,7 +17278,7 @@
         toast("That line is in " + file + ", which belongs to TeX, not to your document.");
         return;
       }
-      pendingLine = { filePath: file, line: issue.line };
+      pendingLine = { filePath: file, line: issue.line, at: Date.now() };
       await openFile(file);
     }
     function stepIssue(step) {
@@ -17246,12 +17299,13 @@
       goToIssue(issue, result ? result.root : null);
     }
     function noteShown() {
+      clearTimeout(autoTimer);
       render();
       const n = state.current;
       if (!pendingLine || !n || !n.filePath) return;
       const wanted = pendingLine;
       pendingLine = null;
-      if (samePath(wanted.filePath, n.filePath)) requestAnimationFrame(() => goToLine(wanted.line));
+      if (Date.now() - wanted.at < PENDING_LINE_MS && samePath(wanted.filePath, n.filePath)) requestAnimationFrame(() => goToLine(wanted.line));
     }
     el.compileBtn.addEventListener("click", () => {
       compile();
@@ -17266,6 +17320,11 @@
     el.compileStatus.addEventListener("click", () => {
       if (el.compileResults.classList.contains("hidden")) openResults();
       else closeMenus();
+    });
+    el.compileAutoBtn.addEventListener("click", () => {
+      closeMenus();
+      const n = state.current;
+      if (isTex(n)) setOptions({ compileOnSave: !optionsOf(n).compileOnSave });
     });
     el.compileHaltBtn.addEventListener("click", () => {
       closeMenus();
@@ -17297,6 +17356,12 @@
     el.bodyInput.addEventListener("input", () => {
       const n = state.current;
       if (!isTex(n)) return;
+      if (optionsOf(n).compileOnSave) {
+        clearTimeout(autoTimer);
+        autoTimer = setTimeout(() => {
+          if (state.current && state.current.id === n.id) compile(true);
+        }, AUTO_COMPILE_MS);
+      }
       if (running === n.id) {
         editedDuring = true;
         return;
@@ -17318,7 +17383,7 @@
       const options = n && tex ? optionsOf(n) : DEFAULT_TEX_OPTIONS;
       const program = tex ? readMagic(src.value).program : null;
       return [
-        { id: "tex-stop", title: "Stop compiling", icon: "square", keys: "Ctrl+Enter", run: compile, ok: tex && busy, keywords: "latex tex cancel" },
+        { id: "tex-stop", title: "Stop compiling", icon: "square", keys: "Ctrl+Enter", run: () => compile(false), ok: tex && busy, keywords: "latex tex cancel" },
         { id: "tex-next", title: "Go to the next compile error", icon: "arrow-down", keys: "F8", run: () => stepIssue(1), ok: tex && !!resultOf(n), keywords: "latex tex error warning problem" },
         { id: "tex-previous", title: "Go to the previous compile error", icon: "arrow-up", keys: "Shift+F8", run: () => stepIssue(-1), ok: tex && !!resultOf(n), keywords: "latex tex error warning problem" },
         { id: "tex-results", title: "Show the compile results", icon: "circle-alert", keys: "", run: openResults, ok: tex && !!resultOf(n), keywords: "latex tex errors warnings log" },
@@ -17327,13 +17392,15 @@
           const r = resultOf(n);
           return !!(r && r.ok && r.pdf);
         })(), keywords: "latex tex pdf output" },
+        { id: "tex-forward", title: "Show this line in the PDF", icon: "arrow-right", keys: "Ctrl+Alt+J", run: showLineInPdf, ok: tex, keywords: "latex tex synctex forward search jump pdf" },
+        { id: "tex-auto", title: options.compileOnSave ? "Stop compiling on save" : "Compile on save", icon: "play", keys: "", run: () => setOptions({ compileOnSave: !options.compileOnSave }), ok: tex, keywords: "latex tex auto compile automatic" },
         { id: "tex-halt", title: options.haltOnError ? "Compile past errors" : "Stop compiling at the first error", icon: "circle-alert", keys: "", run: () => setOptions({ haltOnError: !options.haltOnError }), ok: tex, keywords: "latex tex halt-on-error" },
         ...ENGINES.map((e) => ({ id: "tex-engine-" + e, title: "Compile with " + ENGINE_LABELS[e], icon: "play", keys: "", run: () => setOptions({ engine: e }), ok: tex && !program && options.engine !== e, keywords: "latex tex engine compiler" })),
         { id: "tex-clean", title: "Clear build files", icon: "eraser", keys: "", run: clean, ok: tex, keywords: "latex tex aux log synctex clean" },
         { id: "tex-find", title: "Look for TeX again", icon: "refresh-cw", keys: "", run: findTex, ok: true, keywords: "latex miktex texlive install" }
       ];
     }
-    return { render, compile, noteShown, closeMenus, openNow, commands, stepIssue, canCompile: () => isTex(state.current) };
+    return { render, compile: () => compile(false), noteShown, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
   }
 
   // src/renderer/note-html.ts
@@ -17947,6 +18014,7 @@
     wrap("live", ["host", "join", "stop"]);
     wrap("vaults", ["add", "clone", "update", "remove", "sync", "scan", "initRepo"]);
     wrap("agentFiles", ["link"]);
+    wrap("tex", ["setOptions", "clean"]);
     wrap("app", ["importMarkdown"]);
     return out;
   }
@@ -24620,6 +24688,45 @@
         return true;
       }
       let picking = null;
+      function pageHeightOf(page) {
+        const view = doc && page >= 0 && page < doc.numPages ? viewer.getPageView(page) : null;
+        return view ? view.pdfPage.view[3] - view.pdfPage.view[1] : 0;
+      }
+      function pdfPointOf(e) {
+        const pageEl = e.target instanceof Element ? e.target.closest(".page[data-page-number]") : null;
+        if (!doc || !pageEl) return null;
+        const page = Number(pageEl.dataset.pageNumber) - 1;
+        const view = viewer.getPageView(page);
+        const r = pageEl.getBoundingClientRect();
+        const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
+        return { page, x, y };
+      }
+      function pointAt(e) {
+        const p = pdfPointOf(e);
+        return p ? { page: p.page, x: p.x, y: pageHeightOf(p.page) - p.y } : null;
+      }
+      function topOfView() {
+        if (!doc || !location2) return null;
+        const page = Math.min(location2.pageNumber, doc.numPages) - 1;
+        return { page, x: location2.left + 36, y: Math.max(0, pageHeightOf(page) - location2.top + 24) };
+      }
+      function reveal(page, box) {
+        if (!doc || page < 0 || page >= doc.numPages) return false;
+        const height = pageHeightOf(page);
+        viewer.scrollPageIntoView({ pageNumber: page + 1, destArray: [null, { name: "XYZ" }, box.left - 40, height - box.top + 60, null], allowNegativeOffset: true });
+        requestAnimationFrame(() => {
+          const view = viewer.getPageView(page);
+          if (!view || !view.div) return;
+          const [x1, y1] = view.viewport.convertToViewportPoint(box.left, height - box.top);
+          const [x2, y2] = view.viewport.convertToViewportPoint(Math.max(box.right, box.left + 24), height - box.bottom);
+          const flash = document.createElement("div");
+          flash.className = "sync-flash";
+          Object.assign(flash.style, { left: Math.min(x1, x2) - 4 + "px", top: Math.min(y1, y2) - 5 + "px", width: Math.abs(x2 - x1) + 8 + "px", height: Math.abs(y2 - y1) + 10 + "px" });
+          view.div.append(flash);
+          setTimeout(() => flash.remove(), 1600);
+        });
+        return true;
+      }
       function pickPoint() {
         cancelPick();
         if (!doc) return Promise.resolve(null);
@@ -24627,20 +24734,17 @@
         root.classList.add("picking");
         return new Promise((resolve2) => {
           const onDown = (e) => {
-            const pageEl = e.button === 0 && e.target instanceof Element ? e.target.closest(".page[data-page-number]") : null;
-            if (!pageEl) return;
+            const point = e.button === 0 ? pdfPointOf(e) : null;
+            if (!point) return;
             e.preventDefault();
             e.stopPropagation();
-            const view = viewer.getPageView(Number(pageEl.dataset.pageNumber) - 1);
-            const r = pageEl.getBoundingClientRect();
-            const [x, y] = view.viewport.convertToPdfPoint(e.clientX - r.left - pageEl.clientLeft, e.clientY - r.top - pageEl.clientTop);
             const eat = (c) => {
               c.preventDefault();
               c.stopPropagation();
             };
             container.addEventListener("click", eat, true);
             setTimeout(() => container.removeEventListener("click", eat, true), 400);
-            finish({ page: view.id - 1, x, y });
+            finish(point);
           };
           const onKey = (e) => {
             if (e.key === "Escape") {
@@ -24712,6 +24816,9 @@
         cancelPick,
         comments,
         goTo,
+        pointAt,
+        topOfView,
+        reveal,
         save,
         pageCount: () => doc ? doc.numPages : 0,
         drawPage: (i, canvas, width) => doc ? drawPage(doc, i, canvas, width) : Promise.resolve(),
@@ -25261,9 +25368,12 @@
   }
 
   // src/renderer/pdf-note.ts
-  function createPdfNote({ api, externalLinkClick, showBanner, openFiles }) {
+  var REVEAL_WAIT_MS = 1e4;
+  function createPdfNote({ api, externalLinkClick, showBanner, openFiles, showSource }) {
     let pdf = null;
     let pdfShownKey = null, pdfSeq = 0, pdfNote = null;
+    let pendingReveal = null;
+    let loadingPdf = false;
     function pdfController() {
       if (!pdf && NotesPdfEditor) {
         pdf = NotesPdfEditor.create(el.pdfEditor, {
@@ -25387,12 +25497,15 @@
       pdfShownKey = null;
       pdfSeq++;
       pdfNote = null;
+      loadingPdf = false;
+      pendingReveal = null;
       el.pdfEditor.classList.add("hidden");
       if (pdf) pdf.close();
     }
     async function showPdf(note, opts) {
       const key = note.id + ":" + note.fileMtime;
       if (pdfShownKey === key) return;
+      const sameNote = !!pdfShownKey && pdfShownKey.startsWith(note.id + ":");
       closePdfPages();
       if (pdfComments) pdfComments.stop();
       const ctl = pdfController();
@@ -25403,15 +25516,19 @@
       pdfShownKey = key;
       const seq = ++pdfSeq;
       pdfNote = null;
+      loadingPdf = true;
       try {
         const { bytes, marks } = await api.files.pdfOpen(note.id);
         if (seq !== pdfSeq) return;
-        if (await ctl.open(new Uint8Array(bytes), marks, opts) && seq === pdfSeq) {
+        if (await ctl.open(new Uint8Array(bytes), marks, { keepView: opts && opts.keepView !== void 0 ? opts.keepView : sameNote }) && seq === pdfSeq) {
           pdfNote = { id: note.id, fileMtime: note.fileMtime };
+          loadingPdf = false;
+          applyPendingReveal();
           if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
         }
       } catch (err) {
         if (seq !== pdfSeq) return;
+        loadingPdf = false;
         pdfShownKey = null;
         showBanner("Could not show this PDF: " + ipcErrorText(err) + ' Use "Open in default app" in the More menu for your PDF app.');
       }
@@ -25691,7 +25808,44 @@
     function forgetShownPdf() {
       pdfShownKey = null;
     }
+    function applyPendingReveal() {
+      const n = state.current;
+      const pending = pendingReveal;
+      if (pending && Date.now() - pending.at > REVEAL_WAIT_MS) {
+        pendingReveal = null;
+        return;
+      }
+      const box = pending ? pending.box : null;
+      if (!box || loadingPdf || !pdf || !pdfNote || !n || n.id !== pdfNote.id || !n.filePath || !samePath(n.filePath, box.pdf)) return;
+      pendingReveal = null;
+      const ctl = pdf;
+      setTimeout(() => ctl.reveal(box.page, box), 120);
+    }
+    function revealSync(box) {
+      pendingReveal = { box, at: Date.now() };
+      applyPendingReveal();
+    }
+    async function sourceAt(point) {
+      const n = state.current;
+      if (!point || !n || !n.filePath || !pdfNote || pdfNote.id !== n.id) return false;
+      let found = null;
+      try {
+        found = await api.tex.inverse(n.filePath, point.page, point.x, point.y);
+      } catch (_) {
+        found = null;
+      }
+      if (!found) return false;
+      showSource(found);
+      return true;
+    }
+    async function sourceOfView() {
+      if (!await sourceAt(pdf ? pdf.topOfView() : null)) toast("Notes could not find this place in a source file. Compile the LaTeX file again to refresh its SyncTeX data.");
+    }
     function bindPdfEvents() {
+      requireChild(el.pdfEditor, ".pdf-viewport", HTMLElement).addEventListener("dblclick", (e) => {
+        if (!pdf || el.pdfEditor.dataset.tool !== "select") return;
+        sourceAt(pdf.pointAt(e));
+      });
       requireChild(el.pdfEditor, ".pdf-toolbar", HTMLElement).addEventListener("click", onPdfToolbarClick);
       fillTextSelects();
       showPdfTextSelection({ style: textStyle, selected: false, issue: null });
@@ -25732,7 +25886,7 @@
         signSay("The saved signature is gone from this PC.");
       });
     }
-    return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents };
+    return { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents, revealSync, sourceOfView };
   }
 
   // src/renderer/craft-frame.ts
@@ -28652,6 +28806,8 @@
       tabs.peerDrag = null;
       el.editorPane.classList.remove("is-split");
       el.splitDivider.classList.add("hidden");
+      peerKind = null;
+      renderSyncArrows();
       tabs.active = "left";
       el.paneMain.classList.remove("is-active-side");
       renderTabs();
@@ -28703,6 +28859,11 @@
           tabs.peerIds = Array.isArray(m.ids) ? m.ids : [];
           tabs.peerCurrent = m.current || null;
           saveLayoutSoon();
+          renderSyncArrows();
+          return;
+        case "syncStep":
+          if (m.forward) compiling.showLineInPdf();
+          else sourceOfView();
           return;
         case "open":
           if (!GUEST && m.focus) {
@@ -28712,7 +28873,21 @@
           await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
           return;
         case "changed":
+          peerKind = null;
           await onPeerWrite();
+          renderSyncArrows();
+          return;
+        case "pdfReveal":
+          if (state.current && state.current.filePath && samePath(state.current.filePath, m.box.pdf)) await pollCurrentFile(true);
+          revealSync(m.box);
+          return;
+        case "texGoTo":
+          if (!GUEST) setActiveSide("left");
+          window.focus();
+          compiling.goToSource(m.source);
+          return;
+        case "reloadFile":
+          if (state.current && state.current.filePath && samePath(state.current.filePath, m.path)) pollCurrentFile(true);
           return;
         case "settings":
           applySettings(m.settings, { fromPeer: true });
@@ -28892,6 +29067,11 @@
       }
       el.paneMain.addEventListener("focusin", () => setActiveSide("left"));
       el.paneMain.addEventListener("pointerdown", () => setActiveSide("left"), true);
+      for (const [btn, forward] of [[el.syncForwardBtn, true], [el.syncBackwardBtn, false]]) {
+        btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+        btn.addEventListener("dblclick", (e) => e.stopPropagation());
+        btn.addEventListener("click", () => syncStep(forward));
+      }
       el.splitDivider.addEventListener("pointerdown", (e) => {
         if (!tabs.split) return;
         e.preventDefault();
@@ -29129,7 +29309,66 @@
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
-    const compiling = createCompileControls({ api, flushSave, openFile: (filePath) => openFiles([filePath]) });
+    const compiling = createCompileControls({ api, flushSave, openFile: (filePath) => openFiles([filePath]), showOutput: showBeside, revealInPdf });
+    async function showBeside(pdfPath, manual) {
+      if (!manual) {
+        toPeer({ type: "reloadFile", path: pdfPath });
+        return;
+      }
+      const linked = await api.files.link([pdfPath]);
+      if (!linked.firstId) return;
+      const opened = !GUEST && !tabs.split;
+      if (opened) openSplit(false);
+      toPeer({ type: "open", id: linked.firstId });
+      toPeer({ type: "reloadFile", path: pdfPath });
+      if (opened) setActiveSide("left");
+    }
+    async function revealInPdf(box) {
+      await showBeside(box.pdf, true);
+      toPeer({ type: "pdfReveal", box });
+    }
+    let syncSides = null;
+    let syncSeq = 0;
+    let peerKind = null;
+    const syncKind = (n) => n && isTexFile(n) && !n.trashedAt ? "tex" : n && n.fileKind === "pdf" && !n.trashedAt ? "pdf" : null;
+    async function renderSyncArrows() {
+      const seq = ++syncSeq;
+      const peerId = !GUEST && tabs.split ? tabs.peerCurrent : null;
+      if (peerId && (!peerKind || peerKind.id !== peerId)) {
+        let note = null;
+        try {
+          note = await api.notes.get(peerId);
+        } catch (_) {
+          return;
+        }
+        if (seq !== syncSeq) return;
+        peerKind = { id: peerId, kind: syncKind(note) };
+      }
+      const left = syncKind(state.current), right = peerId && peerKind ? peerKind.kind : null;
+      syncSides = left === "tex" && right === "pdf" ? { tex: "left", pdf: "right" } : left === "pdf" && right === "tex" ? { tex: "right", pdf: "left" } : null;
+      el.syncArrows.classList.toggle("hidden", !syncSides);
+      const towardPdf = syncSides && syncSides.pdf === "right" ? "arrow-right" : "arrow-left";
+      setIcon(el.syncForwardBtn, towardPdf);
+      setIcon(el.syncBackwardBtn, towardPdf === "arrow-right" ? "arrow-left" : "arrow-right");
+      el.syncForwardBtn.title = "Show the line at the caret in the PDF (Ctrl+Alt+J)";
+      el.syncBackwardBtn.title = "Show the source of the PDF page in view (Ctrl+Alt+J)";
+      el.syncForwardBtn.setAttribute("aria-label", el.syncForwardBtn.title);
+      el.syncBackwardBtn.setAttribute("aria-label", el.syncBackwardBtn.title);
+    }
+    function syncStep(forward) {
+      if (!syncSides) return;
+      const side = forward ? syncSides.tex : syncSides.pdf;
+      if (side === "right") {
+        toPeer({ type: "syncStep", forward });
+        return;
+      }
+      if (forward) compiling.showLineInPdf();
+      else sourceOfView();
+    }
+    function showSourceBeside(source) {
+      if (hasPeer()) toPeer({ type: "texGoTo", source });
+      else compiling.goToSource(source);
+    }
     const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
@@ -29203,7 +29442,7 @@
     }
     const { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal } = createBotPanel({ api, flushSave, refresh, applyFreshFileBody });
     const { tts, stopReadAloud, toggleReadAloud, populateVoices, startDictation } = createSpeech({ api });
-    const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents } = createPdfNote({ api, externalLinkClick, showBanner, openFiles });
+    const { clearPdf, showPdf, pdfDirty, pdfBusy, flushPdf, reportFileSaved, commitPdf, pdfOpen, forgetShownPdf, bindPdfEvents, revealSync, sourceOfView } = createPdfNote({ api, externalLinkClick, showBanner, openFiles, showSource: showSourceBeside });
     const { crafts, useWordCraft, craftFor, craftDirty, flushCrafts, showCraftOnly } = createCraftNotes({ api, GUEST, setSaved, showBanner, openFiles, reportFileSaved, refresh, renderFileRow, checkCurrentFile: pollCurrentFile });
     const { clearDocx, showDocx, docxDirty, flushDocx, docxOpen, forgetShownDocx, bindDocxEvents } = createWordNote({ api, flushSave, showBanner, reportFileSaved, externalLinkClick, crafts, useWordCraft });
     function externalLinkClick(e, href) {
@@ -29238,6 +29477,7 @@
       el.editor.classList.toggle("shows-craft", inCraft);
       syncTextViews(note);
       compiling.noteShown();
+      renderSyncArrows();
       if (!isFile) return;
       el.fileKind.textContent = fileBadge(note);
       api.files.convertOptions(note.id).then((opts) => {
@@ -29250,6 +29490,10 @@
       if (note.fileKind === "pdf") {
         el.pdfEditor.classList.remove("hidden");
         showBanner("Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.");
+        if (note.filePath) api.tex.sourceFor(note.filePath).then((source) => {
+          if (source && state.currentId === note.id) showBanner("Made by Compile from " + fileNameOf(source) + ": edits here are replaced at the next compile. Double-click to see the source.");
+        }).catch(() => {
+        });
         showPdf(note);
       } else if (note.fileKind === "docx") {
         el.docxEditor.classList.toggle("hidden", useWordCraft());
@@ -29324,7 +29568,7 @@
       const failed2 = res.failed.length ? " Could not open: " + res.failed.join(", ") : "";
       toast((res.linked.length ? "Opened " + res.linked.length + (res.linked.length === 1 ? " file" : " files") : "Nothing opened") + failed2);
     }
-    async function pollCurrentFile() {
+    async function pollCurrentFile(quiet) {
       const note = state.current;
       if (!note || !note.filePath || state.dirty || document.hidden || documentBusy()) return;
       let res;
@@ -29339,11 +29583,12 @@
         showBanner(missingFileText(note));
         return;
       }
-      if (res.changed && !state.dirty) {
+      if ((res.changed || quiet) && !state.dirty) {
         const fresh = await api.notes.get(note.id);
         if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
+        if (!res.changed && fresh.fileMtime === note.fileMtime) return;
         applyFreshFileBody(fresh);
-        toast("Reloaded from disk: the file changed outside Notes.");
+        if (!quiet) toast("Reloaded from disk: the file changed outside Notes.");
       }
     }
     function tagsIntoBody() {
@@ -30103,6 +30348,7 @@
         }, canFindInNote()),
         ...[...el.moreMenu.querySelectorAll(".menu-item")].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, "This note")),
         ...compiling.commands(noteOpen).map((c) => Object.assign({ group: "This file" }, c)),
+        cmd("pdf-source", "This file", "Show the source of this PDF page", "arrow-left", "Ctrl+Alt+J", sourceOfView, noteOpen && !!state.current && state.current.fileKind === "pdf", "latex tex synctex inverse search source"),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
         ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action ?? "") })),
@@ -30387,6 +30633,18 @@
         e.preventDefault();
         compiling.compile();
         return;
+      }
+      if (ctrl && e.altKey && !e.shiftKey && e.key.toLowerCase() === "j" && !inDialog) {
+        if (compiling.canCompile()) {
+          e.preventDefault();
+          compiling.showLineInPdf();
+          return;
+        }
+        if (state.current && state.current.fileKind === "pdf") {
+          e.preventDefault();
+          sourceOfView();
+          return;
+        }
       }
       if (e.key === "F8" && !ctrl && !e.altKey && !inDialog && compiling.canCompile()) {
         e.preventDefault();
