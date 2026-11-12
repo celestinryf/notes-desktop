@@ -86,4 +86,7 @@ test('the Convert to menu says what happens to formulas, only for a note that ha
 test('plain text turned into Markdown keeps its dollars as text', () => {
   const md = convert.textToMarkdown('A $x$ here and $y$ there.\ncosts $5 and $10');
   assert.equal(md, 'A \\$x$ here and \\$y$ there.\\\ncosts $5 and $10\n');
+  assert.equal(convert.textToMarkdown('cost $$ a\nb $$'), 'cost \\$$ a\\\nb $$\n', 'a $$ pair across two lines of one paragraph');
+  const md2 = convert.textToMarkdown('cost $$ a\nb $$');
+  assert.equal(require('../../src/shared/math.mts').hasMath(md2), false);
 });

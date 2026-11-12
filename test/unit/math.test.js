@@ -2,12 +2,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const createMarkdownIt = require('markdown-it');
 const M = require('../../src/shared/math.mts');
 const H = require('../../src/shared/helpers.mts');
+const { tmpDir } = require('../helpers/tmp.js');
 
 function parser() {
   const md = createMarkdownIt({ html: true });
@@ -229,26 +229,37 @@ const CORPUS = [
   'Line one\n\n$$\na \\\\\nb\n$$\n\nLine after',
 ];
 
-let roundTrips = null;
-function runCorpus() {
-  if (roundTrips) return roundTrips;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-math-'));
-  try {
-    const casesFile = path.join(dir, 'cases.json');
-    const outFile = path.join(dir, 'out.json');
-    fs.writeFileSync(casesFile, JSON.stringify(CORPUS));
-    const env = Object.assign({}, process.env);
-    delete env.ELECTRON_RUN_AS_NODE;
-    const run = spawnSync(require('electron'), [path.join(__dirname, '..', 'fixtures', 'editor-roundtrip.js'), casesFile, outFile], { env, timeout: 60000, encoding: 'utf8' });
-    assert.ok(fs.existsSync(outFile), 'the round-trip window wrote no results: ' + (run.stderr || run.error || ''));
-    const out = JSON.parse(fs.readFileSync(outFile, 'utf8'));
-    assert.ok(Array.isArray(out), String(out.error));
-    roundTrips = new Map(out.map((r) => [r.md, r]));
-    return roundTrips;
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+const text = (t, marks) => Object.assign({ type: 'text', text: t }, marks ? { marks: marks.map((type) => ({ type })) } : {});
+const formula = (latex, display) => ({ type: 'inlineMath', attrs: { latex, display: !!display } });
+const paragraph = (...content) => ({ type: 'paragraph', content });
+const DOCS = {
+  splitByFormula: [paragraph(text('$a'), formula('x'), text('b$'))],
+  splitByBold: [paragraph(text('$a '), text('b', ['bold']), text(' c$'))],
+  splitByBreak: [paragraph(text('cost $$ a'), { type: 'hardBreak' }, text('b $$'))],
+  plainDollars: [paragraph(text('$x$ and $y$ typed as text'))],
+  dollarInFormula: [paragraph(text('a '), formula('p$q'), text(' b'))],
+  blankLinesInBlock: [{ type: 'blockMath', attrs: { latex: 'a\n\n\nb' } }],
+  emptyBlock: [{ type: 'blockMath', attrs: { latex: '' } }],
+};
+
+let editorRun = null;
+function runEditor() {
+  if (editorRun) return editorRun;
+  const dir = tmpDir('notes-math-');
+  const casesFile = path.join(dir, 'cases.json');
+  const outFile = path.join(dir, 'out.json');
+  fs.writeFileSync(casesFile, JSON.stringify({ markdown: CORPUS, docs: Object.values(DOCS) }));
+  const env = Object.assign({}, process.env);
+  delete env.ELECTRON_RUN_AS_NODE;
+  const run = spawnSync(require('electron'), [path.join(__dirname, '..', 'fixtures', 'editor-roundtrip.js'), casesFile, outFile], { env, timeout: 60000, encoding: 'utf8' });
+  assert.ok(fs.existsSync(outFile), 'the editor window wrote no results: ' + (run.stderr || run.error || ''));
+  const out = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+  assert.ok(Array.isArray(out.markdown), String(out.error));
+  const names = Object.keys(DOCS);
+  editorRun = { markdown: new Map(out.markdown.map((r) => [r.md, r])), docs: Object.fromEntries(out.docs.map((r, i) => [names[i], r])), flows: out.flows };
+  return editorRun;
 }
+const runCorpus = () => runEditor().markdown;
 
 for (const md of CORPUS) {
   test('the rendered editor writes back ' + JSON.stringify(md) + ' unchanged', () => {
@@ -294,4 +305,89 @@ test('a TeX mistake is reported in one plain line', () => {
   assert.equal(M.formulaErrorText(messageOf(String.raw`\frac{1}{`)), "Unexpected end of input in a macro argument, expected '}'");
   assert.equal(M.formulaErrorText('KaTeX parse error: '), 'This formula has a mistake.');
   assert.equal(M.formulaErrorText('something else'), 'something else');
+});
+
+test('dollars split across a formula, bold text or a line break are escaped so they stay text', () => {
+  const d = runEditor().docs;
+  for (const name of ['splitByFormula', 'splitByBold', 'splitByBreak', 'plainDollars']) assert.equal(d[name].same, true, name + ' came back as ' + JSON.stringify(d[name].out));
+  assert.equal(d.splitByFormula.out, '\\$a$x$b$');
+  assert.equal(d.splitByBold.out, '\\$a **b** c$');
+  assert.equal(d.plainDollars.out, '\\$x$ and \\$y$ typed as text');
+  assert.equal(d.splitByFormula.nodes.inlineMath, 1);
+});
+
+test('a formula is saved safely even before its popover finishes', () => {
+  const d = runEditor().docs;
+  assert.equal(d.dollarInFormula.out, 'a $p\\$q$ b');
+  assert.deepEqual(d.dollarInFormula.latex, ['p\\$q']);
+  assert.equal(d.blankLinesInBlock.out, '$$a\nb$$');
+  assert.equal(d.blankLinesInBlock.nodes.blockMath, 1);
+  assert.equal(d.emptyBlock.out, '$$\n$$');
+  assert.equal(d.emptyBlock.nodes.blockMath, 1);
+});
+
+test('inserting a formula and editing it is one undo step', () => {
+  const f = runEditor().flows.insertThenUndo;
+  assert.equal(f.after, 'Area$x^2$');
+  assert.equal(f.undone, 'Area');
+  assert.equal(f.nodes.inlineMath, undefined);
+});
+
+test('a new formula left empty leaves nothing behind, not even for undo', () => {
+  const f = runEditor().flows.insertThenCancel;
+  assert.equal(f.after, 'Area');
+  assert.equal(f.nodesAfter.inlineMath, undefined);
+  assert.equal(f.nodesUndone.inlineMath, undefined);
+});
+
+test('a new block formula with blank lines saves as one block', () => {
+  const f = runEditor().flows.blockInsert;
+  assert.equal(f.after, 'Text\n\n$$\na\nb\n$$');
+  assert.equal(f.nodes.blockMath, 1);
+});
+
+test('the live preview never writes an unescaped dollar', () => {
+  const f = runEditor().flows.previewSaves;
+  assert.equal(f.opened, true);
+  assert.equal(f.during, 'a $p\\$q$ b');
+  assert.equal(f.after, 'a $p\\$q$ b');
+});
+
+test('emptying an existing formula removes it, and undo brings it back', () => {
+  const f = runEditor().flows.emptiedExisting;
+  assert.equal(f.after, 'a  b');
+  assert.equal(f.undone, 'a $x$ b');
+});
+
+test('an outside change while the popover is open ends the edit and keeps the outside text', () => {
+  const f = runEditor().flows.replacedWhileOpen;
+  assert.equal(f.ended, 1);
+  assert.equal(f.after, 'outside $z$ edit');
+});
+
+test('typing a closing dollar makes a formula only where formulas can be edited', () => {
+  const [main, sticky] = runEditor().flows.typedDollars;
+  assert.equal(main.formulas, 1);
+  assert.equal(main.out, 'see $x$');
+  assert.equal(sticky.formulas, 0);
+  assert.equal(sticky.out, 'see \\$x$');
+});
+
+test('display and block TeX keep their lines but lose blank ones', () => {
+  assert.equal(M.displayLatexForSaving('a\n\n\nb'), 'a\nb');
+  assert.equal(M.displayLatexForSaving('a\n  \n\t\nb'), 'a\nb');
+  assert.equal(M.displayLatexForSaving('\n x \n'), '\n x \n');
+  assert.equal(M.displayLatexForSaving('a $$ b'), 'a \\$$ b');
+  assert.equal(M.blockLatexForSaving('a\n\n\n\nb'), '\na\nb\n');
+  assert.equal(M.blockLatexForSaving('a\n \n\t\n b'), '\na\n b\n');
+});
+
+test('mathOpeners skips what the caller marks as already-formula', () => {
+  assert.deepEqual(M.mathOpeners('$a$x$b$'), [0, 2, 4]);
+  assert.deepEqual(M.mathOpeners('$a$x$b$', (i) => (i === 2 ? 5 : -1)), [0]);
+  assert.deepEqual(M.mathOpeners('no dollars'), []);
+});
+
+test('a dollar with no closer is not retried from inside, as in Pandoc', () => {
+  assert.equal(render('$\\text{a $b$ c}$'), '<p>$\\text{a <M>b</M> c}$</p>\n');
 });

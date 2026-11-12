@@ -1,11 +1,12 @@
 import { Editor, InputRule, Mark, Node as TiptapNode, type Range as TextRange } from '@tiptap/core';
 import type { MarkdownSerializerState } from '@tiptap/pm/markdown';
-import type { Node as PMNode, NodeType } from '@tiptap/pm/model';
+import type { Node as PMNode, NodeType, ResolvedPos } from '@tiptap/pm/model';
 import { NodeSelection, TextSelection, type Transaction } from '@tiptap/pm/state';
+import { closeHistory } from '@tiptap/pm/history';
 import type MarkdownIt from 'markdown-it';
 import katex from 'katex';
 import 'katex/contrib/mhchem';
-import { KATEX_OPTIONS, addMath, blockLatexForSaving, formulaErrorText, inlineLatexForSaving, mathSource } from '../shared/math.mts';
+import { KATEX_OPTIONS, addMath, blockLatexForSaving, displayLatexForSaving, formulaErrorText, inlineLatexForSaving, mathSource } from '../shared/math.mts';
 
 export type MathKind = 'inline' | 'block';
 
@@ -16,10 +17,10 @@ export type MathEdit = {
   preview: (latex: string) => void,
   finish: (latex: string) => void,
   remove: () => void,
+  onEnd: (listener: () => void) => void,
 };
 
 export type MathOptions = { onEditMath: ((edit: MathEdit) => void) | null };
-
 
 export function renderMath(target: HTMLElement, latex: string, display: boolean) {
   const source = latex.trim();
@@ -39,15 +40,11 @@ export function mathError(latex: string) {
   }
 }
 
-const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-const parsersWithMath = new WeakSet<MarkdownIt>();
 function addMathToParser(md: MarkdownIt) {
-  if (parsersWithMath.has(md)) return;
-  parsersWithMath.add(md);
+  const esc = md.utils.escapeHtml;
   addMath(md, {
-    inline: (latex, display) => '<span data-math="' + (display ? 'display' : 'inline') + '" data-latex="' + escapeAttr(latex) + '"></span>',
-    block: (latex) => '<div data-math="block" data-latex="' + escapeAttr(latex) + '"></div>\n',
+    inline: (latex, display) => '<span data-math="' + (display ? 'display' : 'inline') + '" data-latex="' + esc(latex) + '"></span>',
+    block: (latex) => '<div data-math="block" data-latex="' + esc(latex) + '"></div>\n',
     dollar: () => '<span data-escaped-dollar="">$</span>',
   });
 }
@@ -71,45 +68,75 @@ export const EscapedDollar = Mark.create({
 export const hasEscapedDollar = (node: PMNode) => node.marks.some((m) => m.type.name === 'escapedDollar');
 
 const nodeKind = (node: PMNode): MathKind | null => (node.type.name === 'inlineMath' ? 'inline' : node.type.name === 'blockMath' ? 'block' : null);
+const savedForm = (kind: MathKind, latex: string) => (kind === 'inline' ? inlineLatexForSaving(latex) : blockLatexForSaving(latex));
+const isEmptySaved = (saved: string) => !saved.trim();
 
-export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptions['onEditMath']) {
+const activeEdits = new WeakMap<Editor, () => void>();
+
+export function endMathEdit(editor: Editor) {
+  const end = activeEdits.get(editor);
+  if (end) end();
+}
+
+type Fresh = { insertedAt: number } | null;
+
+export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptions['onEditMath'], fresh: Fresh = null) {
   const node = editor.state.doc.nodeAt(pos);
   const kind = node ? nodeKind(node) : null;
   const anchor = editor.view.nodeDOM(pos);
   if (!node || !kind || !onEditMath || !editor.isEditable || !(anchor instanceof HTMLElement)) return false;
+  endMathEdit(editor);
   const type = node.type;
   const original = String(node.attrs.latex);
   let at = pos;
   let known = editor.state.doc;
+  let othersInHistory = false;
   const locate = () => {
     if (editor.isDestroyed || editor.state.doc !== known) return null;
     const here = editor.state.doc.nodeAt(at);
     return here && here.type === type ? here : null;
   };
-  const write = (latex: string, history: boolean) => {
-    const here = locate();
-    if (!here || here.attrs.latex === latex) return;
-    const tr = editor.state.tr.setNodeMarkup(at, undefined, Object.assign({}, here.attrs, { latex }));
-    if (!history) tr.setMeta('addToHistory', false);
+  const dispatch = (tr: Transaction, history: boolean | number) => {
+    if (history === false) tr.setMeta('addToHistory', false);
+    else if (typeof history === 'number') tr.setTime(history);
     editor.view.dispatch(tr);
   };
-  const mapper = ({ transaction }: { transaction: Transaction }) => {
-    if (transaction.docChanged && transaction.before === known) at = transaction.mapping.map(at, 1);
-    if (transaction.before === known) known = transaction.doc;
+  const write = (latex: string, history: boolean | number) => {
+    const here = locate();
+    if (!here || here.attrs.latex === latex) return;
+    dispatch(editor.state.tr.setNodeMarkup(at, undefined, Object.assign({}, here.attrs, { latex })), history);
   };
-  editor.on('transaction', mapper);
+  const remove = (history: boolean) => {
+    const here = locate();
+    if (!here) return;
+    dispatch(editor.state.tr.delete(at, at + here.nodeSize).scrollIntoView(), history);
+  };
+  const mapper = ({ transaction }: { transaction: Transaction }) => {
+    if (transaction.before !== known) return;
+    if (transaction.docChanged) at = transaction.mapping.map(at, 1);
+    if (transaction.docChanged && transaction.getMeta('addToHistory') !== false) othersInHistory = true;
+    known = transaction.doc;
+  };
+  const endListeners: (() => void)[] = [];
   let open = true;
+  const close = () => {
+    open = false;
+    anchor.classList.remove('is-editing');
+    editor.off('transaction', mapper);
+    if (activeEdits.get(editor) === end) activeEdits.delete(editor);
+  };
+  const end = () => { if (!open) return; close(); for (const listener of endListeners) listener(); };
+  editor.on('transaction', mapper);
+  activeEdits.set(editor, end);
   anchor.classList.add('is-editing');
-  const close = () => { open = false; anchor.classList.remove('is-editing'); editor.off('transaction', mapper); };
   const caretAfter = () => {
     const here = locate();
     if (!here) return;
-    const after = at + here.nodeSize;
     const tr = editor.state.tr;
-    tr.setSelection(kind === 'inline' ? TextSelection.create(tr.doc, after) : NodeSelection.create(tr.doc, at));
-    editor.view.dispatch(tr.scrollIntoView());
-    editor.view.focus();
+    tr.setSelection(kind === 'inline' ? TextSelection.create(tr.doc, at + here.nodeSize) : NodeSelection.create(tr.doc, at));
+    editor.view.dispatch(tr.setMeta('addToHistory', false).scrollIntoView());
   };
+  const joinsInsertion = () => (fresh && !othersInHistory ? fresh.insertedAt : true);
   onEditMath({
     kind,
     latex: kind === 'block' ? original.replace(/^\n|\n$/g, '') : original,
@@ -117,29 +144,29 @@ export function startMathEdit(editor: Editor, pos: number, onEditMath: MathOptio
     preview: (latex) => { if (open) write(latex, false); },
     finish: (latex) => {
       if (!open) return;
-      const saved = kind === 'inline' ? inlineLatexForSaving(latex) : blockLatexForSaving(latex);
-      if (kind === 'inline' && !saved) { write(original, false); close(); removeAt(editor, at, type); editor.view.focus(); return; }
+      const saved = savedForm(kind, latex);
       write(original, false);
-      write(saved, true);
+      if (isEmptySaved(saved)) {
+        if (fresh && !othersInHistory) editor.commands.undo();
+        else remove(!fresh);
+      } else {
+        write(saved, joinsInsertion());
+      }
       close();
       caretAfter();
+      editor.view.focus();
     },
     remove: () => {
       if (!open) return;
       write(original, false);
+      if (fresh && !othersInHistory) editor.commands.undo();
+      else remove(!fresh);
       close();
-      removeAt(editor, at, type);
       editor.view.focus();
     },
+    onEnd: (listener) => { endListeners.push(listener); },
   });
   return true;
-}
-
-function removeAt(editor: Editor, pos: number, type: NodeType) {
-  const here = editor.state.doc.nodeAt(pos);
-  if (!here || here.type !== type) return;
-  const tr = editor.state.tr.delete(pos, pos + here.nodeSize);
-  editor.view.dispatch(tr.scrollIntoView());
 }
 
 function mathNodeView(display: (node: PMNode) => boolean, tag: 'span' | 'div', className: string, options: MathOptions) {
@@ -156,6 +183,7 @@ function mathNodeView(display: (node: PMNode) => boolean, tag: 'span' | 'div', c
       shown = latex;
       shownDisplay = asDisplay;
       dom.setAttribute('data-latex', latex);
+      dom.toggleAttribute('data-display', asDisplay);
       renderMath(dom, latex, asDisplay);
     };
     draw(node);
@@ -181,10 +209,16 @@ function mathNodeView(display: (node: PMNode) => boolean, tag: 'span' | 'div', c
 const INLINE_TYPED = /(?:^|[^\\$])(\$([^\s$](?:[^$\n]*[^\s$\\])?)\$)$/;
 const BLOCK_TYPED = /^\$\$\s$/;
 
+function inTable($pos: ResolvedPos) {
+  for (let d = $pos.depth; d > 0; d--) if ($pos.node(d).type.spec.tableRole) return true;
+  return false;
+}
+
 function editSelected(editor: Editor, options: MathOptions) {
   const sel = editor.state.selection;
   if (!(sel instanceof NodeSelection) || !nodeKind(sel.node)) return false;
-  return startMathEdit(editor, sel.from, options.onEditMath);
+  startMathEdit(editor, sel.from, options.onEditMath);
+  return true;
 }
 
 export const InlineMath = TiptapNode.create<MathOptions>({
@@ -216,16 +250,18 @@ export const InlineMath = TiptapNode.create<MathOptions>({
     return {
       markdown: {
         serialize(state: MarkdownSerializerState, node: PMNode) {
-          const latex = String(node.attrs.latex);
-          if (!latex) return;
-          const inTable = 'inTable' in state && state.inTable === true;
-          state.text(mathSource(inTable ? latex.replace(/(?<!\\)\|/g, '\\|') : latex, node.attrs.display === true), false);
+          const display = node.attrs.display === true;
+          const latex = display ? displayLatexForSaving(String(node.attrs.latex)) : inlineLatexForSaving(String(node.attrs.latex));
+          if (!latex.trim()) return;
+          const inTableCell = 'inTable' in state && state.inTable === true;
+          state.text(mathSource(inTableCell ? latex.replace(/(?<!\\)\|/g, '\\|') : latex, display), false);
         },
         parse: { setup: addMathToParser },
       },
     };
   },
   addInputRules() {
+    if (!this.options.onEditMath) return [];
     return [new InputRule({
       find: INLINE_TYPED,
       handler: ({ state, range, match }) => {
@@ -268,8 +304,9 @@ export const BlockMath = TiptapNode.create<MathOptions>({
     return {
       markdown: {
         serialize(state: MarkdownSerializerState, node: PMNode) {
+          const latex = displayLatexForSaving(String(node.attrs.latex));
           state.write('$$');
-          state.text(String(node.attrs.latex), false);
+          state.text(latex.trim() ? latex : '\n', false);
           state.write('$$');
           state.closeBlock(node);
         },
@@ -278,16 +315,18 @@ export const BlockMath = TiptapNode.create<MathOptions>({
     };
   },
   addInputRules() {
+    if (!this.options.onEditMath) return [];
     return [new InputRule({
       find: BLOCK_TYPED,
       handler: ({ state, range }) => {
         const $from = state.doc.resolve(range.from);
-        if ($from.parent.type.name !== 'paragraph' || $from.depth < 1 || range.to !== $from.end()) return null;
+        if ($from.parent.type.name !== 'paragraph' || $from.depth < 1 || range.to !== $from.end() || inTable($from)) return null;
         const start = $from.before();
+        const insertedAt = closeHistory(state.tr).time;
         state.tr.replaceWith(start, $from.after(), this.type.create());
         const editor = this.editor;
         const options = this.options;
-        setTimeout(() => { startMathEdit(editor, start, options.onEditMath); }, 0);
+        setTimeout(() => { startMathEdit(editor, start, options.onEditMath, { insertedAt }); }, 0);
       },
     })];
   },
@@ -297,19 +336,26 @@ export const BlockMath = TiptapNode.create<MathOptions>({
 });
 
 export function insertMath(editor: Editor, kind: MathKind, range: TextRange | null, options: MathOptions) {
-  if (!editor.isEditable) return false;
+  if (!editor.isEditable || !options.onEditMath) return false;
   const sel = editor.state.selection;
   const from = range ? range.from : sel.from;
   const to = range ? range.to : sel.to;
   const picked = from !== to ? editor.state.doc.textBetween(from, to, ' ') : '';
-  if (kind === 'inline') {
-    const node = editor.schema.nodes.inlineMath.create({ latex: inlineLatexForSaving(picked) });
-    editor.view.dispatch(editor.state.tr.replaceWith(from, to, node).scrollIntoView());
-    return startMathEdit(editor, from, options.onEditMath);
+  const asInline = kind === 'inline' || inTable(editor.state.doc.resolve(from));
+  if (asInline) {
+    const node = editor.schema.nodes.inlineMath.create({ latex: inlineLatexForSaving(picked), display: kind === 'block' });
+    const tr = closeHistory(editor.state.tr).replaceWith(from, to, node).scrollIntoView();
+    editor.view.dispatch(tr);
+    return startMathEdit(editor, from, options.onEditMath, { insertedAt: tr.time });
   }
-  const ok = editor.chain().focus().deleteRange({ from, to }).insertContent({ type: 'blockMath', attrs: { latex: picked ? blockLatexForSaving(picked) : '\n' } }).run();
+  let insertedAt = 0;
+  const ok = editor.chain().focus()
+    .command(({ tr }) => { closeHistory(tr); insertedAt = tr.time; return true; })
+    .deleteRange({ from, to })
+    .insertContent({ type: 'blockMath', attrs: { latex: picked ? blockLatexForSaving(picked) : '\n' } })
+    .run();
   if (!ok) return false;
   let at = -1;
   editor.state.doc.nodesBetween(Math.max(0, from - 2), Math.min(editor.state.doc.content.size, from + 4), (n, pos) => { if (at === -1 && n.type.name === 'blockMath') at = pos; });
-  return at !== -1 && startMathEdit(editor, at, options.onEditMath);
+  return at !== -1 && startMathEdit(editor, at, options.onEditMath, { insertedAt });
 }

@@ -16744,10 +16744,22 @@
   }
 
   // src/renderer/note-html.ts
-  function currentHtml() {
+  function currentHtml(opts) {
     const live = !state.sourceMode && state.rich ? el.richEditor.querySelector(".rich-editor-content") : null;
-    if (live) return live.innerHTML;
-    return markdownToHtml(el.bodyInput.value, state.current);
+    const html = live ? live.innerHTML : markdownToHtml(el.bodyInput.value, state.current);
+    return opts && opts.formulasAsTex ? formulasAsTex(html) : html;
+  }
+  function formulasAsTex(html) {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    for (const f of Array.from(host.querySelectorAll(".math-inline, .math-block"))) {
+      const latex = f.getAttribute("data-latex") || "";
+      const block = f.classList.contains("math-block");
+      const tex = document.createElement(block ? "p" : "span");
+      tex.textContent = block ? "$$" + latex.trim() + "$$" : f.hasAttribute("data-display") ? "$$" + latex + "$$" : "$" + latex + "$";
+      f.replaceWith(tex);
+    }
+    return host.innerHTML;
   }
   function markdownToHtml(md, note) {
     if (!window.NotesEditor) return "<pre>" + escapeHtml(md) + "</pre>";
@@ -17461,7 +17473,7 @@
           await api.app.copy({ text: titleLine + plainTextFromMarkdown(el.bodyInput.value) });
           toast("Copied as plain text");
         } else if (action === "copy-html") {
-          await api.app.copy({ text: noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml() });
+          await api.app.copy({ text: noteToMarkdown(note), html: (note.title ? "<h1>" + escapeHtml(note.title) + "</h1>" : "") + currentHtml({ formulasAsTex: true }) });
           toast("Copied as rich text");
         } else if (action === "copy-note-link") {
           await api.app.copy({ text: "[" + (deriveTitle(note) || "Note") + "](note://" + note.id + ")" });
@@ -20621,6 +20633,12 @@
     function open(edit) {
       if (current) finish();
       current = edit;
+      edit.onEnd(() => {
+        if (current === edit) {
+          current = null;
+          hide();
+        }
+      });
       el.mathEditor.dataset.kind = edit.kind;
       el.mathSource.setAttribute("aria-label", edit.kind === "block" ? "Formula block in TeX" : "Formula in TeX");
       el.mathSource.value = edit.latex;
@@ -20655,12 +20673,7 @@
     });
     el.mathSource.addEventListener("keydown", (e) => {
       if (e.isComposing) return;
-      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        e.preventDefault();
-        finish();
-        return;
-      }
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         finish();
         return;

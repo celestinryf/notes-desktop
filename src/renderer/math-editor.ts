@@ -52,6 +52,7 @@ export function createMathEditor() {
   function open(edit: MathEdit) {
     if (current) finish();
     current = edit;
+    edit.onEnd(() => { if (current === edit) { current = null; hide(); } });
     el.mathEditor.dataset.kind = edit.kind;
     el.mathSource.setAttribute('aria-label', edit.kind === 'block' ? 'Formula block in TeX' : 'Formula in TeX');
     el.mathSource.value = edit.latex;
@@ -90,8 +91,7 @@ export function createMathEditor() {
 
   el.mathSource.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
-    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); finish(); return; }
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(); return; }
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) { e.preventDefault(); finish(); return; }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); return; }
     if (e.key === 'Backspace' && !el.mathSource.value) { e.preventDefault(); remove(); return; }
     e.stopPropagation();

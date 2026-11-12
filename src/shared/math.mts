@@ -176,15 +176,26 @@ export function hasMath(md: string) {
   return found;
 }
 
-export function escapeMathOpeners(markdown: string) {
-  if (!markdown.includes('$')) return markdown;
-  let out = '';
+export function mathOpeners(markdown: string, atomEnd?: (at: number) => number) {
+  const at: number[] = [];
+  if (!markdown.includes('$')) return at;
   for (let i = 0; i < markdown.length; i++) {
+    const skip = atomEnd ? atomEnd(i) : -1;
+    if (skip > i) { i = skip - 1; continue; }
     const c = markdown[i];
-    if (c === '\\') { out += markdown.slice(i, i + 2); i++; continue; }
-    out += c === '$' && mathAt(markdown, i) ? '\\$' : c;
+    if (c === '\\') { i++; continue; }
+    if (c === '$' && mathAt(markdown, i)) at.push(i);
   }
-  return out;
+  return at;
+}
+
+export function escapeMathOpeners(markdown: string) {
+  const openers = mathOpeners(markdown);
+  if (!openers.length) return markdown;
+  let out = '';
+  let from = 0;
+  for (const i of openers) { out += markdown.slice(from, i) + '\\'; from = i; }
+  return out + markdown.slice(from);
 }
 
 function escapeDollars(latex: string, pair: boolean) {
@@ -197,6 +208,8 @@ function escapeDollars(latex: string, pair: boolean) {
   return out;
 }
 
+const withoutBlankLines = (s: string) => s.replace(/\r/g, '').replace(/\n(?:[ \t]*\n)+/g, '\n');
+
 export function inlineLatexForSaving(latex: string) {
   let s = escapeDollars(String(latex).replace(/\s*\n\s*/g, ' ').trim(), false);
   const trailing = /\\+$/.exec(s);
@@ -204,8 +217,12 @@ export function inlineLatexForSaving(latex: string) {
   return s;
 }
 
+export function displayLatexForSaving(latex: string) {
+  return escapeDollars(withoutBlankLines(String(latex)), true);
+}
+
 export function blockLatexForSaving(latex: string) {
-  const s = escapeDollars(String(latex).replace(/\r/g, '').replace(/^[ \t]*\n+|\n+[ \t]*$/g, '').replace(/\n[ \t]*\n/g, '\n'), true);
+  const s = displayLatexForSaving(String(latex).replace(/^[ \t]*(?:\r?\n)+|(?:\r?\n)+[ \t]*$/g, ''));
   return s.trim() ? '\n' + s + '\n' : '\n';
 }
 
@@ -213,4 +230,4 @@ export function formulaErrorText(message: string) {
   return String(message).replace(/^KaTeX parse error:\s*/, '').replace(/ at (?:position \d+|end of input):[\s\S]*$/, '').trim() || 'This formula has a mistake.';
 }
 
-export const KATEX_OPTIONS ={ throwOnError: false, errorColor: 'var(--danger)', strict: 'ignore', trust: false, maxSize: 50, maxExpand: 1000, output: 'htmlAndMathml' } as const;
+export const KATEX_OPTIONS = { throwOnError: false, errorColor: 'var(--danger)', strict: 'ignore', trust: false, maxSize: 50, maxExpand: 1000, output: 'htmlAndMathml' } as const;

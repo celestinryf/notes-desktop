@@ -68,10 +68,9 @@ const FORMULA_LOSS: Record<string, string> = {
   docx: 'Formulas stay as TeX between dollar signs; Word does not draw them.',
 };
 
-
 function escapeMarkdownLine(line: string) {
-  return escapeMathOpeners(line
-    .replace(/[\\`*_[\]<>|~&]/g, '\\$&'))
+  return line
+    .replace(/[\\`*_[\]<>|~&]/g, '\\$&')
     .replace(/^(\s*)([#>+=-])/, '$1\\$2')
     .replace(/^(\s*)(\d+)([.)])/, '$1$2\\$3')
     .replace(/^[ \t]+/, (m: string) => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length));
@@ -81,7 +80,7 @@ function textToMarkdown(text: string) {
   return String(text).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:\n[ \t]*)*\n/)
     .map((p) => p.replace(/^\n+|\n+$/g, ''))
     .filter((p) => p.trim())
-    .map((p) => p.split('\n').map(escapeMarkdownLine).join('\\\n'))
+    .map((p) => escapeMathOpeners(p.split('\n').map(escapeMarkdownLine).join('\\\n')))
     .join('\n\n') + '\n';
 }
 
@@ -178,12 +177,15 @@ async function toMarkdown(note: FileNote, imagesDir?: { parent: string, folder: 
 
 type Katex = { renderToString: (latex: string, options: object) => string };
 let katex: Katex | null = null;
+function loadKatex(): Katex {
+  const loaded: Katex = requireWhenNeeded('katex');
+  requireWhenNeeded('katex/contrib/mhchem');
+  katex = loaded;
+  return loaded;
+}
+
 function renderFormula(latex: string, display: boolean) {
-  if (!katex) {
-    katex = requireWhenNeeded('katex');
-    requireWhenNeeded('katex/contrib/mhchem');
-  }
-  return katex ? katex.renderToString(latex.trim(), Object.assign({ displayMode: display }, KATEX_OPTIONS)) : escHtml(mathSource(latex, display));
+  return (katex || loadKatex()).renderToString(latex.trim(), Object.assign({ displayMode: display }, KATEX_OPTIONS));
 }
 
 let markdownIt: MarkdownIt | null = null;

@@ -602,6 +602,13 @@ test('formulas: $ and $$ render with KaTeX, a click or Enter edits them in a pop
   assert.match(await page.$eval('#richEditor p:nth-of-type(1)', (p) => p.textContent), /costs \$5 and \$10 stay text/, 'prices stay text');
   assert.equal(await page.$eval('#richEditor .math-inline .katex-error', (k) => getComputedStyle(k).color), await page.evaluate(() => { const s = document.createElement('span'); s.style.color = 'var(--danger)'; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; }), 'the error colour is --danger');
 
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForSelector('#shareMenu:not(.hidden)');
+  await page.click('#shareMenu [data-action="copy-html"]');
+  const copied = await waitFor('formulas copied as rich text', () => { const html = require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], { encoding: 'utf8' }).stdout || ''; return html.includes('mc^2') ? html : null; }, 10000);
+  assert.ok(copied.includes('$E = mc^2$') && copied.includes('$$\\int_0^1 x\\,dx$$'), 'formulas paste as their TeX: ' + copied.slice(0, 300));
+  assert.doesNotMatch(copied, /katex/, 'no KaTeX markup on the clipboard');
+
   await page.click('#richEditor .math-inline >> nth=0');
   await page.waitForSelector('#mathEditor:not(.hidden)');
   assert.equal(await page.inputValue('#mathSource'), 'E = mc^2');
