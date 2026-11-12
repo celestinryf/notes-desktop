@@ -4,6 +4,7 @@ import { detectTex, runQuietly, type TexDetection, type Runner } from './tex-eng
 import { compileTex, isCompiling, stopCompile } from './tex-compile.mts';
 import { buildFiles, pdfFor, readMagic, rootFor } from './tex-build.mts';
 import { forwardSearch, inverseSearch, loadBoxes, syncFileFor } from './tex-sync.mts';
+import { referencesFor } from './tex-refs.mts';
 import { stemOf } from './shared/tex-magic.mts';
 
 export const NO_TEX = 'Notes could not find TeX on this PC. It looked on PATH and in the MiKTeX and TeX Live folders. Install MiKTeX or TeX Live, then compile again.';
@@ -70,6 +71,11 @@ export class TexService {
     const stem = stemOf(pdfPath);
     const source = ['.tex', '.ltx', '.latex'].map((ext) => stem + ext).find((f) => fs.existsSync(f));
     return source && syncFileFor(pdfPath) ? source : null;
+  }
+
+  references(filePath: string) {
+    const target = this.rootOf(filePath);
+    return referencesFor('error' in target ? filePath : target.root);
   }
 
   stop(noteId: string) {

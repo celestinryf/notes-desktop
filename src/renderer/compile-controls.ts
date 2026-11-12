@@ -7,6 +7,8 @@ import { ipcErrorText } from './text.ts';
 import * as H from '../shared/helpers.mts';
 import { ENGINES, ENGINE_LABELS, DEFAULT_TEX_OPTIONS, readMagic, stemOf } from '../shared/tex-magic.mts';
 import { ISSUE_ICON, dirOf, isWithin, joinPath, plural, samePath, sortedIssues, statusOf } from '../shared/tex-results.mts';
+import { EMPTY_REFERENCES, withBuffer } from '../shared/tex-refs.mts';
+import type { TexHelp, TexMark } from '../code/index.ts';
 
 type Deps = {
   api: NotesApi,
@@ -18,9 +20,12 @@ type Deps = {
 
 const AUTO_COMPILE_MS = 2000;
 const PENDING_LINE_MS = 10000;
+const REFERENCES_MS = 2000;
 
 export function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }: Deps) {
   const results = new Map<string, TexCompileResult>();
+  const byRoot = new Map<string, TexCompileResult>();
+  let references: { id: string, at: number, found: Promise<TexReferences> } | null = null;
   const edited = new Set<string>();
   const visited = new Map<string, number>();
   let running: string | null = null;
@@ -94,6 +99,9 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     running = null;
     if (editedDuring && result.ok) edited.add(n.id);
     results.set(n.id, result);
+    if (result.root) byRoot.set(result.root.toLowerCase(), result);
+    references = null;
+    showMarks();
     const again = compileAgain;
     compileAgain = false;
     render();
@@ -288,9 +296,51 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     goToIssue(issue, result ? result.root : null);
   }
 
+  function marksFor(filePath: string): TexMark[] {
+    const marks: TexMark[] = [];
+    for (const result of byRoot.values()) {
+      if (!result.root || !result.log) continue;
+      for (const issue of result.log.issues) {
+        if (!issue.line) continue;
+        const file = issue.file ? joinPath(dirOf(result.root), issue.file) : result.root;
+        if (!samePath(file, filePath)) continue;
+        marks.push({ line: issue.line, severity: issue.kind === 'error' ? 'error' : issue.kind === 'warning' ? 'warning' : 'info', message: issue.message });
+      }
+    }
+    return marks;
+  }
+
+  function showMarks() {
+    const n = state.current;
+    if (isTex(n)) src.setMarks(marksFor(n.filePath));
+  }
+
+  function referencesOf(n: PublicNote & { filePath: string }, text: string) {
+    const now = Date.now();
+    if (!references || references.id !== n.id || now - references.at > REFERENCES_MS) references = { id: n.id, at: now, found: api.tex.references(n.id).catch(() => EMPTY_REFERENCES) };
+    return references.found.then((found) => withBuffer(found, text, n.filePath, samePath));
+  }
+
+  function iconSpan(name: string, title: string) {
+    const span = document.createElement('span');
+    span.title = title;
+    span.insertAdjacentHTML('beforeend', I(name));
+    return span;
+  }
+
+  function editorHelp(n: PublicNote): TexHelp | null {
+    if (!isTex(n)) return null;
+    return {
+      references: (text) => referencesOf(n, text),
+      marker: (open) => { const s = iconSpan(open ? 'chevron-down' : 'chevron-right', open ? 'Fold (Ctrl+Shift+[)' : 'Unfold (Ctrl+Shift+])'); s.className = 'fold-marker'; return s; },
+      placeholder: () => { const s = iconSpan('ellipsis', 'Unfold (Ctrl+Shift+])'); s.className = 'fold-placeholder'; s.setAttribute('role', 'button'); s.setAttribute('aria-label', 'Folded lines. Unfold'); return s; },
+    };
+  }
+
   function noteShown() {
     clearTimeout(autoTimer);
     render();
+    showMarks();
     const n = state.current;
     if (!pendingLine || !n || !n.filePath) return;
     const wanted = pendingLine;
@@ -345,10 +395,15 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
       { id: 'tex-auto', title: options.compileOnSave ? 'Stop compiling on save' : 'Compile on save', icon: 'play', keys: '', run: () => setOptions({ compileOnSave: !options.compileOnSave }), ok: tex, keywords: 'latex tex auto compile automatic' },
       { id: 'tex-halt', title: options.haltOnError ? 'Compile past errors' : 'Stop compiling at the first error', icon: 'circle-alert', keys: '', run: () => setOptions({ haltOnError: !options.haltOnError }), ok: tex, keywords: 'latex tex halt-on-error' },
       ...ENGINES.map((e) => ({ id: 'tex-engine-' + e, title: 'Compile with ' + ENGINE_LABELS[e], icon: 'play', keys: '', run: () => setOptions({ engine: e }), ok: tex && !program && options.engine !== e, keywords: 'latex tex engine compiler' })),
+      { id: 'tex-suggest', title: 'Suggest a command, citation or label', icon: 'list', keys: 'Ctrl+Space', run: () => src.suggest(), ok: tex && src.codeOn, keywords: 'latex tex complete autocomplete cite ref' },
+      { id: 'tex-fold', title: 'Fold this section or environment', icon: 'chevron-right', keys: 'Ctrl+Shift+[', run: () => src.fold('here'), ok: tex && src.codeOn, keywords: 'latex tex collapse hide' },
+      { id: 'tex-unfold', title: 'Unfold here', icon: 'chevron-down', keys: 'Ctrl+Shift+]', run: () => src.fold('open'), ok: tex && src.codeOn, keywords: 'latex tex expand show' },
+      { id: 'tex-fold-all', title: 'Fold all sections and environments', icon: 'chevron-right', keys: 'Ctrl+Alt+[', run: () => src.fold('all'), ok: tex && src.codeOn, keywords: 'latex tex collapse outline' },
+      { id: 'tex-unfold-all', title: 'Unfold everything', icon: 'chevron-down', keys: 'Ctrl+Alt+]', run: () => src.fold('none'), ok: tex && src.codeOn, keywords: 'latex tex expand' },
       { id: 'tex-clean', title: 'Clear build files', icon: 'eraser', keys: '', run: clean, ok: tex, keywords: 'latex tex aux log synctex clean' },
       { id: 'tex-find', title: 'Look for TeX again', icon: 'refresh-cw', keys: '', run: findTex, ok: true, keywords: 'latex miktex texlive install' },
     ];
   }
 
-  return { render, compile: () => compile(false), noteShown, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
+  return { render, compile: () => compile(false), noteShown, editorHelp, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
 }

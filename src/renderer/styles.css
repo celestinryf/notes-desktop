@@ -765,6 +765,33 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .code-host .cm-editor .cm-nonmatchingBracket { background: transparent; color: var(--danger); }
 .code-host .cm-editor .cm-placeholder { color: var(--fg-3); }
 .code-host .cm-frontMatter, .code-host .cm-frontMatter span { color: var(--fg-3); font-weight: 400; font-style: normal; }
+.code-host .cm-editor .cm-tooltip { border: 1px solid var(--float-line); border-radius: var(--r-md); box-shadow: var(--float-shadow); background: var(--raised); color: var(--fg); font-family: var(--font-sans); font-size: var(--t-sm); overflow: hidden; }
+.code-host .cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul { min-width: 240px; max-width: min(560px, 80vw); max-height: 264px; padding: var(--s1); font-family: var(--font-mono); font-size: var(--t-sm); }
+.code-host .cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li { display: flex; align-items: center; gap: var(--s4); min-height: 28px; padding: 0 var(--s2); border-radius: var(--r-sm); line-height: 28px; cursor: pointer; }
+.code-host .cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li:hover { background: var(--hover); }
+.code-host .cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--selected); color: var(--selected-fg); }
+.code-host .cm-editor .cm-completionLabel { white-space: nowrap; }
+.code-host .cm-editor .cm-completionMatchedText { text-decoration: none; font-weight: 700; }
+.code-host .cm-editor .cm-completionDetail { margin-left: auto; overflow: hidden; max-width: 320px; font-family: var(--font-sans); font-size: var(--t-xs); font-style: normal; color: var(--fg-2); text-overflow: ellipsis; white-space: nowrap; }
+.code-host .cm-editor li[aria-selected] .cm-completionDetail { color: inherit; }
+.code-host .cm-editor .cm-foldGutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; width: 20px; padding: 0; color: var(--fg-3); cursor: pointer; }
+.code-host .cm-editor .cm-foldGutter .cm-gutterElement:hover { color: var(--fg); }
+.code-host .fold-marker { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--r-sm); }
+.code-host .fold-marker:hover { background: var(--hover); }
+.code-host .fold-marker .icon, .code-host .fold-placeholder .icon { width: 14px; height: 14px; }
+.code-host .fold-placeholder { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 24px; margin: 0 var(--s1); padding: 0 var(--s1); border-radius: var(--r-sm); background: var(--well); color: var(--fg-2); vertical-align: middle; cursor: pointer; }
+.code-host .fold-placeholder:hover { background: var(--hover); color: var(--fg); }
+.code-host .cm-editor .cm-lintRange-error, .code-host .cm-editor .cm-lintRange-warning, .code-host .cm-editor .cm-lintRange-info { background-image: none; padding-bottom: 0; }
+.code-host .cm-editor .cm-lintRange-error { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.code-host .cm-editor .cm-lintRange-warning { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.code-host .cm-editor .cm-gutter-lint { width: 12px; }
+.code-host .cm-editor .cm-gutter-lint .cm-gutterElement { display: flex; align-items: center; justify-content: center; padding: 0; }
+.code-host .cm-editor .cm-lint-marker { content: normal; width: 8px; height: 8px; border-radius: 50%; }
+.code-host .cm-editor .cm-lint-marker-error { background: var(--danger); }
+.code-host .cm-editor .cm-lint-marker-warning { background: var(--accent); }
+.code-host .cm-editor .cm-lint-marker-info { background: var(--fg-3); }
+.code-host .cm-editor .cm-diagnostic { max-width: 480px; padding: var(--s2) var(--s3); border-left: none; font-family: var(--font-sans); line-height: 1.4; }
+.code-host .cm-editor .cm-tooltip-lint { padding: var(--s1) 0; }
 .status-code { margin-left: auto; color: var(--fg-3); }
 .status-code:not(.hidden) + .status-right { margin-left: 0; }
 

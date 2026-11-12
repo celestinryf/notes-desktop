@@ -98,6 +98,7 @@ const notesApi = {
     forward: invoke('tex:forward'),
     inverse: invoke('tex:inverse'),
     sourceFor: invoke('tex:sourceFor'),
+    references: invoke('tex:references'),
   },
   live: {
     host: invoke('live:host'),

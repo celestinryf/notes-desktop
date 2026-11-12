@@ -1601,6 +1601,7 @@ function main() {
   handle('tex:compile', (_e, id) => { const note = texNote(id); return tex.compile(note.id, note.filePath, note.texOptions || DEFAULT_TEX_OPTIONS); });
   handle('tex:stop', (_e, id) => (typeof id === 'string' ? tex.stop(id) : false));
   handle('tex:clean', (_e, id) => { const note = texNote(id); return tex.clean(note.id, note.filePath); });
+  handle('tex:references', (_e, id) => tex.references(texNote(id).filePath));
   handle('tex:forward', (_e, id, line) => (typeof line === 'number' && line > 0 ? tex.forward(texNote(id).filePath, Math.floor(line)) : null));
   const knownPdf = (pdfPath: unknown): pdfPath is string => typeof pdfPath === 'string' && path.isAbsolute(pdfPath) && /\.pdf$/i.test(pdfPath) && !!store.findByPath(pdfPath);
   handle('tex:inverse', (_e, pdfPath, page, x, y) => {

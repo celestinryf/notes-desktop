@@ -2659,7 +2659,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
-  const { showCode } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+  const { showCode } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection, texHelp: (note) => compiling.editorHelp(note) });
 
   const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
 
@@ -3089,6 +3089,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     if (e.key === 'Escape') {
       if (inDialog) return;
+      if (e.defaultPrevented && e.target instanceof Node && el.codeHost.contains(e.target)) return;
       if (el.pdfEditor.contains(document.activeElement)) return;
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (compiling.openNow()) { e.preventDefault(); compiling.closeMenus(); return; }

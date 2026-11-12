@@ -16816,7 +16816,7 @@
   var hooks = { runFind: () => {
   }, autoGrow: () => {
   }, scrollTextareaToSelection: () => {
-  } };
+  }, texHelp: () => null };
   var shown = () => codeOn && state.sourceMode ? code : null;
   var src = {
     get value() {
@@ -16884,6 +16884,18 @@
       const c = shown();
       if (c) c.setValue(el.bodyInput.value, { history: false });
     },
+    setMarks(marks) {
+      const c = shown();
+      if (c) c.setMarks(marks);
+    },
+    fold(how) {
+      const c = shown();
+      return !!c && c.fold(how);
+    },
+    suggest() {
+      const c = shown();
+      return !!c && c.suggest();
+    },
     undoRedo(cmd) {
       const c = shown();
       if (!c || !c.contains(document.activeElement)) return false;
@@ -16925,7 +16937,7 @@
     codeOn = !!window.NotesCode && !codeFailed && (markdown || isPlainTextFile2(note) && !isProseFile(note));
     if (codeOn) {
       try {
-        codeEditor().load(el.bodyInput.value, { ext: markdown ? "md" : extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : "Plain text.", label: deriveTitle(note) });
+        codeEditor().load(el.bodyInput.value, { ext: markdown ? "md" : extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : "Plain text.", label: deriveTitle(note), tex: markdown ? null : hooks.texHelp(note) });
       } catch (err) {
         console.error("The code editor could not start:", err);
         codeFailed = true;
@@ -16951,8 +16963,8 @@
     const at = c.position();
     el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
   }
-  function createCodeEditor({ runFind, autoGrow: autoGrow2, scrollTextareaToSelection }) {
-    hooks = { runFind, autoGrow: autoGrow2, scrollTextareaToSelection };
+  function createCodeEditor(given) {
+    hooks = given;
     return { showCode };
   }
 
@@ -16992,11 +17004,65 @@
     return issues.map((issue, i) => ({ issue, i })).sort((a, b) => ISSUE_ORDER[a.issue.kind] - ISSUE_ORDER[b.issue.kind] || a.i - b.i).map((x) => x.issue);
   }
 
+  // src/shared/tex-refs.mts
+  var EMPTY_REFERENCES = { citations: [], labels: [], commands: [], environments: [], files: [] };
+  var withoutComments = (text) => text.replace(/(^|[^\\])%.*$/gm, "$1");
+  function labelsIn(text, file) {
+    const out = [];
+    const name = fileNameOf(file);
+    withoutComments(text).split("\n").forEach((line, i) => {
+      for (const m of line.matchAll(/\\label\{([^}\n]+)\}/g)) {
+        const key = m[1].trim();
+        if (key) out.push({ key, detail: name + ":" + (i + 1), file, line: i + 1 });
+      }
+    });
+    return out;
+  }
+  function definitionsIn(text) {
+    const plain = withoutComments(text);
+    const commands = /* @__PURE__ */ new Set();
+    const environments = /* @__PURE__ */ new Set();
+    for (const m of plain.matchAll(/\\(?:(?:re)?newcommand|providecommand|DeclareMathOperator|DeclareRobustCommand|NewDocumentCommand|RenewDocumentCommand)\*?\s*\{?\s*\\([A-Za-z@]+)/g)) commands.add(m[1]);
+    for (const m of plain.matchAll(/\\[gex]?def\s*\\([A-Za-z@]+)/g)) commands.add(m[1]);
+    for (const m of plain.matchAll(/\\(?:(?:re)?newenvironment|NewDocumentEnvironment|newtheorem)\*?\s*\{([A-Za-z*]+)\}/g)) environments.add(m[1]);
+    return { commands: [...commands], environments: [...environments] };
+  }
+  function uniqueBy(items, keyOf) {
+    const seen = /* @__PURE__ */ new Set();
+    return items.filter((item) => {
+      const k = keyOf(item);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  function mergeReferences(parts, files) {
+    return {
+      citations: uniqueBy(parts.citations, (c) => c.key),
+      labels: uniqueBy(parts.labels, (l) => l.key),
+      commands: uniqueBy(parts.commands, (c) => c),
+      environments: uniqueBy(parts.environments, (e) => e),
+      files
+    };
+  }
+  function withBuffer(refs, text, file, isSame) {
+    const own = definitionsIn(text);
+    return mergeReferences({
+      citations: refs.citations,
+      labels: [...labelsIn(text, file), ...refs.labels.filter((l) => !isSame(l.file, file))],
+      commands: [...own.commands, ...refs.commands],
+      environments: [...own.environments, ...refs.environments]
+    }, refs.files);
+  }
+
   // src/renderer/compile-controls.ts
   var AUTO_COMPILE_MS = 2e3;
   var PENDING_LINE_MS = 1e4;
+  var REFERENCES_MS = 2e3;
   function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }) {
     const results = /* @__PURE__ */ new Map();
+    const byRoot = /* @__PURE__ */ new Map();
+    let references = null;
     const edited = /* @__PURE__ */ new Set();
     const visited = /* @__PURE__ */ new Map();
     let running = null;
@@ -17081,6 +17147,9 @@
       running = null;
       if (editedDuring && result.ok) edited.add(n.id);
       results.set(n.id, result);
+      if (result.root) byRoot.set(result.root.toLowerCase(), result);
+      references = null;
+      showMarks();
       const again = compileAgain;
       compileAgain = false;
       render();
@@ -17298,9 +17367,56 @@
       toast((issue.kind === "error" ? "Error " : issue.kind === "warning" ? "Warning " : "Box ") + (at + 1) + " of " + issues.length + ": " + issue.message);
       goToIssue(issue, result ? result.root : null);
     }
+    function marksFor(filePath) {
+      const marks = [];
+      for (const result of byRoot.values()) {
+        if (!result.root || !result.log) continue;
+        for (const issue of result.log.issues) {
+          if (!issue.line) continue;
+          const file = issue.file ? joinPath(dirOf(result.root), issue.file) : result.root;
+          if (!samePath(file, filePath)) continue;
+          marks.push({ line: issue.line, severity: issue.kind === "error" ? "error" : issue.kind === "warning" ? "warning" : "info", message: issue.message });
+        }
+      }
+      return marks;
+    }
+    function showMarks() {
+      const n = state.current;
+      if (isTex(n)) src.setMarks(marksFor(n.filePath));
+    }
+    function referencesOf(n, text) {
+      const now = Date.now();
+      if (!references || references.id !== n.id || now - references.at > REFERENCES_MS) references = { id: n.id, at: now, found: api.tex.references(n.id).catch(() => EMPTY_REFERENCES) };
+      return references.found.then((found) => withBuffer(found, text, n.filePath, samePath));
+    }
+    function iconSpan(name, title) {
+      const span = document.createElement("span");
+      span.title = title;
+      span.insertAdjacentHTML("beforeend", I(name));
+      return span;
+    }
+    function editorHelp(n) {
+      if (!isTex(n)) return null;
+      return {
+        references: (text) => referencesOf(n, text),
+        marker: (open) => {
+          const s = iconSpan(open ? "chevron-down" : "chevron-right", open ? "Fold (Ctrl+Shift+[)" : "Unfold (Ctrl+Shift+])");
+          s.className = "fold-marker";
+          return s;
+        },
+        placeholder: () => {
+          const s = iconSpan("ellipsis", "Unfold (Ctrl+Shift+])");
+          s.className = "fold-placeholder";
+          s.setAttribute("role", "button");
+          s.setAttribute("aria-label", "Folded lines. Unfold");
+          return s;
+        }
+      };
+    }
     function noteShown() {
       clearTimeout(autoTimer);
       render();
+      showMarks();
       const n = state.current;
       if (!pendingLine || !n || !n.filePath) return;
       const wanted = pendingLine;
@@ -17396,11 +17512,16 @@
         { id: "tex-auto", title: options.compileOnSave ? "Stop compiling on save" : "Compile on save", icon: "play", keys: "", run: () => setOptions({ compileOnSave: !options.compileOnSave }), ok: tex, keywords: "latex tex auto compile automatic" },
         { id: "tex-halt", title: options.haltOnError ? "Compile past errors" : "Stop compiling at the first error", icon: "circle-alert", keys: "", run: () => setOptions({ haltOnError: !options.haltOnError }), ok: tex, keywords: "latex tex halt-on-error" },
         ...ENGINES.map((e) => ({ id: "tex-engine-" + e, title: "Compile with " + ENGINE_LABELS[e], icon: "play", keys: "", run: () => setOptions({ engine: e }), ok: tex && !program && options.engine !== e, keywords: "latex tex engine compiler" })),
+        { id: "tex-suggest", title: "Suggest a command, citation or label", icon: "list", keys: "Ctrl+Space", run: () => src.suggest(), ok: tex && src.codeOn, keywords: "latex tex complete autocomplete cite ref" },
+        { id: "tex-fold", title: "Fold this section or environment", icon: "chevron-right", keys: "Ctrl+Shift+[", run: () => src.fold("here"), ok: tex && src.codeOn, keywords: "latex tex collapse hide" },
+        { id: "tex-unfold", title: "Unfold here", icon: "chevron-down", keys: "Ctrl+Shift+]", run: () => src.fold("open"), ok: tex && src.codeOn, keywords: "latex tex expand show" },
+        { id: "tex-fold-all", title: "Fold all sections and environments", icon: "chevron-right", keys: "Ctrl+Alt+[", run: () => src.fold("all"), ok: tex && src.codeOn, keywords: "latex tex collapse outline" },
+        { id: "tex-unfold-all", title: "Unfold everything", icon: "chevron-down", keys: "Ctrl+Alt+]", run: () => src.fold("none"), ok: tex && src.codeOn, keywords: "latex tex expand" },
         { id: "tex-clean", title: "Clear build files", icon: "eraser", keys: "", run: clean, ok: tex, keywords: "latex tex aux log synctex clean" },
         { id: "tex-find", title: "Look for TeX again", icon: "refresh-cw", keys: "", run: findTex, ok: true, keywords: "latex miktex texlive install" }
       ];
     }
-    return { render, compile: () => compile(false), noteShown, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
+    return { render, compile: () => compile(false), noteShown, editorHelp, closeMenus, openNow, commands, stepIssue, showLineInPdf, goToSource, canCompile: () => isTex(state.current) };
   }
 
   // src/renderer/note-html.ts
@@ -29937,7 +30058,7 @@
         toast("Export failed: " + (err.message || err));
       }
     }
-    const { showCode: showCode2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+    const { showCode: showCode2 } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection, texHelp: (note) => compiling.editorHelp(note) });
     const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
     function openSettings(sectionId) {
       const s = settingsNow();
@@ -30427,6 +30548,7 @@
       }
       if (e.key === "Escape") {
         if (inDialog) return;
+        if (e.defaultPrevented && e.target instanceof Node && el.codeHost.contains(e.target)) return;
         if (el.pdfEditor.contains(document.activeElement)) return;
         if (find.open) {
           e.preventDefault();

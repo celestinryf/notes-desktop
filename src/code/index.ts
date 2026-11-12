@@ -25,6 +25,12 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { r } from '@codemirror/legacy-modes/mode/r';
 import { perl } from '@codemirror/legacy-modes/mode/perl';
 import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
+import { autocompletion, startCompletion } from '@codemirror/autocomplete';
+import { foldAll, unfoldAll, foldCode, unfoldCode } from '@codemirror/language';
+import { bibtex, bibtexCompletionSource } from 'codemirror-lang-bib';
+import { texHelp, marksTransaction, type TexHelp, type TexMark } from './latex.ts';
+
+export type { TexHelp, TexMark } from './latex.ts';
 
 const LANGUAGES: [string, StreamParser<unknown>, string[]][] = [
   ['LaTeX', stex, ['tex', 'latex', 'sty', 'cls', 'ltx']],
@@ -65,6 +71,8 @@ for (const [name, mode, exts] of LANGUAGES) {
 }
 const MARKDOWN: Known = { name: 'Markdown', code: false, make: () => markdown({ addKeymap: false }) };
 for (const ext of ['md', 'markdown']) BY_EXT.set(ext, MARKDOWN);
+const BIBTEX: Known = { name: 'BibTeX', code: true, make: () => [bibtex({ enableLinting: false, enableTooltips: false, enableAutocomplete: false }), autocompletion({ override: [bibtexCompletionSource], icons: false })] };
+BY_EXT.set('bib', BIBTEX);
 
 const found = (ext: string | null | undefined) => BY_EXT.get(String(ext || '').toLowerCase());
 
@@ -143,7 +151,7 @@ export type CodeEditorOptions = {
   onEnter?: (shift: boolean) => boolean,
 };
 
-export type LoadOptions = { ext?: string, readOnly?: boolean, placeholder?: string, label?: string };
+export type LoadOptions = { ext?: string, readOnly?: boolean, placeholder?: string, label?: string, tex?: TexHelp | null };
 
 export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOptions) {
   const language = new Compartment(), writable = new Compartment(), hint = new Compartment(), indent = new Compartment(), words = new Compartment();
@@ -173,6 +181,7 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
         EditorView.lineWrapping, EditorState.tabSize.of(2), syntaxHighlighting(highlight),
         language.of(lang.language || []),
         found(opts.ext) === MARKDOWN ? frontMatter : [],
+        opts.tex && found(opts.ext) === found('tex') ? texHelp(opts.tex) : [],
         words.of(EditorView.contentAttributes.of({ spellcheck: lang.code ? 'false' : 'true', 'aria-label': 'Text of ' + (opts.label || 'the file') })),
         writable.of([EditorState.readOnly.of(!!opts.readOnly), EditorView.editable.of(!opts.readOnly)]),
         hint.of(opts.placeholder ? placeholder(opts.placeholder) : []),
@@ -225,6 +234,9 @@ export function create({ parent, onChange, onSelection, onEnter }: CodeEditorOpt
     hasFocus() { return view.hasFocus; },
     contains(node: Element | null) { return !!node && view.dom.contains(node); },
     setReadOnly(readOnly: boolean) { view.dispatch({ effects: writable.reconfigure([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]) }); },
+    setMarks(marks: TexMark[]) { view.dispatch(marksTransaction(view.state, marks)); },
+    fold(how: 'all' | 'none' | 'here' | 'open') { view.focus(); return (how === 'all' ? foldAll : how === 'none' ? unfoldAll : how === 'here' ? foldCode : unfoldCode)(view); },
+    suggest() { view.focus(); return startCompletion(view); },
     position() {
       const head = view.state.selection.main.head, line = view.state.doc.lineAt(head);
       return { line: line.number, col: head - line.from + 1 };
