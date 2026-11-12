@@ -60,6 +60,19 @@ async function sampleWordNote(dir) {
 }
 
 const FAKE_TEX = path.join(__dirname, '..', 'test', 'fixtures', 'fake-tex');
+const TRAIL_BIB = `@book{parkmap,
+  author = {{Ridge Park Service}},
+  title = {North loop trail map},
+  year = {2026}
+}
+
+@article{meadow,
+  author = {{Upper Meadow Survey}},
+  title = {Springs of the upper meadow},
+  journal = {Trail Notes Quarterly},
+  year = {2025}
+}
+`;
 
 const SAMPLE_FILES = {
   tex: ['trail.tex', String.raw`\documentclass{article}
@@ -73,6 +86,33 @@ const SAMPLE_FILES = {
 The climb gains $\Delta h = 640\,\text{m}$ over the first loop.
 % Check against the park map.
 
+\end{document}
+`],
+  'tex-guide': ['trail-guide.tex', String.raw`\documentclass{article}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\newcommand{\elev}[1]{#1\,\text{m}}
+\title{Trail guide}
+
+\begin{document}
+\maketitle
+
+\section{Elevation}
+The climb gains $\Delta h = \elev{640}$ over the first loop, as the park map shows.
+\begin{equation}
+  \label{eq:grade}
+  g = \frac{\Delta h}{d}
+\end{equation}
+
+\section{Water}
+The spring at mile four is dry; Equation~\ref{eq:grade} gives the steep part.
+\begin{itemize}
+  \item Bring two litres.
+  \item Refill at the lake.
+\end{itemize}
+
+\bibliographystyle{plain}
+\bibliography{trail}
 \end{document}
 `],
   txt: ['trail.txt', `Trail notes
@@ -451,6 +491,9 @@ const SCENES = {
   'tex-errors': { about: 'The compile results open after a run with one error and one warning: the summary, the rows with their file and line, Open the PDF and Show the full log', file: 'tex', env: { NOTES_APP_TEX_DIR: FAKE_TEX }, run: steps(openNote('trail.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=9'); await page.keyboard.press('End'); await page.keyboard.type(' See Figure~\\ref{fig:loop}. \\FAKEWARNING'); await page.click('#codeHost .cm-line >> nth=10'); await page.keyboard.press('End'); await page.keyboard.type(' \\FAKEERROR'); await sleep(500); await page.click('#compileBtn'); await page.waitForSelector('#compileStatus[data-tone="danger"]', { timeout: 15000 }); await page.click('#compileStatus'); await sleep(400); }) },
   'tex-menu': { about: 'The Compile options menu: the engine, Stop on the first error, Show the full log, Clear build files, Look for TeX again', file: 'tex', env: { NOTES_APP_TEX_DIR: FAKE_TEX }, run: steps(openNote('trail.tex'), async (page) => { await page.click('#compileBtn'); await page.waitForSelector('#compileStatus[data-tone="ok"]', { timeout: 15000 }); await page.click('#compileMenuBtn'); await sleep(400); }) },
   'tex-preview': { about: 'A LaTeX file and its compiled PDF side by side after Compile: the source on the left, the PDF on the right, the two arrows on the divider, and the place of the caret line flashing in the PDF after Ctrl+Alt+J', file: 'tex', env: { NOTES_APP_TEX_DIR: FAKE_TEX }, run: steps(openNote('trail.tex'), async (page) => { await page.click('#compileBtn'); await page.waitForSelector('#compileStatus[data-tone="ok"]', { timeout: 15000 }); await page.waitForSelector('#panePeer', { timeout: 15000 }); for (let i = 0; i < 60; i++) { const g = page.frames().find((f) => /pane=right/.test(f.url())); if (g && await g.evaluate(() => !!document.querySelector('#pdfEditor .pdfViewer .page canvas')).catch(() => false)) break; await sleep(250); } await page.waitForSelector('#syncArrows:not(.hidden)', { timeout: 8000 }); await page.click('#codeHost .cm-line >> nth=8'); await page.keyboard.press('Control+Alt+j'); await sleep(500); }) },
+  'tex-complete': { about: 'Typing \\cite{ in a LaTeX file: the suggestions from the .bib file beside it, key on the left, author, year and title on the right', file: 'tex-guide', extraFiles: { 'trail.bib': TRAIL_BIB }, run: steps(openNote('trail-guide.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=17'); await page.keyboard.press('End'); await page.keyboard.type(' See \\cite{'); await page.waitForSelector('.cm-tooltip-autocomplete', { timeout: 8000 }); await sleep(400); }) },
+  'tex-marks': { about: 'A compile error and a warning marked on their lines: the wavy underline, the dot in the gutter, and the message on hover', file: 'tex-guide', extraFiles: { 'trail.bib': TRAIL_BIB }, env: { NOTES_APP_TEX_DIR: FAKE_TEX }, run: steps(openNote('trail-guide.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=10'); await page.keyboard.press('End'); await page.keyboard.type(' \\FAKEERROR'); await page.click('#codeHost .cm-line >> nth=17'); await page.keyboard.press('End'); await page.keyboard.type(' \\FAKEWARNING'); await sleep(500); await page.click('#compileBtn'); await page.waitForSelector('#compileStatus[data-tone="danger"]', { timeout: 15000 }); await page.waitForSelector('#codeHost .cm-lintRange-error', { timeout: 8000 }); await page.hover('#codeHost .cm-lintRange-error'); await page.waitForSelector('.cm-tooltip-lint', { timeout: 8000 }); await sleep(300); }) },
+  'tex-fold': { about: 'Fold all (Ctrl+Alt+[) in a LaTeX file: each section folded to its heading, with the chevrons in the gutter and the folded-lines marker', file: 'tex-guide', run: steps(openNote('trail-guide.tex'), async (page) => { await page.click('#codeHost .cm-line >> nth=1'); await page.keyboard.press('Control+Alt+BracketLeft'); await page.waitForSelector('#codeHost .fold-placeholder', { timeout: 8000 }); await sleep(300); }) },
   'tex-no-tex': { about: 'Compile on a PC with no TeX: "No TeX found" and the results saying where Notes looked and what to install', file: 'tex', env: { NOTES_APP_TEX_DIR: path.join(os.tmpdir(), 'notes-shots-no-tex') }, run: steps(openNote('trail.tex'), async (page) => { await page.click('#compileBtn'); await page.waitForSelector('#compileResults:not(.hidden)', { timeout: 15000 }); await sleep(400); }) },
   txt: { about: 'A .txt file: the plain text box, in the writing font', file: 'txt', run: openNote('trail.txt') },
   'code-js': { about: 'A JavaScript file in the code editor', file: 'js', run: openNote('trail.js') },
@@ -483,6 +526,7 @@ async function shoot(theme, name, opts) {
   data.settings.window = { width: opts.size.width, height: opts.size.height };
   if (SCENES[name].word) data.notes.push(await sampleWordNote(dataDir));
   if (SCENES[name].file) data.notes.push(sampleFileNote(dataDir, SCENES[name].file));
+  for (const [fileName, content] of Object.entries(SCENES[name].extraFiles || {})) fs.writeFileSync(path.join(dataDir, fileName), content);
   if (SCENES[name].office) data.notes.push(sampleOfficeNote(dataDir, SCENES[name].office));
   if (SCENES[name].vault) data.vaults.push(sampleVault(dataDir));
   if (SCENES[name].syncRemote) { const bare = path.join(dataDir, 'remote.git'); execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]); data.settings.gitRemote = bare; }

@@ -186,6 +186,9 @@ interface TexIssue { kind: 'error' | 'warning' | 'badbox'; file: string | null; 
 interface TexLog { issues: TexIssue[]; errors: number; warnings: number; badBoxes: number; rerun: boolean; fatal: boolean }
 interface TexBox { pdf: string; page: number; left: number; top: number; right: number; bottom: number }
 interface TexSource { filePath: string; line: number }
+interface TexEntry { key: string; detail: string }
+interface TexLabel extends TexEntry { file: string; line: number }
+interface TexReferences { citations: TexEntry[]; labels: TexLabel[]; commands: string[]; environments: string[]; files: string[] }
 type TexStatus = { found: true; distribution: string; dir: string; latexmk: boolean } | { found: false; looked: string[]; problem: string | null };
 type TexCompileResult =
   | { ok: true; root: string; pdf: string | null; engine: TexEngineName; log: TexLog; ms: number; steps: string[] }
@@ -316,6 +319,7 @@ interface IpcContract {
   'tex:forward': (id: string, line: number) => TexBox | null;
   'tex:inverse': (pdfPath: string, page: number, x: number, y: number) => TexSource | null;
   'tex:sourceFor': (pdfPath: string) => string | null;
+  'tex:references': (id: string) => TexReferences;
   'signature:get': () => Uint8Array<ArrayBuffer> | null;
   'signature:set': (bytes: Uint8Array) => Ok;
   'signature:forget': () => Ok;
@@ -399,7 +403,7 @@ interface NotesApi {
     pathFor: (file: File) => string | null;
   };
   agentFiles: { discover: Invoker<'agentFiles:discover'>; link: Invoker<'agentFiles:link'> };
-  tex: { status: Invoker<'tex:status'>; compile: Invoker<'tex:compile'>; stop: Invoker<'tex:stop'>; clean: Invoker<'tex:clean'>; setOptions: Invoker<'tex:setOptions'>; forward: Invoker<'tex:forward'>; inverse: Invoker<'tex:inverse'>; sourceFor: Invoker<'tex:sourceFor'> };
+  tex: { status: Invoker<'tex:status'>; compile: Invoker<'tex:compile'>; stop: Invoker<'tex:stop'>; clean: Invoker<'tex:clean'>; setOptions: Invoker<'tex:setOptions'>; forward: Invoker<'tex:forward'>; inverse: Invoker<'tex:inverse'>; sourceFor: Invoker<'tex:sourceFor'>; references: Invoker<'tex:references'> };
   live: { host: Invoker<'live:host'>; join: Invoker<'live:join'>; stop: Invoker<'live:stop'>; status: Invoker<'live:status'> };
   attachments: {
     pick: Invoker<'attachments:pick'>; addPaths: Invoker<'attachments:addPaths'>; saveRecording: Invoker<'attachments:saveRecording'>;

@@ -3,6 +3,7 @@ import { state } from './state.ts';
 import { find } from './find-state.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
+import type { TexHelp, TexMark } from '../code/index.ts';
 
 const { isPlainTextFile, isViewerOnlyFile } = H;
 
@@ -10,11 +11,14 @@ let code: CodeEditor | null = null;
 let codeOn = false;
 let codeFailed = false;
 
-type CodeEditorHooks = { runFind: (forward?: boolean) => void, autoGrow: () => void, scrollTextareaToSelection: (at: number) => void };
+type CodeEditorHooks = { runFind: (forward?: boolean) => void, autoGrow: () => void, scrollTextareaToSelection: (at: number) => void, texHelp: (note: PublicNote) => TexHelp | null };
 
-let hooks: CodeEditorHooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {} };
+let hooks: CodeEditorHooks = { runFind: () => {}, autoGrow: () => {}, scrollTextareaToSelection: () => {}, texHelp: () => null };
 
 const shown = () => (codeOn && state.sourceMode ? code : null);
+const escapesTaken = new WeakSet<Event>();
+
+export const editorTookEscape = (e: KeyboardEvent) => escapesTaken.has(e);
 
 export const src = {
   get value() { return el.bodyInput.value; },
@@ -37,6 +41,9 @@ export const src = {
   dispatchEvent(event: Event) { return el.bodyInput.dispatchEvent(event); },
   get codeOn() { return !!shown(); },
   sync() { const c = shown(); if (c) c.setValue(el.bodyInput.value, { history: false }); },
+  setMarks(marks: TexMark[]) { const c = shown(); if (c) c.setMarks(marks); },
+  fold(how: 'all' | 'none' | 'here' | 'open') { const c = shown(); return !!c && c.fold(how); },
+  suggest() { const c = shown(); return !!c && c.suggest(); },
   undoRedo(cmd: 'undo' | 'redo') {
     const c = shown();
     if (!c || !c.contains(document.activeElement)) return false;
@@ -58,6 +65,7 @@ function codeEditor(): CodeEditor {
       onSelection: () => { mirrorSelection(); renderCodePosition(); },
       onEnter: (shift: boolean) => { if (!find.open) return false; hooks.runFind(!shift); return true; },
     });
+    el.codeHost.addEventListener('keydown', (e) => { if (e.key === 'Escape' && code && code.suggesting()) escapesTaken.add(e); }, true);
   }
   return code;
 }
@@ -72,7 +80,7 @@ function showCode(note: PublicNote, readOnly: boolean) {
   codeOn = !!window.NotesCode && !codeFailed && (markdown || (isPlainTextFile(note) && !isProseFile(note)));
   if (codeOn) {
     try {
-      codeEditor().load(el.bodyInput.value, { ext: markdown ? 'md' : H.extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : 'Plain text.', label: H.deriveTitle(note) });
+      codeEditor().load(el.bodyInput.value, { ext: markdown ? 'md' : H.extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : 'Plain text.', label: H.deriveTitle(note), tex: markdown ? null : hooks.texHelp(note) });
     } catch (err) {
       console.error('The code editor could not start:', err);
       codeFailed = true;
@@ -95,7 +103,7 @@ export function renderCodePosition() {
   el.statusCode.textContent = 'Ln ' + at.line + ', Col ' + at.col;
 }
 
-export function createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection }: CodeEditorHooks) {
-  hooks = { runFind, autoGrow, scrollTextareaToSelection };
+export function createCodeEditor(given: CodeEditorHooks) {
+  hooks = given;
   return { showCode };
 }

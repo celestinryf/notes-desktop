@@ -29,7 +29,7 @@ import { treeItems, levelKey } from './tree-items.ts';
 import type { TreeItem } from './tree-items.ts';
 import { createStickyButton } from './sticky-button.ts';
 import { createBotPanel } from './bot-panel.ts';
-import { createCodeEditor, src } from './code-editor.ts';
+import { createCodeEditor, editorTookEscape, src } from './code-editor.ts';
 import { createEditorView, tableShown, focusBody, inTextField, bodyHasFocus, autoGrow } from './editor-view.ts';
 import { createLinkDialog } from './link-dialog.ts';
 import { createVaultsPanel } from './vaults-panel.ts';
@@ -2659,7 +2659,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
   }
 
-  const { showCode } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection });
+  const { showCode } = createCodeEditor({ runFind, autoGrow, scrollTextareaToSelection, texHelp: (note) => compiling.editorHelp(note) });
 
   const { wrapSelection, handleEditorKeydown } = createEditorText({ runFind, scheduleSave });
 
@@ -3089,6 +3089,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     }
     if (e.key === 'Escape') {
       if (inDialog) return;
+      if (editorTookEscape(e)) return;
       if (el.pdfEditor.contains(document.activeElement)) return;
       if (find.open) { e.preventDefault(); closeFind(); return; }
       if (compiling.openNow()) { e.preventDefault(); compiling.closeMenus(); return; }

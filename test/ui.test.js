@@ -832,6 +832,92 @@ test('preview: a compile opens the PDF beside the file, Ctrl+Alt+J shows the lin
   await removeFromNotes([texPath, pdfPath]);
 });
 
+test('editor help: LaTeX suggests citations and labels, closes \\begin on Enter, folds, marks compile errors on their lines; .bib files get BibTeX help', { timeout: 60000 }, async () => {
+  const dir = tmpDir('notes-ui-texhelp-');
+  const texPath = path.join(dir, 'paper.tex');
+  const bibPath = path.join(dir, 'refs.bib');
+  const lineText = (n) => page.$eval('#codeHost .cm-content', (c, i) => c.querySelectorAll('.cm-line')[i].textContent, n);
+  const suggestions = () => page.$$eval('.cm-tooltip-autocomplete li .cm-completionLabel', (ls) => ls.map((l) => l.textContent));
+  fs.writeFileSync(texPath, '\\documentclass{article}\n\\begin{document}\n\\section{Intro}\\label{sec:intro}\nText\n\\section{Next}\nMore\n\\end{document}\n');
+  fs.writeFileSync(bibPath, '@book{knuth84, author = {Knuth, Donald}, title = {Literate Programming}, year = 1984}\n');
+  await page.evaluate((files) => window.notesApi.files.link(files), [texPath, bibPath]);
+  await waitFor('both files linked', () => [texPath, bibPath].every((f) => readNotes().notes.some((n) => n.filePath === f)));
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('paper.tex listed', () => revealRow({ text: 'paper.tex' }), 8000);
+  await clickRow('paper.tex');
+  await waitForDom(() => document.getElementById('titleInput').value === 'paper.tex');
+
+  await page.click('#codeHost .cm-line >> nth=3');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' See \\cite{');
+  await page.waitForSelector('.cm-tooltip-autocomplete');
+  assert.deepEqual(await suggestions(), ['knuth84']);
+  assert.match(await page.textContent('.cm-tooltip-autocomplete'), /Knuth, 1984, Literate Programming/);
+  await sleep(200);
+  await page.keyboard.press('Enter');
+  assert.equal(await lineText(3), 'Text See \\cite{knuth84');
+  await page.keyboard.type('} and \\ref{');
+  await page.waitForSelector('.cm-tooltip-autocomplete');
+  assert.deepEqual(await suggestions(), ['sec:intro']);
+  await page.keyboard.press('Escape');
+  await waitForDom(() => !document.querySelector('.cm-tooltip-autocomplete'));
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'Escape closed the list, not the window');
+
+  await page.keyboard.type('sec:intro}');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('\\begin{itemize}');
+  await waitForDom(() => !document.querySelector('.cm-tooltip-autocomplete'));
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('\\item one');
+  assert.equal(await lineText(4), '\\begin{itemize}');
+  assert.equal(await lineText(5), '  \\item one');
+  assert.equal(await lineText(6), '\\end{itemize}');
+
+  await page.keyboard.press('Control+Alt+BracketLeft');
+  await waitForDom(() => document.querySelectorAll('#codeHost .fold-placeholder').length === 2);
+  await page.click('#codeHost .fold-placeholder >> nth=0');
+  await waitForDom(() => document.querySelectorAll('#codeHost .fold-placeholder').length === 1);
+  await page.click('#codeHost .cm-line >> nth=0');
+  await page.keyboard.press('Control+Alt+BracketRight');
+  await waitForDom(() => !document.querySelector('#codeHost .fold-placeholder'));
+
+  await page.click('#codeHost .cm-line >> nth=8');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' \\FAKEERROR');
+  await page.keyboard.press('Control+Enter');
+  await waitFor('the error counted', async () => (await page.textContent('#compileStatus')).trim() === '1 error', 15000);
+  await page.waitForSelector('#codeHost .cm-lintRange-error');
+  assert.match(await page.$eval('#codeHost .cm-lintRange-error', (m) => m.closest('.cm-line').textContent), /FAKEERROR/);
+  assert.equal(await page.$$eval('#codeHost .cm-lint-marker-error', (ms) => ms.length), 1, 'one dot in the gutter');
+
+  await page.keyboard.press('Control+f');
+  await page.waitForSelector('#findBar:not(.hidden)');
+  await page.keyboard.type('More');
+  await page.click('#codeHost .cm-line >> nth=0');
+  await page.keyboard.press('Shift+End');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('findBar').classList.contains('hidden'));
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'one Escape closed find, with text selected in the editor');
+
+  await page.keyboard.press('Control+p');
+  await page.keyboard.type('fold all');
+  await waitForDom(() => [...document.querySelectorAll('#paletteList [role="option"]')].some((o) => /Fold all sections/.test(o.textContent)));
+  await page.keyboard.press('Escape');
+
+  await waitFor('refs.bib listed', () => revealRow({ text: 'refs.bib' }), 8000);
+  await clickRow('refs.bib');
+  await waitForDom(() => document.getElementById('titleInput').value === 'refs.bib');
+  await page.click('#codeHost .cm-line >> nth=0');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('@art');
+  await page.waitForSelector('.cm-tooltip-autocomplete');
+  assert.ok((await suggestions()).some((s) => /article/.test(s)), 'BibTeX entry types are suggested');
+  await page.keyboard.press('Escape');
+
+  await closeSplitIfOpen();
+  await removeFromNotes([texPath, bibPath, path.join(dir, 'paper.pdf')]);
+});
+
 test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
   const fileDir = tmpDir('notes-ui-files-');
   const mdPath = path.join(fileDir, 'External note.md');
