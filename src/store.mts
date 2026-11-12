@@ -636,7 +636,7 @@ class Store {
   lastCompactedAt: number;
   loadError: Error | null;
   onFileText: ((id: string) => void) | null;
-  onContentChange: ((notes: readonly Note[]) => void) | null;
+  onContentChange: (() => void) | null;
   onIndexChange: ((update: IndexUpdate) => void) | null;
   saveBlocked: boolean | undefined;
   recoveredFromBackup: boolean | undefined;
@@ -902,7 +902,7 @@ class Store {
     const settings = isRecord(doc.settings) ? this._mergeSettings(doc.settings) : [];
     this._repairLinks();
     if (notes.changed.length || notes.dropped.length) {
-      this._contentChanged(notes.changed);
+      this._contentChanged();
       this._indexChanged({ notes: notes.changed, dropped: notes.dropped, purge: notes.sealed });
     }
     return { kind: 'merged', notes: notes.changed, dropped: notes.dropped, refresh: notes.refresh, settings, settingsBefore, folders };
@@ -1302,7 +1302,7 @@ class Store {
         if (plainBefore !== undefined && !fileWritten) this.plain.set(id, plainBefore);
         throw err;
       }
-      this._contentChanged([note]);
+      this._contentChanged();
       this._indexChanged({ notes: [note], dropped: [] });
     }
     return note;
@@ -1782,13 +1782,13 @@ class Store {
       if (settings) this.settings = settings;
       throw err;
     }
-    if (!change || touchesContent(change)) this._contentChanged(change && change.notes ? change.notes : []);
+    if (!change || touchesContent(change)) this._contentChanged();
     this._indexChanged(indexed !== undefined ? indexed : change ? { notes: change.notes || [], dropped: change.dropped || [] } : null);
     return result;
   }
 
-  _contentChanged(notes: readonly Note[]) {
-    if (this.onContentChange) this.onContentChange(notes);
+  _contentChanged() {
+    if (this.onContentChange) this.onContentChange();
   }
 
   _indexChanged(update: IndexUpdate) {

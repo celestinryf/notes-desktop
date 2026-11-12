@@ -98,7 +98,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     el.historyStatus.textContent = hist.versions.length ? countText(hist.versions.length, 'earlier version') : r.keptOut ? 'No earlier versions.' : 'No earlier version differs from the current text yet.';
     hist.versions.forEach((v, i) => {
       const first = (v.body.split('\n').find((l) => l.trim()) || '(empty)').replace(/^#+\s*/, '');
-      addRow(i, new Date(v.at).toLocaleString() + ' · ' + v.chars + ' chars', H.truncate(first, 48), () => showVersion(i));
+      addRow(i, new Date(v.at).toLocaleString(), H.truncate(first, 48), () => showVersion(i));
     });
     if (hist.versions.length) {
       const at = pickIndex(pick);

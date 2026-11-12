@@ -3,6 +3,7 @@ import path from 'node:path';
 import { run, AUTHOR } from './git-run.mts';
 import type { GitRun } from './git-run.mts';
 import type { Store } from './store.mts';
+import { DEFAULT_TIMING } from './version-timing.mts';
 
 type VaultTimers = { rescan?: NodeJS.Timeout, commit?: NodeJS.Timeout, pull?: NodeJS.Timeout };
 
@@ -27,7 +28,7 @@ class VaultManager {
     this.onChange = opts.onChange || (() => {});
     this.onNotesChanged = opts.onNotesChanged || (() => {});
     this.now = opts.now || Date.now;
-    this.debounceMs = opts.debounceMs == null ? 8000 : opts.debounceMs;
+    this.debounceMs = opts.debounceMs == null ? DEFAULT_TIMING.quietMs : opts.debounceMs;
     this.rescanDebounceMs = opts.rescanDebounceMs == null ? 700 : opts.rescanDebounceMs;
     this.watchers = new Map();
     this.timers = new Map();

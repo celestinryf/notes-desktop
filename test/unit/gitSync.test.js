@@ -278,59 +278,85 @@ test('files outside the notes folder keep their history by id at .linked, and a 
   assert.match(hashed[0] + hashed[2], /^[0-9a-f]{80}$/, 'the rest of the batch is still hashed');
 });
 
-test('a version waits for a long quiet mid-sentence, a short one after a sentence, and comes at once when attention leaves', { skip: !gitAvailable && 'git not installed' }, async () => {
+test('typing with short pauses makes no version; one comes after the quiet, and a pause, a blur or a note switch has no say', { skip: !gitAvailable && 'git not installed' }, async () => {
   const dir = tmp();
   const write = (v, body) => fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify({ v, notes: [{ id: 'n1', body }] }));
   write(1, '');
-  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 60, attentionMs: 10, attentionWindowMs: 200, maxWaitMs: 20000 } });
+  const sync = new GitSync(dir, { timing: { quietMs: 2500, maxWaitMs: 60000 } });
   await sync.configure({ gitEnabled: true, gitRemote: '' });
   const settle = (ms) => new Promise((r) => setTimeout(r, ms));
   const commits = () => sync.status().commits;
   const untilCommits = async (n) => { for (let i = 0; i < 100 && commits() !== n; i++) await settle(50); assert.equal(commits(), n); };
 
-  write(2, 'Half a sent');
-  sync.noteChanged([{ id: 'n1', body: 'Half a sent' }]);
-  await settle(400);
-  assert.equal(commits(), 0);
-  assert.equal(sync.status().pending, true);
+  const sentences = ['Half a sent', 'Half a sentence, finished.', 'Half a sentence, finished.\n\nA new paragraph.', 'Half a sentence, finished.\n\nA new paragraph. And mo'];
+  for (let i = 0; i < sentences.length; i++) {
+    write(i + 2, sentences[i]);
+    sync.noteChanged();
+    await settle(150);
+    assert.equal(commits(), 0);
+    assert.equal(sync.status().pending, true);
+  }
+  for (const gone of ['attentionLost', 'attentionBack', 'settle']) assert.equal(typeof sync[gone], 'undefined');
 
-  write(3, 'Half a sentence, finished.');
-  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished.' }]);
   await untilCommits(1);
   assert.equal(sync.status().pending, false);
-
-  write(4, 'Half a sentence, finished. And then mo');
-  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then mo' }]);
-  await settle(300);
+  assert.equal(await sync.eachNotesAt([(await sync.history(1))[0].hash], (_i, text) => { assert.match(text, /And mo/); }), true);
+  await settle(400);
   assert.equal(commits(), 1);
-  sync.attentionLost();
-  await untilCommits(2);
-
-  sync.attentionLost();
-  await settle(300);
-  assert.equal(commits(), 2);
-  sync.attentionBack();
-
-  write(5, 'Half a sentence, finished. And then more, with a blur right after it');
-  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then more, with a blur right after it' }]);
-  sync.attentionLost();
-  write(6, 'Half a sentence, finished. And then more, with a blur right after it and a save just behind');
-  sync.noteChanged([{ id: 'n1', body: 'Half a sentence, finished. And then more, with a blur right after it and a save just behind' }]);
-  await untilCommits(3);
-  assert.equal(await sync.eachNotesAt([(await sync.history(1))[0].hash], (_i, text) => { assert.match(text, /save just behind/); }), true);
   await sync.flush();
 });
 
-test('a change with no note named, as from a bot or a settings change, is a finished task', { skip: !gitAvailable && 'git not installed' }, async () => {
+test('continuous typing still gets a version at the cap', { skip: !gitAvailable && 'git not installed' }, async () => {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
-  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 30, attentionMs: 10, attentionWindowMs: 100, maxWaitMs: 20000 } });
+  const sync = new GitSync(dir, { timing: { quietMs: 5000, maxWaitMs: 600 } });
   await sync.configure({ gitEnabled: true, gitRemote: '' });
-  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":2}');
-  sync.noteChanged();
+  for (let i = 2; i < 12 && sync.status().commits === 0; i++) {
+    fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":' + i + '}');
+    sync.noteChanged();
+    await new Promise((r) => setTimeout(r, 150));
+  }
   for (let i = 0; i < 100 && sync.status().commits !== 1; i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(sync.status().commits, 1);
   await sync.flush();
+});
+
+test('quitting and Save a version now do not wait for the quiet', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 60000, maxWaitMs: 600000 } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":2}');
+  sync.noteChanged();
+  assert.equal((await sync.commit('manual commit')).ok, true);
+  assert.equal(sync.status().commits, 1);
+  assert.equal(sync.status().pending, false);
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":3}');
+  sync.noteChanged();
+  await sync.flush();
+  assert.equal(sync.status().commits, 2);
+  assert.equal(sync.timer, null);
+});
+
+test('a background sync is not due while edits wait for their quiet, so it cannot cut a version early', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 60000, maxWaitMs: 600000 } });
+  await sync.configure({ gitEnabled: true, gitRemote: 'https://example.invalid/notes.git' });
+  assert.equal(sync.syncDue(0), true);
+  sync.noteChanged();
+  assert.equal(sync.syncDue(0), false);
+  sync.state.remote = '';
+  await sync.flush();
+  sync.state.remote = 'https://example.invalid/notes.git';
+  assert.equal(sync.syncDue(0), true);
+});
+
+test('a change does nothing while history is off', () => {
+  const sync = new GitSync(tmp());
+  sync.noteChanged();
+  assert.equal(sync.timer, null);
+  assert.equal(sync.status().pending, false);
 });
 
 test('built without a debounce, history uses the default version timing; a debounce sets every delay', () => {
@@ -344,7 +370,7 @@ test('built without a debounce, history uses the default version timing; a debou
 test('a failed commit attempt restarts the wait cap instead of leaving every later change due at once', { skip: !gitAvailable && 'git not installed' }, async () => {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
-  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 20, attentionMs: 10, attentionWindowMs: 100, maxWaitMs: 500 }, beforeSnapshot: () => { throw new Error('no snapshot today'); } });
+  const sync = new GitSync(dir, { timing: { quietMs: 20, maxWaitMs: 500 }, beforeSnapshot: () => { throw new Error('no snapshot today'); } });
   await sync.configure({ gitEnabled: true, gitRemote: '' });
   sync.noteChanged();
   for (let i = 0; i < 100 && !/no snapshot today/.test(sync.status().lastError || ''); i++) await new Promise((r) => setTimeout(r, 50));
@@ -353,20 +379,57 @@ test('a failed commit attempt restarts the wait cap instead of leaving every lat
   await sync.flush();
 });
 
-test('attention lost only brings a commit forward, never pushes a due one back, and does nothing while disabled', { skip: !gitAvailable && 'git not installed' }, async () => {
+test('an edit made while a version is being written keeps its own wait: no early sync, and quitting still versions it', { skip: !gitAvailable && 'git not installed' }, async () => {
   const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":1}');
-  const sync = new GitSync(dir, { timing: { quietMs: 3000, boundaryQuietMs: 50, attentionMs: 2000, attentionWindowMs: 100, maxWaitMs: 20000 } });
-  sync.attentionLost();
-  assert.equal(sync.timer, null);
+  const file = path.join(dir, 'notes.json');
+  fs.writeFileSync(file, '{"v":1}');
+  let editDuringCommit = true;
+  const sync = new GitSync(dir, { timing: { quietMs: 60000, maxWaitMs: 600000 }, beforeSnapshot: () => {
+    if (!editDuringCommit) return;
+    editDuringCommit = false;
+    sync.noteChanged();
+  } });
   await sync.configure({ gitEnabled: true, gitRemote: '' });
-  fs.writeFileSync(path.join(dir, 'notes.json'), '{"v":2}');
-  sync.noteChanged([{ id: 'n', body: 'Done.' }]);
-  const due = sync.dueAt;
-  sync.attentionLost();
-  assert.equal(sync.dueAt, due);
-  for (let i = 0; i < 100 && sync.status().commits !== 1; i++) await new Promise((r) => setTimeout(r, 50));
+  sync.noteChanged();
+  assert.equal((await sync.commit('first')).ok, true);
   assert.equal(sync.status().commits, 1);
-  assert.equal(sync.dueAt, null);
+  assert.equal(sync.status().pending, true);
+  assert.notEqual(sync.timer, null);
+  assert.notEqual(sync.clock.pendingSince, null);
+  sync.state.remote = 'https://example.invalid/notes.git';
+  assert.equal(sync.syncDue(0), false);
+  sync.state.remote = '';
+  fs.writeFileSync(file, '{"v":2}');
   await sync.flush();
+  assert.equal(sync.status().commits, 2);
+  assert.equal(sync.status().pending, false);
+  assert.equal(sync.timer, null);
+});
+
+test('a manual version stops the waiting timer, and one that cannot start leaves the edit to be versioned at quit', { skip: !gitAvailable && 'git not installed' }, async () => {
+  const dir = tmp();
+  const file = path.join(dir, 'notes.json');
+  fs.writeFileSync(file, '{"v":1}');
+  const sync = new GitSync(dir, { timing: { quietMs: 60000, maxWaitMs: 600000 } });
+  await sync.configure({ gitEnabled: true, gitRemote: '' });
+  sync.noteChanged();
+  await sync.commit('manual');
+  assert.equal(sync.timer, null);
+  assert.equal(sync.status().pending, false);
+
+  fs.writeFileSync(file, '{"v":2}');
+  sync.noteChanged();
+  const ready = sync._ready;
+  sync._ready = async () => ({ ok: false, error: 'git unavailable' });
+  assert.equal((await sync.commit()).ok, false);
+  assert.equal(sync.status().pending, true);
+  sync._ready = ready;
+  await sync.flush();
+  assert.equal(sync.status().commits, 2);
+});
+
+test('flush with history off commits nothing and does not throw', async () => {
+  const sync = new GitSync(tmp());
+  await sync.flush();
+  assert.equal(sync.status().commits, 0);
 });

@@ -183,7 +183,7 @@ type MarkdownResult = { ok: true; markdown: string } | { ok: false; error: strin
 type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: false; error: string };
 type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
 
-interface HistoryVersion { hash: string; at: number; title: string; body: string; chars: number }
+interface HistoryVersion { hash: string; at: number; title: string; body: string }
 interface FileVersion { name: string; at: number; bytes: number }
 type HistoryVersions = { ok: true; versions: HistoryVersion[]; current: string; keptOut: boolean } | { ok: false; error: string };
 
@@ -257,7 +257,6 @@ interface IpcContract {
   'app:exportAll': () => FileResult;
   'app:importMarkdown': () => { canceled?: boolean; count: number; firstId?: string | null; failed?: string[] };
   'history:versions': (id: string, limit?: number) => HistoryVersions;
-  'history:settle': () => void;
   'update:status': () => UpdateStatus;
   'update:check': () => UpdateStatus;
   'update:apply': () => { ok: boolean; error: string | null };
@@ -410,7 +409,7 @@ interface NotesApi {
     pdfPath: Invoker<'app:pdfPath'>; writePdf: Invoker<'app:writePdf'>; exportHtml: Invoker<'app:exportHtml'>; rendererReady: Invoker<'app:rendererReady'>;
     dictate: Invoker<'app:dictate'>; flushDone: () => void; trace: (event: string, fields?: TraceFields) => void; openDataFolder: Invoker<'app:openDataFolder'>; openExternal: Invoker<'app:openExternal'>;
     exportNote: Invoker<'app:exportNote'>; exportAll: Invoker<'app:exportAll'>; importMarkdown: Invoker<'app:importMarkdown'>;
-    historyVersions: Invoker<'history:versions'>; historySettle: Invoker<'history:settle'>;
+    historyVersions: Invoker<'history:versions'>;
     updateStatus: Invoker<'update:status'>; updateCheck: Invoker<'update:check'>; updateApply: Invoker<'update:apply'>; titleBar: Invoker<'app:titleBar'>;
   };
   on: {

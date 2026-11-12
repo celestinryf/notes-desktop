@@ -6,7 +6,7 @@ import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
 import { MAX_TEXT_BYTES, isRecord, isAuthFailure } from './shared/helpers.mts';
 import { VersionClock, DEFAULT_TIMING, uniformTiming } from './version-timing.mts';
-import type { VersionTiming, ChangedNote } from './version-timing.mts';
+import type { VersionTiming } from './version-timing.mts';
 
 const COPY_RETRIES = 8;
 const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
@@ -105,13 +105,13 @@ class GitSync {
   dir: string;
   snapshot: string;
   clock: VersionClock;
-  dueAt: number | null;
   now: () => number;
   timer: NodeJS.Timeout | null;
   busy: Promise<GitResult> | null;
   state: GitState;
   onChange: (state: GitState) => void;
   beforeSnapshot: () => void;
+  changeCount: number;
   workTree: () => string | null;
   linkedFiles: () => LinkedFile[];
   keptOut: () => KeptOut[];
@@ -132,11 +132,11 @@ class GitSync {
     this.clock = new VersionClock(Object.assign({}, opts.debounceMs == null ? DEFAULT_TIMING : uniformTiming(opts.debounceMs), opts.timing));
     this.now = opts.now || Date.now;
     this.timer = null;
-    this.dueAt = null;
     this.busy = null;
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
     this.beforeSnapshot = opts.beforeSnapshot || (() => {});
+    this.changeCount = 0;
     this.workTree = opts.workTree || (() => null);
     this.linkedFiles = opts.linkedFiles || (() => []);
     this.keptOut = opts.keptOut || (() => []);
@@ -374,40 +374,18 @@ class GitSync {
     throw lastErr;
   }
 
-  noteChanged(notes?: readonly ChangedNote[]) {
+  noteChanged() {
     if (!this.state.enabled) return;
+    this.changeCount++;
     this._set({ pending: true });
-    this._commitAfter(this.clock.changed(notes, this.now()));
-  }
-
-  attentionLost() {
-    this._commitSooner(this.clock.attentionLost(this.now()));
-  }
-
-  settle() {
-    this._commitSooner(this.clock.settle(this.now()));
-  }
-
-  _commitSooner(delay: number | null) {
-    if (delay === null || !this.state.enabled || !this.state.pending) return;
-    if (this.dueAt === null || this.now() + delay < this.dueAt) this._commitAfter(delay);
-  }
-
-  attentionBack() {
-    this.clock.attentionBack();
-  }
-
-  _commitAfter(delay: number) {
     if (this.timer) clearTimeout(this.timer);
-    this.dueAt = this.now() + delay;
-    this.timer = setTimeout(() => { this.timer = null; this.dueAt = null; this.commit().catch(() => {}); }, delay);
+    this.timer = setTimeout(() => { this.timer = null; this.commit().catch(() => {}); }, this.clock.changed(this.now()));
   }
 
   async flush() {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    this.dueAt = null;
-    if (this.state.pending) await this.commit(undefined, { pull: false });
+    const waiting = this.timer !== null || this.state.pending;
+    this._stopTimer();
+    if (waiting) await this.commit(undefined, { pull: false });
     if (this.busy) await this.busy;
   }
 
@@ -427,22 +405,34 @@ class GitSync {
     return null;
   }
 
+  _stopTimer() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  _changedSince(count: number) {
+    if (this.changeCount !== count) return true;
+    this._stopTimer();
+    return false;
+  }
+
   async _commitNow(message?: string): Promise<GitResult> {
+    const seen = this.changeCount;
     this.clock.committed();
     const notReady = await this._ready();
     if (notReady) return notReady;
     let add: GitRun | null;
     try { add = await this._stage(); }
-    catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
-    if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
-    if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
+    catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: this._changedSince(seen) }); return { ok: false, error: err.message }; }
+    if (!add) { this._set({ pending: this._changedSince(seen), lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    if (!add.ok) { this._set({ lastError: add.error, pending: this._changedSince(seen) }); return { ok: false, error: add.error }; }
     const staged = await this._staged();
-    if (staged.ok) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    if (staged.ok) { this._set({ pending: this._changedSince(seen), lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
     const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
     const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
-    if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
+    if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: this._changedSince(seen) }); return { ok: false, error: r.error }; }
     if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
-    this._set({ lastError: this._linkedNotice(), pending: false });
+    this._set({ lastError: this._linkedNotice(), pending: this._changedSince(seen) });
     await this.refreshCounts();
     return { ok: true };
   }
@@ -475,7 +465,7 @@ class GitSync {
   }
 
   syncDue(minGapMs: number) {
-    return this.state.enabled && !!this.state.remote && !this.busy && this.now() - this.lastSyncTry >= minGapMs;
+    return this.state.enabled && !!this.state.remote && !this.busy && this.timer === null && this.now() - this.lastSyncTry >= minGapMs;
   }
 
   async _pushNow(): Promise<GitResult> {

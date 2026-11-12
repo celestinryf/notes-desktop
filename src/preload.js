@@ -190,7 +190,6 @@ const notesApi = {
     exportAll: invoke('app:exportAll'),
     importMarkdown: invoke('app:importMarkdown'),
     historyVersions: invoke('history:versions'),
-    historySettle: invoke('history:settle'),
     updateStatus: invoke('update:status'),
     updateCheck: invoke('update:check'),
     updateApply: invoke('update:apply'),
