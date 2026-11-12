@@ -134,6 +134,21 @@ test('references: a root that cannot be read gives empty lists, not an error', a
   assert.deepEqual(found.citations, []);
 });
 
+test('references: a project folder that is gone gives empty lists and leaves no rejected promise behind', async () => {
+  const unhandled = [];
+  const listen = (err) => unhandled.push(err);
+  process.on('unhandledRejection', listen);
+  try {
+    const gone = path.join(tmpDir('notes-tex-refs-gone-'), 'missing', 'folder');
+    const found = await F.referencesFor(path.join(gone, 'main.tex'));
+    assert.deepEqual(found.labels, []);
+    assert.deepEqual(found.files, []);
+    assert.equal(await F.projectReader(gone)(path.join(gone, 'a.tex')), null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(unhandled, []);
+  } finally { process.off('unhandledRejection', listen); }
+});
+
 test('references: a folder linked into the project that points outside it is not read', async (t) => {
   const { dir, write } = project();
   const outside = tmpDir('notes-tex-refs-outside-');

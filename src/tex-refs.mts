@@ -22,12 +22,14 @@ const withTex = (name: string) => (/\.(tex|ltx|latex)$/i.test(name) ? name : nam
 
 export function projectReader(dir: string, budget = MAX_TOTAL_BYTES): Reader {
   let left = budget;
-  let realDir: Promise<string> | null = null;
+  let realDir: Promise<string | null> | null = null;
   return async (file) => {
+    realDir = realDir || fs.promises.realpath(dir).catch(() => null);
+    const inside = await realDir;
+    if (inside === null) return null;
     try {
-      realDir = realDir || fs.promises.realpath(dir);
       const real = await fs.promises.realpath(file);
-      if (!isInside(await realDir, real)) return null;
+      if (!isInside(inside, real)) return null;
       const { size } = await fs.promises.stat(real);
       if (size > MAX_FILE_BYTES || size > left) return null;
       left -= size;
