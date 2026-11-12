@@ -824,10 +824,13 @@
     <div class="popover menu compile-results hidden" id="compileResults" role="menu" aria-label="Compile results">
       <p class="compile-summary" id="compileSummary"></p>
       <div class="compile-issue-list" id="compileIssueList"></div>
+      <p class="compile-hint" id="compileHint">F8 goes to the next error or warning, Shift+F8 to the one before.</p>
       <div class="menu-group" role="group" aria-label="Output" id="compileOutput">
         <button role="menuitem" class="menu-item" id="compileOpenPdfBtn" data-icon="file-text"><span class="lbl">Open the PDF</span></button>
         <button role="menuitem" class="menu-item" id="compileResultsLogBtn" data-icon="scroll-text"><span class="lbl">Show the full log</span></button>
         <button role="menuitem" class="menu-item" id="compileRetryFindBtn" data-icon="refresh-cw"><span class="lbl">Look for TeX again</span></button>
+        <button role="menuitem" class="menu-item compile-get-tex" data-url="https://miktex.org/download" data-icon="external-link"><span class="lbl">MiKTeX's download page</span></button>
+        <button role="menuitem" class="menu-item compile-get-tex" data-url="https://tug.org/texlive/windows.html" data-icon="external-link"><span class="lbl">TeX Live's page for Windows</span></button>
       </div>
     </div>
     <div class="popover inline-menu hidden" id="inlineMenu" role="listbox" aria-label="Insert"></div>

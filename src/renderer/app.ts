@@ -3066,6 +3066,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (ctrl && e.shiftKey && !e.altKey && e.code === 'Backslash') { e.preventDefault(); toggleList(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); toggleReadAloud(); return; }
     if (ctrl && !e.shiftKey && !e.altKey && e.key === 'Enter' && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.compile(); return; }
+    if (e.key === 'F8' && !ctrl && !e.altKey && !inDialog && compiling.canCompile()) { e.preventDefault(); compiling.stepIssue(e.shiftKey ? -1 : 1); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'e') { if (bodyHasFocus() && canAddFormula()) { e.preventDefault(); addFormula(); } return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggleBot(); return; }
     if (ctrl && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); toggleSticky(); return; }

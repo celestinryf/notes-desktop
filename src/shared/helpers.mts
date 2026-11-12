@@ -1,4 +1,5 @@
 import { mathAsText } from './math.mts';
+import { TEX_FILE } from './tex-magic.mts';
 
 const UNTITLED = 'Untitled';
 

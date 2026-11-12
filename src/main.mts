@@ -1598,9 +1598,9 @@ function main() {
     return note;
   };
   handle('tex:status', (_e, again) => tex.status(again === true));
-  handle('tex:compile', (_e, id) => { const note = texNote(id); return tex.compile(note.filePath, note.texOptions || DEFAULT_TEX_OPTIONS); });
-  handle('tex:stop', (_e, id) => tex.stop(texNote(id).filePath));
-  handle('tex:clean', (_e, id) => tex.clean(texNote(id).filePath));
+  handle('tex:compile', (_e, id) => { const note = texNote(id); return tex.compile(note.id, note.filePath, note.texOptions || DEFAULT_TEX_OPTIONS); });
+  handle('tex:stop', (_e, id) => (typeof id === 'string' ? tex.stop(id) : false));
+  handle('tex:clean', (_e, id) => { const note = texNote(id); return tex.clean(note.id, note.filePath); });
   handle('tex:setOptions', (_e, id, patch) => store.publicNote(store.setTexOptions(texNote(id).id, patch)));
   handle('files:convert', async (_e, id, to) => {
     try { const r = await convert.convertFile(store.get(id), to, printers); return { ok: true, filePath: r.filePath, warning: r.warning }; }

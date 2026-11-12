@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const args = process.argv.slice(2);
-if (args.includes('--version')) {
+if (args.includes('--version') || args.includes('-v')) {
   process.stdout.write('pdfTeX 3.141592653-2.6-1.40.26 (Fake TeX 2026)\n');
   process.exit(0);
 }
@@ -15,6 +15,10 @@ const source = fs.readFileSync(path.join(cwd, file), 'utf8').replace(/\r\n?/g, '
 const lines = source.split('\n');
 const errorAt = lines.findIndex((l) => l.includes('\\FAKEERROR'));
 const fatal = source.includes('\\FAKEFATAL');
+const noLog = source.includes('\\FAKENOLOG');
+const rerun = source.includes('\\FAKERERUN');
+const bibliography = /\\bibliography\{/.test(source);
+const runs = (() => { try { return Number(fs.readFileSync(path.join(cwd, stem + '.runs'), 'utf8')) || 0; } catch (_) { return 0; } })() + 1;
 const log = ['This is pdfTeX, Version 3.141592653-2.6-1.40.26 (Fake TeX 2026) (preloaded format=pdflatex)', 'entering extended mode', ' file:line:error style messages enabled.', '**' + file, '(./' + file];
 if (errorAt !== -1) {
   log.push('./' + file + ':' + (errorAt + 1) + ': Undefined control sequence.', 'l.' + (errorAt + 1) + ' ' + lines[errorAt].trim(), '', 'The control sequence at the end of the top line', 'of your error message was never \\def\'ed.', '');
@@ -22,6 +26,7 @@ if (errorAt !== -1) {
 lines.forEach((l, i) => {
   if (l.includes('\\FAKEWARNING')) log.push('', 'LaTeX Warning: Reference `fig:loop\' on page 1 undefined on input line ' + (i + 1) + '.', '');
 });
+if (rerun) log.push('', 'LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.', '');
 if (fatal) {
   log.push('./' + file + ':1: Emergency stop.', '!  ==> Fatal error occurred, no output PDF file produced!');
 } else {
@@ -47,8 +52,10 @@ function onePagePdf(text) {
 
 const delay = Number(process.env.FAKE_TEX_DELAY_MS || 0);
 setTimeout(async () => {
+  fs.writeFileSync(path.join(cwd, stem + '.runs'), String(runs));
+  if (noLog) process.exit(3);
   fs.writeFileSync(path.join(cwd, stem + '.log'), log.join('\n') + '\n');
-  fs.writeFileSync(path.join(cwd, stem + '.aux'), '\\relax\n');
+  fs.writeFileSync(path.join(cwd, stem + '.aux'), bibliography ? '\\relax\n\\bibdata{refs}\n' : '\\relax\n');
   if (!fatal) {
     const title = (lines.find((l) => l.trim() && !l.trim().startsWith('%') && !l.trim().startsWith('\\')) || stem).slice(0, 60);
     fs.writeFileSync(path.join(cwd, stem + '.pdf'), onePagePdf(title));

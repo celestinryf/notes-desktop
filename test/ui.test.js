@@ -705,6 +705,7 @@ test('compile: a LaTeX file compiles with the TeX Notes finds, lists errors with
   await page.click('#codeHost .cm-line >> nth=2');
   await page.keyboard.press('End');
   await page.keyboard.type(' \\FAKEERROR');
+  await waitFor('the result marked as stale', async () => (await statusText()) === 'Edited since compiling');
   await page.click('#codeHost .cm-line >> nth=0');
   await page.keyboard.press('Control+Enter');
   await waitFor('the error counted', async () => (await statusText()) === '1 error', 15000);
@@ -717,6 +718,10 @@ test('compile: a LaTeX file compiles with the TeX Notes finds, lists errors with
   await page.click('#compileIssueList .compile-issue');
   await waitForDom(() => /^Ln 3,/.test(document.getElementById('statusCode').textContent));
   assert.equal(await page.$eval('#compileResults', (p) => p.classList.contains('hidden')), true, 'the list closes on a click');
+  await page.click('#codeHost .cm-line >> nth=0');
+  await waitForDom(() => /^Ln 1,/.test(document.getElementById('statusCode').textContent));
+  await page.keyboard.press('F8');
+  await waitForDom(() => /^Ln 3,/.test(document.getElementById('statusCode').textContent));
 
   await page.click('#compileMenuBtn');
   await page.waitForSelector('#compileMenu:not(.hidden)');

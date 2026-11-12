@@ -3,102 +3,130 @@ import path from 'node:path';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { launchSpec } from './claude-bin.mts';
 import { parseTexLog } from './shared/tex-log.mts';
-import { readMagic, rootFor, engineFor, engineArgs, latexmkArgs, pdfFor, needsBibtex, needsBiber, type TexOptions } from './tex-build.mts';
+import { engineFor, engineArgs, latexmkArgs, pdfFor, needsBibtex, needsBiber, stemOf, type TexMagic, type TexOptions } from './tex-build.mts';
 import type { TexInstall } from './tex-engine.mts';
 
 export const COMPILE_CAP_MS = 120 * 1000;
 const MAX_ENGINE_RUNS = 4;
 
 type Exe = NonNullable<TexInstall['latexmk']>;
+type Running = { stop: () => void, done: Promise<void> };
+export type CompileJob = { root: string, magic: TexMagic, install: TexInstall, options: TexOptions, capMs?: number };
 
-const running = new Map<string, () => void>();
+const running = new Map<string, Running>();
+const keyOf = (root: string) => (process.platform === 'win32' ? path.resolve(root).toLowerCase() : path.resolve(root));
 
 function killTree(child: ChildProcess) {
-  if (process.platform === 'win32' && child.pid) execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => child.kill());
-  else child.kill();
+  if (!child.pid) { child.kill(); return; }
+  if (process.platform === 'win32') { execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => child.kill()); return; }
+  try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
 }
 
-function step(exe: Exe, args: string[], cwd: string, deadline: number, stopped: { on: boolean, kill: (() => void) | null }) {
+type StepControl = { stopped: boolean, kill: (() => void) | null };
+
+function step(exe: Exe, args: string[], cwd: string, deadline: number, control: StepControl) {
   return new Promise<number | null>((resolve, reject) => {
     const spec = launchSpec(exe, args);
     let child: ChildProcess;
     try {
-      child = spawn(spec.file, spec.args, { cwd, shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'], env: Object.assign({}, process.env, spec.env) });
+      child = spawn(spec.file, spec.args, { cwd, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'ignore', 'ignore'], env: Object.assign({}, process.env, spec.env) });
     } catch (err) { reject(err); return; }
     const timer = setTimeout(() => killTree(child), Math.max(0, deadline - Date.now()));
-    stopped.kill = () => killTree(child);
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
-    child.on('close', (code) => { clearTimeout(timer); stopped.kill = null; resolve(code); });
+    control.kill = () => killTree(child);
+    child.on('error', (err) => { clearTimeout(timer); control.kill = null; reject(err); });
+    child.on('close', (code) => { clearTimeout(timer); control.kill = null; resolve(code); });
   });
 }
 
-const readIfThere = (file: string) => { try { return fs.readFileSync(file, 'utf8'); } catch (_) { return ''; } };
-const modifiedSince = (file: string, since: number) => { try { return fs.statSync(file).mtimeMs >= since - 1000; } catch (_) { return false; } };
+function writtenSince(file: string, since: number) {
+  try { return fs.statSync(file).mtimeMs >= since - 1000; } catch (_) { return false; }
+}
 
-export function stopAllCompiles() {
-  for (const stop of Array.from(running.values())) stop();
+function readFresh(file: string, since: number) {
+  try { return writtenSince(file, since) ? fs.readFileSync(file, 'utf8') : ''; } catch (_) { return ''; }
+}
+
+export function isCompiling(root: string) {
+  return running.has(keyOf(root));
 }
 
 export function stopCompile(root: string) {
-  const stop = running.get(path.resolve(root).toLowerCase());
-  if (stop) stop();
-  return !!stop;
+  const job = running.get(keyOf(root));
+  if (job) job.stop();
+  return !!job;
 }
 
-export async function compileTex(filePath: string, source: string, install: TexInstall, options: TexOptions): Promise<TexCompileResult> {
-  const magic = readMagic(source);
-  const root = rootFor(filePath, magic);
-  const key = path.resolve(root).toLowerCase();
-  stopCompile(root);
+export function stopAllCompiles() {
+  for (const job of Array.from(running.values())) job.stop();
+}
+
+export async function compileTex(job: CompileJob): Promise<TexCompileResult> {
+  const { root, magic, install, options } = job;
+  const key = keyOf(root);
+  const before = running.get(key);
+  if (before) { before.stop(); await before.done; }
   const started = Date.now();
-  const deadline = started + COMPILE_CAP_MS;
+  const deadline = started + (job.capMs ?? COMPILE_CAP_MS);
   const steps: string[] = [];
-  const stopped: { on: boolean, kill: (() => void) | null } = { on: false, kill: null };
-  const stop = () => { stopped.on = true; if (stopped.kill) stopped.kill(); };
-  running.set(key, stop);
+  const control: StepControl = { stopped: false, kill: null };
+  let finished = () => {};
+  const done = new Promise<void>((resolve) => { finished = resolve; });
+  const stop = () => { control.stopped = true; if (control.kill) control.kill(); };
+  running.set(key, { stop, done });
   const cwd = path.dirname(root);
-  const stem = path.basename(root).replace(/\.[^.]+$/, '');
+  const stem = path.basename(stemOf(root));
   const logFile = path.join(cwd, stem + '.log');
   const engine = engineFor(magic, options);
-  const finish = (): TexCompileResult | null => {
-    if (stopped.on) return { ok: false, root, reason: 'stopped', message: 'Compiling stopped.', log: null, ms: Date.now() - started, steps };
-    if (Date.now() >= deadline) return { ok: false, root, reason: 'timeout', message: 'Compiling took longer than 2 minutes and was stopped.', log: parseTexLog(readIfThere(logFile)), ms: Date.now() - started, steps };
+  const failed = (reason: 'stopped' | 'timeout' | 'failed', message: string): TexCompileResult => {
+    const log = readFresh(logFile, started);
+    return { ok: false, root, reason, message, log: log ? parseTexLog(log) : null, ms: Date.now() - started, steps };
+  };
+  const interrupted = () => {
+    if (control.stopped) return failed('stopped', 'Compiling stopped.');
+    if (Date.now() >= deadline) return failed('timeout', 'Compiling took longer than ' + Math.round((job.capMs ?? COMPILE_CAP_MS) / 60000) + ' minutes and was stopped.');
     return null;
   };
   try {
-    if (!fs.existsSync(root)) return { ok: false, root, reason: 'failed', message: 'The root file ' + path.basename(root) + ' named by "% !TEX root" does not exist.', log: null, ms: 0, steps };
     const exe = install.engines[engine];
     if (install.latexmk) {
       steps.push('latexmk');
-      await step(install.latexmk, latexmkArgs(root, engine, options), cwd, deadline, stopped);
+      await step(install.latexmk, latexmkArgs(root, engine, options), cwd, deadline, control);
+      const stopped = interrupted();
+      if (stopped) return stopped;
     } else {
-      if (!exe) return { ok: false, root, reason: 'failed', message: 'This TeX installation has no ' + engine + '.', log: null, ms: 0, steps };
-      let runs = 0;
+      if (!exe) return failed('failed', 'This TeX installation has no ' + engine + '.');
       let bibDone = false;
-      for (;;) {
+      for (let runs = 1; ; runs++) {
         steps.push(engine);
-        await step(exe, engineArgs(root, options), cwd, deadline, stopped);
-        runs += 1;
-        const early = finish();
-        if (early) return early;
-        const log = readIfThere(logFile);
+        const code = await step(exe, engineArgs(root, options), cwd, deadline, control);
+        const stopped = interrupted();
+        if (stopped) return stopped;
+        const log = readFresh(logFile, started);
+        if (!log) return failed('failed', engine + ' stopped before writing its log' + (code === null ? '.' : ' (exit code ' + code + ').'));
         if (!bibDone) {
           bibDone = true;
-          const aux = readIfThere(path.join(cwd, stem + '.aux'));
+          const aux = readFresh(path.join(cwd, stem + '.aux'), started);
           const bib = magic.bib || (needsBiber(aux, log) ? 'biber' : needsBibtex(aux) ? 'bibtex' : null);
           const tool = bib === 'biber' ? install.biber : bib === 'bibtex' ? install.bibtex : null;
-          if (bib && tool) { steps.push(bib); await step(tool, [stem], cwd, deadline, stopped); const after = finish(); if (after) return after; continue; }
+          if (bib && tool) {
+            steps.push(bib);
+            await step(tool, [stem], cwd, deadline, control);
+            const afterBib = interrupted();
+            if (afterBib) return afterBib;
+            continue;
+          }
         }
         if (runs >= MAX_ENGINE_RUNS || !parseTexLog(log).rerun) break;
       }
     }
-    const early = finish();
-    if (early) return early;
+    const log = readFresh(logFile, started);
     const pdf = pdfFor(root);
-    return { ok: true, root, pdf: modifiedSince(pdf, started) ? pdf : null, engine, log: parseTexLog(readIfThere(logFile)), ms: Date.now() - started, steps };
+    return { ok: true, root, pdf: writtenSince(pdf, started) ? pdf : null, engine, log: parseTexLog(log), ms: Date.now() - started, steps };
   } catch (err) {
-    return { ok: false, root, reason: 'failed', message: 'Could not run ' + engine + ': ' + (err instanceof Error ? err.message : String(err)), log: null, ms: Date.now() - started, steps };
+    return failed('failed', 'Could not run ' + engine + ': ' + (err instanceof Error ? err.message : String(err)));
   } finally {
-    if (running.get(key) === stop) running.delete(key);
+    const current = running.get(key);
+    if (current && current.stop === stop) running.delete(key);
+    finished();
   }
 }

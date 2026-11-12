@@ -76,10 +76,19 @@ test('magic comments name the root, the program and the bibliography tool', () =
 });
 
 test('the root resolves beside the file and gains .tex when it has none', () => {
-  const file = path.join('C:', 'thesis', 'chapters', 'intro.tex');
-  assert.equal(B.rootFor(file, B.readMagic('')), file);
-  assert.equal(B.rootFor(file, B.readMagic('% !TEX root = ../main.tex')), path.join('C:', 'thesis', 'main.tex'));
-  assert.equal(B.rootFor(file, B.readMagic('% !TEX root = ../main')), path.join('C:', 'thesis', 'main.tex'));
+  const file = path.resolve('/thesis/chapters/intro.tex');
+  assert.deepEqual(B.rootFor(file, B.readMagic('')), { root: file });
+  assert.deepEqual(B.rootFor(file, B.readMagic('% !TEX root = ../main.tex')), { root: path.resolve('/thesis/main.tex') });
+  assert.deepEqual(B.rootFor(file, B.readMagic('% !TEX root = ../main')), { root: path.resolve('/thesis/main.tex') });
+  assert.deepEqual(B.rootFor(file, B.readMagic('% !TEX root = parts/p.tex')), { root: path.resolve('/thesis/chapters/parts/p.tex') }, 'a folder below is fine');
+});
+
+test('a root may sit up to three folders above the file, never beside it or further up', () => {
+  const file = path.resolve('/a/b/c/d/x.tex');
+  assert.ok('root' in B.rootFor(file, B.readMagic('% !TEX root = ../../../main.tex')));
+  assert.ok('error' in B.rootFor(file, B.readMagic('% !TEX root = ../../../../main.tex')));
+  assert.ok('error' in B.rootFor(file, B.readMagic('% !TEX root = ../sibling/main.tex')));
+  assert.ok('error' in B.rootFor(file, B.readMagic('% !TEX root = ' + path.resolve('/elsewhere/main.tex'))));
 });
 
 test('the magic comment beats the chosen engine', () => {
@@ -93,7 +102,7 @@ test('commands never wait on the keyboard, write SyncTeX and file:line errors, a
   const file = path.join('C:', 'x', 'main.tex');
   assert.deepEqual(B.engineArgs(file, { engine: 'pdflatex', haltOnError: false }), ['-interaction=nonstopmode', '-synctex=1', '-file-line-error', 'main.tex']);
   assert.deepEqual(B.engineArgs(file, { engine: 'pdflatex', haltOnError: true }), ['-interaction=nonstopmode', '-synctex=1', '-file-line-error', '-halt-on-error', 'main.tex']);
-  assert.deepEqual(B.latexmkArgs(file, 'xelatex', { engine: 'pdflatex', haltOnError: false }), ['-pdfxe', '-interaction=nonstopmode', '-synctex=1', '-file-line-error', 'main.tex']);
+  assert.deepEqual(B.latexmkArgs(file, 'xelatex', { engine: 'pdflatex', haltOnError: false }), ['-pdfxe', '-norc', '-interaction=nonstopmode', '-synctex=1', '-file-line-error', 'main.tex']);
   assert.equal(B.latexmkArgs(file, 'lualatex', { engine: 'pdflatex', haltOnError: false })[0], '-pdflua');
   assert.equal(B.latexmkArgs(file, 'pdflatex', { engine: 'pdflatex', haltOnError: false })[0], '-pdf');
 });
@@ -126,12 +135,14 @@ const failed = (reason) => ({ ok: false, root: null, reason, message: 'm', log: 
 test('the status line says what happened in a few words', () => {
   assert.deepEqual(R.statusOf(null, false), { text: 'Not compiled yet', tone: 'muted', icon: null });
   assert.equal(R.statusOf(ok(), true).text, 'Compiling…');
-  assert.deepEqual(R.statusOf(ok(), false), { text: 'Compiled', tone: 'normal', icon: null });
+  assert.deepEqual(R.statusOf(ok(), false), { text: 'Compiled', tone: 'ok', icon: 'check' });
+  assert.deepEqual(R.statusOf(ok(), false, true), { text: 'Edited since compiling', tone: 'muted', icon: null });
+  assert.equal(R.statusOf(ok({ log: log({ errors: 1 }) }), false, true).text, '1 error', 'errors stay in view while they are fixed');
   assert.equal(R.statusOf(ok({ log: log({ warnings: 3 }) }), false).text, 'Compiled, 3 warnings');
   assert.equal(R.statusOf(ok({ log: log({ warnings: 1 }) }), false).text, 'Compiled, 1 warning');
   assert.deepEqual(R.statusOf(ok({ log: log({ errors: 2, warnings: 1 }) }), false), { text: '2 errors', tone: 'danger', icon: 'circle-alert' });
   assert.equal(R.statusOf(ok({ pdf: null }), false).text, 'No PDF made');
-  assert.equal(R.statusOf(failed('no-tex'), false).text, 'No TeX found');
+  assert.deepEqual(R.statusOf(failed('no-tex'), false), { text: 'No TeX found', tone: 'normal', icon: 'triangle-alert' });
   assert.equal(R.statusOf(failed('stopped'), false).tone, 'muted');
   assert.equal(R.statusOf(failed('timeout'), false).text, 'Stopped after 2 minutes');
   assert.equal(R.statusOf(failed('failed'), false).text, 'Could not compile');
@@ -176,4 +187,33 @@ test('only .tex, .ltx and .latex files outside the notes folder are LaTeX files'
   assert.equal(Hl.isTexFile({ filePath: 'C:/x/a.md', fileKind: 'text' }), false);
   assert.equal(Hl.isTexFile({ filePath: null, fileKind: null }), false);
   assert.equal(Hl.isTexFile(null), false);
+});
+
+test('a line that happens to be 79 characters long does not swallow the next message', () => {
+  const long = 'x'.repeat(79);
+  const r = parseTexLog(['(./main.tex', long, '! Undefined control sequence.', 'l.5 \\oops', '', long, 'LaTeX Warning: Reference `a\' on page 1 undefined on input line 9.', ')'].join('\n'));
+  assert.deepEqual(brief(r.issues), [['error', 'main.tex', 5, 'Undefined control sequence.'], ['warning', 'main.tex', 9, "Reference `a' on page 1 undefined on input line 9."]]);
+});
+
+test('parentheses inside an overfull box do not lose track of the file', () => {
+  const r = parseTexLog(['(./main.tex', 'Overfull \\hbox (3.0pt too wide) in paragraph at lines 4--6', '[]\\OT1/cmr/m/n/10 (see the figure on the left', ' []', '', 'LaTeX Warning: Reference `b\' on page 1 undefined on input line 9.', ')'].join('\n'));
+  assert.deepEqual(brief(r.issues).map((x) => x.slice(0, 3)), [['badbox', 'main.tex', 4], ['warning', 'main.tex', 9]]);
+});
+
+test('a quoted path with spaces is tracked as one file', () => {
+  const r = parseTexLog(['("C:/Users/Some One/My Thesis/chap one.tex"', '! Undefined control sequence.', 'l.2 \\x', ')'].join('\n'));
+  assert.deepEqual(brief(r.issues), [['error', 'C:/Users/Some One/My Thesis/chap one.tex', 2, 'Undefined control sequence.']]);
+});
+
+test('an error with no context line within twelve lines keeps the line after it in view', () => {
+  const lines = ['(./main.tex', '! Some error.'].concat(Array.from({ length: 11 }, (_, k) => 'detail ' + k), ['LaTeX Warning: Reference `c\' on page 1 undefined on input line 3.', ')']);
+  const r = parseTexLog(lines.join('\n'));
+  assert.deepEqual(r.issues.map((i) => i.kind), ['error', 'warning']);
+});
+
+test('only files inside the document folder count as the document', () => {
+  assert.equal(R.isWithin('C:/thesis', 'C:/thesis/chapters/a.tex'), true);
+  assert.equal(R.isWithin('C:/thesis/', 'c:/THESIS/a.tex'), true);
+  assert.equal(R.isWithin('C:/thesis', 'C:/thesis2/a.tex'), false);
+  assert.equal(R.isWithin('C:/thesis', 'C:/texlive/2024/texmf-dist/tex/latex/base/article.cls'), false);
 });

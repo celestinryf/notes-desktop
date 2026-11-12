@@ -2,7 +2,11 @@ export type TexMagic = { root: string | null, program: TexEngineName | null, bib
 export type TexOptions = Pick<TexNoteOptions, 'engine' | 'haltOnError'>;
 
 export const ENGINES: readonly TexEngineName[] = ['pdflatex', 'xelatex', 'lualatex'];
+export const ENGINE_LABELS: Record<TexEngineName, string> = { pdflatex: 'pdfLaTeX', xelatex: 'XeLaTeX', lualatex: 'LuaLaTeX' };
 export const DEFAULT_TEX_OPTIONS: TexNoteOptions = { engine: 'pdflatex', haltOnError: false, compileOnSave: false };
+export const TEX_FILE = /\.(tex|ltx|latex)$/i;
+
+export const stemOf = (filePath: string) => filePath.replace(/\.[^./\\]+$/, '');
 
 export function texOptionsPatch(raw: unknown): Partial<TexNoteOptions> {
   const patch: Partial<TexNoteOptions> = {};
@@ -16,16 +20,11 @@ export function texOptionsPatch(raw: unknown): Partial<TexNoteOptions> {
 
 export function texOptionsFrom(raw: unknown): TexNoteOptions | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  const engine = 'engine' in raw ? ENGINES.find((e) => e === raw.engine) : undefined;
-  return {
-    engine: engine || DEFAULT_TEX_OPTIONS.engine,
-    haltOnError: 'haltOnError' in raw && raw.haltOnError === true,
-    compileOnSave: 'compileOnSave' in raw && raw.compileOnSave === true,
-  };
+  return Object.assign({}, DEFAULT_TEX_OPTIONS, texOptionsPatch(raw));
 }
 
 const MAGIC_LINES = 20;
-const MAGIC = /^\s*%\s*!\s*(?:TEX|TeX|tex)\s+(TS-program|program|root|BIB\s+program)\s*=\s*(.+?)\s*$/i;
+const MAGIC = /^\s*%\s*!\s*TEX\s+(TS-program|program|root)\s*=\s*(.+?)\s*$/i;
 const BIB_MAGIC = /^\s*%\s*!\s*BIB\s+(?:TS-)?program\s*=\s*(.+?)\s*$/i;
 
 const asEngine = (name: string): TexEngineName | null => {
@@ -43,9 +42,7 @@ export function readMagic(source: string): TexMagic {
     if (!m) continue;
     const key = m[1].toLowerCase();
     if (key === 'root' && !magic.root) magic.root = m[2];
-    else if ((key === 'program' || key === 'ts-program') && !magic.program) magic.program = asEngine(m[2]);
+    else if (key !== 'root' && !magic.program) magic.program = asEngine(m[2]);
   }
   return magic;
 }
-
-export const ENGINE_LABELS: Record<TexEngineName, string> = { pdflatex: 'pdfLaTeX', xelatex: 'XeLaTeX', lualatex: 'LuaLaTeX' };

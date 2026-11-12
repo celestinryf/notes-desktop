@@ -14787,7 +14787,7 @@
     speechChunks: () => speechChunks,
     splitAtHeadings: () => splitAtHeadings,
     splitFrontMatter: () => splitFrontMatter,
-    stemOf: () => stemOf,
+    stemOf: () => stemOf2,
     stringItems: () => stringItems,
     tenths: () => tenths,
     toggleTaskAt: () => toggleTaskAt,
@@ -14900,6 +14900,37 @@
       if (keep) out += span.latex.replace(/\s+/g, " ").trim();
     });
     return out;
+  }
+
+  // src/shared/tex-magic.mts
+  var ENGINES = ["pdflatex", "xelatex", "lualatex"];
+  var ENGINE_LABELS = { pdflatex: "pdfLaTeX", xelatex: "XeLaTeX", lualatex: "LuaLaTeX" };
+  var DEFAULT_TEX_OPTIONS = { engine: "pdflatex", haltOnError: false, compileOnSave: false };
+  var stemOf = (filePath) => filePath.replace(/\.[^./\\]+$/, "");
+  var MAGIC_LINES = 20;
+  var MAGIC = /^\s*%\s*!\s*TEX\s+(TS-program|program|root)\s*=\s*(.+?)\s*$/i;
+  var BIB_MAGIC = /^\s*%\s*!\s*BIB\s+(?:TS-)?program\s*=\s*(.+?)\s*$/i;
+  var asEngine = (name) => {
+    const n = name.trim().toLowerCase().replace(/\.exe$/, "");
+    return ENGINES.find((e) => e === n) || null;
+  };
+  function readMagic(source) {
+    const magic = { root: null, program: null, bib: null };
+    const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n").slice(0, MAGIC_LINES);
+    for (const line of lines) {
+      const bib = BIB_MAGIC.exec(line);
+      if (bib) {
+        const b = bib[1].trim().toLowerCase();
+        if (b === "bibtex" || b === "biber") magic.bib = b;
+        continue;
+      }
+      const m = MAGIC.exec(line);
+      if (!m) continue;
+      const key = m[1].toLowerCase();
+      if (key === "root" && !magic.root) magic.root = m[2];
+      else if (key !== "root" && !magic.program) magic.program = asEngine(m[2]);
+    }
+    return magic;
   }
 
   // src/shared/helpers.mts
@@ -15352,7 +15383,7 @@
     const leaf = target.split("/").pop() || "";
     return leaf.toLowerCase();
   }
-  function stemOf(name) {
+  function stemOf2(name) {
     const dot = name.lastIndexOf(".");
     return dot > 0 ? name.slice(0, dot) : name;
   }
@@ -16355,6 +16386,7 @@
     compileResults: pageElement("#compileResults", HTMLDivElement),
     compileSummary: pageElement("#compileSummary", HTMLParagraphElement),
     compileIssueList: pageElement("#compileIssueList", HTMLDivElement),
+    compileHint: pageElement("#compileHint", HTMLParagraphElement),
     compileOutput: pageElement("#compileOutput", HTMLDivElement),
     compileOpenPdfBtn: pageElement("#compileOpenPdfBtn", HTMLButtonElement),
     compileResultsLogBtn: pageElement("#compileResultsLogBtn", HTMLButtonElement),
@@ -16920,42 +16952,13 @@
     return { showCode };
   }
 
-  // src/shared/tex-magic.mts
-  var ENGINES = ["pdflatex", "xelatex", "lualatex"];
-  var DEFAULT_TEX_OPTIONS = { engine: "pdflatex", haltOnError: false, compileOnSave: false };
-  var MAGIC_LINES = 20;
-  var MAGIC = /^\s*%\s*!\s*(?:TEX|TeX|tex)\s+(TS-program|program|root|BIB\s+program)\s*=\s*(.+?)\s*$/i;
-  var BIB_MAGIC = /^\s*%\s*!\s*BIB\s+(?:TS-)?program\s*=\s*(.+?)\s*$/i;
-  var asEngine = (name) => {
-    const n = name.trim().toLowerCase().replace(/\.exe$/, "");
-    return ENGINES.find((e) => e === n) || null;
-  };
-  function readMagic(source) {
-    const magic = { root: null, program: null, bib: null };
-    const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n").slice(0, MAGIC_LINES);
-    for (const line of lines) {
-      const bib = BIB_MAGIC.exec(line);
-      if (bib) {
-        const b = bib[1].trim().toLowerCase();
-        if (b === "bibtex" || b === "biber") magic.bib = b;
-        continue;
-      }
-      const m = MAGIC.exec(line);
-      if (!m) continue;
-      const key = m[1].toLowerCase();
-      if (key === "root" && !magic.root) magic.root = m[2];
-      else if ((key === "program" || key === "ts-program") && !magic.program) magic.program = asEngine(m[2]);
-    }
-    return magic;
-  }
-  var ENGINE_LABELS = { pdflatex: "pdfLaTeX", xelatex: "XeLaTeX", lualatex: "LuaLaTeX" };
-
   // src/shared/tex-results.mts
   var plural = (n, one, many) => n.toLocaleString() + " " + (n === 1 ? one : many || one + "s");
   var ISSUE_ICON = { error: "circle-alert", warning: "triangle-alert", badbox: "move-horizontal" };
   var ISSUE_ORDER = { error: 0, warning: 1, badbox: 2 };
   var slashes = (p) => p.replace(/\\/g, "/");
   var dirOf = (p) => slashes(p).replace(/\/[^/]*$/, "");
+  var isWithin = (dir, file) => slashes(file).toLowerCase().startsWith(slashes(dir).toLowerCase().replace(/\/$/, "") + "/");
   var samePath = (a, b) => slashes(a).toLowerCase() === slashes(b).toLowerCase();
   function joinPath(dir, rel) {
     if (/^([A-Za-z]:)?[\\/]/.test(rel)) return slashes(rel);
@@ -16966,19 +16969,20 @@
     }
     return parts.join("/");
   }
-  function statusOf(result, running) {
+  function statusOf(result, running, edited) {
     if (running) return { text: "Compiling\u2026", tone: "muted", icon: null };
     if (!result) return { text: "Not compiled yet", tone: "muted", icon: null };
     if (!result.ok) {
-      if (result.reason === "no-tex") return { text: "No TeX found", tone: "danger", icon: "circle-alert" };
+      if (result.reason === "no-tex") return { text: "No TeX found", tone: "normal", icon: "triangle-alert" };
       if (result.reason === "stopped") return { text: "Stopped", tone: "muted", icon: null };
       if (result.reason === "timeout") return { text: "Stopped after 2 minutes", tone: "danger", icon: "circle-alert" };
       return { text: "Could not compile", tone: "danger", icon: "circle-alert" };
     }
     if (result.log.errors) return { text: plural(result.log.errors, "error"), tone: "danger", icon: "circle-alert" };
     if (!result.pdf) return { text: "No PDF made", tone: "danger", icon: "circle-alert" };
-    if (result.log.warnings) return { text: "Compiled, " + plural(result.log.warnings, "warning"), tone: "normal", icon: null };
-    return { text: "Compiled", tone: "normal", icon: null };
+    if (edited) return { text: "Edited since compiling", tone: "muted", icon: null };
+    if (result.log.warnings) return { text: "Compiled, " + plural(result.log.warnings, "warning"), tone: "ok", icon: "check" };
+    return { text: "Compiled", tone: "ok", icon: "check" };
   }
   function sortedIssues(issues) {
     return issues.map((issue, i) => ({ issue, i })).sort((a, b) => ISSUE_ORDER[a.issue.kind] - ISSUE_ORDER[b.issue.kind] || a.i - b.i).map((x) => x.issue);
@@ -16987,6 +16991,8 @@
   // src/renderer/compile-controls.ts
   function createCompileControls({ api, flushSave, openFile }) {
     const results = /* @__PURE__ */ new Map();
+    const edited = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new Map();
     let running = null;
     let pendingLine = null;
     const isTex = (n) => !!n && !n.trashedAt && isTexFile(n);
@@ -17010,10 +17016,11 @@
       const busy = running === n.id;
       setIcon(el.compileBtn, busy ? "square" : "play");
       setLabel(el.compileBtn, busy ? "Stop" : "Compile");
-      el.compileBtn.title = busy ? "Stop compiling (Ctrl+Enter)" : "Compile to PDF (Ctrl+Enter)";
+      const engine = readMagic(src.value).program || optionsOf(n).engine;
+      el.compileBtn.title = busy ? "Stop compiling (Ctrl+Enter)" : "Compile to PDF with " + ENGINE_LABELS[engine] + " (Ctrl+Enter)";
       setLabel(el.moreCompileBtn, busy ? "Stop compiling" : "Compile to PDF");
       const result = resultOf(n);
-      const status = statusOf(result, busy);
+      const status = statusOf(result, busy, edited.has(n.id));
       setLabel(el.compileStatus, status.text);
       el.compileStatus.dataset.tone = status.tone;
       if (status.icon) setIcon(el.compileStatus, status.icon);
@@ -17036,11 +17043,13 @@
         return;
       }
       closeMenus();
-      await flushSave();
       running = n.id;
+      edited.delete(n.id);
+      visited.delete(n.id);
       render();
       let result;
       try {
+        await flushSave();
         result = await api.tex.compile(n.id);
       } catch (err) {
         result = { ok: false, root: null, reason: "failed", message: ipcErrorText(err), log: null, ms: 0, steps: [] };
@@ -17085,9 +17094,12 @@
       const issues = log ? sortedIssues(log.issues) : [];
       el.compileIssueList.replaceChildren(...issues.map((i) => issueButton(i, result ? result.root : null)));
       el.compileIssueList.classList.toggle("hidden", !issues.length);
+      el.compileHint.classList.toggle("hidden", !issues.some((i) => i.line));
       el.compileOpenPdfBtn.classList.toggle("hidden", !(result && result.ok && result.pdf));
       el.compileResultsLogBtn.classList.toggle("hidden", !(result && result.root));
-      el.compileRetryFindBtn.classList.toggle("hidden", !(result && !result.ok && result.reason === "no-tex"));
+      const noTex = !!(result && !result.ok && result.reason === "no-tex");
+      el.compileRetryFindBtn.classList.toggle("hidden", !noTex);
+      for (const b of el.compileOutput.querySelectorAll(".compile-get-tex")) b.classList.toggle("hidden", !noTex);
       placePopover(el.compileResults, el.compileStatus);
       el.compileStatus.setAttribute("aria-expanded", "true");
     }
@@ -17142,7 +17154,7 @@
       }
     }
     function logPathOf(result) {
-      return result && result.root ? result.root.replace(/\.[^./\\]+$/, "") + ".log" : null;
+      return result && result.root ? stemOf(result.root) + ".log" : null;
     }
     async function showLog() {
       closeMenus();
@@ -17198,8 +17210,29 @@
         goToLine(issue.line);
         return;
       }
+      if (!root || !isWithin(dirOf(root), file)) {
+        toast("That line is in " + file + ", which belongs to TeX, not to your document.");
+        return;
+      }
       pendingLine = { filePath: file, line: issue.line };
       await openFile(file);
+    }
+    function stepIssue(step) {
+      const n = state.current;
+      if (!isTex(n)) return;
+      const result = resultOf(n);
+      const issues = result && result.log ? sortedIssues(result.log.issues).filter((i) => i.line) : [];
+      if (!issues.length) {
+        toast(result ? "No errors or warnings with a line to go to." : "Compile first (Ctrl+Enter).");
+        return;
+      }
+      const last = visited.get(n.id);
+      const at = last === void 0 ? step === 1 ? 0 : issues.length - 1 : (last + step + issues.length) % issues.length;
+      visited.set(n.id, at);
+      const issue = issues[at];
+      closeMenus();
+      toast((issue.kind === "error" ? "Error " : issue.kind === "warning" ? "Warning " : "Box ") + (at + 1) + " of " + issues.length + ": " + issue.message);
+      goToIssue(issue, result ? result.root : null);
     }
     function noteShown() {
       render();
@@ -17246,6 +17279,16 @@
     el.compileRetryFindBtn.addEventListener("click", () => {
       findTex();
     });
+    for (const b of el.compileOutput.querySelectorAll(".compile-get-tex")) b.addEventListener("click", () => {
+      closeMenus();
+      api.app.openExternal(b.dataset.url || "");
+    });
+    el.bodyInput.addEventListener("input", () => {
+      const n = state.current;
+      if (!isTex(n) || edited.has(n.id) || !results.has(n.id) || running === n.id) return;
+      edited.add(n.id);
+      render();
+    });
     document.addEventListener("pointerdown", (e) => {
       const target = e.target instanceof Node ? e.target : null;
       if (!el.compileMenu.classList.contains("hidden") && !el.compileMenu.contains(target) && !el.compileMenuBtn.contains(target)) closeMenus();
@@ -17260,6 +17303,8 @@
       const program = tex ? readMagic(src.value).program : null;
       return [
         { id: "tex-stop", title: "Stop compiling", icon: "square", keys: "Ctrl+Enter", run: compile, ok: tex && busy, keywords: "latex tex cancel" },
+        { id: "tex-next", title: "Go to the next compile error", icon: "arrow-down", keys: "F8", run: () => stepIssue(1), ok: tex && !!resultOf(n), keywords: "latex tex error warning problem" },
+        { id: "tex-previous", title: "Go to the previous compile error", icon: "arrow-up", keys: "Shift+F8", run: () => stepIssue(-1), ok: tex && !!resultOf(n), keywords: "latex tex error warning problem" },
         { id: "tex-results", title: "Show the compile results", icon: "circle-alert", keys: "", run: openResults, ok: tex && !!resultOf(n), keywords: "latex tex errors warnings log" },
         { id: "tex-log", title: "Show the full compile log", icon: "scroll-text", keys: "", run: showLog, ok: tex && !!logPathOf(resultOf(n)), keywords: "latex tex log" },
         { id: "tex-pdf", title: "Open the compiled PDF", icon: "file-text", keys: "", run: openPdf, ok: tex && (() => {
@@ -17272,7 +17317,7 @@
         { id: "tex-find", title: "Look for TeX again", icon: "refresh-cw", keys: "", run: findTex, ok: true, keywords: "latex miktex texlive install" }
       ];
     }
-    return { render, compile, noteShown, closeMenus, openNow, commands, canCompile: () => isTex(state.current) };
+    return { render, compile, noteShown, closeMenus, openNow, commands, stepIssue, canCompile: () => isTex(state.current) };
   }
 
   // src/renderer/note-html.ts
@@ -30325,6 +30370,11 @@
       if (ctrl && !e.shiftKey && !e.altKey && e.key === "Enter" && !inDialog && compiling.canCompile()) {
         e.preventDefault();
         compiling.compile();
+        return;
+      }
+      if (e.key === "F8" && !ctrl && !e.altKey && !inDialog && compiling.canCompile()) {
+        e.preventDefault();
+        compiling.stepIssue(e.shiftKey ? -1 : 1);
         return;
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "e") {
