@@ -1,22 +1,21 @@
 import { el } from './dom.ts';
 import { find } from './find-state.ts';
+import { src } from './code-editor.ts';
 
 type EditorTextDeps = { runFind: (forward?: boolean, fresh?: boolean, quiet?: boolean) => void, scheduleSave: () => void };
 
 export function createEditorText({ runFind, scheduleSave }: EditorTextDeps) {
   function wrapSelection(before: string, after: string) {
-    const ta = el.bodyInput;
-    if (ta.readOnly) return;
-    const { selectionStart: s, selectionEnd: e, value } = ta;
+    if (src.readOnly) return;
+    const s = src.selectionStart, e = src.selectionEnd, value = src.value;
     const selected = value.slice(s, e);
     const already = value.slice(s - before.length, s) === before && value.slice(e, e + after.length) === after;
     if (already) {
-      ta.setRangeText(selected, s - before.length, e + after.length, 'select');
+      src.setRangeText(selected, s - before.length, e + after.length, 'select');
     } else {
-      ta.setRangeText(before + selected + after, s, e, 'select');
-      ta.setSelectionRange(s + before.length, s + before.length + selected.length);
+      src.setRangeText(before + selected + after, s, e, 'select');
+      src.setSelectionRange(s + before.length, s + before.length + selected.length);
     }
-    scheduleSave();
   }
 
   function handleEditorKeydown(e: KeyboardEvent) {

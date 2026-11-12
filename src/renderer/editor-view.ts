@@ -286,7 +286,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     syncSourceButton();
     syncTextViews(state.current);
     renderCodePosition();
-    if (state.sourceMode) autoGrow();
+    if (state.sourceMode) { src.sync(); autoGrow(); }
     else if (state.rich && state.currentId && !isViewerOnlyFile(state.current) && !isPlainTextFile(state.current)) state.currentLossless = state.rich.setMarkdown(el.bodyInput.value);
   }
 

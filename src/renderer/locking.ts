@@ -104,6 +104,7 @@ export function createLocking({ api, renderFileRow, flushSave, applyEditorMode, 
     if (!keepTyping) {
       state.dirty = false;
       src.reload(updated.body);
+      src.forgetHistory();
       if (state.rich) {
         state.currentLossless = state.rich.setMarkdown(updated.body);
         if (updated.unlocked && state.currentLossless === false && !state.sourceMode && state.lossyOverride !== updated.id) { applyEditorMode(true); toast('Switched to source: this note contains formatting the rendered view would change.'); }
