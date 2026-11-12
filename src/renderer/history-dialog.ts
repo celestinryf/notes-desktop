@@ -238,7 +238,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     scheduleSave();
     const ok = await flushSave();
     if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
-    else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
+    else if (state.pending.has(note.id)) toast('Could not save the restored text yet; it will be retried.');
   }
 
   return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange };

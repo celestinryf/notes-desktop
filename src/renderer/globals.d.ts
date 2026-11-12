@@ -45,7 +45,6 @@ interface RendererState {
   currentLossless?: boolean | null;
   lossyOverride?: string | null;
   lossyToastFor?: string | null;
-  conflictShown?: string | null;
   saveErrorShown?: boolean;
   retryTimer?: ReturnType<typeof setTimeout> | null;
   revealInTree?: string | null;

@@ -575,7 +575,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
   assert.equal(await page.$eval('#fileRow', (r) => !r.classList.contains('hidden')), true);
   assert.equal(await page.textContent('#fileKind'), 'Markdown');
-  assert.equal(await page.$$eval('#fileRow .tool-btn', (bs) => bs.map((b) => b.textContent)).then((t) => t.join(',')), 'Reload', 'the row keeps only Reload');
+  assert.equal(await page.$$eval('#fileRow button', (bs) => bs.length), 0, 'the row has no buttons');
   await page.click('#moreBtn');
   await page.waitForSelector('#moreMenu:not(.hidden)');
   const fileItems = () => page.$$eval('#fileRevealBtn, #fileOpenBtn, #fileConvertBtn', (bs) => bs.map((b) => !b.classList.contains('hidden') && !!b.offsetParent));
@@ -605,6 +605,16 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await sleep(400);
   fs.writeFileSync(mdPath, '# From disk\n\nreplaced by another program\n');
   await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('replaced by another program'));
+
+  const outside = '# From disk\n\nwritten by another program while typing\n';
+  fs.writeFileSync(mdPath, outside);
+  await page.focus('#bodyInput');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('x');
+  await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('while typing') && !document.getElementById('bodyInput').value.includes('x'));
+  await sleep(600);
+  assert.equal(fs.readFileSync(mdPath, 'utf8'), outside, 'the disk version wins without asking; the typed character is not written');
+  assert.equal(await page.inputValue('#bodyInput'), outside);
 
   const softPath = path.join(fileDir, 'soft.md');
   fs.writeFileSync(softPath, 'first line\nsecond line\n');
