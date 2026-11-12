@@ -43,6 +43,13 @@
           "panel-left": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />',
           "panel-right-close": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M15 3v18" /><path d="m8 9 3 3-3 3" />',
           "sigma": '<path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2" />',
+          "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />',
+          "square": '<rect width="18" height="18" x="3" y="3" rx="2" />',
+          "square-check": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="m16 9-5.5 5.5L8 12" />',
+          "triangle-alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" />',
+          "move-horizontal": '<path d="m18 8 4 4-4 4" /><path d="M2 12h20" /><path d="m6 8-4 4 4 4" />',
+          "scroll-text": '<path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />',
+          "eraser": '<path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21" /><path d="m5.082 11.09 8.828 8.828" />',
           "list": '<path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />',
           "folder-tree": '<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" /><path d="M3 5a2 2 0 0 0 2 2h3" /><path d="M3 3v13a2 2 0 0 0 2 2h3" />',
           "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M12 3v18" />',
@@ -14754,6 +14761,7 @@
     isRecord: () => isRecord,
     isRecycleBinPath: () => isRecycleBinPath,
     isTableFile: () => isTableFile,
+    isTexFile: () => isTexFile,
     isViewerOnlyFile: () => isViewerOnlyFile,
     linkLeaf: () => linkLeaf,
     listRow: () => listRow,
@@ -15367,6 +15375,9 @@
   }
   function isNonMarkdownFile(note) {
     return isPlainTextFile(note) || isViewerOnlyFile(note);
+  }
+  function isTexFile(note) {
+    return isPlainTextFile(note) && /\.(tex|ltx|latex)$/i.test(String(note && note.filePath));
   }
   var MAX_TEXT_BYTES = 4 * 1024 * 1024;
   var WORD_EXT = /* @__PURE__ */ new Set(["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt"]);
@@ -16331,6 +16342,24 @@
     fileKind: pageElement("#fileKind", HTMLSpanElement),
     filePath: pageElement("#filePath", HTMLSpanElement),
     fileRevealBtn: pageElement("#fileRevealBtn", HTMLButtonElement),
+    compileControls: pageElement("#compileControls", HTMLDivElement),
+    compileBtn: pageElement("#compileBtn", HTMLButtonElement),
+    compileMenuBtn: pageElement("#compileMenuBtn", HTMLButtonElement),
+    compileStatus: pageElement("#compileStatus", HTMLButtonElement),
+    compileMenu: pageElement("#compileMenu", HTMLDivElement),
+    compileEngines: pageElement("#compileEngines", HTMLDivElement),
+    compileHaltBtn: pageElement("#compileHaltBtn", HTMLButtonElement),
+    compileLogBtn: pageElement("#compileLogBtn", HTMLButtonElement),
+    compileCleanBtn: pageElement("#compileCleanBtn", HTMLButtonElement),
+    compileFindBtn: pageElement("#compileFindBtn", HTMLButtonElement),
+    compileResults: pageElement("#compileResults", HTMLDivElement),
+    compileSummary: pageElement("#compileSummary", HTMLParagraphElement),
+    compileIssueList: pageElement("#compileIssueList", HTMLDivElement),
+    compileOutput: pageElement("#compileOutput", HTMLDivElement),
+    compileOpenPdfBtn: pageElement("#compileOpenPdfBtn", HTMLButtonElement),
+    compileResultsLogBtn: pageElement("#compileResultsLogBtn", HTMLButtonElement),
+    compileRetryFindBtn: pageElement("#compileRetryFindBtn", HTMLButtonElement),
+    moreCompileBtn: pageElement("#moreCompileBtn", HTMLButtonElement),
     fileOpenBtn: pageElement("#fileOpenBtn", HTMLButtonElement),
     docxView: pageElement("#docxView", HTMLIFrameElement),
     docxEditor: pageElement("#docxEditor", HTMLDivElement),
@@ -16741,6 +16770,509 @@
       const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       items[next].focus();
     }, true);
+  }
+
+  // src/renderer/code-editor.ts
+  var { isPlainTextFile: isPlainTextFile2, isViewerOnlyFile: isViewerOnlyFile2 } = helpers_exports;
+  var code = null;
+  var codeOn = false;
+  var codeFailed = false;
+  var hooks = { runFind: () => {
+  }, autoGrow: () => {
+  }, scrollTextareaToSelection: () => {
+  } };
+  var shown = () => codeOn && state.sourceMode ? code : null;
+  var src = {
+    get value() {
+      return el.bodyInput.value;
+    },
+    set value(text) {
+      el.bodyInput.value = text;
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value);
+    },
+    reload(text) {
+      el.bodyInput.value = text;
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value, { history: false });
+    },
+    forgetHistory() {
+      const c = shown();
+      if (c) c.forgetHistory();
+    },
+    get readOnly() {
+      return el.bodyInput.readOnly;
+    },
+    get selectionStart() {
+      const c = shown();
+      return c ? c.selectionStart : el.bodyInput.selectionStart;
+    },
+    get selectionEnd() {
+      const c = shown();
+      return c ? c.selectionEnd : el.bodyInput.selectionEnd;
+    },
+    setSelectionRange(from, to) {
+      const c = shown();
+      if (c) c.setSelectionRange(from, to);
+      else el.bodyInput.setSelectionRange(from, to);
+    },
+    setRangeText(text, from, to, mode) {
+      const c = shown();
+      if (c) {
+        c.setRangeText(text, from, to, mode);
+        el.bodyInput.value = c.value;
+      } else el.bodyInput.setRangeText(text, from, to, mode);
+      el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    focus() {
+      const c = shown();
+      if (c) c.focus();
+      else el.bodyInput.focus();
+    },
+    hasFocus() {
+      const c = shown();
+      return c ? c.hasFocus() : document.activeElement === el.bodyInput;
+    },
+    reveal(at) {
+      const c = shown();
+      if (c) c.reveal(at);
+      else hooks.scrollTextareaToSelection(at);
+    },
+    dispatchEvent(event) {
+      return el.bodyInput.dispatchEvent(event);
+    },
+    get codeOn() {
+      return !!shown();
+    },
+    sync() {
+      const c = shown();
+      if (c) c.setValue(el.bodyInput.value, { history: false });
+    },
+    undoRedo(cmd) {
+      const c = shown();
+      if (!c || !c.contains(document.activeElement)) return false;
+      c[cmd === "redo" ? "redo" : "undo"]();
+      return true;
+    }
+  };
+  var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
+  var isProseFile = (note) => isPlainTextFile2(note) && PROSE_EXT.has(extOf(note.filePath));
+  var isMarkdownNote = (note) => !isPlainTextFile2(note) && !isViewerOnlyFile2(note) && !isTableFile(note);
+  function codeEditor() {
+    if (!code) {
+      if (!window.NotesCode) throw new Error("the code editor bundle did not load");
+      code = window.NotesCode.create({
+        parent: el.codeHost,
+        onChange: (text) => {
+          el.bodyInput.value = text;
+          el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        onSelection: () => {
+          mirrorSelection();
+          renderCodePosition();
+        },
+        onEnter: (shift) => {
+          if (!find.open) return false;
+          hooks.runFind(!shift);
+          return true;
+        }
+      });
+    }
+    return code;
+  }
+  function mirrorSelection() {
+    const c = shown();
+    if (c) el.bodyInput.setSelectionRange(c.selectionStart, c.selectionEnd);
+  }
+  function showCode(note, readOnly) {
+    const markdown = isMarkdownNote(note);
+    codeOn = !!window.NotesCode && !codeFailed && (markdown || isPlainTextFile2(note) && !isProseFile(note));
+    if (codeOn) {
+      try {
+        codeEditor().load(el.bodyInput.value, { ext: markdown ? "md" : extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : "Plain text.", label: deriveTitle(note) });
+      } catch (err) {
+        console.error("The code editor could not start:", err);
+        codeFailed = true;
+        codeOn = false;
+        toast("The code editor could not start, so this file opens as plain text.");
+      }
+    }
+    if (!codeOn && code) {
+      try {
+        code.load("", {});
+      } catch (_) {
+      }
+    }
+    el.bodyInput.classList.toggle("uses-code", codeOn);
+    el.bodyInput.classList.toggle("is-prose", isProseFile(note));
+    renderCodePosition();
+    hooks.autoGrow();
+  }
+  function renderCodePosition() {
+    const c = shown();
+    el.statusCode.classList.toggle("hidden", !c);
+    if (!c) return;
+    const at = c.position();
+    el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
+  }
+  function createCodeEditor({ runFind, autoGrow: autoGrow2, scrollTextareaToSelection }) {
+    hooks = { runFind, autoGrow: autoGrow2, scrollTextareaToSelection };
+    return { showCode };
+  }
+
+  // src/shared/tex-magic.mts
+  var ENGINES = ["pdflatex", "xelatex", "lualatex"];
+  var DEFAULT_TEX_OPTIONS = { engine: "pdflatex", haltOnError: false, compileOnSave: false };
+  var MAGIC_LINES = 20;
+  var MAGIC = /^\s*%\s*!\s*(?:TEX|TeX|tex)\s+(TS-program|program|root|BIB\s+program)\s*=\s*(.+?)\s*$/i;
+  var BIB_MAGIC = /^\s*%\s*!\s*BIB\s+(?:TS-)?program\s*=\s*(.+?)\s*$/i;
+  var asEngine = (name) => {
+    const n = name.trim().toLowerCase().replace(/\.exe$/, "");
+    return ENGINES.find((e) => e === n) || null;
+  };
+  function readMagic(source) {
+    const magic = { root: null, program: null, bib: null };
+    const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n").slice(0, MAGIC_LINES);
+    for (const line of lines) {
+      const bib = BIB_MAGIC.exec(line);
+      if (bib) {
+        const b = bib[1].trim().toLowerCase();
+        if (b === "bibtex" || b === "biber") magic.bib = b;
+        continue;
+      }
+      const m = MAGIC.exec(line);
+      if (!m) continue;
+      const key = m[1].toLowerCase();
+      if (key === "root" && !magic.root) magic.root = m[2];
+      else if ((key === "program" || key === "ts-program") && !magic.program) magic.program = asEngine(m[2]);
+    }
+    return magic;
+  }
+  var ENGINE_LABELS = { pdflatex: "pdfLaTeX", xelatex: "XeLaTeX", lualatex: "LuaLaTeX" };
+
+  // src/shared/tex-results.mts
+  var plural = (n, one, many) => n.toLocaleString() + " " + (n === 1 ? one : many || one + "s");
+  var ISSUE_ICON = { error: "circle-alert", warning: "triangle-alert", badbox: "move-horizontal" };
+  var ISSUE_ORDER = { error: 0, warning: 1, badbox: 2 };
+  var slashes = (p) => p.replace(/\\/g, "/");
+  var dirOf = (p) => slashes(p).replace(/\/[^/]*$/, "");
+  var samePath = (a, b) => slashes(a).toLowerCase() === slashes(b).toLowerCase();
+  function joinPath(dir, rel) {
+    if (/^([A-Za-z]:)?[\\/]/.test(rel)) return slashes(rel);
+    const parts = slashes(dir).split("/");
+    for (const piece of slashes(rel).split("/")) {
+      if (piece === "..") parts.pop();
+      else if (piece && piece !== ".") parts.push(piece);
+    }
+    return parts.join("/");
+  }
+  function statusOf(result, running) {
+    if (running) return { text: "Compiling\u2026", tone: "muted", icon: null };
+    if (!result) return { text: "Not compiled yet", tone: "muted", icon: null };
+    if (!result.ok) {
+      if (result.reason === "no-tex") return { text: "No TeX found", tone: "danger", icon: "circle-alert" };
+      if (result.reason === "stopped") return { text: "Stopped", tone: "muted", icon: null };
+      if (result.reason === "timeout") return { text: "Stopped after 2 minutes", tone: "danger", icon: "circle-alert" };
+      return { text: "Could not compile", tone: "danger", icon: "circle-alert" };
+    }
+    if (result.log.errors) return { text: plural(result.log.errors, "error"), tone: "danger", icon: "circle-alert" };
+    if (!result.pdf) return { text: "No PDF made", tone: "danger", icon: "circle-alert" };
+    if (result.log.warnings) return { text: "Compiled, " + plural(result.log.warnings, "warning"), tone: "normal", icon: null };
+    return { text: "Compiled", tone: "normal", icon: null };
+  }
+  function sortedIssues(issues) {
+    return issues.map((issue, i) => ({ issue, i })).sort((a, b) => ISSUE_ORDER[a.issue.kind] - ISSUE_ORDER[b.issue.kind] || a.i - b.i).map((x) => x.issue);
+  }
+
+  // src/renderer/compile-controls.ts
+  function createCompileControls({ api, flushSave, openFile }) {
+    const results = /* @__PURE__ */ new Map();
+    let running = null;
+    let pendingLine = null;
+    const isTex = (n) => !!n && !n.trashedAt && isTexFile(n);
+    const optionsOf = (n) => n.texOptions || DEFAULT_TEX_OPTIONS;
+    const resultOf = (n) => n ? results.get(n.id) || null : null;
+    function closeMenus() {
+      for (const [pop, btn] of [[el.compileMenu, el.compileMenuBtn], [el.compileResults, el.compileStatus]]) {
+        pop.classList.add("hidden");
+        btn.setAttribute("aria-expanded", "false");
+      }
+    }
+    function render() {
+      const n = state.current;
+      const show = isTex(n);
+      el.compileControls.classList.toggle("hidden", !show);
+      el.moreCompileBtn.classList.toggle("hidden", !show);
+      if (!show) {
+        closeMenus();
+        return;
+      }
+      const busy = running === n.id;
+      setIcon(el.compileBtn, busy ? "square" : "play");
+      setLabel(el.compileBtn, busy ? "Stop" : "Compile");
+      el.compileBtn.title = busy ? "Stop compiling (Ctrl+Enter)" : "Compile to PDF (Ctrl+Enter)";
+      setLabel(el.moreCompileBtn, busy ? "Stop compiling" : "Compile to PDF");
+      const result = resultOf(n);
+      const status = statusOf(result, busy);
+      setLabel(el.compileStatus, status.text);
+      el.compileStatus.dataset.tone = status.tone;
+      if (status.icon) setIcon(el.compileStatus, status.icon);
+      else {
+        delete el.compileStatus.dataset.icon;
+        const icon = el.compileStatus.querySelector(".icon");
+        if (icon) icon.remove();
+      }
+      el.compileStatus.title = result && result.ok ? "Compiled with " + ENGINE_LABELS[result.engine] + " in " + (result.ms / 1e3).toFixed(1) + " s. Show the results." : "Show the compile results";
+    }
+    async function compile() {
+      const n = state.current;
+      if (!isTex(n)) return;
+      if (running === n.id) {
+        await api.tex.stop(n.id).catch(() => false);
+        return;
+      }
+      if (running) {
+        toast("Another file is compiling. Wait for it or stop it first.");
+        return;
+      }
+      closeMenus();
+      await flushSave();
+      running = n.id;
+      render();
+      let result;
+      try {
+        result = await api.tex.compile(n.id);
+      } catch (err) {
+        result = { ok: false, root: null, reason: "failed", message: ipcErrorText(err), log: null, ms: 0, steps: [] };
+      }
+      running = null;
+      results.set(n.id, result);
+      render();
+      if (state.currentId !== n.id) return;
+      if (!result.ok && (result.reason === "failed" || result.reason === "no-tex")) openResults();
+    }
+    function issueButton(issue, root) {
+      const b = document.createElement("button");
+      b.className = "menu-item compile-issue";
+      b.setAttribute("role", "menuitem");
+      b.dataset.kind = issue.kind;
+      const where = issue.file ? issue.file + (issue.line ? ":" + issue.line : "") : issue.line ? "line " + issue.line : "";
+      const message = document.createElement("span");
+      message.className = "compile-issue-text";
+      message.textContent = issue.message;
+      const at = document.createElement("span");
+      at.className = "compile-issue-where";
+      at.textContent = where;
+      b.append(message, at);
+      b.insertAdjacentHTML("afterbegin", I(ISSUE_ICON[issue.kind]));
+      b.title = issue.message + (issue.detail && issue.kind === "error" ? "\n" + issue.detail : "");
+      b.disabled = !issue.line;
+      b.addEventListener("click", () => {
+        closeMenus();
+        goToIssue(issue, root);
+      });
+      return b;
+    }
+    function openResults() {
+      const n = state.current;
+      if (!isTex(n)) return;
+      const result = resultOf(n);
+      closeMenus();
+      const log = result ? result.log : null;
+      if (!result) el.compileSummary.textContent = "Press Compile (Ctrl+Enter) to make a PDF from this file. Errors and warnings will be listed here.";
+      else if (!result.ok) el.compileSummary.textContent = result.message;
+      else el.compileSummary.textContent = [log && log.errors ? plural(log.errors, "error") : "", log && log.warnings ? plural(log.warnings, "warning") : "", log && log.badBoxes ? plural(log.badBoxes, "overfull or underfull box", "overfull or underfull boxes") : ""].filter(Boolean).join(", ") || "Compiled with no errors or warnings.";
+      const issues = log ? sortedIssues(log.issues) : [];
+      el.compileIssueList.replaceChildren(...issues.map((i) => issueButton(i, result ? result.root : null)));
+      el.compileIssueList.classList.toggle("hidden", !issues.length);
+      el.compileOpenPdfBtn.classList.toggle("hidden", !(result && result.ok && result.pdf));
+      el.compileResultsLogBtn.classList.toggle("hidden", !(result && result.root));
+      el.compileRetryFindBtn.classList.toggle("hidden", !(result && !result.ok && result.reason === "no-tex"));
+      placePopover(el.compileResults, el.compileStatus);
+      el.compileStatus.setAttribute("aria-expanded", "true");
+    }
+    function engineItem(engine, chosen, setByFile) {
+      const b = document.createElement("button");
+      b.className = "menu-item";
+      b.setAttribute("role", "menuitemradio");
+      b.setAttribute("aria-checked", String(engine === chosen));
+      b.classList.toggle("is-on", engine === chosen);
+      b.disabled = setByFile;
+      const label = document.createElement("span");
+      label.className = "lbl";
+      label.textContent = ENGINE_LABELS[engine];
+      b.append(label);
+      if (engine === chosen) b.insertAdjacentHTML("afterbegin", I("check"));
+      if (setByFile && engine === chosen) {
+        const why = document.createElement("span");
+        why.className = "keys";
+        why.textContent = "set by the file";
+        b.append(why);
+      }
+      b.addEventListener("click", () => {
+        closeMenus();
+        setOptions({ engine });
+      });
+      return b;
+    }
+    function openMenu() {
+      const n = state.current;
+      if (!isTex(n)) return;
+      closeMenus();
+      const options = optionsOf(n);
+      const program = readMagic(src.value).program;
+      el.compileEngines.replaceChildren(...ENGINES.map((e) => engineItem(e, program || options.engine, !!program)));
+      el.compileHaltBtn.setAttribute("aria-checked", String(options.haltOnError));
+      el.compileHaltBtn.classList.toggle("is-on", options.haltOnError);
+      setIcon(el.compileHaltBtn, options.haltOnError ? "square-check" : "square");
+      el.compileLogBtn.classList.toggle("hidden", !resultOf(n));
+      placePopover(el.compileMenu, el.compileMenuBtn);
+      el.compileMenuBtn.setAttribute("aria-expanded", "true");
+    }
+    async function setOptions(patch) {
+      const n = state.current;
+      if (!isTex(n)) return;
+      try {
+        const fresh = await api.tex.setOptions(n.id, patch);
+        if (fresh && state.current && state.current.id === fresh.id) state.current.texOptions = fresh.texOptions;
+        if (patch.engine) toast("This file compiles with " + ENGINE_LABELS[patch.engine] + ".");
+        if (patch.haltOnError !== void 0) toast(patch.haltOnError ? "Compiling stops at the first error." : "Compiling goes on past errors.");
+      } catch (err) {
+        toast("Could not change the compile options: " + ipcErrorText(err));
+      }
+    }
+    function logPathOf(result) {
+      return result && result.root ? result.root.replace(/\.[^./\\]+$/, "") + ".log" : null;
+    }
+    async function showLog() {
+      closeMenus();
+      const path = logPathOf(resultOf(state.current));
+      if (path) await openFile(path);
+    }
+    async function openPdf() {
+      closeMenus();
+      const result = resultOf(state.current);
+      if (result && result.ok && result.pdf) await openFile(result.pdf);
+    }
+    async function clean() {
+      closeMenus();
+      const n = state.current;
+      if (!isTex(n)) return;
+      try {
+        const removed = await api.tex.clean(n.id);
+        results.delete(n.id);
+        render();
+        toast(removed ? "Removed " + plural(removed, "build file") + ". The PDF and your files are kept." : "There were no build files to remove.");
+      } catch (err) {
+        toast("Could not clear the build files: " + ipcErrorText(err));
+      }
+    }
+    async function findTex() {
+      closeMenus();
+      try {
+        const status = await api.tex.status(true);
+        toast(status.found ? "Found " + status.distribution + " in " + status.dir + "." : status.problem || "Still no TeX on this PC. Install MiKTeX or TeX Live, then look again.");
+        const n = state.current;
+        if (n && status.found) {
+          results.delete(n.id);
+          render();
+        }
+      } catch (err) {
+        toast("Could not look for TeX: " + ipcErrorText(err));
+      }
+    }
+    function goToLine(line) {
+      const text = src.value;
+      let at = 0;
+      for (let i = 1; i < line && at !== -1; i++) at = text.indexOf("\n", at) + 1 || -1;
+      if (at === -1) at = text.length;
+      src.focus();
+      src.setSelectionRange(at, at);
+      src.reveal(at);
+    }
+    async function goToIssue(issue, root) {
+      const n = state.current;
+      if (!isTex(n) || !issue.line) return;
+      const file = issue.file && root ? joinPath(dirOf(root), issue.file) : n.filePath;
+      if (samePath(file, n.filePath)) {
+        goToLine(issue.line);
+        return;
+      }
+      pendingLine = { filePath: file, line: issue.line };
+      await openFile(file);
+    }
+    function noteShown() {
+      render();
+      const n = state.current;
+      if (!pendingLine || !n || !n.filePath) return;
+      const wanted = pendingLine;
+      pendingLine = null;
+      if (samePath(wanted.filePath, n.filePath)) requestAnimationFrame(() => goToLine(wanted.line));
+    }
+    el.compileBtn.addEventListener("click", () => {
+      compile();
+    });
+    el.moreCompileBtn.addEventListener("click", () => {
+      compile();
+    });
+    el.compileMenuBtn.addEventListener("click", () => {
+      if (el.compileMenu.classList.contains("hidden")) openMenu();
+      else closeMenus();
+    });
+    el.compileStatus.addEventListener("click", () => {
+      if (el.compileResults.classList.contains("hidden")) openResults();
+      else closeMenus();
+    });
+    el.compileHaltBtn.addEventListener("click", () => {
+      closeMenus();
+      const n = state.current;
+      if (isTex(n)) setOptions({ haltOnError: !optionsOf(n).haltOnError });
+    });
+    el.compileLogBtn.addEventListener("click", () => {
+      showLog();
+    });
+    el.compileResultsLogBtn.addEventListener("click", () => {
+      showLog();
+    });
+    el.compileOpenPdfBtn.addEventListener("click", () => {
+      openPdf();
+    });
+    el.compileCleanBtn.addEventListener("click", () => {
+      clean();
+    });
+    el.compileFindBtn.addEventListener("click", () => {
+      findTex();
+    });
+    el.compileRetryFindBtn.addEventListener("click", () => {
+      findTex();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      const target = e.target instanceof Node ? e.target : null;
+      if (!el.compileMenu.classList.contains("hidden") && !el.compileMenu.contains(target) && !el.compileMenuBtn.contains(target)) closeMenus();
+      if (!el.compileResults.classList.contains("hidden") && !el.compileResults.contains(target) && !el.compileStatus.contains(target)) closeMenus();
+    });
+    const openNow = () => !el.compileMenu.classList.contains("hidden") || !el.compileResults.classList.contains("hidden");
+    function commands(noteOpen) {
+      const n = state.current;
+      const tex = noteOpen && isTex(n);
+      const busy = !!n && running === n.id;
+      const options = n && tex ? optionsOf(n) : DEFAULT_TEX_OPTIONS;
+      const program = tex ? readMagic(src.value).program : null;
+      return [
+        { id: "tex-stop", title: "Stop compiling", icon: "square", keys: "Ctrl+Enter", run: compile, ok: tex && busy, keywords: "latex tex cancel" },
+        { id: "tex-results", title: "Show the compile results", icon: "circle-alert", keys: "", run: openResults, ok: tex && !!resultOf(n), keywords: "latex tex errors warnings log" },
+        { id: "tex-log", title: "Show the full compile log", icon: "scroll-text", keys: "", run: showLog, ok: tex && !!logPathOf(resultOf(n)), keywords: "latex tex log" },
+        { id: "tex-pdf", title: "Open the compiled PDF", icon: "file-text", keys: "", run: openPdf, ok: tex && (() => {
+          const r = resultOf(n);
+          return !!(r && r.ok && r.pdf);
+        })(), keywords: "latex tex pdf output" },
+        { id: "tex-halt", title: options.haltOnError ? "Compile past errors" : "Stop compiling at the first error", icon: "circle-alert", keys: "", run: () => setOptions({ haltOnError: !options.haltOnError }), ok: tex, keywords: "latex tex halt-on-error" },
+        ...ENGINES.map((e) => ({ id: "tex-engine-" + e, title: "Compile with " + ENGINE_LABELS[e], icon: "play", keys: "", run: () => setOptions({ engine: e }), ok: tex && !program && options.engine !== e, keywords: "latex tex engine compiler" })),
+        { id: "tex-clean", title: "Clear build files", icon: "eraser", keys: "", run: clean, ok: tex, keywords: "latex tex aux log synctex clean" },
+        { id: "tex-find", title: "Look for TeX again", icon: "refresh-cw", keys: "", run: findTex, ok: true, keywords: "latex miktex texlive install" }
+      ];
+    }
+    return { render, compile, noteShown, closeMenus, openNow, commands, canCompile: () => isTex(state.current) };
   }
 
   // src/renderer/note-html.ts
@@ -20160,14 +20692,14 @@
   }
 
   // src/renderer/sticky-button.ts
-  var { isViewerOnlyFile: isViewerOnlyFile2, isPlainTextFile: isPlainTextFile2 } = helpers_exports;
+  var { isViewerOnlyFile: isViewerOnlyFile3, isPlainTextFile: isPlainTextFile3 } = helpers_exports;
   function createStickyButton({ api, flushSave, refreshCurrentMeta }) {
     function renderStickyButton(note) {
       const on = !!(note && note.sticky);
       el.stickyBtn.classList.toggle("is-on", on);
       setLabel(el.stickyBtn, on ? "Take off the desktop" : "Stick to the desktop");
       el.stickyBtn.title = on ? "Remove this note from the desktop (Ctrl+Shift+T)" : "Put this note on the desktop as a sticky (Ctrl+Shift+T)";
-      const notMarkdown = isViewerOnlyFile2(note) || isPlainTextFile2(note);
+      const notMarkdown = isViewerOnlyFile3(note) || isPlainTextFile3(note);
       el.stickyBtn.disabled = !note || !!note.trashedAt || notMarkdown && !on || !!note.locked;
       el.stickyBtn.title = note && note.locked ? "Locked notes cannot be stickies" : el.stickyBtn.title;
     }
@@ -20277,154 +20809,6 @@
       toast("Claude Code opened in a terminal at " + res.cwd);
     }
     return { bot, toggleBot, describeBotScope, runBot, onBotEvent, openBotTerminal };
-  }
-
-  // src/renderer/code-editor.ts
-  var { isPlainTextFile: isPlainTextFile3, isViewerOnlyFile: isViewerOnlyFile3 } = helpers_exports;
-  var code = null;
-  var codeOn = false;
-  var codeFailed = false;
-  var hooks = { runFind: () => {
-  }, autoGrow: () => {
-  }, scrollTextareaToSelection: () => {
-  } };
-  var shown = () => codeOn && state.sourceMode ? code : null;
-  var src = {
-    get value() {
-      return el.bodyInput.value;
-    },
-    set value(text) {
-      el.bodyInput.value = text;
-      const c = shown();
-      if (c) c.setValue(el.bodyInput.value);
-    },
-    reload(text) {
-      el.bodyInput.value = text;
-      const c = shown();
-      if (c) c.setValue(el.bodyInput.value, { history: false });
-    },
-    forgetHistory() {
-      const c = shown();
-      if (c) c.forgetHistory();
-    },
-    get readOnly() {
-      return el.bodyInput.readOnly;
-    },
-    get selectionStart() {
-      const c = shown();
-      return c ? c.selectionStart : el.bodyInput.selectionStart;
-    },
-    get selectionEnd() {
-      const c = shown();
-      return c ? c.selectionEnd : el.bodyInput.selectionEnd;
-    },
-    setSelectionRange(from, to) {
-      const c = shown();
-      if (c) c.setSelectionRange(from, to);
-      else el.bodyInput.setSelectionRange(from, to);
-    },
-    setRangeText(text, from, to, mode) {
-      const c = shown();
-      if (c) {
-        c.setRangeText(text, from, to, mode);
-        el.bodyInput.value = c.value;
-      } else el.bodyInput.setRangeText(text, from, to, mode);
-      el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
-    },
-    focus() {
-      const c = shown();
-      if (c) c.focus();
-      else el.bodyInput.focus();
-    },
-    hasFocus() {
-      const c = shown();
-      return c ? c.hasFocus() : document.activeElement === el.bodyInput;
-    },
-    reveal(at) {
-      const c = shown();
-      if (c) c.reveal(at);
-      else hooks.scrollTextareaToSelection(at);
-    },
-    dispatchEvent(event) {
-      return el.bodyInput.dispatchEvent(event);
-    },
-    get codeOn() {
-      return !!shown();
-    },
-    sync() {
-      const c = shown();
-      if (c) c.setValue(el.bodyInput.value, { history: false });
-    },
-    undoRedo(cmd) {
-      const c = shown();
-      if (!c || !c.contains(document.activeElement)) return false;
-      c[cmd === "redo" ? "redo" : "undo"]();
-      return true;
-    }
-  };
-  var PROSE_EXT = /* @__PURE__ */ new Set(["txt", "text"]);
-  var isProseFile = (note) => isPlainTextFile3(note) && PROSE_EXT.has(extOf(note.filePath));
-  var isMarkdownNote = (note) => !isPlainTextFile3(note) && !isViewerOnlyFile3(note) && !isTableFile(note);
-  function codeEditor() {
-    if (!code) {
-      if (!window.NotesCode) throw new Error("the code editor bundle did not load");
-      code = window.NotesCode.create({
-        parent: el.codeHost,
-        onChange: (text) => {
-          el.bodyInput.value = text;
-          el.bodyInput.dispatchEvent(new Event("input", { bubbles: true }));
-        },
-        onSelection: () => {
-          mirrorSelection();
-          renderCodePosition();
-        },
-        onEnter: (shift) => {
-          if (!find.open) return false;
-          hooks.runFind(!shift);
-          return true;
-        }
-      });
-    }
-    return code;
-  }
-  function mirrorSelection() {
-    const c = shown();
-    if (c) el.bodyInput.setSelectionRange(c.selectionStart, c.selectionEnd);
-  }
-  function showCode(note, readOnly) {
-    const markdown = isMarkdownNote(note);
-    codeOn = !!window.NotesCode && !codeFailed && (markdown || isPlainTextFile3(note) && !isProseFile(note));
-    if (codeOn) {
-      try {
-        codeEditor().load(el.bodyInput.value, { ext: markdown ? "md" : extOf(note.filePath), readOnly, placeholder: markdown ? el.bodyInput.placeholder : "Plain text.", label: deriveTitle(note) });
-      } catch (err) {
-        console.error("The code editor could not start:", err);
-        codeFailed = true;
-        codeOn = false;
-        toast("The code editor could not start, so this file opens as plain text.");
-      }
-    }
-    if (!codeOn && code) {
-      try {
-        code.load("", {});
-      } catch (_) {
-      }
-    }
-    el.bodyInput.classList.toggle("uses-code", codeOn);
-    el.bodyInput.classList.toggle("is-prose", isProseFile(note));
-    renderCodePosition();
-    hooks.autoGrow();
-  }
-  function renderCodePosition() {
-    const c = shown();
-    el.statusCode.classList.toggle("hidden", !c);
-    if (!c) return;
-    const at = c.position();
-    el.statusCode.textContent = "Ln " + at.line + ", Col " + at.col;
-  }
-  function createCodeEditor({ runFind, autoGrow: autoGrow2, scrollTextareaToSelection }) {
-    hooks = { runFind, autoGrow: autoGrow2, scrollTextareaToSelection };
-    return { showCode };
   }
 
   // src/renderer/csv-view.ts
@@ -28684,6 +29068,7 @@
     };
     const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint("find-options", TIPS.find) });
     const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+    const compiling = createCompileControls({ api, flushSave, openFile: (filePath) => openFiles([filePath]) });
     const links = createLinkDialog({ api, folderNames: () => new Map(flattenTree(state.tree).map((f) => [f.id, f.name])) });
     const { renderRelated, renderRelatedSoon } = createRelated({ api, followLink });
     const { renderStickyButton, toggleSticky } = createStickyButton({ api, flushSave, refreshCurrentMeta });
@@ -28791,6 +29176,7 @@
       el.editorColumn.classList.toggle("shows-craft", inCraft);
       el.editor.classList.toggle("shows-craft", inCraft);
       syncTextViews(note);
+      compiling.noteShown();
       if (!isFile) return;
       el.fileKind.textContent = fileBadge(note);
       api.files.convertOptions(note.id).then((opts) => {
@@ -29655,6 +30041,7 @@
           toggleReplace(true);
         }, canFindInNote()),
         ...[...el.moreMenu.querySelectorAll(".menu-item")].filter((b) => !el.moreFolded.contains(b)).map((b) => fromButton(b, "This note")),
+        ...compiling.commands(noteOpen).map((c) => Object.assign({ group: "This file" }, c)),
         fromButton(el.restoreBtn, "This note"),
         fromButton(el.destroyBtn, "This note"),
         ...[...el.shareMenu.querySelectorAll("button[data-action]")].map((b) => ({ id: "share-" + b.dataset.action, group: "Share", title: (b.textContent || "").trim(), icon: "share-2", keys: "", ok: noteOpen && !!state.current && !state.current.trashedAt && !b.classList.contains("hidden"), run: () => shareAction(b.dataset.action ?? "") })),
@@ -29737,6 +30124,11 @@
         if (find.open) {
           e.preventDefault();
           closeFind();
+          return;
+        }
+        if (compiling.openNow()) {
+          e.preventDefault();
+          compiling.closeMenus();
           return;
         }
         if (!el.moreMenu.classList.contains("hidden")) {
@@ -29928,6 +30320,11 @@
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "r") {
         e.preventDefault();
         toggleReadAloud();
+        return;
+      }
+      if (ctrl && !e.shiftKey && !e.altKey && e.key === "Enter" && !inDialog && compiling.canCompile()) {
+        e.preventDefault();
+        compiling.compile();
         return;
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "e") {

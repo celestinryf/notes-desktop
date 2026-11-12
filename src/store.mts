@@ -10,6 +10,7 @@ import * as FM from './shared/front-matter.mts';
 import { VaultLinker, nameHints } from './vault-links.mts';
 import { restoreFromBin, removeFromBin, binRecordOf, binReachable } from './recycle-bin.mts';
 import type { Recycled } from './recycle-bin.mts';
+import { DEFAULT_TEX_OPTIONS, texOptionsFrom, texOptionsPatch } from './tex-build.mts';
 
 const SCHEMA_VERSION = 2;
 const TAGS_IN_FILES_VERSION = 2;
@@ -580,6 +581,7 @@ function noteFrom(raw: Record<string, unknown>, now: number): Note {
     remindedAt: isFiniteNumber(raw.remindedAt) ? Math.round(raw.remindedAt) : null,
     pinned: !!raw.pinned,
     keepOutOfHistory: raw.keepOutOfHistory === true,
+    texOptions: texOptionsFrom(raw.texOptions),
     createdAt,
     updatedAt: isFiniteNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
     trashedAt: isFiniteNumber(raw.trashedAt) ? raw.trashedAt : null,
@@ -1828,6 +1830,14 @@ class Store {
 
   keptOutOfHistory() {
     return this.notes.filter((n) => n.keepOutOfHistory).map((n) => ({ id: n.id, filePath: n.filePath }));
+  }
+
+  setTexOptions(id: string, patch: unknown) {
+    const note = this.get(id);
+    if (!note) return null;
+    const next = texOptionsFrom(Object.assign({}, note.texOptions || DEFAULT_TEX_OPTIONS, texOptionsPatch(patch)));
+    if (!next || JSON.stringify(next) === JSON.stringify(note.texOptions || null)) return note;
+    return this._change({ notes: [note] }, () => { note.texOptions = next; return note; });
   }
 
   setKeepOutOfHistory(id: string, on: boolean) {

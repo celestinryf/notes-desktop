@@ -67,6 +67,7 @@ interface Note {
   remindedAt: number | null;
   pinned: boolean;
   keepOutOfHistory: boolean;
+  texOptions?: TexNoteOptions;
   createdAt: number;
   updatedAt: number;
   trashedAt: number | null;
@@ -179,6 +180,14 @@ type SavedFile = { mtime: number | null; backup: boolean; savedAs?: undefined } 
 type CraftSave = SavedFile | { exported: string; own?: boolean } | { relinked: string; mtime: number | null };
 interface ConvertOption { to: string; label: string; note: string }
 type ConvertResult = { ok: true; filePath: string; warning: string } | { ok: false; error: string };
+type TexEngineName = 'pdflatex' | 'xelatex' | 'lualatex';
+interface TexNoteOptions { engine: TexEngineName; haltOnError: boolean; compileOnSave: boolean }
+interface TexIssue { kind: 'error' | 'warning' | 'badbox'; file: string | null; line: number | null; message: string; detail: string }
+interface TexLog { issues: TexIssue[]; errors: number; warnings: number; badBoxes: number; rerun: boolean; fatal: boolean }
+type TexStatus = { found: true; distribution: string; dir: string; latexmk: boolean } | { found: false; looked: string[]; problem: string | null };
+type TexCompileResult =
+  | { ok: true; root: string; pdf: string | null; engine: TexEngineName; log: TexLog; ms: number; steps: string[] }
+  | { ok: false; root: string | null; reason: 'no-tex' | 'stopped' | 'timeout' | 'failed'; message: string; log: TexLog | null; ms: number; steps: string[] };
 type MarkdownResult = { ok: true; markdown: string } | { ok: false; error: string };
 type BotRun = { ok: true; cwd: string; kind: string; script?: string } | { ok: false; error: string };
 type BookExport = { ok: true; filePath?: string; dry?: boolean } | { ok: false; error?: string; canceled?: boolean };
@@ -297,6 +306,11 @@ interface IpcContract {
   'files:convertOptions': (id: string) => ConvertOption[];
   'files:convert': (id: string, to: string) => ConvertResult;
   'files:asMarkdown': (id: string) => MarkdownResult;
+  'tex:status': (again?: boolean) => TexStatus;
+  'tex:compile': (id: string) => TexCompileResult;
+  'tex:stop': (id: string) => boolean;
+  'tex:clean': (id: string) => number;
+  'tex:setOptions': (id: string, patch: Partial<TexNoteOptions>) => PublicNote | null;
   'signature:get': () => Uint8Array<ArrayBuffer> | null;
   'signature:set': (bytes: Uint8Array) => Ok;
   'signature:forget': () => Ok;
@@ -380,6 +394,7 @@ interface NotesApi {
     pathFor: (file: File) => string | null;
   };
   agentFiles: { discover: Invoker<'agentFiles:discover'>; link: Invoker<'agentFiles:link'> };
+  tex: { status: Invoker<'tex:status'>; compile: Invoker<'tex:compile'>; stop: Invoker<'tex:stop'>; clean: Invoker<'tex:clean'>; setOptions: Invoker<'tex:setOptions'> };
   live: { host: Invoker<'live:host'>; join: Invoker<'live:join'>; stop: Invoker<'live:stop'>; status: Invoker<'live:status'> };
   attachments: {
     pick: Invoker<'attachments:pick'>; addPaths: Invoker<'attachments:addPaths'>; saveRecording: Invoker<'attachments:saveRecording'>;

@@ -449,3 +449,19 @@ test('export and import markdown', () => {
   assert.equal(all.notes.length, 2);
   assert.equal(store.exportNote('nope'), null);
 });
+
+test('a note keeps its compile options across a reload, and bad values fall back to the defaults', () => {
+  const { store } = makeStore();
+  const n = store.create({ title: 'paper.tex', body: 'x' });
+  assert.equal(n.texOptions, undefined);
+  assert.equal(store.setTexOptions('nope', { engine: 'xelatex' }), null);
+  store.setTexOptions(n.id, { engine: 'xelatex' });
+  store.setTexOptions(n.id, { haltOnError: true, engine: 'context', compileOnSave: 'yes' });
+  assert.deepEqual(store.get(n.id).texOptions, { engine: 'xelatex', haltOnError: true, compileOnSave: false }, 'an unknown engine and a non-boolean are ignored');
+  store.setTexOptions(n.id, { engine: 'lualatex' });
+  store.save();
+  assert.deepEqual(new Store(store.dir).load().get(n.id).texOptions, { engine: 'lualatex', haltOnError: true, compileOnSave: false });
+  const before = store.get(n.id).updatedAt;
+  store.setTexOptions(n.id, { engine: 'lualatex' });
+  assert.equal(store.get(n.id).updatedAt, before, 'no change, no write');
+});

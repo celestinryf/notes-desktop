@@ -1,0 +1,37 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (MiKTeX 24.4) (preloaded format=pdflatex 2026.11.1)  12 NOV 2026 10:02
+entering extended mode
+ restricted \write18 enabled.
+ file:line:error style messages enabled.
+ %&-line parsing enabled.
+**./resume.tex
+(resume.tex
+LaTeX2e <2023-11-01> patch level 1
+L3 programming layer <2024-02-20>
+(C:\Users\someone\AppData\Local\Programs\MiKTeX\tex/latex/base\article.cls
+Document Class: article 2023/05/17 v1.4n Standard LaTeX document class
+(C:\Users\someone\AppData\Local\Programs\MiKTeX\tex/latex/base\size11.clo
+File: size11.clo 2023/05/17 v1.4n Standard LaTeX file (size option)
+)
+\c@part=\count188
+)
+(resume.aux)
+resume.tex:48: Missing $ inserted.
+<inserted text>
+                $
+l.48   Built features with 30% fewer bugs_
+                                        and less code.
+I've inserted a begin-math/end-math symbol since I think
+you left one out. Proceed, with fingers crossed.
+
+resume.tex:52: Extra }, or forgotten $.
+l.52   \textbf{Go}}
+
+I've deleted a group-closing symbol because it seems to be
+spurious, as in `$x}$'. But perhaps the } is legitimate and
+you forgot something else, as in `\hbox{$x}'. In such cases
+the way to recover is to insert both the forgotten and the
+deleted material, e.g., by typing `I$}'.
+
+[1{C:/Users/someone/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}] (resume.aux) )
+Output written on resume.pdf (1 page, 51830 bytes).
+SyncTeX written on resume.synctex.gz.

@@ -142,6 +142,7 @@
             <button role="menuitem" class="menu-item" id="splitBtn" data-icon="book-plus"><span class="lbl">Split into a book…</span></button>
           </div>
           <div class="menu-group" role="group" aria-label="This file">
+            <button role="menuitem" class="menu-item hidden" id="moreCompileBtn" data-icon="play"><span class="lbl">Compile to PDF</span><span class="keys">Ctrl+Enter</span></button>
             <button role="menuitem" class="menu-item hidden" id="fileRevealBtn" data-icon="folder-open"><span class="lbl">Show in Explorer</span></button>
             <button role="menuitem" class="menu-item hidden" id="fileOpenBtn" data-icon="external-link"><span class="lbl">Open in default app</span></button>
             <button role="menuitem" class="menu-item hidden" id="fileConvertBtn" data-icon="file-output" aria-haspopup="menu"><span class="lbl">Convert to…</span></button>
@@ -203,6 +204,13 @@
             <div class="file-row hidden" id="fileRow">
               <span class="file-kind" id="fileKind"></span>
               <span class="file-path" id="filePath" title=""></span>
+              <div class="compile-controls hidden" id="compileControls">
+                <div class="split-button">
+                  <button type="button" class="btn btn-small btn-primary" id="compileBtn" data-icon="play" title="Compile to PDF (Ctrl+Enter)"><span class="lbl">Compile</span></button>
+                  <button type="button" class="btn btn-small btn-primary split-button-menu" id="compileMenuBtn" data-icon="chevron-down" aria-label="Compile options" title="Compile options" aria-haspopup="menu" aria-expanded="false"></button>
+                </div>
+                <button type="button" class="btn btn-small compile-status" id="compileStatus" aria-haspopup="menu" aria-expanded="false"><span class="lbl">Not compiled yet</span></button>
+              </div>
             </div>
             <div class="file-banner hidden" id="fileBanner"></div>
             <form class="lock-screen hidden" id="lockScreen" aria-label="Locked note">
@@ -802,6 +810,26 @@
       </div>
     </div>
     <div class="popover convert-menu hidden" id="convertMenu" role="menu" aria-label="Convert to"></div>
+    <div class="popover menu compile-menu hidden" id="compileMenu" role="menu" aria-label="Compile options">
+      <div class="menu-group" role="group" aria-label="Engine" id="compileEngines"></div>
+      <div class="menu-group" role="group" aria-label="Options">
+        <button role="menuitemcheckbox" class="menu-item" id="compileHaltBtn" aria-checked="false"><span class="lbl">Stop on the first error</span></button>
+      </div>
+      <div class="menu-group" role="group" aria-label="Build files">
+        <button role="menuitem" class="menu-item" id="compileLogBtn" data-icon="scroll-text"><span class="lbl">Show the full log</span></button>
+        <button role="menuitem" class="menu-item" id="compileCleanBtn" data-icon="eraser"><span class="lbl">Clear build files</span></button>
+        <button role="menuitem" class="menu-item" id="compileFindBtn" data-icon="refresh-cw"><span class="lbl">Look for TeX again</span></button>
+      </div>
+    </div>
+    <div class="popover menu compile-results hidden" id="compileResults" role="menu" aria-label="Compile results">
+      <p class="compile-summary" id="compileSummary"></p>
+      <div class="compile-issue-list" id="compileIssueList"></div>
+      <div class="menu-group" role="group" aria-label="Output" id="compileOutput">
+        <button role="menuitem" class="menu-item" id="compileOpenPdfBtn" data-icon="file-text"><span class="lbl">Open the PDF</span></button>
+        <button role="menuitem" class="menu-item" id="compileResultsLogBtn" data-icon="scroll-text"><span class="lbl">Show the full log</span></button>
+        <button role="menuitem" class="menu-item" id="compileRetryFindBtn" data-icon="refresh-cw"><span class="lbl">Look for TeX again</span></button>
+      </div>
+    </div>
     <div class="popover inline-menu hidden" id="inlineMenu" role="listbox" aria-label="Insert"></div>
     <div class="popover math-editor hidden" id="mathEditor" role="dialog" aria-label="Edit formula">
       <textarea class="input math-source" id="mathSource" rows="1" spellcheck="false" autocomplete="off" aria-label="Formula in TeX" aria-describedby="mathError mathHint" placeholder="TeX, for example \frac{a}{b}"></textarea>

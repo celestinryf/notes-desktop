@@ -77,6 +77,7 @@ test.before(async () => {
       NOTES_APP_DRY_GITHUB: 'code',
       NOTES_APP_NO_CRAFTS: '1',
       NOTES_APP_NO_RECYCLE_BIN: '1',
+      NOTES_APP_TEX_DIR: path.join(ROOT, 'test', 'fixtures', 'fake-tex'),
     }),
   });
   page = await app.firstWindow();
@@ -681,6 +682,71 @@ test('formulas: $ and $$ render with KaTeX, a click or Enter edits them in a pop
   await page.click('.nav-item[data-view="all"]');
 });
 
+test('compile: a LaTeX file compiles with the TeX Notes finds, lists errors with their lines, goes to a line on click, and keeps its options', { timeout: 60000 }, async () => {
+  const dir = tmpDir('notes-ui-tex-');
+  const texPath = path.join(dir, 'paper.tex');
+  const built = (ext) => path.join(dir, 'paper.' + ext);
+  const statusText = () => page.evaluate(() => document.getElementById('compileStatus').textContent.trim());
+  fs.writeFileSync(texPath, '\\documentclass{article}\n\\begin{document}\nHello from the test\n\\end{document}\n');
+  await page.evaluate((p) => window.notesApi.files.link([p]), texPath);
+  await waitFor('tex file linked', () => readNotes().notes.some((n) => n.filePath === texPath));
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('paper.tex listed', () => revealRow({ text: 'paper.tex' }), 8000);
+  await clickRow('paper.tex');
+  await waitForDom(() => document.getElementById('titleInput').value === 'paper.tex');
+  await page.waitForSelector('#compileControls:not(.hidden)');
+  assert.equal(await statusText(), 'Not compiled yet');
+  assert.equal(await page.$eval('#moreCompileBtn', (b) => b.classList.contains('hidden')), false, 'Compile is in the More menu too');
+
+  await page.click('#compileBtn');
+  await waitFor('compiled', async () => (await statusText()) === 'Compiled', 15000);
+  assert.ok(fs.existsSync(built('pdf')), 'the PDF sits beside the file');
+
+  await page.click('#codeHost .cm-line >> nth=2');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' \\FAKEERROR');
+  await page.click('#codeHost .cm-line >> nth=0');
+  await page.keyboard.press('Control+Enter');
+  await waitFor('the error counted', async () => (await statusText()) === '1 error', 15000);
+  assert.match(fs.readFileSync(texPath, 'utf8'), /\\FAKEERROR/, 'the edit was saved before compiling');
+  await page.click('#compileStatus');
+  await page.waitForSelector('#compileResults:not(.hidden)');
+  assert.match(await page.textContent('#compileSummary'), /^1 error$/);
+  assert.equal(await page.textContent('#compileIssueList .compile-issue .compile-issue-where'), 'paper.tex:3');
+  assert.equal(await page.isVisible('#compileOpenPdfBtn'), true);
+  await page.click('#compileIssueList .compile-issue');
+  await waitForDom(() => /^Ln 3,/.test(document.getElementById('statusCode').textContent));
+  assert.equal(await page.$eval('#compileResults', (p) => p.classList.contains('hidden')), true, 'the list closes on a click');
+
+  await page.click('#compileMenuBtn');
+  await page.waitForSelector('#compileMenu:not(.hidden)');
+  assert.equal(await page.getAttribute('#compileEngines [aria-checked="true"]', 'role'), 'menuitemradio');
+  await page.click('#compileEngines [role="menuitemradio"]:has-text("XeLaTeX")');
+  const options = () => (readNotes().notes.find((n) => n.filePath === texPath) || {}).texOptions || {};
+  await waitFor('the engine kept for this file', () => options().engine === 'xelatex');
+  await page.click('#compileMenuBtn');
+  await page.click('#compileHaltBtn');
+  await waitFor('stop on the first error kept', () => options().haltOnError === true);
+  await page.click('#compileMenuBtn');
+  await page.keyboard.press('Escape');
+  await waitForDom(() => document.getElementById('compileMenu').classList.contains('hidden'));
+
+  await page.click('#compileMenuBtn');
+  await page.click('#compileCleanBtn');
+  await waitFor('build files cleared', () => !fs.existsSync(built('log')) && !fs.existsSync(built('aux')));
+  assert.ok(fs.existsSync(built('pdf')) && fs.existsSync(texPath), 'the PDF and the source stay');
+  assert.equal(await statusText(), 'Not compiled yet');
+
+  await page.keyboard.press('Control+Shift+Delete');
+  await waitFor('tex note in the trash', () => { const n = readNotes().notes.find((x) => x.filePath === texPath); return !n || n.trashedAt; });
+  await page.click('.nav-item[data-view="trash"]');
+  await page.waitForSelector('#emptyTrashBtn:not(.hidden)', { timeout: 8000 });
+  await page.click('#emptyTrashBtn');
+  await waitFor('tex note gone from Notes', () => !readNotes().notes.some((x) => x.filePath === texPath));
+  await page.click('.nav-item[data-view="all"]');
+  assert.ok(fs.existsSync(texPath), 'removing a linked file from Notes never deletes it');
+});
+
 test('file-backed notes: open a Markdown file, edit it on disk both ways, view a PDF, agent files folder', { timeout: 90000 }, async () => {
   const fileDir = tmpDir('notes-ui-files-');
   const mdPath = path.join(fileDir, 'External note.md');
@@ -700,7 +766,7 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDom(() => document.getElementById('titleInput').value === 'External note.md');
   assert.equal(await page.$eval('#fileRow', (r) => !r.classList.contains('hidden')), true);
   assert.equal(await page.textContent('#fileKind'), 'Markdown');
-  assert.equal(await page.$$eval('#fileRow button', (bs) => bs.length), 0, 'the row has no buttons');
+  assert.equal(await page.$$eval('#fileRow button', (bs) => bs.filter((b) => b.offsetParent).length), 0, 'the row shows no buttons for a file that does not compile');
   await page.click('#moreBtn');
   await page.waitForSelector('#moreMenu:not(.hidden)');
   const fileItems = () => page.$$eval('#fileRevealBtn, #fileOpenBtn, #fileConvertBtn', (bs) => bs.map((b) => !b.classList.contains('hidden') && !!b.offsetParent));
