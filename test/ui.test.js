@@ -607,10 +607,10 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
   await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('replaced by another program'));
 
   const outside = '# From disk\n\nwritten by another program while typing\n';
-  fs.writeFileSync(mdPath, outside);
   await page.focus('#bodyInput');
   await page.keyboard.press('Control+End');
   await page.keyboard.type('x');
+  fs.writeFileSync(mdPath, outside);
   await waitForDomWithin(10000, () => document.getElementById('bodyInput').value.includes('while typing') && !document.getElementById('bodyInput').value.includes('x'));
   await sleep(600);
   assert.equal(fs.readFileSync(mdPath, 'utf8'), outside, 'the disk version wins without asking; the typed character is not written');

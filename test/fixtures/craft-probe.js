@@ -52,11 +52,6 @@ async function main() {
     ok('banner cleared after open', (await banner()) === '');
     ok('fake frame got the bytes', (await craftFrame('wordcraft').evaluate(() => document.getElementById('s').textContent)).startsWith('open Probe report.docx'));
 
-    await page.click('#fileReloadBtn');
-    await sleep(1500);
-    ok('reload from disk did not throw', !errors.some((e) => /ReferenceError/.test(e)));
-    ok('frame shown again after reload', await frameShown('wordcraftFrame'));
-
     await page.click('.note-row:has-text("Probe book.xlsm")');
     await waitFor('gridcraft frame shown', () => frameShown('gridcraftFrame'));
     ok('banner cleared for the workbook', (await banner()) === '');

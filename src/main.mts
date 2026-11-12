@@ -912,7 +912,7 @@ function main() {
       return { ok: false, error: err.message };
     }
   }
-  handle('files:restoreVersion', (_e, id, name, expectedMtime) => restoreCopy(versionedFileNote(id), name, expectedMtime, 'the file changed since you opened it. Reload it, then try again.'));
+  handle('files:restoreVersion', (_e, id, name, expectedMtime) => restoreCopy(versionedFileNote(id), name, expectedMtime, 'the file changed since you opened it. Notes shows the new version in a moment; then try again.'));
 
   const SIGNATURE_FILE = path.join(DATA_DIR, 'signature.png');
   const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
@@ -936,7 +936,7 @@ function main() {
     return buf;
   }
   const stillAsOpened = (file: string, expectedMtime: number | null) => fs.existsSync(file) && mtimeOf(file) === expectedMtime;
-  const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Reload it, then try again.';
+  const CHANGED_ON_DISK = 'The PDF changed on disk since you opened it. Notes shows the new version in a moment; then try again.';
 
   async function rewritePdf(id: string, expectedMtime: number | null, build: (current: Buffer) => unknown): Promise<Ok<{ mtime: number | null; backup: string }>> {
     const file = fileNoteOfKind(id, 'pdf').filePath;
@@ -1071,7 +1071,7 @@ function main() {
   handle('files:saveDocx', async (_e, id, patches, expectedMtime) => {
     const file = fileNoteOfKind(id, 'docx').filePath;
     const base = docxBases.get(id);
-    if (!base || base.mtime !== expectedMtime) throw new Error('the document shown here is not the version Notes last read. Reload it, then make the change again.');
+    if (!base || base.mtime !== expectedMtime) throw new Error('the document shown here is not the version Notes last read. Notes shows the new version in a moment; then make the change again.');
     if (!Array.isArray(patches) || !patches.length || patches.reduce((n, p) => n + String((p && p.xml) || '').length + String((p && p.old) || '').length, 0) > MAX_DOCX_PATCH_CHARS) throw new Error('the changes could not be read, so nothing was written.');
     const res = await runWorker<{ bytes: Uint8Array }>('docx-edit-worker.mts', { bytes: base.buf, patches }, 2 * 60 * 1000, 'Saving the document took too long.');
     if (!res.ok) throw new Error(res.error);

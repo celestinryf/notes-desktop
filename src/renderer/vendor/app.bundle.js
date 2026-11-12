@@ -21865,7 +21865,7 @@
       }
       const when = new Date(c.at).toLocaleString();
       if (await reloadFile()) toast("Restored the copy from " + when + ". The file you had is kept as a copy too.");
-      else toast("The copy from " + when + " is in place on disk; the view still shows the file as it was. Reload it to see the copy.");
+      else toast("The copy from " + when + " is in place on disk; the view still shows the file as it was. Reopen the note to see the copy.");
     }
     async function restoreVersion() {
       if (hist.copies.length) {
@@ -26072,7 +26072,7 @@
         if (!target || !ed) throw new Error("no Word document is open");
         c = ed.save();
       } catch (err) {
-        toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; use Reload to start again from the file.");
+        toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; reopen the note to start again from the file.");
         return false;
       }
       if (!c) return true;
@@ -28602,7 +28602,7 @@
       if (documentBusy()) return;
       if (state.currentId !== note.id) return;
       if (res.missing) {
-        showBanner("The file no longer exists at " + note.filePath + ". Your last view is kept here as a plain note.");
+        showBanner(missingFileText(note));
         return;
       }
       if (res.changed && !state.dirty) {
@@ -28707,21 +28707,31 @@
     }
     async function takeDiskVersion(id) {
       state.pending.delete(id);
+      let res;
+      try {
+        res = await api.files.refresh(id);
+      } catch (err) {
+        reportSaveFailure(err);
+        return;
+      }
+      const fresh = await api.notes.get(id);
+      if (!fresh) return;
       if (state.currentId !== id) {
-        const row = await api.notes.get(id);
-        if (row) refreshRow(row);
+        refreshRow(fresh);
         return;
       }
       state.dirty = false;
-      try {
-        await api.files.refresh(id);
-      } catch (_) {
+      setSaved("Saved");
+      if (res.missing) {
+        showBanner(missingFileText(fresh));
+        toast("The file no longer exists on disk, so your last edit was not saved.");
+        return;
       }
-      const fresh = await api.notes.get(id);
-      if (!fresh || state.currentId !== id) return;
       applyFreshFileBody(fresh);
+      if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
       toast("Reloaded from disk: the file changed outside Notes while you were editing. Your last edit was not saved.");
     }
+    const missingFileText = (note) => "The file no longer exists at " + note.filePath + ". Your last view is kept here as a plain note.";
     function reportSaveFailure(err) {
       if (state.saveErrorShown) return;
       state.saveErrorShown = true;
@@ -30346,8 +30356,8 @@
                 applyFreshFileBody(fresh);
                 if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
               }
-            } else {
-              const dropped = state.dirty || state.inflight.has(fresh.id);
+            } else if (state.current && fresh.body !== state.current.body && !state.inflight.has(fresh.id)) {
+              const dropped = state.dirty;
               state.dirty = false;
               applyFreshFileBody(fresh);
               if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;

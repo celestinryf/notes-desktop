@@ -2224,7 +2224,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     try { res = await api.files.refresh(note.id); } catch (_) { return; }
     if (documentBusy()) return;
     if (state.currentId !== note.id) return;
-    if (res.missing) { showBanner('The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.'); return; }
+    if (res.missing) { showBanner(missingFileText(note)); return; }
     if (res.changed && !state.dirty) {
       const fresh = await api.notes.get(note.id);
       if (state.currentId !== note.id || state.dirty || state.inflight.has(note.id) || !fresh || documentBusy()) return;
@@ -2328,18 +2328,20 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   async function takeDiskVersion(id: string) {
     state.pending.delete(id);
-    if (state.currentId !== id) {
-      const row = await api.notes.get(id);
-      if (row) refreshRow(row);
-      return;
-    }
-    state.dirty = false;
-    try { await api.files.refresh(id); } catch (_) {  }
+    let res;
+    try { res = await api.files.refresh(id); } catch (err) { reportSaveFailure(err); return; }
     const fresh = await api.notes.get(id);
-    if (!fresh || state.currentId !== id) return;
+    if (!fresh) return;
+    if (state.currentId !== id) { refreshRow(fresh); return; }
+    state.dirty = false;
+    setSaved('Saved');
+    if (res.missing) { showBanner(missingFileText(fresh)); toast('The file no longer exists on disk, so your last edit was not saved.'); return; }
     applyFreshFileBody(fresh);
+    if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
     toast('Reloaded from disk: the file changed outside Notes while you were editing. Your last edit was not saved.');
   }
+
+  const missingFileText = (note: Pick<PublicNote, 'filePath'>) => 'The file no longer exists at ' + note.filePath + '. Your last view is kept here as a plain note.';
 
   function reportSaveFailure(err: Error | undefined) {
     if (state.saveErrorShown) return;
@@ -3447,8 +3449,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         else if (fresh && fresh.body !== el.bodyInput.value) {
           if (reason === 'live') {
             if ((!state.dirty && !state.inflight.has(state.currentId)) || Date.now() - state.lastTypedAt > 1500) { state.dirty = false; applyFreshFileBody(fresh); if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title; }
-          } else {
-            const dropped = state.dirty || state.inflight.has(fresh.id);
+          } else if (state.current && fresh.body !== state.current.body && !state.inflight.has(fresh.id)) {
+            const dropped = state.dirty;
             state.dirty = false;
             applyFreshFileBody(fresh);
             if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;

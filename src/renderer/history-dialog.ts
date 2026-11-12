@@ -215,7 +215,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     if (!r.ok) { toast('Could not restore that copy: ' + (r.error || 'unknown error')); return; }
     const when = new Date(c.at).toLocaleString();
     if (await reloadFile()) toast('Restored the copy from ' + when + '. The file you had is kept as a copy too.');
-    else toast('The copy from ' + when + ' is in place on disk; the view still shows the file as it was. Reload it to see the copy.');
+    else toast('The copy from ' + when + ' is in place on disk; the view still shows the file as it was. Reopen the note to see the copy.');
   }
 
   async function restoreVersion() {
