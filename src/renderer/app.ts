@@ -1629,6 +1629,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     tabs.peerDrag = null;
     el.editorPane.classList.remove('is-split');
     el.splitDivider.classList.add('hidden');
+    peerKind = null;
+    renderSyncArrows();
     tabs.active = 'left';
     el.paneMain.classList.remove('is-active-side');
     renderTabs();
@@ -1690,6 +1692,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         await onPeerWrite();
         return;
       case 'pdfReveal':
+        if (state.current && state.current.filePath && samePath(state.current.filePath, m.box.pdf)) await pollCurrentFile(true);
         revealSync(m.box);
         return;
       case 'texGoTo':
@@ -2064,7 +2067,8 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
   const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]), showOutput: showBeside, revealInPdf });
 
-  async function showBeside(pdfPath: string) {
+  async function showBeside(pdfPath: string, manual: boolean) {
+    if (!manual) { toPeer({ type: 'reloadFile', path: pdfPath }); return; }
     const linked = await api.files.link([pdfPath]);
     if (!linked.firstId) return;
     const opened = !GUEST && !tabs.split;
@@ -2075,20 +2079,24 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   async function revealInPdf(box: TexBox) {
-    await showBeside(box.pdf);
+    await showBeside(box.pdf, true);
     toPeer({ type: 'pdfReveal', box });
   }
 
   type SyncSides = { tex: 'left' | 'right', pdf: 'left' | 'right' } | null;
   let syncSides: SyncSides = null;
   let syncSeq = 0;
+  let peerKind: { id: string, kind: 'tex' | 'pdf' | null } | null = null;
+  const syncKind = (n: PublicNote | null) => (n && H.isTexFile(n) && !n.trashedAt ? 'tex' : n && n.fileKind === 'pdf' && !n.trashedAt ? 'pdf' : null);
   async function renderSyncArrows() {
     const seq = ++syncSeq;
-    const here = state.current;
-    const peer = !GUEST && tabs.split && tabs.peerCurrent ? await api.notes.get(tabs.peerCurrent).catch(() => null) : null;
-    if (seq !== syncSeq) return;
-    const kind = (n: PublicNote | null) => (n && H.isTexFile(n) && !n.trashedAt ? 'tex' : n && n.fileKind === 'pdf' ? 'pdf' : null);
-    const left = kind(here), right = kind(peer);
+    const peerId = !GUEST && tabs.split ? tabs.peerCurrent : null;
+    if (peerId && (!peerKind || peerKind.id !== peerId)) {
+      const note = await api.notes.get(peerId).catch(() => null);
+      if (seq !== syncSeq) return;
+      peerKind = { id: peerId, kind: syncKind(note) };
+    }
+    const left = syncKind(state.current), right = peerId && peerKind ? peerKind.kind : null;
     syncSides = left === 'tex' && right === 'pdf' ? { tex: 'left', pdf: 'right' } : left === 'pdf' && right === 'tex' ? { tex: 'right', pdf: 'left' } : null;
     el.syncArrows.classList.toggle('hidden', !syncSides);
     const towardPdf = syncSides && syncSides.pdf === 'right' ? 'arrow-right' : 'arrow-left';
@@ -2236,7 +2244,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       el.pdfEditor.classList.remove('hidden');
       showBanner('Highlight, add text, draw or add a picture with the tools above; with a tool on, click a mark to move or delete it. Save writes your changes into this PDF, and the original is backed up first.');
       if (note.filePath) api.tex.sourceFor(note.filePath).then((source) => {
-        if (source && state.currentId === note.id) showBanner('Made by Compile from ' + H.fileNameOf(source) + '. Changes made here are replaced at the next compile. Double-click a place to see its source, or press Ctrl+Alt+J for the page in view.');
+        if (source && state.currentId === note.id) showBanner('Made by Compile from ' + H.fileNameOf(source) + ': edits here are replaced at the next compile. Double-click to see the source.');
       }).catch(() => {});
       showPdf(note);
     } else if (note.fileKind === 'docx') {

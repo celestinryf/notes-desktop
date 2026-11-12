@@ -12,11 +12,12 @@ type Deps = {
   api: NotesApi,
   flushSave: () => Promise<unknown>,
   openFile: (filePath: string) => Promise<unknown>,
-  showOutput: (pdfPath: string) => Promise<unknown>,
+  showOutput: (pdfPath: string, manual: boolean) => Promise<unknown>,
   revealInPdf: (box: TexBox) => Promise<unknown>,
 };
 
 const AUTO_COMPILE_MS = 2000;
+const PENDING_LINE_MS = 10000;
 
 export function createCompileControls({ api, flushSave, openFile, showOutput, revealInPdf }: Deps) {
   const results = new Map<string, TexCompileResult>();
@@ -28,7 +29,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
   let editedDuring = false;
   let autoTimer: ReturnType<typeof setTimeout> | undefined;
   let compileAgain = false;
-  let pendingLine: { filePath: string, line: number } | null = null;
+  let pendingLine: { filePath: string, line: number, at: number } | null = null;
 
   const isTex = (n: PublicNote | null): n is PublicNote & { filePath: string } => !!n && !n.trashedAt && H.isTexFile(n);
   const optionsOf = (n: PublicNote) => n.texOptions || DEFAULT_TEX_OPTIONS;
@@ -66,6 +67,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     const n = state.current;
     if (!isTex(n)) return;
     clearTimeout(autoTimer);
+    if (auto && !optionsOf(n).compileOnSave) return;
     if (auto && running) { compileAgain = running === n.id; return; }
     if (running === n.id) {
       if (saving) stopBeforeStart = true;
@@ -92,11 +94,13 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     running = null;
     if (editedDuring && result.ok) edited.add(n.id);
     results.set(n.id, result);
+    const again = compileAgain;
+    compileAgain = false;
     render();
     if (state.currentId !== n.id) return;
-    if (result.ok && result.pdf) showOutput(result.pdf).catch(() => {});
+    if (result.ok && result.pdf) showOutput(result.pdf, !auto).catch(() => {});
     if (!auto && !result.ok && (result.reason === 'failed' || result.reason === 'no-tex')) openResults();
-    if (compileAgain) { compileAgain = false; compile(true); }
+    if (again && !(!result.ok && result.reason === 'stopped')) compile(true);
   }
 
   function caretLine() {
@@ -118,7 +122,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
   function goToSource(source: TexSource) {
     const n = state.current;
     if (n && n.filePath && samePath(n.filePath, source.filePath)) { goToLine(source.line); return; }
-    pendingLine = { filePath: source.filePath, line: source.line };
+    pendingLine = { filePath: source.filePath, line: source.line, at: Date.now() };
     openFile(source.filePath);
   }
 
@@ -265,7 +269,7 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
     const file = issue.file && root ? joinPath(dirOf(root), issue.file) : n.filePath;
     if (samePath(file, n.filePath)) { goToLine(issue.line); return; }
     if (!root || !isWithin(dirOf(root), file)) { toast('That line is in ' + file + ', which belongs to TeX, not to your document.'); return; }
-    pendingLine = { filePath: file, line: issue.line };
+    pendingLine = { filePath: file, line: issue.line, at: Date.now() };
     await openFile(file);
   }
 
@@ -285,12 +289,13 @@ export function createCompileControls({ api, flushSave, openFile, showOutput, re
   }
 
   function noteShown() {
+    clearTimeout(autoTimer);
     render();
     const n = state.current;
     if (!pendingLine || !n || !n.filePath) return;
     const wanted = pendingLine;
     pendingLine = null;
-    if (samePath(wanted.filePath, n.filePath)) requestAnimationFrame(() => goToLine(wanted.line));
+    if (Date.now() - wanted.at < PENDING_LINE_MS && samePath(wanted.filePath, n.filePath)) requestAnimationFrame(() => goToLine(wanted.line));
   }
 
   el.compileBtn.addEventListener('click', () => { compile(); });

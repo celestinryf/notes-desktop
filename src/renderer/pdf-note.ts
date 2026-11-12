@@ -34,6 +34,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
   let pdf: PdfController | null = null;
   let pdfShownKey: string | null = null, pdfSeq = 0, pdfNote: PdfOnShow | null = null;
   let pendingReveal: TexBox | null = null;
+  let loadingPdf = false;
 
   function pdfController() {
     if (!pdf && NotesPdfEditor) {
@@ -173,17 +174,19 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
     pdfShownKey = key;
     const seq = ++pdfSeq;
     pdfNote = null;
+    loadingPdf = true;
     try {
       const { bytes, marks } = await api.files.pdfOpen(note.id);
       if (seq !== pdfSeq) return;
       if (await ctl.open(new Uint8Array(bytes), marks, { keepView: opts && opts.keepView !== undefined ? opts.keepView : sameNote }) && seq === pdfSeq) {
         pdfNote = { id: note.id, fileMtime: note.fileMtime };
-        const reveal = pendingReveal;
-        if (reveal && note.filePath && samePath(reveal.pdf, note.filePath)) { pendingReveal = null; setTimeout(() => { if (pdf && pdfNote && pdfNote.id === note.id) pdf.reveal(reveal.page, reveal); }, 120); }
+        loadingPdf = false;
+        applyPendingReveal();
         if (pdfComments && pdfCommentsShown()) pdfComments.refresh();
       }
     } catch (err) {
       if (seq !== pdfSeq) return;
+      loadingPdf = false;
       pdfShownKey = null;
       showBanner('Could not show this PDF: ' + ipcErrorText(err) + ' Use "Open in default app" in the More menu for your PDF app.');
     }
@@ -406,10 +409,18 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
   function pdfOpen() { return !!pdfNote; }
   function forgetShownPdf() { pdfShownKey = null; }
 
-  function revealSync(box: TexBox) {
+  function applyPendingReveal() {
     const n = state.current;
-    if (pdf && pdfNote && n && n.id === pdfNote.id && n.filePath && samePath(n.filePath, box.pdf) && pdf.reveal(box.page, box)) return;
+    const box = pendingReveal;
+    if (!box || loadingPdf || !pdf || !pdfNote || !n || n.id !== pdfNote.id || !n.filePath || !samePath(n.filePath, box.pdf)) return;
+    pendingReveal = null;
+    const ctl = pdf;
+    setTimeout(() => ctl.reveal(box.page, box), 120);
+  }
+
+  function revealSync(box: TexBox) {
     pendingReveal = box;
+    applyPendingReveal();
   }
 
   async function sourceAt(point: { page: number, x: number, y: number } | null) {
@@ -423,7 +434,7 @@ export function createPdfNote({ api, externalLinkClick, showBanner, openFiles, s
   }
 
   async function sourceOfView() {
-    if (!(await sourceAt(pdf ? pdf.topOfView() : null))) toast('This PDF has no SyncTeX data beside it. Compile its LaTeX file in Notes first.');
+    if (!(await sourceAt(pdf ? pdf.topOfView() : null))) toast('Notes could not find this place in a source file. Compile the LaTeX file again to refresh its SyncTeX data.');
   }
 
   function bindPdfEvents() {

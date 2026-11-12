@@ -8,8 +8,10 @@ import { stemOf } from './shared/tex-magic.mts';
 
 const requireWhenNeeded = createRequire(import.meta.url);
 const NEAR_LINES = 8;
+const MAX_SYNCTEX_BYTES = 256 * 1024 * 1024;
+const CACHED_FILES = 8;
 
-export type SyncBox = { file: string, line: number, page: number, left: number, top: number, right: number, bottom: number };
+export type SyncBox = { file: string, key: string, line: number, page: number, left: number, top: number, right: number, bottom: number };
 type Parser = { parseSyncTex: (text: string) => unknown };
 
 let parser: Parser | null = null;
@@ -27,12 +29,12 @@ function loadParser(): Parser {
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const keyOf = (p: string) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
 
-function boxOf(raw: unknown, base: string, offset: { x: number, y: number }): SyncBox | null {
+function boxOf(raw: unknown, fileOf: (written: string) => { file: string, key: string }, offset: { x: number, y: number }): SyncBox | null {
   if (!isRecord(raw) || !isRecord(raw.file) || typeof raw.file.path !== 'string') return null;
   const left = num(raw.left) + offset.x;
   const bottom = num(raw.bottom) + offset.y;
   const height = num(raw.height);
-  return { file: path.resolve(base, raw.file.path), line: num(raw.line), page: num(raw.page) - 1, left, top: bottom - height, right: left + num(raw.width), bottom };
+  return Object.assign({ line: num(raw.line), page: num(raw.page) - 1, left, top: bottom - height, right: left + num(raw.width), bottom }, fileOf(raw.file.path));
 }
 
 export function boxesOf(text: string, base: string): SyncBox[] {
@@ -40,7 +42,13 @@ export function boxesOf(text: string, base: string): SyncBox[] {
   if (!isRecord(parsed)) return [];
   const offset = isRecord(parsed.offset) ? { x: num(parsed.offset.x), y: num(parsed.offset.y) } : { x: 0, y: 0 };
   const boxes: SyncBox[] = [];
-  const add = (raw: unknown) => { const b = boxOf(raw, base, offset); if (b && b.line > 0 && b.page >= 0) boxes.push(b); };
+  const files = new Map<string, { file: string, key: string }>();
+  const fileOf = (written: string) => {
+    let known = files.get(written);
+    if (!known) { const file = path.resolve(base, written); known = { file, key: keyOf(file) }; files.set(written, known); }
+    return known;
+  };
+  const add = (raw: unknown) => { const b = boxOf(raw, fileOf, offset); if (b && b.line > 0 && b.page >= 0) boxes.push(b); };
   if (Array.isArray(parsed.hBlocks)) parsed.hBlocks.forEach(add);
   if (isRecord(parsed.blockNumberLine)) {
     for (const lines of Object.values(parsed.blockNumberLine)) {
@@ -68,16 +76,22 @@ export function loadBoxes(pdfOrRoot: string) {
   const mtime = fs.statSync(file).mtimeMs;
   const known = cache.get(file);
   if (known && known.mtime === mtime) return known.boxes;
-  const bytes = fs.readFileSync(file);
-  const text = file.endsWith('.gz') ? zlib.gunzipSync(bytes).toString('utf8') : bytes.toString('utf8');
-  const boxes = boxesOf(text, path.dirname(file));
+  let boxes: SyncBox[];
+  try {
+    if (fs.statSync(file).size > MAX_SYNCTEX_BYTES) return null;
+    const bytes = fs.readFileSync(file);
+    const text = file.endsWith('.gz') ? zlib.gunzipSync(bytes, { maxOutputLength: MAX_SYNCTEX_BYTES }).toString('utf8') : bytes.toString('utf8');
+    boxes = boxesOf(text, path.dirname(file));
+  } catch (_) { return null; }
+  cache.delete(file);
   cache.set(file, { mtime, boxes });
+  for (const old of cache.keys()) { if (cache.size <= CACHED_FILES) break; cache.delete(old); }
   return boxes;
 }
 
 export function forwardSearch(boxes: SyncBox[], file: string, line: number) {
   const key = keyOf(file);
-  const inFile = boxes.filter((b) => keyOf(b.file) === key);
+  const inFile = boxes.filter((b) => b.key === key);
   if (!inFile.length) return null;
   let hits: SyncBox[] = [];
   for (let d = 0; d <= NEAR_LINES && !hits.length; d++) {

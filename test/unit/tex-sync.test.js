@@ -97,3 +97,28 @@ test('the service maps a line to a box in the compiled PDF and a point back to t
   fs.writeFileSync(path.join(path.dirname(file), 'loose.tex'), 'x');
   assert.equal(svc.sourceFor(loose), null, 'a PDF beside a .tex but with no SyncTeX file is not called compiled');
 });
+
+test('a truncated or broken SyncTeX file reads as no data instead of throwing', () => {
+  const dir = tmpDir('notes-tex-sync-bad-');
+  const gz = zlib.gzipSync(syncText());
+  fs.writeFileSync(path.join(dir, 'main.synctex.gz'), gz.subarray(0, Math.floor(gz.length / 2)));
+  assert.equal(S.loadBoxes(path.join(dir, 'main.pdf')), null);
+});
+
+test('an absolute input path is kept as written', () => {
+  const abs = path.resolve('/elsewhere/part.tex');
+  const text = syncText().replace('Input:2:./chapters/intro.tex', 'Input:2:' + abs);
+  const boxes = S.boxesOf(text, base);
+  assert.ok(boxes.some((b) => b.file === abs && b.line === 2));
+  assert.ok(S.forwardSearch(boxes, abs, 2));
+});
+
+test('only the last eight SyncTeX files stay in memory', () => {
+  const dirs = Array.from({ length: 10 }, () => tmpDir('notes-tex-sync-cache-'));
+  for (const d of dirs) fs.writeFileSync(path.join(d, 'main.synctex'), syncText());
+  const first = S.loadBoxes(path.join(dirs[0], 'main.pdf'));
+  for (const d of dirs.slice(1)) S.loadBoxes(path.join(d, 'main.pdf'));
+  assert.notEqual(S.loadBoxes(path.join(dirs[0], 'main.pdf')), first, 'the oldest was dropped and read again');
+  const last = S.loadBoxes(path.join(dirs[9], 'main.pdf'));
+  assert.equal(S.loadBoxes(path.join(dirs[9], 'main.pdf')), last, 'a recent one is still cached');
+});

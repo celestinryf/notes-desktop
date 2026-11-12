@@ -334,7 +334,7 @@ export const NotesPdfEditor = (function () {
         const [x2, y2] = view.viewport.convertToViewportPoint(Math.max(box.right, box.left + 24), height - box.bottom);
         const flash = document.createElement('div');
         flash.className = 'sync-flash';
-        Object.assign(flash.style, { left: Math.min(x1, x2) - 4 + 'px', top: Math.min(y1, y2) - 3 + 'px', width: Math.abs(x2 - x1) + 8 + 'px', height: Math.abs(y2 - y1) + 6 + 'px' });
+        Object.assign(flash.style, { left: Math.min(x1, x2) - 4 + 'px', top: Math.min(y1, y2) - 5 + 'px', width: Math.abs(x2 - x1) + 8 + 'px', height: Math.abs(y2 - y1) + 10 + 'px' });
         view.div.append(flash);
         setTimeout(() => flash.remove(), 1600);
       });
