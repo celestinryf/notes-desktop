@@ -158,7 +158,7 @@ function main() {
       if (win && !win.isDestroyed()) win.webContents.send('git:pulled', pulled);
     },
   });
-  store.onContentChange = (notes) => git.noteChanged(notes.filter((n) => !n.lock).map((n) => ({ id: n.id, body: n.body })));
+  store.onContentChange = () => git.noteChanged();
   const searchIndex = new SearchIndex(path.join(DATA_DIR, 'search-index.sqlite'), () => store.notes);
   store.onIndexChange = (update) => searchIndex.changed(update);
   searchIndex.onReady = (info) => trace.write('search-index-ready', info);
@@ -269,7 +269,7 @@ function main() {
     return { ok: true, error: null };
   }
   const vaults = new VaultManager(store, {
-    debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || 8000,
+    debounceMs: Number(process.env.NOTES_APP_VAULT_DEBOUNCE_MS) || undefined,
     onChange: (id, status) => { if (win && !win.isDestroyed()) win.webContents.send('vault:status', { id, status }); },
     onNotesChanged: () => { fanReloaded({ reason: 'vault' }); },
   });
@@ -392,13 +392,12 @@ function main() {
       stickies.broadcast('app:flush');
       git.flush().catch(() => {}).finally(flushStore);
     });
-    w.on('hide', () => { writeRuntime(); relockOnHide(); git.attentionLost(); });
+    w.on('hide', () => { writeRuntime(); relockOnHide(); });
     w.on('focus', () => {
       if (store.settings.alwaysOnTop && !w.isAlwaysOnTop()) w.setAlwaysOnTop(true);
       writeRuntime();
-      git.attentionBack();
     });
-    w.on('blur', () => { writeRuntime(); git.attentionLost(); });
+    w.on('blur', () => { writeRuntime(); });
 
     w.webContents.setWindowOpenHandler(({ url }) => {
       if (H.isOpenableLink(url)) shell.openExternal(url);
@@ -536,7 +535,7 @@ function main() {
     refreshTray();
     if (!changed('gitEnabled') && !changed('gitRemote')) return;
     await git.configure(now);
-    if (now.gitEnabled) git.noteChanged();
+    if (now.gitEnabled) await git.commit();
   }
 
   function refreshTray() {
@@ -1304,7 +1303,6 @@ function main() {
 
   handle('git:status', () => git.status());
   handle('git:commit', () => git.commit('manual commit'));
-  handle('history:settle', () => { git.settle(); });
   handle('update:status', () => updateStatus());
   handle('update:check', async () => { if (SELF_UPDATE) await refreshUpdate(); return updateStatus(); });
   handle('update:apply', () => applyUpdate({ visible: true }));
@@ -1652,7 +1650,7 @@ function main() {
         if (text === null || !followed) return;
         const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
         if (followsRenames && i > 0 && files[i].path !== files[i - 1].path && !body.trim()) { followed = false; return; }
-        found.push({ hash: files[i].hash, at: files[i].at, title: '', body, chars: body.length });
+        found.push({ hash: files[i].hash, at: files[i].at, title: '', body });
       });
     };
     if (homeRel) await addVersions(await git.fileHistory(homeRel, max), true);
@@ -1664,7 +1662,7 @@ function main() {
       try { snap = JSON.parse(text); } catch (_) { return; }
       const n = (snap.notes || []).find((x) => x.id === id);
       if (!n || typeof n.body !== 'string' || n.lock) return;
-      found.push({ hash: snapshots[i].hash, at: snapshots[i].at, title: n.title || '', body: n.body, chars: n.body.length });
+      found.push({ hash: snapshots[i].hash, at: snapshots[i].at, title: n.title || '', body: n.body });
     });
     found.sort((a, b) => b.at - a.at);
     const versions = found.filter((v, i) => i === 0 || v.body !== found[i - 1].body).slice(0, max);
@@ -1800,7 +1798,7 @@ function main() {
     step('login item', applyLoginItem);
     step('start menu shortcut', applyStartMenuShortcut);
     step('recycle bin', forgetEmptiedBin);
-    git.configure(store.settings).then(() => { if (store.settings.gitEnabled) git.noteChanged(); }).catch(() => {});
+    git.configure(store.settings).then(() => (store.settings.gitEnabled ? git.commit() : null)).catch(() => {});
     vaults.start().catch((err) => console.error('[vaults] start failed', err));
     setInterval(() => syncInBackground(SYNC_EVERY_MS), SYNC_ON_SHOW_MS);
     if (!store.saveBlocked && process.env.NOTES_APP_NO_INDEX !== '1') step('search index', () => searchIndex.start());

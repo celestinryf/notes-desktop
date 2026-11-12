@@ -388,3 +388,11 @@ test('unmerged paths with no merge marker block every sync until resolved (no co
   assert.equal(git(bare, ['rev-list', '--count', 'main']), pushed, 'nothing pushed while unresolved');
   vm.closeAll();
 });
+
+test('a vault waits the same quiet as note history before it versions a change, unless a debounce is given', () => {
+  const { DEFAULT_TIMING } = require('../../src/version-timing.mts');
+  const store = new Store(tmp());
+  assert.equal(new VaultManager(store).debounceMs, DEFAULT_TIMING.quietMs);
+  assert.equal(new VaultManager(store, { debounceMs: undefined }).debounceMs, DEFAULT_TIMING.quietMs);
+  assert.equal(new VaultManager(store, { debounceMs: 50 }).debounceMs, 50);
+});

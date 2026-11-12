@@ -1881,7 +1881,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
       if (gone >= 0 && id !== state.currentId) { removeTabAt(gone); tabsChanged(); }
       return;
     }
-    if (state.dirty) { await flushSave(); stashIfDirty(); api.app.historySettle().catch(() => {}); }
+    if (state.dirty) { await flushSave(); stashIfDirty(); }
     state.currentId = note.id;
     state.current = note;
     state.dirty = false;

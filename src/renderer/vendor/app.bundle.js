@@ -21778,7 +21778,7 @@
       el.historyStatus.textContent = hist.versions.length ? countText(hist.versions.length, "earlier version") : r.keptOut ? "No earlier versions." : "No earlier version differs from the current text yet.";
       hist.versions.forEach((v, i) => {
         const first = (v.body.split("\n").find((l) => l.trim()) || "(empty)").replace(/^#+\s*/, "");
-        addRow(i, new Date(v.at).toLocaleString() + " \xB7 " + v.chars + " chars", truncate(first, 48), () => showVersion(i));
+        addRow(i, new Date(v.at).toLocaleString(), truncate(first, 48), () => showVersion(i));
       });
       if (hist.versions.length) {
         const at = pickIndex(pick);
@@ -28276,8 +28276,6 @@
       if (state.dirty) {
         await flushSave();
         stashIfDirty();
-        api.app.historySettle().catch(() => {
-        });
       }
       state.currentId = note.id;
       state.current = note;
