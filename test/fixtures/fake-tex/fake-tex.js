@@ -7,6 +7,7 @@ if (args.includes('--version') || args.includes('-v')) {
   process.stdout.write('pdfTeX 3.141592653-2.6-1.40.26 (Fake TeX 2026)\n');
   process.exit(0);
 }
+if (process.env.FAKE_LATEXMK_UPTODATE) process.exit(0);
 const file = args.filter((a) => !a.startsWith('-')).pop();
 if (!file) process.exit(2);
 const cwd = process.cwd();

@@ -7,7 +7,7 @@ export const ROOT_LEVELS_UP = 3;
 
 const isInside = (dir: string, inner: string) => {
   const rel = path.relative(dir, inner);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 };
 
 export function rootFor(filePath: string, magic: TexMagic): { root: string } | { error: string } {

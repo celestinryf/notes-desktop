@@ -56,8 +56,9 @@ export class TexService {
   }
 
   clean(noteId: string, filePath: string) {
+    const current = this.rootOf(filePath);
     const known = this.roots.get(noteId);
-    const target = known ? { root: known } : this.rootOf(filePath);
+    const target = 'error' in current && known ? { root: known } : current;
     if ('error' in target) throw new Error(target.error);
     if (isCompiling(target.root)) throw new Error('Stop the compile, or wait for it, before clearing its files.');
     let removed = 0;

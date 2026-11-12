@@ -19,6 +19,9 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   const edited = new Set<string>();
   const visited = new Map<string, number>();
   let running: string | null = null;
+  let saving = false;
+  let stopBeforeStart = false;
+  let editedDuring = false;
   let pendingLine: { filePath: string, line: number } | null = null;
 
   const isTex = (n: PublicNote | null): n is PublicNote & { filePath: string } => !!n && !n.trashedAt && H.isTexFile(n);
@@ -56,19 +59,30 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   async function compile() {
     const n = state.current;
     if (!isTex(n)) return;
-    if (running === n.id) { await api.tex.stop(n.id).catch(() => false); return; }
+    if (running === n.id) {
+      if (saving) stopBeforeStart = true;
+      else await api.tex.stop(n.id).catch(() => false);
+      return;
+    }
     if (running) { toast('Another file is compiling. Wait for it or stop it first.'); return; }
     closeMenus();
     running = n.id;
+    saving = true;
+    stopBeforeStart = false;
+    editedDuring = false;
     edited.delete(n.id);
     visited.delete(n.id);
     render();
     let result: TexCompileResult;
+    const stopped: TexCompileResult = { ok: false, root: null, reason: 'stopped', message: 'Compiling stopped.', log: null, ms: 0, steps: [] };
     try {
       await flushSave();
-      result = await api.tex.compile(n.id);
+      saving = false;
+      result = stopBeforeStart ? stopped : await api.tex.compile(n.id);
     } catch (err) { result = { ok: false, root: null, reason: 'failed', message: ipcErrorText(err), log: null, ms: 0, steps: [] }; }
+    saving = false;
     running = null;
+    if (editedDuring && result.ok) edited.add(n.id);
     results.set(n.id, result);
     render();
     if (state.currentId !== n.id) return;
@@ -256,7 +270,9 @@ export function createCompileControls({ api, flushSave, openFile }: Deps) {
   for (const b of el.compileOutput.querySelectorAll<HTMLButtonElement>('.compile-get-tex')) b.addEventListener('click', () => { closeMenus(); api.app.openExternal(b.dataset.url || ''); });
   el.bodyInput.addEventListener('input', () => {
     const n = state.current;
-    if (!isTex(n) || edited.has(n.id) || !results.has(n.id) || running === n.id) return;
+    if (!isTex(n)) return;
+    if (running === n.id) { editedDuring = true; return; }
+    if (edited.has(n.id) || !results.has(n.id)) return;
     edited.add(n.id);
     render();
   });

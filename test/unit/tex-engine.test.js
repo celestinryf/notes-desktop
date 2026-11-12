@@ -81,6 +81,7 @@ function service(extra) {
 }
 
 const OPTIONS = { engine: 'pdflatex', haltOnError: false, compileOnSave: false };
+const withLatexmk = (dir) => fs.writeFileSync(path.join(dir, 'latexmk.cmd'), '@node "%~dp0\\fake-tex.js" %*\r\n');
 const runsOf = (file) => Number(fs.readFileSync(file.replace(/\.tex$/, '.runs'), 'utf8'));
 
 test('a clean compile writes the PDF beside the file and reports no issues', async () => {
@@ -179,7 +180,7 @@ test('bibtex runs when the aux file asks for it, then the engine again', async (
 });
 
 test('latexmk is used when it runs, with no rc files', async () => {
-  const svc = service((dir) => fs.writeFileSync(path.join(dir, 'latexmk.cmd'), '@node "%~dp0\\fake-tex.js" %*\r\n'));
+  const svc = service(withLatexmk);
   assert.equal((await svc.status()).latexmk, true);
   const out = await svc.compile('n1', texFile('Hello\n'), OPTIONS);
   assert.equal(out.ok, true);
@@ -252,4 +253,49 @@ test('no TeX gives one plain message', async () => {
   assert.equal(out.reason, 'no-tex');
   assert.equal(out.message, NO_TEX);
   assert.deepEqual(await svc.status(), { found: false, looked: [path.resolve(svc.env.NOTES_APP_TEX_DIR)], problem: null });
+});
+
+test('compiles queued on one root: each newer one stops the one before, and a waiting one can be stopped', async () => {
+  const svc = service();
+  const file = texFile('Queued\n');
+  process.env.FAKE_TEX_DELAY_MS = '1500';
+  try {
+    const a = svc.compile('n1', file, OPTIONS);
+    await new Promise((r) => setTimeout(r, 400));
+    const b = svc.compile('n2', file, OPTIONS);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(svc.stop('n2'), true, 'the waiting compile is the one stopped');
+    delete process.env.FAKE_TEX_DELAY_MS;
+    const c = svc.compile('n3', file, OPTIONS);
+    const [ra, rb, rc] = await Promise.all([a, b, c]);
+    assert.equal(ra.reason, 'stopped');
+    assert.equal(rb.reason, 'stopped');
+    assert.equal(rc.ok, true);
+    assert.equal(runsOf(file), 1, 'only the last compile ran to the end');
+  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+});
+
+test('latexmk with nothing to do keeps the PDF and the log it already has', async () => {
+  const svc = service(withLatexmk);
+  const file = texFile('Up to date\n\\FAKEWARNING\n');
+  assert.equal((await svc.compile('n1', file, OPTIONS)).ok, true);
+  const old = (Date.now() - 60000) / 1000;
+  for (const ext of ['log', 'pdf']) fs.utimesSync(file.replace(/\.tex$/, '.' + ext), old, old);
+  process.env.FAKE_LATEXMK_UPTODATE = '1';
+  try {
+    const again = await svc.compile('n1', file, OPTIONS);
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.equal(again.pdf, file.replace(/\.tex$/, '.pdf'));
+    assert.equal(again.log.warnings, 1, 'the existing log is still read');
+  } finally { delete process.env.FAKE_LATEXMK_UPTODATE; }
+});
+
+test('a folder whose name starts with two dots is still inside', async () => {
+  const file = texFile('% !TEX root = ..parts/main.tex\n');
+  const target = path.join(path.dirname(file), '..parts', 'main.tex');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, 'Hello\n');
+  const out = await service().compile('n1', file, OPTIONS);
+  assert.equal(out.ok, true, out.message);
+  assert.equal(out.root, target);
 });

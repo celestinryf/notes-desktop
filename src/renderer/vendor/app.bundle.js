@@ -16994,6 +16994,9 @@
     const edited = /* @__PURE__ */ new Set();
     const visited = /* @__PURE__ */ new Map();
     let running = null;
+    let saving = false;
+    let stopBeforeStart = false;
+    let editedDuring = false;
     let pendingLine = null;
     const isTex = (n) => !!n && !n.trashedAt && isTexFile(n);
     const optionsOf = (n) => n.texOptions || DEFAULT_TEX_OPTIONS;
@@ -17035,7 +17038,8 @@
       const n = state.current;
       if (!isTex(n)) return;
       if (running === n.id) {
-        await api.tex.stop(n.id).catch(() => false);
+        if (saving) stopBeforeStart = true;
+        else await api.tex.stop(n.id).catch(() => false);
         return;
       }
       if (running) {
@@ -17044,17 +17048,24 @@
       }
       closeMenus();
       running = n.id;
+      saving = true;
+      stopBeforeStart = false;
+      editedDuring = false;
       edited.delete(n.id);
       visited.delete(n.id);
       render();
       let result;
+      const stopped = { ok: false, root: null, reason: "stopped", message: "Compiling stopped.", log: null, ms: 0, steps: [] };
       try {
         await flushSave();
-        result = await api.tex.compile(n.id);
+        saving = false;
+        result = stopBeforeStart ? stopped : await api.tex.compile(n.id);
       } catch (err) {
         result = { ok: false, root: null, reason: "failed", message: ipcErrorText(err), log: null, ms: 0, steps: [] };
       }
+      saving = false;
       running = null;
+      if (editedDuring && result.ok) edited.add(n.id);
       results.set(n.id, result);
       render();
       if (state.currentId !== n.id) return;
@@ -17285,7 +17296,12 @@
     });
     el.bodyInput.addEventListener("input", () => {
       const n = state.current;
-      if (!isTex(n) || edited.has(n.id) || !results.has(n.id) || running === n.id) return;
+      if (!isTex(n)) return;
+      if (running === n.id) {
+        editedDuring = true;
+        return;
+      }
+      if (edited.has(n.id) || !results.has(n.id)) return;
       edited.add(n.id);
       render();
     });
