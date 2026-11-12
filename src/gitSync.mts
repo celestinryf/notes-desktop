@@ -111,6 +111,7 @@ class GitSync {
   state: GitState;
   onChange: (state: GitState) => void;
   beforeSnapshot: () => void;
+  changeCount: number;
   workTree: () => string | null;
   linkedFiles: () => LinkedFile[];
   keptOut: () => KeptOut[];
@@ -135,6 +136,7 @@ class GitSync {
     this.state = { available: null, enabled: false, initialized: false, repoDir: this.dir, remote: '', commits: 0, lastCommitAt: null, lastPushAt: null, lastError: null, pending: false };
     this.onChange = opts.onChange || (() => {});
     this.beforeSnapshot = opts.beforeSnapshot || (() => {});
+    this.changeCount = 0;
     this.workTree = opts.workTree || (() => null);
     this.linkedFiles = opts.linkedFiles || (() => []);
     this.keptOut = opts.keptOut || (() => []);
@@ -374,15 +376,16 @@ class GitSync {
 
   noteChanged() {
     if (!this.state.enabled) return;
+    this.changeCount++;
     this._set({ pending: true });
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = null; this.commit().catch(() => {}); }, this.clock.changed(this.now()));
   }
 
   async flush() {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    if (this.state.pending) await this.commit(undefined, { pull: false });
+    const waiting = this.timer !== null || this.state.pending;
+    this._stopTimer();
+    if (waiting) await this.commit(undefined, { pull: false });
     if (this.busy) await this.busy;
   }
 
@@ -402,22 +405,34 @@ class GitSync {
     return null;
   }
 
+  _stopTimer() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  _changedSince(count: number) {
+    if (this.changeCount !== count) return true;
+    this._stopTimer();
+    return false;
+  }
+
   async _commitNow(message?: string): Promise<GitResult> {
+    const seen = this.changeCount;
     this.clock.committed();
     const notReady = await this._ready();
     if (notReady) return notReady;
     let add: GitRun | null;
     try { add = await this._stage(); }
-    catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: false }); return { ok: false, error: err.message }; }
-    if (!add) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
-    if (!add.ok) { this._set({ lastError: add.error, pending: false }); return { ok: false, error: add.error }; }
+    catch (err) { this._set({ lastError: 'snapshot failed: ' + err.message, pending: this._changedSince(seen) }); return { ok: false, error: err.message }; }
+    if (!add) { this._set({ pending: this._changedSince(seen), lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    if (!add.ok) { this._set({ lastError: add.error, pending: this._changedSince(seen) }); return { ok: false, error: add.error }; }
     const staged = await this._staged();
-    if (staged.ok) { this._set({ pending: false, lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
+    if (staged.ok) { this._set({ pending: this._changedSince(seen), lastError: this._keptError() }); return { ok: true, nothingToCommit: true }; }
     const stamp = new Date(this.now()).toISOString().replace('T', ' ').slice(0, 19);
     const r = await run(AUTHOR.concat(['commit', '-q', '-m', message || ('notes ' + stamp)]), this.dir, COMMIT_TIMEOUT_MS);
-    if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: false }); return { ok: false, error: r.error }; }
+    if (!r.ok) { this.linkedSeen.clear(); this._set({ lastError: r.error, pending: this._changedSince(seen) }); return { ok: false, error: r.error }; }
     if (this.workTree()) { try { fs.rmSync(this.snapshot, { force: true }); } catch (_) {  } }
-    this._set({ lastError: this._linkedNotice(), pending: false });
+    this._set({ lastError: this._linkedNotice(), pending: this._changedSince(seen) });
     await this.refreshCounts();
     return { ok: true };
   }
@@ -450,7 +465,7 @@ class GitSync {
   }
 
   syncDue(minGapMs: number) {
-    return this.state.enabled && !!this.state.remote && !this.busy && !this.state.pending && this.now() - this.lastSyncTry >= minGapMs;
+    return this.state.enabled && !!this.state.remote && !this.busy && this.timer === null && this.now() - this.lastSyncTry >= minGapMs;
   }
 
   async _pushNow(): Promise<GitResult> {
