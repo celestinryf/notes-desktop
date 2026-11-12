@@ -16227,7 +16227,6 @@
     filePath: pageElement("#filePath", HTMLSpanElement),
     fileRevealBtn: pageElement("#fileRevealBtn", HTMLButtonElement),
     fileOpenBtn: pageElement("#fileOpenBtn", HTMLButtonElement),
-    fileReloadBtn: pageElement("#fileReloadBtn", HTMLButtonElement),
     docxView: pageElement("#docxView", HTMLIFrameElement),
     docxEditor: pageElement("#docxEditor", HTMLDivElement),
     docxSaveBtn: pageElement("#docxSaveBtn", HTMLButtonElement),
@@ -21866,7 +21865,7 @@
       }
       const when = new Date(c.at).toLocaleString();
       if (await reloadFile()) toast("Restored the copy from " + when + ". The file you had is kept as a copy too.");
-      else toast("The copy from " + when + " is in place on disk; the view still shows the file as it was. Reload it to see the copy.");
+      else toast("The copy from " + when + " is in place on disk; the view still shows the file as it was. Reopen the note to see the copy.");
     }
     async function restoreVersion() {
       if (hist.copies.length) {
@@ -21894,7 +21893,7 @@
       scheduleSave();
       const ok = await flushSave();
       if (ok) toast("Restored the version from " + new Date(v.at).toLocaleString() + ". The text you had is still in history.");
-      else if (state.conflictShown !== note.id) toast("Could not save the restored text yet; it will be retried.");
+      else if (state.pending.has(note.id)) toast("Could not save the restored text yet; it will be retried.");
     }
     return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange };
   }
@@ -26073,7 +26072,7 @@
         if (!target || !ed) throw new Error("no Word document is open");
         c = ed.save();
       } catch (err) {
-        toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; use Reload to start again from the file.");
+        toast("Could not save the document: " + (err.message || err) + ". Your changes are still here; reopen the note to start again from the file.");
         return false;
       }
       if (!c) return true;
@@ -28603,7 +28602,7 @@
       if (documentBusy()) return;
       if (state.currentId !== note.id) return;
       if (res.missing) {
-        showBanner("The file no longer exists at " + note.filePath + ". Your last view is kept here as a plain note.");
+        showBanner(missingFileText(note));
         return;
       }
       if (res.changed && !state.dirty) {
@@ -28654,7 +28653,6 @@
     async function reloadCurrentFile(quiet = false) {
       if (!state.current || !state.current.filePath) return false;
       await commitPdf();
-      if ((state.dirty || documentDirty()) && !window.confirm("Discard your unsaved edits and reload from disk?")) return false;
       const id = state.currentId;
       if (!id) return false;
       state.dirty = false;
@@ -28707,35 +28705,33 @@
         await retryPending();
       }, 3e3);
     }
-    function offerConflictChoice(id, patch) {
-      if (state.conflictShown === id) return;
-      state.conflictShown = id;
-      toast("This file changed on disk while you were editing. Reload it (your edit is dropped) or keep yours.", {
-        label: "Keep mine",
-        run: async () => {
-          state.conflictShown = null;
-          const latest = state.currentId === id ? currentPatch() : state.pending.get(id) || patch;
-          try {
-            const updated = await api.notes.update(id, Object.assign({}, latest, { force: true }));
-            if (state.pending.get(id) === patch || state.pending.get(id) === latest) state.pending.delete(id);
-            if (state.currentId === id && updated) {
-              state.current = updated;
-              const same2 = JSON.stringify(currentPatch()) === JSON.stringify(latest);
-              state.dirty = !same2;
-              if (same2) setSaved("Saved");
-              else scheduleSave();
-              refreshRow(updated);
-            }
-          } catch (err) {
-            reportSaveFailure(err);
-            scheduleRetry();
-          }
-        }
-      });
-      setTimeout(() => {
-        if (state.conflictShown === id) state.conflictShown = null;
-      }, 12e3);
+    async function takeDiskVersion(id) {
+      state.pending.delete(id);
+      let res;
+      try {
+        res = await api.files.refresh(id);
+      } catch (err) {
+        reportSaveFailure(err);
+        return;
+      }
+      const fresh = await api.notes.get(id);
+      if (!fresh) return;
+      if (state.currentId !== id) {
+        refreshRow(fresh);
+        return;
+      }
+      state.dirty = false;
+      setSaved("Saved");
+      if (res.missing) {
+        showBanner(missingFileText(fresh));
+        toast("The file no longer exists on disk, so your last edit was not saved.");
+        return;
+      }
+      applyFreshFileBody(fresh);
+      if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
+      toast("Reloaded from disk: the file changed outside Notes while you were editing. Your last edit was not saved.");
     }
+    const missingFileText = (note) => "The file no longer exists at " + note.filePath + ". Your last view is kept here as a plain note.";
     function reportSaveFailure(err) {
       if (state.saveErrorShown) return;
       state.saveErrorShown = true;
@@ -28759,7 +28755,7 @@
           }
         } catch (err) {
           if (/changed on disk/i.test(String(err && err.message))) {
-            offerConflictChoice(id, patch);
+            await takeDiskVersion(id);
             continue;
           }
           failed2 = true;
@@ -28807,7 +28803,7 @@
           setSaved("Save failed");
         }
         if (/changed on disk/i.test(String(err && err.message))) {
-          offerConflictChoice(id, patch);
+          await takeDiskVersion(id);
           return false;
         }
         reportSaveFailure(err);
@@ -29779,7 +29775,6 @@
         const err = await api.files.openExternal(state.currentId);
         if (err) toast("Could not open: " + err);
       });
-      el.fileReloadBtn.addEventListener("click", () => reloadCurrentFile());
       el.imageView.addEventListener("click", toggleImageSize);
       el.imageView.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -30361,10 +30356,14 @@
                 applyFreshFileBody(fresh);
                 if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
               }
-            } else if (!state.dirty && !state.inflight.has(fresh.id)) {
+            } else if (state.current && fresh.body !== state.current.body && !state.inflight.has(fresh.id)) {
+              const dropped = state.dirty;
+              state.dirty = false;
               applyFreshFileBody(fresh);
-              if (reason === "vault") toast("This note was updated from the vault.");
-            } else toast("This note changed elsewhere while you were editing. Your text is kept; " + (fresh.filePath && !fresh.home ? "use Reload to take the disk version." : "reopen the note to see the other version."));
+              if (fresh.title !== el.titleInput.value) el.titleInput.value = fresh.title;
+              if (dropped) toast((reason === "vault" ? "This note was updated from the vault" : "This note changed elsewhere") + "; showing the new version. Your last edit was not saved.");
+              else if (reason === "vault") toast("This note was updated from the vault.");
+            }
           }
         }
         if (reason === "recovered") toast("Your notes file is readable again; saving resumed.");

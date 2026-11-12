@@ -215,7 +215,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     if (!r.ok) { toast('Could not restore that copy: ' + (r.error || 'unknown error')); return; }
     const when = new Date(c.at).toLocaleString();
     if (await reloadFile()) toast('Restored the copy from ' + when + '. The file you had is kept as a copy too.');
-    else toast('The copy from ' + when + ' is in place on disk; the view still shows the file as it was. Reload it to see the copy.');
+    else toast('The copy from ' + when + ' is in place on disk; the view still shows the file as it was. Reopen the note to see the copy.');
   }
 
   async function restoreVersion() {
@@ -238,7 +238,7 @@ export function createHistoryDialog({ api, flushSave, applyEditorMode, runFind, 
     scheduleSave();
     const ok = await flushSave();
     if (ok) toast('Restored the version from ' + new Date(v.at).toLocaleString() + '. The text you had is still in history.');
-    else if (state.conflictShown !== note.id) toast('Could not save the restored text yet; it will be retried.');
+    else if (state.pending.has(note.id)) toast('Could not save the restored text yet; it will be retried.');
   }
 
   return { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange };

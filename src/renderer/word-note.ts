@@ -135,7 +135,7 @@ export function createWordNote({ api, flushSave, showBanner, reportFileSaved, ex
     try {
       if (!target || !ed) throw new Error('no Word document is open');
       c = ed.save();
-    } catch (err) { toast('Could not save the document: ' + (err.message || err) + '. Your changes are still here; use Reload to start again from the file.'); return false; }
+    } catch (err) { toast('Could not save the document: ' + (err.message || err) + '. Your changes are still here; reopen the note to start again from the file.'); return false; }
     if (!c) return true;
     try {
       const r = await api.files.saveDocx(target.id, c.patches, target.fileMtime);
