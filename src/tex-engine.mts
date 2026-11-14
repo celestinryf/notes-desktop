@@ -19,7 +19,7 @@ export type Runner = (exe: Exe, args: string[]) => Promise<RunResult>;
 type Env = Record<string, string | undefined>;
 
 const PROBE_FILE = 'article.cls';
-const names = (name: string) =>(process.platform === 'win32' ? [name + '.exe', name + '.cmd', name] : [name]);
+const names = (name: string) => (process.platform === 'win32' ? [name + '.exe', name + '.cmd', name] : [name]);
 const find = (dir: string, name: string) => resolveExecutable(names(name), { pathDirs: [dir] });
 
 function isDir(p: string) {
