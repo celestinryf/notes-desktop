@@ -55,9 +55,33 @@ test('an engine without a working kpsewhich is a broken install, said plainly', 
   assert.equal(missing.install, null);
   assert.match(missing.problem, /no kpsewhich beside it/);
   const dir2 = copyFake(path.join(tmpDir('notes-tex-broken2-'), 'bin'));
-  const failing = await detectTex(env({ NOTES_APP_TEX_DIR: dir2 }), async (exe, args) => (/kpsewhich/.test(exe.file) ? { code: 3, stdout: '' } : { code: 0, stdout: 'pdfTeX (MiKTeX 24.4)' }));
+  const failing = await detectTex(env({ NOTES_APP_TEX_DIR: dir2 }), async (exe) => (/kpsewhich/.test(exe.file) ? { code: null, stdout: '' } : { code: 0, stdout: 'pdfTeX (MiKTeX 24.4)' }));
   assert.equal(failing.install, null);
   assert.match(failing.problem, /kpsewhich did not run/);
+});
+
+test('a kpsewhich that runs but cannot find article.cls means LaTeX itself is missing', async () => {
+  const dir = copyFake(path.join(tmpDir('notes-tex-nolatex-'), 'bin'));
+  for (const answer of [{ code: 1, stdout: '' }, { code: 0, stdout: '  \n' }]) {
+    const found = await detectTex(env({ NOTES_APP_TEX_DIR: dir }), async (exe) => (/kpsewhich/.test(exe.file) ? answer : { code: 0, stdout: 'pdfTeX (TeX Live 2026)' }));
+    assert.equal(found.install, null);
+    assert.match(found.problem, /cannot find article\.cls, so LaTeX itself looks missing/);
+  }
+});
+
+test('MiKTeX is found although its kpsewhich has no TEXMFROOT and nags about updates', async () => {
+  const dir = copyFake(path.join(tmpDir('notes-tex-miktex-'), 'bin'));
+  const asked = [];
+  const miktex = async (exe, args) => {
+    if (!/kpsewhich/.test(exe.file)) return { code: 0, stdout: 'MiKTeX-pdfTeX 4.23 (MiKTeX 25.12)\n' };
+    asked.push(args.join(' '));
+    if (args[0] === 'article.cls') return { code: 0, stdout: 'C:/Users/me/AppData/Local/Programs/MiKTeX/tex/latex/base/article.cls\n' };
+    return { code: 1, stdout: '' };
+  };
+  const found = await detectTex(env({ NOTES_APP_TEX_DIR: dir }), miktex);
+  assert.ok(found.install, found.problem || 'not found');
+  assert.equal(found.install.distribution, 'MiKTeX 25.12');
+  assert.deepEqual(asked, ['article.cls']);
 });
 
 test('the distribution is read from the engine version line', () => {
