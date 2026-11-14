@@ -1,3 +1,3 @@
 'use strict';
-if (process.env.FAKE_KPSEWHICH_FAILS) process.exit(3);
-process.stdout.write('C:/fake-tex/texmf\n');
+if (process.argv[2] !== 'article.cls') process.exit(1);
+process.stdout.write('C:/fake-tex/texmf/tex/latex/base/article.cls\n');

@@ -18,6 +18,7 @@ export type RunResult = { code: number | null, stdout: string };
 export type Runner = (exe: Exe, args: string[]) => Promise<RunResult>;
 type Env = Record<string, string | undefined>;
 
+const PROBE_FILE = 'article.cls';
 const names = (name: string) => (process.platform === 'win32' ? [name + '.exe', name + '.cmd', name] : [name]);
 const find = (dir: string, name: string) => resolveExecutable(names(name), { pathDirs: [dir] });
 
@@ -65,8 +66,9 @@ export async function detectTex(env: Env, run: Runner = runQuietly): Promise<Tex
     if (!first) continue;
     const kpsewhich = find(dir, 'kpsewhich');
     if (!kpsewhich) return { install: null, looked, problem: 'Found ' + path.join(dir, 'pdflatex') + ' but no kpsewhich beside it, so the TeX installation looks incomplete.' };
-    const check = await run(kpsewhich, ['-var-value=TEXMFROOT']);
-    if (check.code !== 0) return { install: null, looked, problem: 'Found TeX in ' + dir + ', but kpsewhich did not run. Repair the installation with its own console.' };
+    const check = await run(kpsewhich, [PROBE_FILE]);
+    if (check.code === null) return { install: null, looked, problem: 'Found TeX in ' + dir + ', but kpsewhich did not run. Repair the installation with its own console.' };
+    if (check.code !== 0 || !check.stdout.trim()) return { install: null, looked, problem: 'Found TeX in ' + dir + ', but it cannot find ' + PROBE_FILE + ', so LaTeX itself looks missing. Repair the installation with its own console.' };
     const version = await run(first, ['--version']);
     const latexmk = find(dir, 'latexmk');
     const latexmkWorks = latexmk ? (await run(latexmk, ['-v'])).code === 0 : false;
