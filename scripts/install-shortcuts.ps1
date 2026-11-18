@@ -4,7 +4,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
 $icon = Join-Path $root 'assets\icon.ico'
 
-if (-not (Test-Path $electron)) { throw "Electron not installed. Run 'npm install' in $root first." }
+if (-not (Test-Path $electron)) { throw "Electron not installed. Run 'pnpm install' and 'pnpm start' in $root first." }
 if (-not (Test-Path $icon)) { & $electron (Join-Path $root 'scripts\make-icon.js') | Out-Null }
 
 $programs = [Environment]::GetFolderPath('Programs')
