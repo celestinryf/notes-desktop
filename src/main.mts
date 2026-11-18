@@ -259,8 +259,9 @@ function main() {
     const git = gitBinary();
     const node = claudeBin.resolveNode();
     const npm = node ? claudeBin.resolveNpm(node) : null;
+    const pnpm = node ? claudeBin.resolvePnpm(node) : null;
     const args = [APP_ROOT].concat(opts.visible ? [] : ['--hidden']);
-    const launched = updater.launchHelper(fresh, { exe: process.execPath, args, env: process.env }, { node, npm, git: { file: git.file, env: git.env } });
+    const launched = updater.launchHelper(fresh, { exe: process.execPath, args, env: process.env }, { node, npm, pnpm, git: { file: git.file, env: git.env } });
     if (!launched.ok) {
       console.error('[update] could not start the update:', launched.error);
       updateNotices.push('Notes could not start its update: ' + launched.error);

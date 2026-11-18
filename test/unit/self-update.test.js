@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { run } = require('../../src/git-run.mts');
-const { SelfUpdater, describe, parseResult, shortSha, cleanEnv, gitDirOf, inProgressOperation, RESULT_FILE, JOB_FILE, FAILURE_BACKOFF_MS } = require('../../src/self-update.mts');
+const { SelfUpdater, describe, parseResult, shortSha, cleanEnv, gitDirOf, inProgressOperation, installerFor, RESULT_FILE, JOB_FILE, FAILURE_BACKOFF_MS } = require('../../src/self-update.mts');
 const { sanitizeSettings } = require('../../src/store.mts');
-const { sh, commitIn, makeRepos } = require('../helpers/git-repos');
+const { sh, commitIn, makeRepos, switchToPnpm } = require('../helpers/git-repos');
 const { tmpDir, cleanup } = require('../helpers/tmp');
 
 const repos = () => makeRepos('notes-selfupdate-');
@@ -27,9 +27,25 @@ test('check reports behind with the commit count, and whether the lock file chan
   const r = repos();
   commitIn(r.upstream, 'a.txt', 'a');
   const target = commitIn(r.upstream, 'b.txt', 'b');
-  assert.deepEqual(await updater(r).check(), { state: 'behind', running: r.first, target, behind: 2, lockChanged: false });
+  assert.deepEqual(await updater(r).check(), { state: 'behind', running: r.first, target, behind: 2, lockChanged: false, installer: 'npm' });
   const withLock = commitIn(r.upstream, 'package-lock.json', '{"v":2}', 'deps');
-  assert.deepEqual(await updater(r).check(), { state: 'behind', running: r.first, target: withLock, behind: 3, lockChanged: true });
+  assert.deepEqual(await updater(r).check(), { state: 'behind', running: r.first, target: withLock, behind: 3, lockChanged: true, installer: 'npm' });
+});
+
+test('check counts a switch to pnpm as a package change and names pnpm for the target from then on', async () => {
+  const r = repos();
+  const switched = switchToPnpm(r.upstream);
+  assert.deepEqual(await updater(r).check(), { state: 'behind', running: r.first, target: switched, behind: 1, lockChanged: true, installer: 'pnpm' });
+  sh(['pull', '-q', '--ff-only', 'origin', 'main'], r.checkout);
+  const target = commitIn(r.upstream, 'a.txt', 'a');
+  assert.deepEqual(await updater(r).check(), { state: 'behind', running: switched, target, behind: 1, lockChanged: false, installer: 'pnpm' });
+});
+
+test('installerFor prefers pnpm-lock.yaml, falls back to package-lock.json, and has none without a lock file', () => {
+  assert.equal(installerFor(['package-lock.json', 'pnpm-lock.yaml']), 'pnpm');
+  assert.equal(installerFor(['package-lock.json']), 'npm');
+  assert.equal(installerFor(['yarn.lock']), null);
+  assert.equal(installerFor([]), null);
 });
 
 test('check compares origin/main with the commit Notes is running, not with a checkout pulled underneath it', async () => {
@@ -38,7 +54,7 @@ test('check compares origin/main with the commit Notes is running, not with a ch
   await u.rememberRunning();
   const target = commitIn(r.upstream, 'package-lock.json', '{"v":2}', 'deps');
   sh(['pull', '-q', '--ff-only', 'origin', 'main'], r.checkout);
-  assert.deepEqual(await u.check(), { state: 'behind', running: r.first, target, behind: 1, lockChanged: true });
+  assert.deepEqual(await u.check(), { state: 'behind', running: r.first, target, behind: 1, lockChanged: true, installer: 'npm' });
   assert.deepEqual(await updater(r).check(), { state: 'current', head: target }, 'a Notes started on the pulled checkout is current');
 });
 
@@ -149,9 +165,9 @@ test('launchHelper writes the job and starts the helper detached with node, with
   let unrefs = 0;
   const spawn = (file, args, opts) => { spawned.push({ file, args, opts }); return { unref() { unrefs++; } }; };
   const u = updater(r, { spawn, helperScript: 'C:/helper.js' });
-  const check = { running: 'aaa', target: 'bbb', lockChanged: false };
+  const check = { running: 'aaa', target: 'bbb', lockChanged: false, installer: 'npm' };
   const relaunch = { exe: 'electron.exe', args: ['root', '--hidden'], env: { PATH: 'p', electron_run_as_node: '1', NUM: 3 } };
-  const tools = { node: 'node.exe', npm: { file: 'node.exe', args: ['npm-cli.js'] }, git: { file: 'git.exe', env: { GIT_EXEC_PATH: 'g', ELECTRON_RUN_AS_NODE: '1' } } };
+  const tools = { node: 'node.exe', npm: { file: 'node.exe', args: ['npm-cli.js'] }, pnpm: { file: 'pnpm.exe', args: [] }, git: { file: 'git.exe', env: { GIT_EXEC_PATH: 'g', ELECTRON_RUN_AS_NODE: '1' } } };
   assert.deepEqual(u.launchHelper(check, relaunch, tools), { ok: true });
   assert.equal(unrefs, 1);
   assert.deepEqual(spawned, [{ file: 'node.exe', args: ['C:/helper.js', path.join(r.dataDir, JOB_FILE)], opts: { cwd: r.checkout, env: { PATH: 'p' } } }]);
@@ -159,28 +175,37 @@ test('launchHelper writes the job and starts the helper detached with node, with
   assert.deepEqual(job, {
     pid: process.pid, root: r.checkout, dataDir: r.dataDir, from: 'aaa', target: 'bbb',
     git: { file: 'git.exe', env: { GIT_EXEC_PATH: 'g', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } },
-    npm: { file: 'node.exe', args: ['npm-cli.js'] }, exe: 'electron.exe', args: ['root', '--hidden'],
+    installers: [
+      { name: 'pnpm', lock: 'pnpm-lock.yaml', file: 'pnpm.exe', args: ['install', '--frozen-lockfile', '--loglevel=error'] },
+      { name: 'npm', lock: 'package-lock.json', file: 'node.exe', args: ['npm-cli.js', 'install', '--no-audit', '--no-fund', '--no-progress', '--loglevel=error'] },
+    ],
+    exe: 'electron.exe', args: ['root', '--hidden'],
   });
 });
 
-test('launchHelper refuses without node, and without npm when the packages changed', () => {
+test('launchHelper refuses without node, and without the target\'s package manager when the packages changed', () => {
   const r = repos();
   let spawned = 0;
   const u = updater(r, { spawn: () => { spawned++; return { unref() {} }; } });
   const relaunch = { exe: 'e', args: [], env: {} };
   const gitTool = { file: 'git', env: {} };
-  const check = { running: 'a', target: 'b', lockChanged: true };
-  assert.match(u.launchHelper(check, relaunch, { node: null, npm: null, git: gitTool }).error, /node/);
-  assert.match(u.launchHelper(check, relaunch, { node: 'node', npm: null, git: gitTool }).error, /npm/);
+  const npmTool = { file: 'node', args: ['npm-cli.js'] };
+  const pnpmTool = { file: 'pnpm.exe', args: [] };
+  const check = { running: 'a', target: 'b', lockChanged: true, installer: 'npm' };
+  assert.match(u.launchHelper(check, relaunch, { node: null, npm: npmTool, pnpm: pnpmTool, git: gitTool }).error, /node/);
+  assert.match(u.launchHelper(check, relaunch, { node: 'node', npm: null, pnpm: pnpmTool, git: gitTool }).error, /and npm was not found/);
+  assert.match(u.launchHelper({ ...check, installer: 'pnpm' }, relaunch, { node: 'node', npm: npmTool, pnpm: null, git: gitTool }).error, /and pnpm was not found/);
+  assert.match(u.launchHelper({ ...check, installer: null }, relaunch, { node: 'node', npm: npmTool, pnpm: pnpmTool, git: gitTool }).error, /its package manager was not found/);
   assert.equal(spawned, 0);
-  assert.equal(u.launchHelper({ ...check, lockChanged: false }, relaunch, { node: 'node', npm: null, git: gitTool }).ok, true);
-  assert.equal(spawned, 1);
+  assert.equal(u.launchHelper({ ...check, installer: 'pnpm' }, relaunch, { node: 'node', npm: null, pnpm: pnpmTool, git: gitTool }).ok, true);
+  assert.equal(u.launchHelper({ ...check, lockChanged: false }, relaunch, { node: 'node', npm: null, pnpm: null, git: gitTool }).ok, true);
+  assert.equal(spawned, 2);
 });
 
 test('launchHelper reports a spawn failure instead of throwing', () => {
   const r = repos();
   const u = updater(r, { spawn: () => { throw new Error('ENOENT node'); } });
-  assert.deepEqual(u.launchHelper({ running: 'a', target: 'b', lockChanged: false }, { exe: 'e', args: [], env: {} }, { node: 'node', npm: null, git: { file: 'git', env: {} } }), { ok: false, error: 'ENOENT node' });
+  assert.deepEqual(u.launchHelper({ running: 'a', target: 'b', lockChanged: false, installer: 'npm' }, { exe: 'e', args: [], env: {} }, { node: 'node', npm: null, pnpm: null, git: { file: 'git', env: {} } }), { ok: false, error: 'ENOENT node' });
 });
 
 test('cleanEnv keeps only strings and drops ELECTRON_RUN_AS_NODE in any case', () => {
