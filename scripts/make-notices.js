@@ -52,7 +52,7 @@ function licenceOf(name) {
 
 function bundledGit() {
   const git = gitBinary();
-  if (!git.bundled) throw new Error('the bundled git is missing; run npm install');
+  if (!git.bundled) throw new Error('the bundled git is missing; run pnpm rebuild dugite');
   const gitDir = path.join(DUGITE_DIR, 'git');
   const version = execFileSync(git.file, ['--version'], { env: git.env, encoding: 'utf8' }).trim().replace(/^git version /, '');
   const downloads = JSON.parse(fs.readFileSync(path.join(DUGITE_DIR, 'script', 'embedded-git.json'), 'utf8'));
@@ -63,7 +63,7 @@ function bundledGit() {
     lines: [
       `git ${version} (GPL-2.0), the git program Notes runs, in node_modules/dugite/git`,
       `Source: https://github.com/git-for-windows/git/releases/tag/v${version}`,
-      `Build: ${release} (downloaded by dugite's npm install)`,
+      `Build: ${release} (downloaded by dugite's install script)`,
       'This MinGit build also carries the components listed in node_modules/dugite/git/etc/package-versions.txt,',
       'each under its own licence; the texts are in node_modules/dugite/git/ucrt64/share/licenses and',
       'node_modules/dugite/git/ucrt64/doc/git-credential-manager/LICENSE. They are:',
@@ -93,7 +93,7 @@ async function main() {
     'Font License; their texts are in assets/fonts/OFL-Fraunces.txt and assets/fonts/OFL-Geist.txt.',
     'The main process runs the git program that the dugite package downloads into',
     'node_modules/dugite/git; its entry, with git\'s GPL-2.0 licence and where its source is, comes last.',
-    'Regenerate this file with: npm run notices',
+    'Regenerate this file with: pnpm notices',
   ];
   for (const group of groups.values()) {
     parts.push('', rule);

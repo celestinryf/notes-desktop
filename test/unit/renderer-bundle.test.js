@@ -15,7 +15,7 @@ const readsGlobal = (text, name) => new RegExp('window\\.' + name + '\\b(?! = )'
 const scriptsOf = (page) => [...fs.readFileSync(path.join(RENDERER, page), 'utf8').matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
 
 for (const name of ENTRIES) {
-  test(`the tracked ${name}.bundle.js matches a fresh build (else run npm run build:app)`, () => {
+  test(`the tracked ${name}.bundle.js matches a fresh build (else run pnpm build:app)`, () => {
     assert.equal(fs.readFileSync(bundlePath(name), 'utf8'), freshText(name));
   });
 }

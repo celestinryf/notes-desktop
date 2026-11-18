@@ -15558,7 +15558,7 @@
     [GIT_FORBIDDEN, "GitHub did not let this account write to the repository. Choose a repository the account owns, or sign in with the account that owns this one."],
     [/Could not resolve host|Failed to connect|timed out|Connection (reset|refused)|unable to access/i, "Notes could not reach GitHub. Check the connection; Notes tries again in a few minutes."],
     [/\[rejected\]|fetch first|non-fast-forward/i, "GitHub has versions from another computer that Notes has not brought in yet. Notes tries again with the next sync."],
-    [/too old to merge/i, "Syncing needs git 2.41 or newer. Run npm install in the Notes folder again, or update the git on this PC, then restart Notes."],
+    [/too old to merge/i, "Syncing needs git 2.41 or newer. Run pnpm rebuild dugite in the Notes folder, or update the git on this PC, then restart Notes."],
     [/^Files outside the notes folder were not saved to history/, "Some files outside the notes folder were not saved to history."]
   ];
   var isLinkedNotice = (raw) => !!raw && raw.startsWith("Files outside the notes folder were not saved to history");
@@ -22836,7 +22836,7 @@
   }
   function statusSentence(s) {
     if (!s.enabled) return "History is off. Turn it on to keep every change to your notes, so any note can go back to an earlier version.";
-    if (s.available === false) return "Notes keeps history with git, but could not start it. Run npm install in the Notes folder again, or install Git for Windows, then restart Notes.";
+    if (s.available === false) return "Notes keeps history with git, but could not start it. Run pnpm rebuild dugite in the Notes folder, or install Git for Windows, then restart Notes.";
     const saved = s.commits ? "The last version was saved " + relativeTime(s.lastCommitAt ?? 0) + "." : "No versions yet.";
     if (!s.remote) return saved + " They are on this PC only. Sync with a GitHub repository to keep a copy somewhere else and to have your notes on another computer.";
     return saved + " " + (s.lastPushAt ? "Synced " + relativeTime(s.lastPushAt) + " with " + remoteName(s.remote) + "." : "Not synced with " + remoteName(s.remote) + " yet.");
