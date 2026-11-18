@@ -13,6 +13,7 @@ function buildRenderer({ write }) {
     format: 'iife',
     target: 'chrome120',
     jsx: 'automatic',
+    minifyWhitespace: true,
     define: { 'process.env.NODE_ENV': '"production"' },
     outdir: OUT_DIR,
     entryNames: '[name].bundle',

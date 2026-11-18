@@ -11,7 +11,7 @@ const freshText = (name) => {
   assert.ok(file, 'esbuild produced ' + name);
   return file.text;
 };
-const readsGlobal = (text, name) => new RegExp('window\\.' + name + '\\b(?! = )').test(text);
+const readsGlobal = (text, name) => new RegExp('window\\.' + name + '\\b(?!\\s*=(?!=))').test(text);
 const scriptsOf = (page) => [...fs.readFileSync(path.join(RENDERER, page), 'utf8').matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
 
 for (const name of ENTRIES) {
@@ -35,6 +35,21 @@ test('the sticky bundle carries helpers and icons and still reads the editor fro
   assert.ok(!readsGlobal(sticky, 'NotesHelpers') && !readsGlobal(sticky, 'NotesIcons'));
   assert.ok(sticky.includes('window.NotesEditor') && sticky.includes('window.notesApi'));
   assert.ok(sticky.includes('function hydrate(') && sticky.includes('function isPlainTextFile('));
+});
+
+test('a global counts as read unless it is assigned, with or without spaces round the =', () => {
+  assert.equal(readsGlobal('window.NotesIcons=api', 'NotesIcons'), false);
+  assert.equal(readsGlobal('window.NotesIcons = api', 'NotesIcons'), false);
+  assert.equal(readsGlobal('const i=window.NotesIcons;', 'NotesIcons'), true);
+  assert.equal(readsGlobal('if(window.NotesIcons==null)', 'NotesIcons'), true);
+  assert.equal(readsGlobal('window.NotesIconsExtra', 'NotesIcons'), false);
+});
+
+test('the renderer bundles carry no comment lines but the licence block', () => {
+  for (const name of ENTRIES) {
+    const lines = freshText(name).split('\n').filter((l) => /^\s*(\/\/|\/\*)/.test(l) && !/^\s*\/\*!/.test(l));
+    assert.deepEqual(lines, [], name + ' has comment lines');
+  }
 });
 
 test('each page loads its vendor bundles and then one page bundle, no loose scripts', () => {

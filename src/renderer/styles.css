@@ -453,10 +453,10 @@ button.nav-fold.is-folded .icon { transform: rotate(-90deg); }
 .nav.tags .nav-item span:first-child::before { content: '#'; color: var(--fg-3); margin-right: 2px; }
 .nav.tags .nav-item.is-active { font-weight: 600; }
 
-.sidebar-foot { display: flex; align-items: center; gap: 2px; padding-top: var(--s2); border-top: 1px solid var(--line); }
+.sidebar-foot { display: flex; align-items: center; gap: 2px; margin-top: auto; padding-top: var(--s2); border-top: 1px solid var(--line); }
 .foot-btn { padding: 0 var(--s2); }
-.sidebar-status { padding-top: var(--s2); border-top: 1px solid var(--line); }
-.sidebar-status + .sidebar-foot { padding-top: 0; border-top: none; }
+.sidebar-status { margin-top: auto; padding-top: var(--s2); border-top: 1px solid var(--line); }
+.sidebar-status + .sidebar-foot { margin-top: 0; padding-top: 0; border-top: none; }
 .status-btn { width: 100%; justify-content: flex-start; font-size: var(--t-xs); color: var(--fg-3); }
 .status-btn .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .status-btn.is-error { color: var(--danger); }
