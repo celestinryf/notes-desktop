@@ -8,7 +8,7 @@ type GitRunner = (args: string[], cwd: string, timeoutMs?: number, input?: strin
 
 type UpdateCheck =
   | { state: 'current'; head: string }
-  | { state: 'behind'; running: string; target: string; behind: number; lockChanged: boolean }
+  | { state: 'behind'; running: string; target: string; behind: number; lockChanged: boolean; installer: PackageManager | null }
   | { state: 'diverged'; head: string; target: string }
   | { state: 'dirty'; head: string; target: string; files: string[] }
   | { state: 'error'; error: string };
@@ -16,7 +16,8 @@ type UpdateCheck =
 interface UpdateResult { at: number; from: string; target: string; to: string; ok: boolean; error: string | null; transient: boolean; installed: boolean; noticed: boolean }
 
 interface Relaunch { exe: string; args: string[]; env: NodeJS.ProcessEnv }
-interface HelperTools { node: string | null; npm: { file: string; args: string[] } | null; git: { file: string; env: NodeJS.ProcessEnv } }
+interface Tool { file: string; args: string[] }
+interface HelperTools { node: string | null; npm: Tool | null; pnpm: Tool | null; git: { file: string; env: NodeJS.ProcessEnv } }
 
 type Spawner = (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => { unref(): void };
 
@@ -26,6 +27,24 @@ const BRANCH = 'main';
 const FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 const NO_PROMPT = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
 const IN_PROGRESS = ['index.lock', 'MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD'];
+const PACKAGE_MANAGERS = [
+  { name: 'pnpm', lock: 'pnpm-lock.yaml', install: ['install', '--frozen-lockfile', '--loglevel=error'] },
+  { name: 'npm', lock: 'package-lock.json', install: ['install', '--no-audit', '--no-fund', '--no-progress', '--loglevel=error'] },
+] as const;
+const LOCK_FILES = PACKAGE_MANAGERS.map((m) => m.lock);
+
+type PackageManager = typeof PACKAGE_MANAGERS[number]['name'];
+
+function installerFor(lockFiles: string[]): PackageManager | null {
+  return PACKAGE_MANAGERS.find((m) => lockFiles.includes(m.lock))?.name ?? null;
+}
+
+function installersFor(tools: Record<PackageManager, Tool | null>) {
+  return PACKAGE_MANAGERS.map((m) => {
+    const tool = tools[m.name];
+    return { name: m.name, lock: m.lock, file: tool ? tool.file : null, args: tool ? [...tool.args, ...m.install] : [] };
+  });
+}
 
 function shortSha(sha: string) { return sha.slice(0, 7); }
 
@@ -114,11 +133,16 @@ class SelfUpdater {
     if (!status.ok) return { state: 'error', error: 'status failed: ' + status.error };
     const files = status.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3).trim());
     if (files.length) return { state: 'dirty', head, target, files };
-    const [count, lock] = await Promise.all([
+    const [count, lock, locks] = await Promise.all([
       this.git(['rev-list', '--count', running + '..' + target], this.root),
-      this.git(['diff', '--name-only', running, target, '--', 'package-lock.json'], this.root),
+      this.git(['diff', '--name-only', running, target, '--', ...LOCK_FILES], this.root),
+      this.git(['ls-tree', '--name-only', target, '--', ...LOCK_FILES], this.root),
     ]);
-    return { state: 'behind', running, target, behind: count.ok ? Math.max(1, Number(count.stdout.trim()) || 1) : 1, lockChanged: lock.ok && lock.stdout.trim().length > 0 };
+    return {
+      state: 'behind', running, target, behind: count.ok ? Math.max(1, Number(count.stdout.trim()) || 1) : 1,
+      lockChanged: lock.ok && lock.stdout.trim().length > 0,
+      installer: locks.ok ? installerFor(locks.stdout.split(/\r?\n/).filter(Boolean)) : null,
+    };
   }
 
   lastResult(): UpdateResult | null {
@@ -151,12 +175,12 @@ class SelfUpdater {
     try { fs.writeFileSync(this.resultFile, JSON.stringify({ ...last, noticed: true })); this.cached = null; } catch (_) {  }
   }
 
-  launchHelper(check: { running: string; target: string; lockChanged: boolean }, relaunch: Relaunch, tools: HelperTools): { ok: true } | { ok: false; error: string } {
+  launchHelper(check: { running: string; target: string; lockChanged: boolean; installer: PackageManager | null }, relaunch: Relaunch, tools: HelperTools): { ok: true } | { ok: false; error: string } {
     if (!tools.node) return { ok: false, error: 'node was not found on PATH' };
-    if (check.lockChanged && !tools.npm) return { ok: false, error: 'this update changes the packages, and npm was not found on PATH' };
+    if (check.lockChanged && !(check.installer && tools[check.installer])) return { ok: false, error: 'this update changes the packages, and ' + (check.installer || 'its package manager') + ' was not found' };
     const job = {
       pid: process.pid, root: this.root, dataDir: this.dataDir, from: check.running, target: check.target,
-      git: { file: tools.git.file, env: { ...cleanEnv(tools.git.env), ...NO_PROMPT } }, npm: tools.npm,
+      git: { file: tools.git.file, env: { ...cleanEnv(tools.git.env), ...NO_PROMPT } }, installers: installersFor(tools),
       exe: relaunch.exe, args: relaunch.args,
     };
     const jobFile = path.join(this.dataDir, JOB_FILE);
@@ -185,5 +209,5 @@ function describe(check: UpdateCheck, opts: { failed: boolean; auto: boolean }):
   }
 }
 
-export type { UpdateCheck, UpdateResult };
-export { SelfUpdater, describe, parseResult, shortSha, cleanEnv, gitDirOf, inProgressOperation, RESULT_FILE, JOB_FILE, FAILURE_BACKOFF_MS };
+export type { UpdateCheck, UpdateResult, PackageManager };
+export { SelfUpdater, describe, parseResult, shortSha, cleanEnv, gitDirOf, inProgressOperation, installerFor, installersFor, RESULT_FILE, JOB_FILE, FAILURE_BACKOFF_MS };

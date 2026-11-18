@@ -17,6 +17,11 @@ function commitIn(repo, name, text, message) {
   return sh(['rev-parse', 'HEAD'], repo);
 }
 
+function switchToPnpm(repo) {
+  sh(['rm', '-q', 'package-lock.json'], repo);
+  return commitIn(repo, 'pnpm-lock.yaml', "lockfileVersion: '9.0'\n", 'pnpm');
+}
+
 function makeRepos(prefix) {
   const base = tmpDir(prefix);
   const upstream = path.join(base, 'upstream');
@@ -30,4 +35,4 @@ function makeRepos(prefix) {
   return { base, upstream, checkout, dataDir, first };
 }
 
-module.exports = { git, sh, commitIn, makeRepos };
+module.exports = { git, sh, commitIn, makeRepos, switchToPnpm };

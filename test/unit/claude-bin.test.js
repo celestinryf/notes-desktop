@@ -68,6 +68,32 @@ test('the native installer location (~/.local/bin) is found when PATH has nothin
   assert.deepEqual(CB.resolveClaude({ pathDirs: [], home }), { file: exe, isScript: false });
 });
 
+test('pnpm is found through its .cmd shim, and in %LOCALAPPDATA%\\pnpm\\bin when PATH has not caught up', { skip: !win && 'windows shim' }, () => {
+  const localAppData = tmp();
+  const bin = path.join(localAppData, 'pnpm', 'bin');
+  const exe = path.join(localAppData, 'pnpm', 'global', 'v11', 'abc123', 'node_modules', 'pnpm', 'pnpm.exe');
+  fs.mkdirSync(path.dirname(exe), { recursive: true });
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(exe, 'MZ');
+  fs.writeFileSync(path.join(bin, 'pnpm.cmd'), '@SETLOCAL\r\n@GOTO #_undefined_# 2>NUL || (IF "%_PNPM_RESTORE_TITLE%"=="1" TITLE %COMSPEC%) & "%~dp0\\..\\global\\v11\\abc123\\node_modules\\pnpm\\pnpm.exe"  %*\r\n');
+  assert.deepEqual(CB.resolvePnpm('node.exe', { pathDirs: [bin], env: {} }), { file: exe, args: [] }, 'on PATH');
+  assert.deepEqual(CB.resolvePnpm('node.exe', { pathDirs: [tmp()], env: { LOCALAPPDATA: localAppData } }), { file: exe, args: [] }, 'PATH predates the install');
+  assert.equal(CB.resolvePnpm('node.exe', { pathDirs: [tmp()], env: {} }), null);
+});
+
+test('pnpm is found in PNPM_HOME itself, and a pnpm that is a script runs under the given node', { skip: !win && 'windows shim' }, () => {
+  const home = tmp();
+  const exe = path.join(home, 'pnpm.exe');
+  fs.writeFileSync(exe, 'MZ');
+  assert.deepEqual(CB.resolvePnpm('node.exe', { pathDirs: [], env: { PNPM_HOME: home } }), { file: exe, args: [] });
+  const npmGlobal = tmp();
+  const cjs = path.join(npmGlobal, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
+  fs.mkdirSync(path.dirname(cjs), { recursive: true });
+  fs.writeFileSync(cjs, '// pnpm');
+  fs.writeFileSync(path.join(npmGlobal, 'pnpm.cmd'), '@ECHO off\r\nnode  "%~dp0\\node_modules\\pnpm\\bin\\pnpm.cjs" %*\r\n');
+  assert.deepEqual(CB.resolvePnpm('C:\\node\\node.exe', { pathDirs: [npmGlobal], env: {} }), { file: 'C:\\node\\node.exe', args: [cjs] });
+});
+
 test('subscriptionEnv drops every variable that would bill API credits and keeps the rest', () => {
   const env = { PATH: 'x', ANTHROPIC_API_KEY: 'sk', anthropic_auth_token: 't', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', CLAUDE_CODE_USE_FOUNDRY: '1', CLAUDE_CODE_OAUTH_TOKEN: 'sub', ANTHROPIC_MODEL: 'm' };
   const out = CB.subscriptionEnv(env);
