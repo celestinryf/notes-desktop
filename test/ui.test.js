@@ -1070,13 +1070,15 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
+  const globalClaudeMd = path.join(os.homedir(), '.claude', 'CLAUDE.md').toLowerCase();
+  const isGlobalClaudeMd = (filePath) => !!filePath && filePath.toLowerCase() === globalClaudeMd;
   await page.click('#agentFilesBtn');
   await waitFor('agent files folder exists', () => readNotes().folders.some((f) => f.name === 'Agent files'));
-  await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath)));
+  await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => isGlobalClaudeMd(n.filePath)));
   await waitForDom(() => !document.getElementById('settingsDialog').open);
   await waitForDomWithin(15000, () => /Agent files are in the/.test(document.getElementById('toast').textContent));
   const agentFolder = readNotes().folders.find((f) => f.name === 'Agent files');
-  const globalNote = readNotes().notes.find((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath));
+  const globalNote = readNotes().notes.find((n) => isGlobalClaudeMd(n.filePath));
   assert.equal(globalNote.folderId, agentFolder.id);
   assert.match(globalNote.title, /global/);
   assert.ok(globalNote.body.includes('# Global instructions'), 'contents read from the real file');
@@ -3016,6 +3018,10 @@ test('wheel: over the tab strip it scrolls the tabs sideways and clicks still la
     await wheelMoves(page, '#tabList', 'scrollLeft', 200);
     await wheelMoves(page, '#tabList', 'scrollLeft', 400);
     await wheelMoves(page, '#tabList', 'scrollLeft', -200);
+    await page.evaluate(() => { document.getElementById('tabList').scrollLeft = 0; });
+    await pointAt(page, '#tabList');
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 20);
+    await waitFor('small wheel steps add up on the tab strip', async () => (await scrollOf(page, '#tabList', 'scrollLeft')) > 0);
     assert.equal(await scrollOf(page, '.editor-scroll', 'scrollTop'), 0, 'the wheel over the tabs never scrolls the note under them');
     const target = await page.evaluate(() => { const box = document.getElementById('tabList').getBoundingClientRect(); const tab = [...document.querySelectorAll('#tabList .tab:not(.is-active)')].find((t) => { const r = t.getBoundingClientRect(); return r.left >= box.left && r.right <= box.right; }); return tab ? Number(tab.dataset.index) : -1; });
     assert.ok(target >= 0, 'a whole inactive tab is in view after the wheel');
