@@ -7,12 +7,11 @@ const envMs = (name, fallback) => Number(process.env[name]) || fallback;
 const LOCK_RETRIES = 5;
 const PULL_TIMEOUT_MS = 120000;
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
-const INSTALL_ARGS = ['install', '--no-audit', '--no-fund', '--no-progress', '--loglevel=error'];
 
 function readJob(file) {
   const job = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const k of ['root', 'dataDir', 'from', 'target', 'exe']) if (typeof job[k] !== 'string' || !job[k]) throw new Error('job is missing ' + k);
-  if (typeof job.pid !== 'number' || !Array.isArray(job.args) || !job.git || typeof job.git.file !== 'string') throw new Error('job is malformed');
+  if (typeof job.pid !== 'number' || !Array.isArray(job.args) || !Array.isArray(job.installers) || !job.git || typeof job.git.file !== 'string') throw new Error('job is malformed');
   return job;
 }
 
@@ -45,11 +44,11 @@ function runTool(file, args, cwd, env, timeoutMs) {
   });
 }
 
-function npmEnv() {
+function installEnv() {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
     const key = k.toUpperCase();
-    if (key === 'NODE_ENV' || key === 'ELECTRON_RUN_AS_NODE' || key.startsWith('NPM_CONFIG_')) continue;
+    if (key === 'NODE_ENV' || key === 'ELECTRON_RUN_AS_NODE' || key.startsWith('NPM_CONFIG_') || key.startsWith('PNPM_CONFIG_')) continue;
     env[k] = v;
   }
   return env;
@@ -75,12 +74,30 @@ function startApp(job, log) {
   }
 }
 
-function tools(job) {
+function electronInstaller(root) {
+  try { return require.resolve('electron/install.js', { paths: [root] }); } catch (_) { return null; }
+}
+
+function tools(job, log) {
   const gitEnv = Object.assign({}, process.env, job.git.env || {});
+  const runInstall = (file, args) => runTool(file, args, job.root, installEnv(), INSTALL_TIMEOUT_MS);
   return {
     git: (args, timeoutMs) => runTool(job.git.file, args, job.root, gitEnv, timeoutMs || 20000),
-    npm: () => runTool(job.npm.file, job.npm.args.concat(INSTALL_ARGS), job.root, npmEnv(), INSTALL_TIMEOUT_MS),
+    install: async (installer) => {
+      const installed = await runInstall(installer.file, installer.args);
+      if (!installed.ok || fs.existsSync(job.exe)) return installed;
+      log(path.basename(job.exe) + ' is missing after ' + installer.name + ' install, downloading Electron');
+      const script = electronInstaller(job.root);
+      if (!script) return { ok: false, error: 'Electron is not installed in ' + job.root };
+      const downloaded = await runInstall(process.execPath, [script]);
+      if (downloaded.ok && !fs.existsSync(job.exe)) return { ok: false, error: path.basename(job.exe) + ' is still missing after downloading Electron' };
+      return downloaded;
+    },
   };
+}
+
+function installerIn(job) {
+  return job.installers.find((i) => fs.existsSync(path.join(job.root, i.lock))) || null;
 }
 
 async function indexLocked(git) {
@@ -101,19 +118,20 @@ async function pullFastForward(git, log) {
   return pulled.ok ? { ok: true } : { ok: false, error: 'pull failed: ' + pulled.error, transient: true };
 }
 
-async function rollBack(job, git, npm, headBefore, res, log) {
+async function rollBack(job, git, install, headBefore, res, log) {
   if (res.to === headBefore) return;
   const back = await git(['reset', '--keep', '--quiet', headBefore]);
   log(back.ok ? 'rolled the checkout back to ' + headBefore.slice(0, 7) : 'roll back failed: ' + back.error);
   if (!back.ok) return;
   res.to = headBefore;
-  if (!job.npm) return;
-  const restore = await npm();
+  const installer = install && installerIn(job);
+  if (!installer || !installer.file) return;
+  const restore = await install(installer);
   log(restore.ok ? 'restored the packages of ' + headBefore.slice(0, 7) : 'restoring the packages failed: ' + restore.error);
 }
 
 async function update(job, log) {
-  const { git, npm } = tools(job);
+  const { git, install } = tools(job, log);
   const res = result(job, {});
   const fail = (error, transient) => { res.error = error; res.transient = !!transient; log(error); return res; };
 
@@ -134,19 +152,23 @@ async function update(job, log) {
   }
   log('checkout at ' + res.to.slice(0, 7) + ' (Notes ran ' + job.from.slice(0, 7) + ')');
 
-  const lock = await git(['diff', '--name-only', job.from, res.to, '--', 'package-lock.json']);
+  const lock = await git(['diff', '--name-only', job.from, res.to, '--', ...job.installers.map((i) => i.lock)]);
   if (lock.ok && !lock.stdout.trim()) { res.ok = true; return res; }
-  if (!job.npm) { await rollBack(job, git, npm, headBefore, res, log); return fail('the packages changed and npm is not available'); }
-  log('packages changed since ' + job.from.slice(0, 7) + ', running npm install');
-  let installed = await npm();
-  if (!installed.ok && !fs.existsSync(job.exe)) {
-    log('npm install failed and ' + path.basename(job.exe) + ' is missing, trying once more: ' + installed.error);
-    await sleep(envMs('NOTES_UPDATE_SETTLE_MS', 3000));
-    installed = await npm();
+  const installer = installerIn(job);
+  if (!installer || !installer.file) {
+    await rollBack(job, git, null, headBefore, res, log);
+    return fail('the packages changed and ' + (installer ? installer.name + ' is not available' : 'the checkout has no lock file'));
   }
-  if (installed.ok) { res.ok = true; res.installed = true; log('npm install done'); return res; }
-  await rollBack(job, git, npm, headBefore, res, log);
-  return fail('npm install failed: ' + installed.error);
+  log('packages changed since ' + job.from.slice(0, 7) + ', running ' + installer.name + ' install');
+  let installed = await install(installer);
+  if (!installed.ok && !fs.existsSync(job.exe)) {
+    log(installer.name + ' install failed and ' + path.basename(job.exe) + ' is missing, trying once more: ' + installed.error);
+    await sleep(envMs('NOTES_UPDATE_SETTLE_MS', 3000));
+    installed = await install(installer);
+  }
+  if (installed.ok) { res.ok = true; res.installed = true; log(installer.name + ' install done'); return res; }
+  await rollBack(job, git, install, headBefore, res, log);
+  return fail(installer.name + ' install failed: ' + installed.error);
 }
 
 async function main() {
@@ -181,4 +203,4 @@ if (require.main === module) {
   main().catch((err) => { console.error(err); process.exit(1); });
 }
 
-module.exports = { update, waitForExit, readJob, npmEnv };
+module.exports = { update, waitForExit, readJob, installEnv };

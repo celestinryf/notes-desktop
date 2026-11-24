@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const NAMES = process.platform === 'win32' ? ['claude.exe', 'claude.cmd', 'claude'] : ['claude'];
+const PNPM_NAMES = process.platform === 'win32' ? ['pnpm.exe', 'pnpm.cmd'] : ['pnpm'];
 
 function exists(p: string) {
   try { return fs.statSync(p).isFile(); } catch (_) { return false; }
@@ -67,6 +68,22 @@ function resolveNpm(node: string) {
   return exists(cli) ? { file: node, args: [cli] } : null;
 }
 
+function pnpmHomeDirs(env: NodeJS.ProcessEnv) {
+  const dirs: string[] = [];
+  for (const home of [env.PNPM_HOME, env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'pnpm')]) if (home) dirs.push(path.join(home, 'bin'), home);
+  return dirs;
+}
+
+function resolvePnpm(node: string, opts?: { pathDirs?: string[], env?: NodeJS.ProcessEnv }) {
+  opts = opts || {};
+  const env = opts.env || process.env;
+  const dirs = (opts.pathDirs || (env.PATH || '').split(path.delimiter)).filter(Boolean).concat(pnpmHomeDirs(env));
+  const spec = resolveExecutable(PNPM_NAMES, { pathDirs: dirs });
+  if (!spec) return null;
+  const launch = launchSpec(spec, [], { node });
+  return { file: launch.file, args: launch.args };
+}
+
 function launchSpec(spec: { file: string, isScript: boolean }, args: string[], opts?: { node?: string | null, pathDirs?: string[] }) {
   opts = opts || {};
   if (!spec.isScript) return { file: spec.file, args: args.slice(), env: {} };
@@ -93,4 +110,4 @@ function checkSubscriptionAuth(text: unknown) {
   return { ok: true, plan: typeof s.subscriptionType === 'string' && s.subscriptionType ? s.subscriptionType : null };
 }
 
-export { resolveExecutable, resolveClaude, resolveNode, resolveNpm, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
+export { resolveExecutable, resolveClaude, resolveNode, resolveNpm, resolvePnpm, launchSpec, shimTarget, subscriptionEnv, checkSubscriptionAuth, API_BILLING_VARS };
