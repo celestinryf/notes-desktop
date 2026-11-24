@@ -231,3 +231,34 @@ test('re-sending a title that collides keeps the numbered name instead of moving
   assert.equal(path.basename(store.get(b.id).filePath), 'Plan 2.md');
   assert.ok(!has('Plan 3.md'));
 });
+
+test('deleting a live note forever removes its file, so the next scan does not bring it back', async () => {
+  const { store, home, has } = homeStore();
+  const plain = store.create({ title: 'Plain', body: 'x' });
+  const tagged = store.create({ title: 'Tagged', body: 'x', tags: ['t'] });
+  const kept = store.create({ title: 'Kept', body: 'x' });
+  assert.equal(store.destroy(plain.id), true);
+  assert.equal(store.destroy(tagged.id), true);
+  assert.equal(has('Plain.md') || has('Tagged.md'), false);
+  assert.equal(has('Kept.md'), true, 'other notes keep their files');
+  await store.scanVault(home.id);
+  assert.deepEqual(store.notes.map((n) => n.id), [kept.id]);
+});
+
+test('deleting a note forever leaves a linked file outside the vaults alone', () => {
+  const { store } = homeStore();
+  const outside = path.join(tmpDir('notes-home-linked-'), 'Linked.md');
+  fs.writeFileSync(outside, 'mine\n');
+  const linked = store.create({ title: 'Linked', body: 'mine\n', filePath: outside });
+  assert.equal(linked.vaultId, null);
+  assert.equal(store.destroy(linked.id), true);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n');
+});
+
+test('deleting a live note forever whose file is already gone still drops it', () => {
+  const { store, dir } = homeStore();
+  const n = store.create({ title: 'Gone', body: 'x' });
+  fs.rmSync(path.join(dir, 'Gone.md'));
+  assert.equal(store.destroy(n.id), true);
+  assert.equal(store.get(n.id), null);
+});

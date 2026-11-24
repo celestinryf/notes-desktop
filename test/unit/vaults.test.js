@@ -396,3 +396,16 @@ test('a vault waits the same quiet as note history before it versions a change, 
   assert.equal(new VaultManager(store, { debounceMs: undefined }).debounceMs, DEFAULT_TIMING.quietMs);
   assert.equal(new VaultManager(store, { debounceMs: 50 }).debounceMs, 50);
 });
+
+test('deleting a live vault note forever removes its file, so the next scan does not bring it back', async () => {
+  const dir = makeVaultDir();
+  const store = new Store(tmp()).load();
+  const v = store.addVault({ path: dir });
+  await store.scanVault(v.id);
+  const inbox = store.notes.find((n) => n.title === 'Inbox');
+  assert.equal(store.destroy(inbox.id), true);
+  assert.equal(fs.existsSync(path.join(dir, 'Inbox.md')), false);
+  assert.ok(fs.existsSync(path.join(dir, 'Projects', 'Plan.md')), 'the rest of the vault is untouched');
+  await store.scanVault(v.id);
+  assert.equal(store.notes.some((n) => n.title === 'Inbox'), false);
+});

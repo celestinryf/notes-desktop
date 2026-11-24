@@ -2298,6 +2298,10 @@ class Store {
     return !!(note.vaultId && note.trashedAt && note.filePath && (/[\\/]\.trash[\\/]/.test(note.filePath) || H.isRecycleBinPath(note.filePath)) && fs.existsSync(note.filePath));
   }
 
+  _hasLiveVaultFile(note: Note): note is FileNote {
+    return !!(note.vaultId && !note.trashedAt && note.filePath && fs.existsSync(note.filePath));
+  }
+
   _removeTrashedFile(note: FileNote) {
     if (H.isRecycleBinPath(note.filePath)) removeFromBin(note.filePath);
     else fs.rmSync(note.filePath);
@@ -2325,6 +2329,7 @@ class Store {
     if (!note) return false;
     this.relock(id);
     if (this._hasTrashedFile(note)) this._removeTrashedFile(note);
+    else if (this._hasLiveVaultFile(note)) fs.rmSync(note.filePath);
     return this._drop([id]) > 0;
   }
 
