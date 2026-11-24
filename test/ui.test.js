@@ -42,7 +42,7 @@ async function waitFor(label, fn, timeout = 6000) {
   throw new Error('Timed out: ' + label);
 }
 
-let app, page;
+let app, page, ALL_HINTS;
 const rendererErrors = [];
 let runningTest = '';
 const duringTest = (text) => text + (runningTest ? ' [during: ' + runningTest + ']' : '');
@@ -67,6 +67,7 @@ const clickRow = async (text) => { await revealRow({ text }); await page.click('
 const clickRowById = async (id) => { await revealRow({ id }); await page.click('.note-row[data-id="' + id + '"]'); };
 
 test.before(async () => {
+  ({ ALL_HINTS } = await import('../src/renderer/hints.ts'));
   fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3, listMode: 'list', listLayout: 1 }, notes: [] }));
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
@@ -2765,7 +2766,7 @@ test('tips: a small pop in the corner shows once for hiding the sidebar and for 
   } finally {
     await page.evaluate(() => document.getElementById('hintPop').classList.add('hidden'));
     if (!(await docked())) { await page.keyboard.press('Control+\\'); await waitFor('sidebar docked', docked); }
-    await page.evaluate(() => window.notesApi.settings.set({ hintsShown: ['palette', 'sidebar-hidden', 'find-options'] }));
+    await page.evaluate((ids) => window.notesApi.settings.set({ hintsShown: ids }), ALL_HINTS);
     await page.evaluate((id) => window.notesApi.notes.destroy(id), sample.id);
   }
 });

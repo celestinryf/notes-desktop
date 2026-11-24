@@ -40,7 +40,7 @@ import { createHistoryDialog } from './history-dialog.ts';
 import { createLibraryDialog, statusSentence } from './library-dialog.ts';
 import { createGithubDialog } from './github-dialog.ts';
 import { createSpeech } from './speech.ts';
-import { createHints } from './hints.ts';
+import { createHints, HINT } from './hints.ts';
 import { createFindBar, canFindInNote } from './find-bar.ts';
 import { createPdfNote } from './pdf-note.ts';
 import { createCraftNotes } from './craft-notes.ts';
@@ -220,7 +220,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     const collapsed = !!settingsNow().sidebarCollapsed;
     sidebarPeek = null;
     updateSettings({ sidebarCollapsed: !collapsed });
-    if (!collapsed) hints.hint('sidebar-hidden', TIPS.sidebar);
+    if (!collapsed) hints.hint(HINT.sidebar, TIPS.sidebar);
   }
   function bindSidebarFloat() {
     if (GUEST) return;
@@ -908,7 +908,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function firstTip() {
-    const soon = (ms: number) => setTimeout(() => hints.hint('palette', TIPS.palette), ms);
+    const soon = (ms: number) => setTimeout(() => hints.hint(HINT.palette, TIPS.palette), ms);
     if (document.hasFocus()) soon(1200);
     else window.addEventListener('focus', () => soon(600), { once: true });
   }
@@ -2065,7 +2065,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     sidebar: 'Point at the window\u2019s left edge to bring the sidebar back. Ctrl+\\ docks it again.',
     find: 'Alt+C matches the case, Alt+W whole words only.',
   };
-  const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint('find-options', TIPS.find) });
+  const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint(HINT.find, TIPS.find) });
 
   const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
   const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]), showOutput: showBeside, revealInPdf });

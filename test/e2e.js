@@ -41,7 +41,8 @@ async function waitFor(label, predicate, timeoutMs) {
 }
 
 async function main() {
-  fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify({ settings: { hotkey: HOTKEY, openAtLogin: false, theme: 'light', gitEnabled: false }, notes: [] }));
+  const { ALL_HINTS } = await import('../src/renderer/hints.ts');
+  fs.writeFileSync(path.join(dataDir, 'notes.json'), JSON.stringify({ settings: { hotkey: HOTKEY, openAtLogin: false, theme: 'light', gitEnabled: false, hintsShown: ALL_HINTS }, notes: [] }));
   const runtimeFile = path.join(dataDir, 'runtime.json');
   const rendererErrors = [];
 
