@@ -65,6 +65,7 @@ function syncTex(file, lines) {
 }
 
 const delay = Number(process.env.FAKE_TEX_DELAY_MS || 0);
+if (process.env.FAKE_TEX_STARTED) fs.appendFileSync(process.env.FAKE_TEX_STARTED, '.');
 setTimeout(async () => {
   fs.writeFileSync(path.join(cwd, stem + '.runs'), String(runs));
   if (noLog) process.exit(3);
