@@ -19,16 +19,16 @@ A notes app for Windows that opens from anywhere with **Ctrl+Alt+N**. It keeps y
 
 ## Install and run
 
-You need Windows and [Node.js](https://nodejs.org) 24 with npm (the version Notes is developed with). Notes brings its own git (through [dugite](https://github.com/desktop/dugite), which `npm install` downloads, about 50 MB, so the install needs the network) for version history and sync, so you do not need git installed.
+You need Windows, [Node.js](https://nodejs.org) 24 and [pnpm](https://pnpm.io) 12 (the versions Notes is developed with). Notes brings its own git (through [dugite](https://github.com/desktop/dugite), which `pnpm install` downloads, about 50 MB, so the install needs the network) for version history and sync, so you do not need git installed.
 
 ```
 git clone https://github.com/celestinryf/notes-desktop.git
 cd notes-desktop
-npm install
-npm start
+pnpm install
+pnpm start
 ```
 
-`npm run install:shortcuts` adds Notes to the Start Menu and the desktop and starts it.
+`pnpm install:shortcuts` adds Notes to the Start Menu and the desktop and starts it.
 
 - **The hotkey:** Ctrl+Alt+N shows or hides Notes from any app, and Esc hides it. If another app already holds Ctrl+Alt+N, Notes takes Ctrl+Shift+Alt+N, Ctrl+Alt+J or Ctrl+Alt+F12 and says which one in Settings. You can change it in Settings (Ctrl+,).
 - **The tray:** closing the window hides Notes; the tray icon shows it again, starts a new note or sticky note, and quits.
@@ -179,19 +179,19 @@ Files you open and vault files stay where they are; Notes only remembers where t
 ## Development
 
 ```
-npm run typecheck   # tsc over the main process and the renderer
-npm test            # unit tests
-npm run test:ui     # drives the real app with Playwright, in a separate data folder
-npm run test:e2e    # presses the real hotkey with SendKeys: hands off the keyboard while it runs
-npm run test:all    # all four
-npm run shots       # screenshots of the app's screens, with sample notes
+pnpm typecheck   # tsc over the main process and the renderer
+pnpm test        # unit tests
+pnpm test:ui     # drives the real app with Playwright, in a separate data folder
+pnpm test:e2e    # presses the real hotkey with SendKeys: hands off the keyboard while it runs
+pnpm test:all    # all four
+pnpm shots       # screenshots of the app's screens, with sample notes
 ```
 
 - **The main process** is TypeScript (`src/*.mts`), which Electron runs directly by stripping the types, with no build step.
-- **The page** is TypeScript too (`src/renderer/`), bundled with esbuild into `src/renderer/vendor/`. Run `npm run build:app` after changing it; a unit test fails while the bundle is stale. `npm run build` rebuilds every bundle, including the editors.
-- **Notices:** `npm run notices` regenerates `THIRD_PARTY_NOTICES.txt` after a dependency change.
+- **The page** is TypeScript too (`src/renderer/`), bundled with esbuild into `src/renderer/vendor/`. Run `pnpm build:app` after changing it; a unit test fails while the bundle is stale. `pnpm build` rebuilds every bundle, including the editors.
+- **Notices:** `pnpm notices` regenerates `THIRD_PARTY_NOTICES.txt` after a dependency change.
 
-Issues and pull requests are welcome; run `npm run test:all` before opening one. Please report security problems privately, through the repository's Security tab.
+Issues and pull requests are welcome; run `pnpm test:all` before opening one. Please report security problems privately, through the repository's Security tab.
 
 ## Licence
 

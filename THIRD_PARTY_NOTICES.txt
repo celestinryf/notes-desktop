@@ -6,7 +6,7 @@ included, followed by the licence text. The fonts in assets/fonts are under the 
 Font License; their texts are in assets/fonts/OFL-Fraunces.txt and assets/fonts/OFL-Geist.txt.
 The main process runs the git program that the dugite package downloads into
 node_modules/dugite/git; its entry, with git's GPL-2.0 licence and where its source is, comes last.
-Regenerate this file with: npm run notices
+Regenerate this file with: pnpm notices
 
 ================================================================================
 @codemirror/autocomplete 6.20.4 (MIT), in code.bundle.js
@@ -1805,7 +1805,7 @@ SOFTWARE.
 ================================================================================
 git 2.56.0.windows.4 (GPL-2.0), the git program Notes runs, in node_modules/dugite/git
 Source: https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.4
-Build: https://github.com/desktop/dugite-native/releases/tag/v2.56.0-2 (downloaded by dugite's npm install)
+Build: https://github.com/desktop/dugite-native/releases/tag/v2.56.0-2 (downloaded by dugite's install script)
 This MinGit build also carries the components listed in node_modules/dugite/git/etc/package-versions.txt,
 each under its own licence; the texts are in node_modules/dugite/git/ucrt64/share/licenses and
 node_modules/dugite/git/ucrt64/doc/git-credential-manager/LICENSE. They are:
