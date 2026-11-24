@@ -1,5 +1,8 @@
 export const HINT_MS = 5000;
 
+export const HINT = { palette: 'palette', sidebar: 'sidebar-hidden', find: 'find-options' } as const;
+export const ALL_HINTS: readonly string[] = Object.values(HINT);
+
 export type HintDeps = {
   shown: () => readonly string[] | null;
   remember: (ids: string[]) => unknown;

@@ -84,3 +84,16 @@ test('no settings yet means no tip; forgetting clears the list', () => {
   assert.equal(again.hints.hint('a', 'A'), true);
   assert.deepEqual(ids(), null);
 });
+
+test('every tip has one id, and ALL_HINTS lists each of them', async () => {
+  const { HINT, ALL_HINTS } = await import('../../src/renderer/hints.ts');
+  assert.deepEqual([...ALL_HINTS].sort(), Object.values(HINT).sort());
+  assert.equal(new Set(ALL_HINTS).size, ALL_HINTS.length);
+});
+
+test('the page names tips only through HINT, so ALL_HINTS cannot miss one', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'src', 'renderer', 'app.ts'), 'utf8');
+  const calls = src.match(/hints\.hint\([^,]+,/g) || [];
+  assert.ok(calls.length >= 3, calls.join(' '));
+  for (const c of calls) assert.match(c, /^hints\.hint\(HINT\.\w+,$/);
+});
