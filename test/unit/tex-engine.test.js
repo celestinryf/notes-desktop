@@ -106,6 +106,22 @@ function service(extra) {
 
 const OPTIONS = { engine: 'pdflatex', haltOnError: false, compileOnSave: false };
 const withLatexmk = (dir) => fs.writeFileSync(path.join(dir, 'latexmk.cmd'), '@node "%~dp0\\fake-tex.js" %*\r\n');
+function slowEngine(ms) {
+  const log = path.join(tmpDir('notes-tex-started-'), 'started');
+  process.env.FAKE_TEX_DELAY_MS = String(ms);
+  process.env.FAKE_TEX_STARTED = log;
+  return async function started(count = 1) {
+    for (let i = 0; i < 400; i++) {
+      if (fs.existsSync(log) && fs.readFileSync(log, 'utf8').length >= count) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error('the engine never started ' + count + ' time(s)');
+  };
+}
+function fastEngine() {
+  delete process.env.FAKE_TEX_DELAY_MS;
+  delete process.env.FAKE_TEX_STARTED;
+}
 const runsOf = (file) => Number(fs.readFileSync(file.replace(/\.tex$/, '.runs'), 'utf8'));
 
 test('a clean compile writes the PDF beside the file and reports no issues', async () => {
@@ -270,45 +286,45 @@ test('a deleted .bbl or .ind is built again even when the citations and the inde
 });
 
 test('a compile past its cap is stopped and says so', async () => {
-  process.env.FAKE_TEX_DELAY_MS = '5000';
+  slowEngine(5000);
   try {
     const started = Date.now();
     const out = await service().compile('n1', texFile('Slow\n'), OPTIONS, 600);
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'timeout');
     assert.ok(Date.now() - started < 4500, 'the engine was killed, not waited for');
-  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+  } finally { fastEngine(); }
 });
 
 test('Stop ends the compile of that note, and stopping all ends every one', async () => {
   const svc = service();
-  process.env.FAKE_TEX_DELAY_MS = '5000';
+  const started = slowEngine(5000);
   try {
     const first = svc.compile('n1', texFile('Slow one\n'), OPTIONS);
     const second = svc.compile('n2', texFile('Slow two\n'), OPTIONS);
-    await new Promise((r) => setTimeout(r, 800));
+    await started(2);
     assert.equal(svc.stop('n1'), true);
     assert.equal((await first).reason, 'stopped');
     assert.equal(svc.stop('nobody'), false);
     stopAllCompiles();
     assert.equal((await second).reason, 'stopped');
     assert.equal(svc.stop('n2'), false, 'nothing left running');
-  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+  } finally { fastEngine(); }
 });
 
 test('a second compile of the same root waits for the first to end', async () => {
   const svc = service();
   const file = texFile('Twice\n');
-  process.env.FAKE_TEX_DELAY_MS = '1500';
+  const started = slowEngine(1500);
   try {
     const first = svc.compile('n1', file, OPTIONS);
-    await new Promise((r) => setTimeout(r, 400));
-    delete process.env.FAKE_TEX_DELAY_MS;
+    await started();
+    fastEngine();
     const second = await svc.compile('n1', file, OPTIONS);
     assert.equal((await first).reason, 'stopped');
     assert.equal(second.ok, true);
     assert.equal(runsOf(file), 1, 'only the second run finished writing');
-  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+  } finally { fastEngine(); }
 });
 
 test('Clear build files removes only build files, and not while compiling', async () => {
@@ -319,14 +335,14 @@ test('Clear build files removes only build files, and not while compiling', asyn
   fs.writeFileSync(path.join(dir, 'refs.bib'), '@book{a}');
   assert.ok(svc.clean('n1', file) >= 2);
   assert.deepEqual(fs.readdirSync(dir).sort(), ['main.pdf', 'main.runs', 'main.tex', 'refs.bib']);
-  process.env.FAKE_TEX_DELAY_MS = '3000';
+  const started = slowEngine(3000);
   try {
     const running = svc.compile('n1', file, OPTIONS);
-    await new Promise((r) => setTimeout(r, 400));
+    await started();
     assert.throws(() => svc.clean('n1', file), /Stop the compile/);
     svc.stop('n1');
     await running;
-  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+  } finally { fastEngine(); }
 });
 
 test('no TeX gives one plain message', async () => {
@@ -340,21 +356,21 @@ test('no TeX gives one plain message', async () => {
 test('compiles queued on one root: each newer one stops the one before, and a waiting one can be stopped', async () => {
   const svc = service();
   const file = texFile('Queued\n');
-  process.env.FAKE_TEX_DELAY_MS = '1500';
+  const started = slowEngine(1500);
   try {
     const a = svc.compile('n1', file, OPTIONS);
-    await new Promise((r) => setTimeout(r, 400));
+    await started();
     const b = svc.compile('n2', file, OPTIONS);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(svc.stop('n2'), true, 'the waiting compile is the one stopped');
-    delete process.env.FAKE_TEX_DELAY_MS;
+    fastEngine();
     const c = svc.compile('n3', file, OPTIONS);
     const [ra, rb, rc] = await Promise.all([a, b, c]);
     assert.equal(ra.reason, 'stopped');
     assert.equal(rb.reason, 'stopped');
     assert.equal(rc.ok, true);
     assert.equal(runsOf(file), 1, 'only the last compile ran to the end');
-  } finally { delete process.env.FAKE_TEX_DELAY_MS; }
+  } finally { fastEngine(); }
 });
 
 test('a folder whose name starts with two dots is still inside', async () => {
