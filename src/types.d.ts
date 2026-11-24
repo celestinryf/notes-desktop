@@ -189,7 +189,7 @@ interface TexSource { filePath: string; line: number }
 interface TexEntry { key: string; detail: string }
 interface TexLabel extends TexEntry { file: string; line: number }
 interface TexReferences { citations: TexEntry[]; labels: TexLabel[]; commands: string[]; environments: string[]; files: string[] }
-type TexStatus = { found: true; distribution: string; dir: string; latexmk: boolean } | { found: false; looked: string[]; problem: string | null };
+type TexStatus = { found: true; distribution: string; dir: string } | { found: false; looked: string[]; problem: string | null };
 type TexCompileResult =
   | { ok: true; root: string; pdf: string | null; engine: TexEngineName; log: TexLog; ms: number; steps: string[] }
   | { ok: false; root: string | null; reason: 'no-tex' | 'stopped' | 'timeout' | 'failed'; message: string; log: TexLog | null; ms: number; steps: string[] };

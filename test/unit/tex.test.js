@@ -102,9 +102,6 @@ test('commands never wait on the keyboard, write SyncTeX and file:line errors, a
   const file = path.join('C:', 'x', 'main.tex');
   assert.deepEqual(B.engineArgs(file, { engine: 'pdflatex', haltOnError: false }), ['-interaction=nonstopmode', '-synctex=1', '-file-line-error', 'main.tex']);
   assert.deepEqual(B.engineArgs(file, { engine: 'pdflatex', haltOnError: true }), ['-interaction=nonstopmode', '-synctex=1', '-file-line-error', '-halt-on-error', 'main.tex']);
-  assert.deepEqual(B.latexmkArgs(file, 'xelatex', { engine: 'pdflatex', haltOnError: false }), ['-pdfxe', '-norc', '-interaction=nonstopmode', '-synctex=1', '-file-line-error', 'main.tex']);
-  assert.equal(B.latexmkArgs(file, 'lualatex', { engine: 'pdflatex', haltOnError: false })[0], '-pdflua');
-  assert.equal(B.latexmkArgs(file, 'pdflatex', { engine: 'pdflatex', haltOnError: false })[0], '-pdf');
 });
 
 test('build files and the PDF sit beside the root', () => {

@@ -33,11 +33,6 @@ export function engineArgs(file: string, options: TexOptions) {
   return flags(options).concat(path.basename(file));
 }
 
-export function latexmkArgs(file: string, engine: TexEngineName, options: TexOptions) {
-  const mode = engine === 'xelatex' ? '-pdfxe' : engine === 'lualatex' ? '-pdflua' : '-pdf';
-  return [mode, '-norc'].concat(flags(options), path.basename(file));
-}
-
 export const BUILD_EXTENSIONS = ['aux', 'log', 'out', 'toc', 'lof', 'lot', 'fls', 'fdb_latexmk', 'synctex.gz', 'synctex', 'bbl', 'blg', 'bcf', 'run.xml', 'nav', 'snm', 'vrb', 'xdv', 'idx', 'ilg', 'ind'];
 
 export function buildFiles(root: string) {
