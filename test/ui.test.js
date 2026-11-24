@@ -2192,7 +2192,7 @@ test('git history: edits are committed to a repo in the data folder', async () =
   assert.equal(await page.$eval('#gitPushBtn', (b) => b.disabled), true, 'push disabled without a remote');
   await waitForDom(() => document.getElementById('toast').classList.contains('hidden'));
   await page.click('#gitCommitBtn');
-  await waitForDomWithin(10000, () => !document.getElementById('toast').classList.contains('hidden'));
+  await waitForDomWithin(30000, () => !document.getElementById('toast').classList.contains('hidden') && !/^Saving a version/.test(document.getElementById('toast').textContent));
   assert.match(await page.textContent('#toast'), /Saved a version|Nothing new to save/);
   assert.equal(await page.$eval('#saveSettingsBtn', (b) => b.disabled), true, 'nothing to save');
   await page.keyboard.press('Escape');

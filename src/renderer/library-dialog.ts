@@ -1,6 +1,7 @@
 import { el, setLabel, setIcon } from './dom.ts';
 import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
+import { noticeIfSlow, oneAtATime } from './slow-notice.ts';
 import { ipcErrorText } from './text.ts';
 
 const PAGE = 100;
@@ -285,17 +286,19 @@ export function createLibraryDialog({ api, flushSave, updateSettings, openGithub
     return needsSignIn(s) && H.isAuthFailure(raw) ? { label: 'Sign in', run: () => { goToGithub(); } } : { label: 'Details', run: () => { openLibrary(); } };
   }
 
-  async function saveVersionNow() {
-    await flushSave();
-    const r = await api.git.commit();
-    const after = await api.git.status();
+  const saveVersionNow = oneAtATime(async () => {
+    const { r, after } = await noticeIfSlow((async () => {
+      await flushSave();
+      const r = await api.git.commit();
+      return { r, after: await api.git.status() };
+    })(), () => toast('Saving a version…'));
     renderStatus(after);
     if (el.libraryDialog.open) await loadVersions();
     if (!r.ok && r.skipped === 'disabled') { toast('History is off.'); return; }
     const problem = (H.isLinkedNotice(after.lastError) ? null : H.gitErrorText(after.lastError)) || (r.ok ? null : H.gitErrorText(r.error || 'commit failed'));
     if (problem) { toast(problem.text, problemAction(after, problem.details)); return; }
     toast(r.ok && r.nothingToCommit ? 'Nothing new to save. The last version has every change.' : 'Saved a version');
-  }
+  });
 
   function bind() {
     el.historyStatusBtn.addEventListener('click', () => { openLibrary(); });
