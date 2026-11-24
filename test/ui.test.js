@@ -3108,15 +3108,14 @@ test('window state: Esc hides, a second launch re-shows the first instance, data
   assert.notEqual(code, 'timeout', 'second instance should quit on its own after handing off');
 
   const listSize = () => page.$eval('#noteList .note-row', (r) => Number(r.getAttribute('aria-setsize')));
-  const diskIds = () => readNotes().notes.map((n) => n.id).sort();
-  await page.waitForSelector('.note-row', { timeout: 8000 });
-  const sizeBefore = await listSize();
-  const idsBefore = diskIds();
+  const liveIds = () => readNotes().notes.filter((n) => !n.trashedAt).map((n) => n.id).sort();
+  const listShowsDisk = async () => (await page.$('#noteList .note-row')) !== null && (await listSize()) === liveIds().length;
+  await waitFor('the list shows every note on disk', listShowsDisk, 8000);
+  const idsBefore = liveIds();
   await page.reload({ timeout: 8000 });
   step('reloaded');
-  await page.waitForSelector('.note-row', { timeout: 8000 });
-  assert.equal(await listSize(), sizeBefore, 'the list shows as many notes after the reload');
-  assert.deepEqual(diskIds(), idsBefore, 'the notes on disk are the same after the reload');
+  await waitFor('the list shows every note on disk after the reload', listShowsDisk, 8000);
+  assert.deepEqual(liveIds(), idsBefore, 'the notes on disk are the same after the reload');
   step('data survived reload');
 });
 
