@@ -14,15 +14,18 @@ export type HintDeps = {
 export function createHints(deps: HintDeps) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const shownNow = new Set<string>();
+  function seen(id: string) {
+    const ids = deps.shown();
+    return !ids || ids.includes(id) || shownNow.has(id);
+  }
   function hint(id: string, message: string) {
-    const seen = deps.shown();
-    if (!seen || seen.includes(id) || shownNow.has(id)) return false;
+    if (seen(id)) return false;
     if (deps.canShow && !deps.canShow()) return false;
     shownNow.add(id);
     deps.show(message);
     clearTimeout(timer);
     timer = setTimeout(deps.hide, HINT_MS);
-    deps.remember(Array.from(new Set([...seen, ...shownNow])));
+    deps.remember(Array.from(new Set([...(deps.shown() ?? []), ...shownNow])));
     return true;
   }
   function dismiss() {
@@ -33,5 +36,5 @@ export function createHints(deps: HintDeps) {
     shownNow.clear();
     deps.remember([]);
   }
-  return { hint, dismiss, forget };
+  return { hint, seen, dismiss, forget };
 }

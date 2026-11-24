@@ -908,6 +908,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   }
 
   function firstTip() {
+    if (hints.seen(HINT.palette)) return;
     const soon = (ms: number) => setTimeout(() => hints.hint(HINT.palette, TIPS.palette), ms);
     if (document.hasFocus()) soon(1200);
     else window.addEventListener('focus', () => soon(600), { once: true });

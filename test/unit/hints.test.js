@@ -97,3 +97,27 @@ test('the page names tips only through HINT, so ALL_HINTS cannot miss one', () =
   assert.ok(calls.length >= 3, calls.join(' '));
   for (const c of calls) assert.match(c, /^hints\.hint\(HINT\.\w+,$/);
 });
+
+test('seen: a tip counts as seen once stored or shown this session, not after forgetting, and always while settings are missing', () => {
+  const { hints } = harness(['stored']);
+  assert.equal(hints.seen('stored'), true);
+  assert.equal(hints.seen('a'), false);
+  hints.hint('a', 'A');
+  assert.equal(hints.seen('a'), true);
+  hints.forget();
+  assert.equal(hints.seen('a'), false);
+  assert.equal(hints.seen('stored'), false);
+  assert.equal(harness(null).hints.seen('a'), true);
+});
+
+test('seen: a tip shown while its remembering is on its way is already seen', () => {
+  const hints = createHints({ shown: () => [], remember: () => {}, show: () => {}, hide: () => {} });
+  hints.hint('a', 'A');
+  assert.equal(hints.seen('a'), true);
+  assert.equal(hints.seen('b'), false);
+});
+
+test('the first-run tip is not scheduled when it was already seen, so a later "Show the tips again" cannot bring it back on its own', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'src', 'renderer', 'app.ts'), 'utf8');
+  assert.match(src, /function firstTip\(\) \{\s*if \(hints\.seen\(HINT\.palette\)\) return;/);
+});
