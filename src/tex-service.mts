@@ -31,7 +31,7 @@ export class TexService {
   async status(again?: boolean): Promise<TexStatus> {
     const found = await this.find(again);
     if (!found.install) return { found: false, looked: found.looked, problem: found.problem };
-    return { found: true, distribution: found.install.distribution, dir: found.install.dir, latexmk: !!found.install.latexmk };
+    return { found: true, distribution: found.install.distribution, dir: found.install.dir };
   }
 
   rootOf(filePath: string) {

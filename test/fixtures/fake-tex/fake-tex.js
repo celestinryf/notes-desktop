@@ -7,7 +7,6 @@ if (args.includes('--version') || args.includes('-v')) {
   process.stdout.write('pdfTeX 3.141592653-2.6-1.40.26 (Fake TeX 2026)\n');
   process.exit(0);
 }
-if (process.env.FAKE_LATEXMK_UPTODATE) process.exit(0);
 const file = args.filter((a) => !a.startsWith('-')).pop();
 if (!file) process.exit(2);
 const cwd = process.cwd();
@@ -19,6 +18,7 @@ const fatal = source.includes('\\FAKEFATAL');
 const noLog = source.includes('\\FAKENOLOG');
 const rerun = source.includes('\\FAKERERUN');
 const bibliography = /\\bibliography\{/.test(source);
+const makeIndex = source.includes('\\makeindex');
 const runs = (() => { try { return Number(fs.readFileSync(path.join(cwd, stem + '.runs'), 'utf8')) || 0; } catch (_) { return 0; } })() + 1;
 const log = ['This is pdfTeX, Version 3.141592653-2.6-1.40.26 (Fake TeX 2026) (preloaded format=pdflatex)', 'entering extended mode', ' file:line:error style messages enabled.', '**' + file, '(./' + file];
 if (errorAt !== -1) {
@@ -69,7 +69,9 @@ setTimeout(async () => {
   fs.writeFileSync(path.join(cwd, stem + '.runs'), String(runs));
   if (noLog) process.exit(3);
   fs.writeFileSync(path.join(cwd, stem + '.log'), log.join('\n') + '\n');
-  fs.writeFileSync(path.join(cwd, stem + '.aux'), bibliography ? '\\relax\n\\bibdata{refs}\n' : '\\relax\n');
+  const citations = Array.from(source.matchAll(/\\cite\{([^}]*)\}/g), (m) => '\\citation{' + m[1] + '}\n').join('');
+  fs.writeFileSync(path.join(cwd, stem + '.aux'), '\\relax\n' + citations + (bibliography ? '\\bibdata{refs}\n' : ''));
+  if (makeIndex) fs.writeFileSync(path.join(cwd, stem + '.idx'), Array.from(source.matchAll(/\\index\{([^}]*)\}/g), (m) => '\\indexentry{' + m[1] + '}{1}\n').join(''));
   if (!fatal) {
     const title = (lines.find((l) => l.trim() && !l.trim().startsWith('%') && !l.trim().startsWith('\\')) || stem).slice(0, 60);
     fs.writeFileSync(path.join(cwd, stem + '.pdf'), onePagePdf(title));

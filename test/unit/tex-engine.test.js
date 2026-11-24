@@ -45,7 +45,7 @@ test('a TeX found with kpsewhich working gives the engines and the distribution'
   assert.equal(found.install.dir, dir);
   assert.deepEqual(Object.keys(found.install.engines).sort(), ['lualatex', 'pdflatex', 'xelatex']);
   assert.equal(found.install.distribution, 'Fake TeX 2026');
-  assert.equal(found.install.latexmk, null);
+  assert.ok(found.install.makeindex, 'makeindex beside the engines is found');
 });
 
 test('an engine without a working kpsewhich is a broken install, said plainly', async () => {
@@ -203,12 +203,70 @@ test('bibtex runs when the aux file asks for it, then the engine again', async (
   assert.ok(fs.existsSync(file.replace(/\.tex$/, '.bbl')));
 });
 
-test('latexmk is used when it runs, with no rc files', async () => {
+test('a latexmk beside the engines is left alone: Notes runs the engine itself', async () => {
   const svc = service(withLatexmk);
-  assert.equal((await svc.status()).latexmk, true);
+  assert.equal('latexmk' in (await svc.status()), false);
   const out = await svc.compile('n1', texFile('Hello\n'), OPTIONS);
   assert.equal(out.ok, true);
-  assert.deepEqual(out.steps, ['latexmk']);
+  assert.deepEqual(out.steps, ['pdflatex']);
+});
+
+test('an index is built with makeindex and the engine runs again to print it', async () => {
+  const file = texFile('\\makeindex\nIndexed words\n');
+  const out = await service().compile('n1', file, OPTIONS);
+  assert.equal(out.ok, true, out.message);
+  assert.deepEqual(out.steps, ['pdflatex', 'makeindex', 'pdflatex']);
+  assert.ok(fs.existsSync(file.replace(/\.tex$/, '.ind')));
+});
+
+test('a bibliography and an index are both built after the first run, then one more run prints them', async () => {
+  const file = texFile('\\makeindex\nText\\cite{a}\n\\bibliography{refs}\n');
+  const out = await service().compile('n1', file, OPTIONS);
+  assert.deepEqual(out.steps, ['pdflatex', 'bibtex', 'makeindex', 'pdflatex']);
+});
+
+test('without makeindex an index document still compiles, with no index step', async () => {
+  const svc = service((dir) => fs.unlinkSync(path.join(dir, 'makeindex.cmd')));
+  const out = await svc.compile('n1', texFile('\\makeindex\nNo tool\n'), OPTIONS);
+  assert.equal(out.ok, true, out.message);
+  assert.deepEqual(out.steps, ['pdflatex']);
+});
+
+test('an index file left from an earlier compile does not start makeindex', async () => {
+  const file = texFile('Plain text\n');
+  const idx = file.replace(/\.tex$/, '.idx');
+  fs.writeFileSync(idx, 'old');
+  const old = (Date.now() - 60000) / 1000;
+  fs.utimesSync(idx, old, old);
+  const out = await service().compile('n1', file, OPTIONS);
+  assert.deepEqual(out.steps, ['pdflatex']);
+});
+
+test('an edit that leaves the citations and the index alone compiles in one run', async () => {
+  const svc = service();
+  const file = texFile('\\makeindex\nLoops\\index{loop} and \\cite{a}\n\\bibliography{refs}\n');
+  assert.deepEqual((await svc.compile('n1', file, OPTIONS)).steps, ['pdflatex', 'bibtex', 'makeindex', 'pdflatex']);
+  fs.appendFileSync(file, 'More words\n');
+  assert.deepEqual((await svc.compile('n1', file, OPTIONS)).steps, ['pdflatex']);
+});
+
+test('a new citation runs bibtex again, and a new index entry runs makeindex again, each alone', async () => {
+  const svc = service();
+  const file = texFile('\\makeindex\nLoops\\index{loop} and \\cite{a}\n\\bibliography{refs}\n');
+  await svc.compile('n1', file, OPTIONS);
+  fs.appendFileSync(file, 'Also \\cite{b}\n');
+  assert.deepEqual((await svc.compile('n1', file, OPTIONS)).steps, ['pdflatex', 'bibtex', 'pdflatex']);
+  fs.appendFileSync(file, 'Trees\\index{tree}\n');
+  assert.deepEqual((await svc.compile('n1', file, OPTIONS)).steps, ['pdflatex', 'makeindex', 'pdflatex']);
+});
+
+test('a deleted .bbl or .ind is built again even when the citations and the index did not change', async () => {
+  const svc = service();
+  const file = texFile('\\makeindex\nLoops\\index{loop} and \\cite{a}\n\\bibliography{refs}\n');
+  await svc.compile('n1', file, OPTIONS);
+  fs.unlinkSync(file.replace(/\.tex$/, '.bbl'));
+  fs.unlinkSync(file.replace(/\.tex$/, '.ind'));
+  assert.deepEqual((await svc.compile('n1', file, OPTIONS)).steps, ['pdflatex', 'bibtex', 'makeindex', 'pdflatex']);
 });
 
 test('a compile past its cap is stopped and says so', async () => {
@@ -297,21 +355,6 @@ test('compiles queued on one root: each newer one stops the one before, and a wa
     assert.equal(rc.ok, true);
     assert.equal(runsOf(file), 1, 'only the last compile ran to the end');
   } finally { delete process.env.FAKE_TEX_DELAY_MS; }
-});
-
-test('latexmk with nothing to do keeps the PDF and the log it already has', async () => {
-  const svc = service(withLatexmk);
-  const file = texFile('Up to date\n\\FAKEWARNING\n');
-  assert.equal((await svc.compile('n1', file, OPTIONS)).ok, true);
-  const old = (Date.now() - 60000) / 1000;
-  for (const ext of ['log', 'pdf']) fs.utimesSync(file.replace(/\.tex$/, '.' + ext), old, old);
-  process.env.FAKE_LATEXMK_UPTODATE = '1';
-  try {
-    const again = await svc.compile('n1', file, OPTIONS);
-    assert.equal(again.ok, true, JSON.stringify(again));
-    assert.equal(again.pdf, file.replace(/\.tex$/, '.pdf'));
-    assert.equal(again.log.warnings, 1, 'the existing log is still read');
-  } finally { delete process.env.FAKE_LATEXMK_UPTODATE; }
 });
 
 test('a folder whose name starts with two dots is still inside', async () => {

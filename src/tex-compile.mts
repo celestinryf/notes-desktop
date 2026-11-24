@@ -3,18 +3,35 @@ import path from 'node:path';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { launchSpec } from './claude-bin.mts';
 import { parseTexLog } from './shared/tex-log.mts';
-import { engineFor, engineArgs, latexmkArgs, pdfFor, needsBibtex, needsBiber, stemOf, type TexMagic, type TexOptions } from './tex-build.mts';
+import { engineFor, engineArgs, pdfFor, needsBibtex, needsBiber, stemOf, type TexMagic, type TexOptions } from './tex-build.mts';
 import type { TexInstall } from './tex-engine.mts';
 
 export const COMPILE_CAP_MS = 120 * 1000;
 const MAX_ENGINE_RUNS = 4;
 const CLOCK_SLACK_MS = 3000;
 
-type Exe = NonNullable<TexInstall['latexmk']>;
+type Exe = NonNullable<TexInstall['makeindex']>;
 type Running = { stop: () => void, done: Promise<void> };
 export type CompileJob = { root: string, magic: TexMagic, install: TexInstall, options: TexOptions, capMs?: number };
 
 const running = new Map<string, Running>();
+const builtFrom = new Map<string, string>();
+
+type Helper = { name: 'bibtex' | 'biber' | 'makeindex', exe: Exe, args: string[], input: string, output: string };
+type HelperContext = { cwd: string, stem: string, started: number, log: string, magic: TexMagic, install: TexInstall };
+
+const BIBTEX_INPUT = /^\\(citation|bibdata|bibstyle)\{.*$/gm;
+
+function helpersFor({ cwd, stem, started, log, magic, install }: HelperContext): Helper[] {
+  const out: Helper[] = [];
+  const aux = readFresh(path.join(cwd, stem + '.aux'), started);
+  const bib = magic.bib || (needsBiber(aux, log) ? 'biber' : needsBibtex(aux) ? 'bibtex' : null);
+  if (bib === 'biber' && install.biber) out.push({ name: 'biber', exe: install.biber, args: [stem], input: readFresh(path.join(cwd, stem + '.bcf'), started), output: stem + '.bbl' });
+  if (bib === 'bibtex' && install.bibtex) out.push({ name: 'bibtex', exe: install.bibtex, args: [stem], input: (aux.match(BIBTEX_INPUT) || []).join('\n'), output: stem + '.bbl' });
+  const idx = readFresh(path.join(cwd, stem + '.idx'), started);
+  if (install.makeindex && writtenSince(path.join(cwd, stem + '.idx'), started)) out.push({ name: 'makeindex', exe: install.makeindex, args: [stem + '.idx'], input: idx, output: stem + '.ind' });
+  return out;
+}
 const keyOf = (root: string) => (process.platform === 'win32' ? path.resolve(root).toLowerCase() : path.resolve(root));
 
 function killTree(child: ChildProcess) {
@@ -94,19 +111,8 @@ export async function compileTex(job: CompileJob): Promise<TexCompileResult> {
     started = Date.now();
     deadline = started + capMs;
     const exe = install.engines[engine];
-    if (install.latexmk) {
-      steps.push('latexmk');
-      const code = await step(install.latexmk, latexmkArgs(root, engine, options), cwd, deadline, control);
-      const stopped = interrupted();
-      if (stopped) return stopped;
-      const upToDate = code === 0 && !writtenSince(logFile, started);
-      const log = upToDate ? readText(logFile) : readFresh(logFile, started);
-      if (!log) return failed('failed', noLog('latexmk', code));
-      const pdf = pdfFor(root);
-      return { ok: true, root, pdf: writtenSince(pdf, started) || (upToDate && fs.existsSync(pdf)) ? pdf : null, engine, log: parseTexLog(log), ms: Date.now() - started, steps };
-    }
     if (!exe) return failed('failed', 'This TeX installation has no ' + engine + '.');
-    let bibDone = false;
+    const done = new Set<string>();
     for (let runs = 1; ; runs++) {
       steps.push(engine);
       const code = await step(exe, engineArgs(root, options), cwd, deadline, control);
@@ -114,18 +120,18 @@ export async function compileTex(job: CompileJob): Promise<TexCompileResult> {
       if (stopped) return stopped;
       const log = readFresh(logFile, started);
       if (!log) return failed('failed', noLog(engine, code));
-      if (!bibDone) {
-        bibDone = true;
-        const aux = readFresh(path.join(cwd, stem + '.aux'), started);
-        const bib = magic.bib || (needsBiber(aux, log) ? 'biber' : needsBibtex(aux) ? 'bibtex' : null);
-        const tool = bib === 'biber' ? install.biber : bib === 'bibtex' ? install.bibtex : null;
-        if (bib && tool) {
-          steps.push(bib);
-          await step(tool, [stem], cwd, deadline, control);
-          const afterBib = interrupted();
-          if (afterBib) return afterBib;
-          continue;
+      const helpers = helpersFor({ cwd, stem, started, log, magic, install }).filter((h) => !done.has(h.name));
+      for (const h of helpers) done.add(h.name);
+      const due = helpers.filter((h) => !(builtFrom.get(key + '|' + h.name) === h.input && fs.existsSync(path.join(cwd, h.output))));
+      if (due.length) {
+        for (const h of due) {
+          steps.push(h.name);
+          await step(h.exe, h.args, cwd, deadline, control);
+          const afterHelper = interrupted();
+          if (afterHelper) return afterHelper;
+          builtFrom.set(key + '|' + h.name, h.input);
         }
+        continue;
       }
       if (runs >= MAX_ENGINE_RUNS || !parseTexLog(log).rerun) break;
     }

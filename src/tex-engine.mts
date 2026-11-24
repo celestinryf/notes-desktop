@@ -9,7 +9,7 @@ export type TexInstall = {
   dir: string,
   distribution: string,
   engines: Partial<Record<TexEngineName, Exe>>,
-  latexmk: Exe | null,
+  makeindex: Exe | null,
   bibtex: Exe | null,
   biber: Exe | null,
 };
@@ -70,10 +70,8 @@ export async function detectTex(env: Env, run: Runner = runQuietly): Promise<Tex
     if (check.code === null) return { install: null, looked, problem: 'Found TeX in ' + dir + ', but kpsewhich did not run. Repair the installation with its own console.' };
     if (check.code !== 0 || !check.stdout.trim()) return { install: null, looked, problem: 'Found TeX in ' + dir + ', but it cannot find ' + PROBE_FILE + ', so LaTeX itself looks missing. Repair the installation with its own console.' };
     const version = await run(first, ['--version']);
-    const latexmk = find(dir, 'latexmk');
-    const latexmkWorks = latexmk ? (await run(latexmk, ['-v'])).code === 0 : false;
     return {
-      install: { dir, distribution: distributionOf(version.stdout), engines, latexmk: latexmkWorks ? latexmk : null, bibtex: find(dir, 'bibtex'), biber: find(dir, 'biber') },
+      install: { dir, distribution: distributionOf(version.stdout), engines, makeindex: find(dir, 'makeindex'), bibtex: find(dir, 'bibtex'), biber: find(dir, 'biber') },
       looked,
       problem: null,
     };
