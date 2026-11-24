@@ -28,7 +28,9 @@ const homeVaultId = () => (readNotes().vaults.find((v) => v.home) || {}).id;
 const isLinkedFile = (n) => !!n.filePath && !n.vaultId;
 const homeNoteFile = (title) => findNote(title).filePath;
 const findNote = (title) => readNotes().notes.find((n) => n.title === title);
-const historyAt = (rev, file) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':' + file], { encoding: 'utf8' }); } catch (_) { return ''; } };
+const HIDDEN_TEXT = { encoding: 'utf8', windowsHide: true };
+const readHtmlClipboard = () => require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], HIDDEN_TEXT).stdout || '';
+const historyAt = (rev, file) => { try { return require('child_process').execFileSync('git', ['-C', path.join(dataDir, 'history'), 'show', rev + ':' + file], HIDDEN_TEXT); } catch (_) { return ''; } };
 
 async function waitFor(label, fn, timeout = 6000) {
   const start = Date.now();
@@ -70,7 +72,7 @@ test.before(async () => {
     executablePath: ELECTRON_PATH,
     args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
     env: Object.assign({}, process.env, {
-      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_REMINDER_TICK_MS: '300',
+      NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_GIT_DEBOUNCE_MS: '300', NOTES_APP_INACTIVE: '1', NOTES_APP_GHOST: '1', NOTES_APP_DRY_DICTATE: '1', NOTES_APP_DRY_PRINT: '1', NOTES_APP_DRY_NOTIFY: '1', NOTES_APP_DRY_SPEECH: '1', NOTES_APP_REMINDER_TICK_MS: '300',
       NOTES_APP_CLAUDE_BIN: path.join(ROOT, 'test', 'fixtures', 'fake-claude.js'),
       ANTHROPIC_API_KEY: 'sk-ant-test-must-not-reach-the-agent',
       NOTES_APP_DRY_TERMINAL: '1',
@@ -159,7 +161,7 @@ async function typeNote(title, body) {
 test('showing the window does not create stray notes once notes exist', async () => {
   await waitForDom(() => !document.getElementById('editor').classList.contains('hidden'));
   await waitFor('exactly one note after first show', () => readNotes().notes.length === 1);
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.hide(); w.show(); w.webContents.send('app:shown'); });
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.hide(); w.showInactive(); w.webContents.send('app:shown'); });
   await sleep(600);
   assert.equal(readNotes().notes.length, 1, 'second show created no extra note');
 });
@@ -628,7 +630,7 @@ test('formulas: $ and $$ render with KaTeX, a click or Enter edits them in a pop
   await page.keyboard.press('Control+Shift+s');
   await page.waitForSelector('#shareMenu:not(.hidden)');
   await page.click('#shareMenu [data-action="copy-html"]');
-  const copied = await waitFor('formulas copied as rich text', () => { const html = require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], { encoding: 'utf8' }).stdout || ''; return html.includes('mc^2') ? html : null; }, 10000);
+  const copied = await waitFor('formulas copied as rich text', () => { const html = readHtmlClipboard(); return html.includes('mc^2') ? html : null; }, 10000);
   assert.ok(copied.includes('$E = mc^2$') && copied.includes('$$\\int_0^1 x\\,dx$$'), 'formulas paste as their TeX: ' + copied.slice(0, 300));
   assert.doesNotMatch(copied, /katex/, 'no KaTeX markup on the clipboard');
 
@@ -1541,7 +1543,6 @@ test('share: copy as Markdown, rich text and plain text; email via mailto; save 
   await share('copy-md');
   await waitFor('markdown on clipboard', () => app.evaluate(({ clipboard }) => clipboard.readText()).then((t) => /\*\*bold\*\* text/.test(t) && /Gamma \(copy\)/.test(t)));
   await share('copy-html');
-  const readHtmlClipboard = () => require('child_process').spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard -TextFormatType Html'], { encoding: 'utf8' }).stdout || '';
   await waitFor('html on clipboard', () => { const t = readHtmlClipboard(); return /<strong>bold<\/strong>/.test(t) && /<h1>Gamma \(copy\)<\/h1>/.test(t); }, 10000);
   await share('copy-text');
   const plain = await app.evaluate(({ clipboard }) => clipboard.readText());
@@ -2174,13 +2175,13 @@ test('writing column: alignment and width settings move and size the block', asy
 test('git history: edits are committed to a repo in the data folder', async () => {
   const { execFileSync } = require('child_process');
   const repoDir = path.join(dataDir, 'history');
-  const count = () => { try { return parseInt(execFileSync('git', ['-C', repoDir, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), 10) || 0; } catch (_) { return 0; } };
+  const count = () => { try { return parseInt(execFileSync('git', ['-C', repoDir, 'rev-list', '--count', 'HEAD'], HIDDEN_TEXT).trim(), 10) || 0; } catch (_) { return 0; } };
   await useSourceMode(true);
   await waitFor('at least one commit exists', () => count() >= 1, 10000);
   const before = count();
   await fillBody('committed text ' + Date.now());
   await waitFor('new commit after an edit', () => count() > before, 10000);
-  const tracked = execFileSync('git', ['-C', repoDir, 'ls-files'], { encoding: 'utf8' }).trim().split('\n').sort();
+  const tracked = execFileSync('git', ['-C', repoDir, 'ls-files'], HIDDEN_TEXT).trim().split('\n').sort();
   assert.ok(tracked.includes('Gamma (copy).md') && !tracked.includes('notes.json'), 'the notes folder\'s files are tracked, not notes.json: ' + tracked.join(', '));
   assert.equal(fs.existsSync(path.join(dataDir, '.git')), false, 'the data folder itself is not a repo');
 
@@ -3096,7 +3097,7 @@ test('window state: Esc hides, a second launch re-shows the first instance, data
   await waitFor('hidden by Esc', async () => !(await win()));
   step('hidden by Esc');
 
-  const second = spawn(ELECTRON_PATH, [ROOT], { env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1' }), stdio: 'ignore' });
+  const second = spawn(ELECTRON_PATH, [ROOT], { env: Object.assign({}, process.env, { NOTES_APP_DATA_DIR: dataDir, NOTES_APP_NO_LOGIN_ITEM: '1', NOTES_APP_INACTIVE: '1', NOTES_APP_GHOST: '1' }), stdio: 'ignore', windowsHide: true });
   const secondExit = new Promise((r) => second.on('exit', (code) => r(code)));
   await waitFor('second instance re-shows the window', win, 10000);
   step('re-shown by second instance');
