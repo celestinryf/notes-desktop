@@ -9,7 +9,7 @@ const { git, sh, commitIn, makeRepos, switchToPnpm } = require('../helpers/git-r
 const { tmpDir, cleanup } = require('../helpers/tmp');
 
 const HELPER = path.join(__dirname, '..', '..', 'scripts', 'finish-update.js');
-const { update, waitForExit, readJob, installEnv } = require(HELPER);
+const { update, waitForExit, waitForIdle, processesUnder, readJob, installEnv } = require(HELPER);
 
 const repos = () => makeRepos('notes-finishupdate-');
 function fakeTool(dir, name, { fail } = {}) {
@@ -368,7 +368,7 @@ test('the helper starts the app again even when the update itself throws', async
   const { marker, args } = startMarker(r, 'started.txt');
   const jobFile = path.join(r.dataDir, 'job.json');
   const waiter = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 100)'], { stdio: 'ignore' });
-  fs.writeFileSync(jobFile, JSON.stringify(job(r, { pid: waiter.pid, target: 'x', git: { file: path.join(r.base, 'no-such-git.exe'), env: {} }, args })));
+  fs.writeFileSync(jobFile, JSON.stringify(job(r, { pid: waiter.pid, target: 'x', root: tmpDir('notes-not-a-repo-'), args })));
   execFileSync(process.execPath, [HELPER, jobFile], { encoding: 'utf8', env: fastEnv() });
   assert.equal(resultOf(r).ok, false);
   assert.match(resultOf(r).error, /rev-parse failed/);
@@ -397,4 +397,70 @@ test('the helper logs a bad job file next to it and exits non-zero', () => {
   fs.writeFileSync(jobFile, '{"pid":1}');
   assert.throws(() => execFileSync(process.execPath, [HELPER, jobFile], { encoding: 'utf8', stdio: 'pipe' }));
   assert.match(fs.readFileSync(path.join(dir, 'self-update.log'), 'utf8'), /bad job file: job is missing root/);
+});
+
+function lockedOnce(dir, name) {
+  const count = path.join(dir, name + '-count.txt');
+  const script = path.join(dir, name + '-locked-once.js');
+  fs.writeFileSync(script, [
+    'const fs = require("fs");',
+    'const n = fs.existsSync(' + JSON.stringify(count) + ') ? Number(fs.readFileSync(' + JSON.stringify(count) + ', "utf8")) : 0;',
+    'fs.writeFileSync(' + JSON.stringify(count) + ', String(n + 1));',
+    'if (n === 0) { console.error("failed to remove existing directory node_modules/electron prior to swap: Access is denied. (os error 5)"); process.exit(1); }',
+  ].join('\n'));
+  return { tool: { file: process.execPath, args: [script] }, calls: () => { try { return Number(fs.readFileSync(count, 'utf8')); } catch (_) { return 0; } } };
+}
+
+test('an install that fails on a file in use is tried once more and the update goes through', async () => {
+  const r = repos();
+  const target = switchToPnpm(r.upstream);
+  const pnpm = lockedOnce(r.base, 'pnpm');
+  const lines = [];
+  process.env.NOTES_UPDATE_SETTLE_MS = '50';
+  try {
+    const res = await update(job(r, { target, installers: using({ pnpm: pnpm.tool }) }), (l) => lines.push(l));
+    assert.equal(res.ok, true, lines.join('\n'));
+    assert.equal(res.installed, true);
+    assert.equal(pnpm.calls(), 2);
+    assert.equal(sh(['rev-parse', 'HEAD'], r.checkout), target);
+    assert.ok(lines.some((l) => /on a file in use, trying once more/.test(l)), lines.join('\n'));
+  } finally { delete process.env.NOTES_UPDATE_SETTLE_MS; }
+});
+
+test('the roll back uses the git on PATH when the bundled git is gone', async () => {
+  const r = repos();
+  const target = commitIn(r.upstream, 'package-lock.json', '{"v":2}', 'deps');
+  const npm = fakeTool(r.base, 'npm', { fail: true });
+  const gone = path.join(r.base, 'no-such-git', 'git.exe');
+  const lines = [];
+  const res = await update(job(r, { target, git: { file: gone, env: {} }, installers: using({ npm: npm.tool }) }), (l) => lines.push(l));
+  assert.equal(res.ok, false);
+  assert.equal(res.to, r.first);
+  assert.equal(sh(['rev-parse', 'HEAD'], r.checkout), r.first);
+  assert.ok(lines.some((l) => /rolled the checkout back/.test(l)), lines.join('\n'));
+});
+
+test('waitForIdle waits while processes run from the checkout and logs them once', async () => {
+  const seen = [[{ pid: 1, exe: 'a' }], [{ pid: 1, exe: 'a' }], []];
+  const lines = [];
+  assert.equal(await waitForIdle(async () => seen.shift(), 5000, (l) => lines.push(l)), true);
+  assert.equal(seen.length, 0);
+  assert.deepEqual(lines, ['waiting for 1 process(es) running from the checkout to exit']);
+});
+
+test('waitForIdle gives up after its limit and names what is still running', async () => {
+  const lines = [];
+  assert.equal(await waitForIdle(async () => [{ pid: 7, exe: 'D:/apps/electron.exe' }], 100, (l) => lines.push(l)), false);
+  assert.equal(lines.at(-1), 'still running from the checkout: 7 D:/apps/electron.exe');
+});
+
+test('waitForIdle treats a failed process query as idle', async () => {
+  assert.equal(await waitForIdle(async () => null, 100, quiet), true);
+});
+
+test('processesUnder finds this test process under its own folder and nothing under an empty one', { skip: process.platform !== 'win32' }, async () => {
+  const mine = await processesUnder(path.dirname(process.execPath));
+  assert.ok(mine.some((p) => p.pid === process.pid), JSON.stringify(mine));
+  assert.deepEqual(await processesUnder(tmpDir('notes-idle-')), []);
+  assert.deepEqual(await processesUnder(path.join(tmpDir('notes-idle-'), 'missing')), []);
 });

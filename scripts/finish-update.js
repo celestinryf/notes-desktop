@@ -35,6 +35,30 @@ async function waitForExit(pid, maxMs) {
   return true;
 }
 
+const LOCKED_FILE = /Access is denied|EPERM|EBUSY|resource busy or locked/i;
+
+function processesUnder(dir) {
+  if (process.platform !== 'win32' || !fs.existsSync(dir)) return Promise.resolve([]);
+  const prefix = path.resolve(dir).toLowerCase() + path.sep;
+  const query = 'Get-CimInstance Win32_Process | ForEach-Object { [string]$_.ProcessId + [char]9 + $_.ExecutablePath }';
+  return runTool('powershell', ['-NoProfile', '-NonInteractive', '-Command', query], dir, process.env, 30000).then((res) => {
+    if (!res.ok) return null;
+    return res.stdout.split(/\r?\n/).map((line) => line.split('\t')).filter(([pid, exe]) => pid && exe && exe.toLowerCase().startsWith(prefix)).map(([pid, exe]) => ({ pid: Number(pid), exe }));
+  });
+}
+
+async function waitForIdle(list, maxMs, log) {
+  const started = Date.now();
+  let told = false;
+  for (;;) {
+    const busy = await list();
+    if (!busy || !busy.length) return true;
+    if (Date.now() - started > maxMs) { log('still running from the checkout: ' + busy.map((p) => p.pid + ' ' + p.exe).join(', ')); return false; }
+    if (!told) { log('waiting for ' + busy.length + ' process(es) running from the checkout to exit'); told = true; }
+    await sleep(500);
+  }
+}
+
 function runTool(file, args, cwd, env, timeoutMs) {
   return new Promise((resolve) => {
     execFile(file, args, { cwd, env, timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -82,7 +106,9 @@ function tools(job, log) {
   const gitEnv = Object.assign({}, process.env, job.git.env || {});
   const runInstall = (file, args) => runTool(file, args, job.root, installEnv(), INSTALL_TIMEOUT_MS);
   return {
-    git: (args, timeoutMs) => runTool(job.git.file, args, job.root, gitEnv, timeoutMs || 20000),
+    git: (args, timeoutMs) => (fs.existsSync(job.git.file)
+      ? runTool(job.git.file, args, job.root, gitEnv, timeoutMs || 20000)
+      : runTool('git', args, job.root, process.env, timeoutMs || 20000)),
     install: async (installer) => {
       const installed = await runInstall(installer.file, installer.args);
       if (!installed.ok || fs.existsSync(job.exe)) return installed;
@@ -160,9 +186,15 @@ async function update(job, log) {
     return fail('the packages changed and ' + (installer ? installer.name + ' is not available' : 'the checkout has no lock file'));
   }
   log('packages changed since ' + job.from.slice(0, 7) + ', running ' + installer.name + ' install');
+  const modules = path.join(job.root, 'node_modules');
+  const idle = () => waitForIdle(() => processesUnder(modules), envMs('NOTES_UPDATE_EXIT_WAIT_MS', 60000), log);
+  await idle();
   let installed = await install(installer);
-  if (!installed.ok && !fs.existsSync(job.exe)) {
-    log(installer.name + ' install failed and ' + path.basename(job.exe) + ' is missing, trying once more: ' + installed.error);
+  const exeMissing = !installed.ok && !fs.existsSync(job.exe);
+  const locked = !installed.ok && LOCKED_FILE.test(installed.error || '');
+  if (exeMissing || locked) {
+    log(installer.name + ' install failed' + (exeMissing ? ' and ' + path.basename(job.exe) + ' is missing' : ' on a file in use') + ', trying once more: ' + installed.error);
+    await idle();
     await sleep(envMs('NOTES_UPDATE_SETTLE_MS', 3000));
     installed = await install(installer);
   }
@@ -203,4 +235,4 @@ if (require.main === module) {
   main().catch((err) => { console.error(err); process.exit(1); });
 }
 
-module.exports = { update, waitForExit, readJob, installEnv };
+module.exports = { update, waitForExit, waitForIdle, processesUnder, readJob, installEnv };
