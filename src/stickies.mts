@@ -43,7 +43,7 @@ class StickyManager {
     if (!sticky) return null;
     const open = this.windows.get(id);
     if (open && !open.isDestroyed()) {
-      if (opts.focus !== false) { open.show(); open.focus(); }
+      if (opts.focus !== false) this.reveal(open);
       return open;
     }
     const bounds = this._bounds(sticky);
@@ -75,7 +75,7 @@ class StickyManager {
     w.loadFile(path.join(import.meta.dirname, 'renderer', 'sticky.html'), { query: { id } });
     w.once('ready-to-show', () => {
       if (w.isDestroyed()) return;
-      if (this.showInactive || opts.focus === false) w.showInactive(); else { w.show(); w.focus(); }
+      if (opts.focus === false) w.showInactive(); else this.reveal(w);
     });
     const persist = () => {
       clearTimeout(this.timers.get(id));
@@ -144,6 +144,12 @@ class StickyManager {
   _send(id: string, channel: string, payload: Sticky | null) {
     const w = this.windows.get(id);
     if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
+  }
+
+  reveal(w: BrowserWindow) {
+    if (this.showInactive) { w.showInactive(); return; }
+    w.show();
+    w.focus();
   }
 
   _bounds(sticky: Sticky) {

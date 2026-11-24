@@ -6,6 +6,7 @@ import { NotesPalette } from './palette.ts';
 import { I, el, setIcon, setLabel, setPressed } from './dom.ts';
 import { state, lockedNow, settingsNow } from './state.ts';
 import { find } from './find-state.ts';
+import { pullFocusFromPeer } from './side-focus.ts';
 import { escapeHtml, highlight, ipcErrorText, trashedMessage, trashLabel } from './text.ts';
 import { toast } from './toast.ts';
 import { bookMark, treeGroup, treeFocusKey, restoreTreeFocus, bindTreeKeys, setRowToggle } from './tree.ts';
@@ -1685,7 +1686,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         else sourceOfView();
         return;
       case 'open':
-        if (!GUEST && m.focus) { setActiveSide('left'); window.focus(); }
+        if (!GUEST && m.focus) { setActiveSide('left'); pullFocusFromPeer(window); }
         await selectNote(m.id, { newTab: !!m.newTab, focus: m.focus || null });
         return;
       case 'changed':
@@ -1699,7 +1700,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
         return;
       case 'texGoTo':
         if (!GUEST) setActiveSide('left');
-        window.focus();
+        pullFocusFromPeer(window);
         compiling.goToSource(m.source);
         return;
       case 'reloadFile':
