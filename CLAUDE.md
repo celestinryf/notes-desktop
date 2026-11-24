@@ -1,6 +1,6 @@
 # notes-app
 
-Project docs live in the user's own Notes app, in `C:\Users\celes\Documents\Notes\Notes App\`, not in this repo (they left the Obsidian vault on 2026-11-05). Notes pushes that folder's text notes to the user's private history repository, so never write a secret into them; its scripts and pictures stay on this PC.
+Project docs live in the user's own Notes app, in `C:\Users\celes\Documents\Notes\Projects\notes-app\`, not in this repo. Notes pushes that folder's text notes to the user's private history repository, so never write a secret into them; its scripts and pictures stay on this PC.
 
 Before doing any work, read from that folder:
 
