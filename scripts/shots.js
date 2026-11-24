@@ -347,6 +347,7 @@ const SCENES = {
   math: { about: 'A note with formulas: inline math in a sentence, a display block, a chemistry line, and prices that stay text', run: openNote('Physics revision') },
   'math-edit': { about: 'The formula popover open on an inline formula: the TeX field, the hint and Done', run: steps(openNote('Physics revision'), async (page) => { await page.click('#richEditor .math-inline >> nth=0'); await sleep(400); }) },
   'math-error': { about: 'The formula popover on a display block with a TeX mistake: the error line under the field, and the block drawn in the error colour', run: steps(openNote('Physics revision'), async (page) => { await page.click('#richEditor .math-block'); await sleep(300); await page.keyboard.press('End'); await page.keyboard.type(' \\fracc{1}{2}'); await sleep(400); }) },
+  'tags-folded': { about: 'Tags folded in the sidebar: History, Open file and Settings stay pinned to its bottom', settings: { tagsCollapsed: true }, run: openNote('Q4 planning') },
   focus: { about: 'Sidebar and list hidden: the writing view', run: steps(openNote('Notes on writing tools'), key('Control+\\'), key('Control+Shift+\\')) },
   find: { about: 'Find and replace in a note', run: steps(openNote('Q4 planning'), key('Control+h')) },
   'find-options': { about: 'Find with Match case on: the pressed cell, and the count narrowed', run: steps(openNote('Q4 planning'), key('Control+f'), async (page) => { await page.fill('#findInput', 'the'); await sleep(200); await page.click('#findCaseBtn'); await sleep(300); }) },

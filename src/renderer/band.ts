@@ -1,4 +1,5 @@
 import { el } from './dom.ts';
+import { wheelScrollsSideways } from './wheel-sideways.ts';
 
 const FRAME_ROUNDING_PX = 1;
 
@@ -55,6 +56,7 @@ export function watchBand(onCaption: () => void) {
   observer.observe(el.captionProbe);
   observer.observe(el.tabBar);
   el.tabList.addEventListener('scroll', markTabScroll, { passive: true });
+  wheelScrollsSideways(el.tabList);
 }
 
 export function applyPeerCaption(w: number, h: number) {

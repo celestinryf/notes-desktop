@@ -1070,13 +1070,15 @@ test('file-backed notes: open a Markdown file, edit it on disk both ways, view a
 
   await page.keyboard.press('Control+,');
   await page.waitForSelector('#settingsDialog[open]');
+  const globalClaudeMd = path.join(os.homedir(), '.claude', 'CLAUDE.md').toLowerCase();
+  const isGlobalClaudeMd = (filePath) => !!filePath && filePath.toLowerCase() === globalClaudeMd;
   await page.click('#agentFilesBtn');
   await waitFor('agent files folder exists', () => readNotes().folders.some((f) => f.name === 'Agent files'));
-  await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath)));
+  await waitFor('global CLAUDE.md linked', () => readNotes().notes.some((n) => isGlobalClaudeMd(n.filePath)));
   await waitForDom(() => !document.getElementById('settingsDialog').open);
   await waitForDomWithin(15000, () => /Agent files are in the/.test(document.getElementById('toast').textContent));
   const agentFolder = readNotes().folders.find((f) => f.name === 'Agent files');
-  const globalNote = readNotes().notes.find((n) => n.filePath && /\\\.claude\\CLAUDE\.md$/i.test(n.filePath));
+  const globalNote = readNotes().notes.find((n) => isGlobalClaudeMd(n.filePath));
   assert.equal(globalNote.folderId, agentFolder.id);
   assert.match(globalNote.title, /global/);
   assert.ok(globalNote.body.includes('# Global instructions'), 'contents read from the real file');
@@ -2990,6 +2992,101 @@ test('layout: panes scroll with the wheel; the note list hides and follows the o
   await waitFor('shown state saved', () => readNotes().settings.listCollapsed === false);
   await page.evaluate(async ([a, b, f]) => { await window.notesApi.notes.destroy(a); await window.notesApi.notes.destroy(b); await window.notesApi.folders.delete(f); }, [inside.id, outside.id, folder.id]);
   await page.click('.nav-item[data-view="all"]');
+});
+
+test('wheel: over the tab strip it scrolls the tabs sideways and clicks still land; panes, the split side and dialogs scroll under the pointer whatever has focus', { timeout: 90000 }, async () => {
+  const setWidth = (w) => app.evaluate(({ BrowserWindow }, width) => { const win = BrowserWindow.getAllWindows()[0]; if (win.isMaximized()) win.unmaximize(); win.setContentSize(width, 800); }, w);
+  await setWidth(1500);
+  const ids = await page.evaluate(async () => { const out = []; for (let i = 0; i < 40; i++) out.push((await window.notesApi.notes.create({ title: 'Wheel tab ' + i + ' with a long title', body: i === 0 ? Array.from({ length: 150 }, (_, n) => 'line ' + n).join('\n\n') : 'x' })).id); return out; });
+  const pointAt = async (frame, sel) => { const box = await frame.locator(sel).first().boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); };
+  const scrollOf = (frame, sel, prop) => frame.evaluate(([s, p]) => document.querySelector(s)[p], [sel, prop]);
+  const wheelMoves = async (frame, sel, prop, dy) => {
+    await pointAt(frame, sel);
+    const before = await scrollOf(frame, sel, prop);
+    await page.mouse.wheel(0, dy);
+    await waitFor(sel + ' ' + prop + ' moves with the wheel', async () => Math.sign((await scrollOf(frame, sel, prop)) - before) === Math.sign(dy));
+  };
+  try {
+    await page.click('.nav-item[data-view="all"]');
+    await clickRowById(ids[0]);
+    for (const id of ids.slice(1, 14)) { await revealRow({ id }); await page.click('.note-row[data-id="' + id + '"]', { modifiers: ['Control'] }); }
+    await waitForDom(() => document.querySelectorAll('#tabList .tab').length >= 14);
+    const strip = await page.evaluate(() => { const t = document.getElementById('tabList'); t.scrollLeft = 0; return { sw: t.scrollWidth, cw: t.clientWidth }; });
+    assert.ok(strip.sw > strip.cw, 'the tabs overflow their strip: ' + JSON.stringify(strip));
+    await clickRowById(ids[0]);
+    await page.evaluate(() => { document.querySelector('.editor-scroll').scrollTop = 0; document.getElementById('tabList').scrollLeft = 0; });
+    await wheelMoves(page, '#tabList', 'scrollLeft', 200);
+    await wheelMoves(page, '#tabList', 'scrollLeft', 400);
+    await wheelMoves(page, '#tabList', 'scrollLeft', -200);
+    await page.evaluate(() => { document.getElementById('tabList').scrollLeft = 0; });
+    await pointAt(page, '#tabList');
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 20);
+    await waitFor('small wheel steps add up on the tab strip', async () => (await scrollOf(page, '#tabList', 'scrollLeft')) > 0);
+    assert.equal(await scrollOf(page, '.editor-scroll', 'scrollTop'), 0, 'the wheel over the tabs never scrolls the note under them');
+    const target = await page.evaluate(() => { const box = document.getElementById('tabList').getBoundingClientRect(); const tab = [...document.querySelectorAll('#tabList .tab:not(.is-active)')].find((t) => { const r = t.getBoundingClientRect(); return r.left >= box.left && r.right <= box.right; }); return tab ? Number(tab.dataset.index) : -1; });
+    assert.ok(target >= 0, 'a whole inactive tab is in view after the wheel');
+    await page.click('#tabList .tab[data-index="' + target + '"] .tab-title');
+    await waitForDom((i) => document.querySelector('#tabList .tab.is-active').dataset.index === String(i), target);
+
+    await clickRowById(ids[0]);
+    await page.evaluate(() => { document.querySelector('.editor-scroll').scrollTop = 0; });
+    await page.focus('#searchInput');
+    await wheelMoves(page, '.editor-scroll', 'scrollTop', 400);
+    await wheelMoves(page, '#noteList', 'scrollTop', 300);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'searchInput', 'the wheel never needed focus');
+
+    if (await page.isVisible('#splitViewBtn')) await page.click('#splitViewBtn'); else { await page.click('#moreBtn'); await page.click('#moreSplitViewBtn'); }
+    await waitFor('the right side loads', async () => !!guestFrame() && await guestFrame().evaluate(() => !!document.getElementById('tabList')).catch(() => false));
+    await guestFrame().click('#editorEmpty');
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), 'IFRAME', 'focus is in the right side');
+    await wheelMoves(page, '.editor-scroll', 'scrollTop', -200);
+    await wheelMoves(page, '#noteList', 'scrollTop', -200);
+    await closeSplitIfOpen();
+
+    await page.keyboard.press('Control+,');
+    await page.waitForSelector('#settingsDialog[open]');
+    const scroller = await page.evaluate(() => { const all = [...document.querySelectorAll('#settingsDialog *')].filter((e) => /auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 1); if (!all.length) return null; all[0].id = all[0].id || 'wheelSettingsScroller'; all[0].scrollTop = 0; return '#' + all[0].id; });
+    assert.ok(scroller, 'Settings has a part that scrolls');
+    await page.focus('#settingsDialog input, #settingsDialog button');
+    await wheelMoves(page, scroller, 'scrollTop', 300);
+    await page.keyboard.press('Escape');
+    await waitForDom(() => !document.getElementById('settingsDialog').open);
+  } finally {
+    await closeSplitIfOpen().catch(() => {});
+    while (await page.$('#tabList .tab ~ .tab')) { await page.click('#tabList .tab.is-active .tab-title'); await page.keyboard.press('Control+w'); await sleep(80); }
+    await page.evaluate((list) => Promise.all(list.map((id) => window.notesApi.notes.destroy(id))), ids);
+  }
+});
+
+test('sidebar footer: History, Open file and Settings stay at the bottom with tags open or folded', async () => {
+  const gap = () => page.evaluate(() => {
+    const side = document.getElementById('sidebar');
+    const box = side.getBoundingClientRect();
+    const foot = document.querySelector('.sidebar-foot').getBoundingClientRect();
+    const status = document.querySelector('.sidebar-status').getBoundingClientRect();
+    return { bottom: box.bottom - parseFloat(getComputedStyle(side).paddingBottom) - foot.bottom, stacked: foot.top - status.bottom };
+  });
+  const atBottom = async (label) => {
+    const g = await gap();
+    assert.ok(Math.abs(g.bottom) < 1.5, label + ': the footer is ' + g.bottom + 'px off the bottom');
+    assert.ok(g.stacked >= 0 && g.stacked < 12, label + ': History sits right above the footer, gap ' + g.stacked);
+  };
+  const folded = () => page.evaluate(() => document.getElementById('tagList').classList.contains('hidden'));
+  const fold = async (want) => { if ((await folded()) !== want) await page.click('#tagsFold'); await waitFor('tags folded: ' + want, async () => (await folded()) === want); };
+  const hasTag = () => page.evaluate(() => [...document.querySelectorAll('#tagList .nav-item')].some((e) => e.textContent.includes('footerpin')));
+  const wasFolded = await folded();
+  const note = await page.evaluate(() => window.notesApi.notes.create({ title: 'Footer tag note', body: 'x', tags: ['footerpin'] }));
+  try {
+    await page.click('.nav-item[data-view="all"]');
+    await fold(false);
+    await waitFor('the tag is listed', hasTag);
+    await atBottom('tags open');
+    await fold(true);
+    await atBottom('tags folded');
+  } finally {
+    await page.evaluate((id) => window.notesApi.notes.destroy(id), note.id);
+    await fold(wasFolded);
+  }
 });
 
 test('window state: Esc hides, a second launch re-shows the first instance, data survives reload', async () => {
