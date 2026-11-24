@@ -42,7 +42,7 @@ async function waitFor(label, fn, timeout = 6000) {
   throw new Error('Timed out: ' + label);
 }
 
-let app, page, ALL_HINTS;
+let app, page, ALL_HINTS, HINT;
 const rendererErrors = [];
 let runningTest = '';
 const duringTest = (text) => text + (runningTest ? ' [during: ' + runningTest + ']' : '');
@@ -67,8 +67,8 @@ const clickRow = async (text) => { await revealRow({ text }); await page.click('
 const clickRowById = async (id) => { await revealRow({ id }); await page.click('.note-row[data-id="' + id + '"]'); };
 
 test.before(async () => {
-  ({ ALL_HINTS } = await import('../src/renderer/hints.ts'));
-  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3, listMode: 'list', listLayout: 1 }, notes: [] }));
+  ({ ALL_HINTS, HINT } = await import('../src/renderer/hints.ts'));
+  fs.writeFileSync(notesFile, JSON.stringify({ settings: { hotkey: 'Control+Alt+Shift+F8', openAtLogin: false, theme: 'light', editorWidth: 0, columnLayout: 3, listMode: 'list', listLayout: 1, hintsShown: [HINT.palette] }, notes: [] }));
   app = await electron.launch({
     executablePath: ELECTRON_PATH,
     args: [ROOT, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
@@ -2720,9 +2720,9 @@ test('tips: a small pop in the corner shows once for hiding the sidebar and for 
   await page.keyboard.press('Control+p');
   await page.waitForSelector('#palette[open]');
   await page.keyboard.type('>Show the tips again');
-  await sleep(300);
-  if (await page.$('.palette-item.is-active:has-text("Show the tips again")')) { await page.keyboard.press('Enter'); await waitFor('tips reset', () => readNotes().settings.hintsShown.length === 0); }
-  else { await page.keyboard.press('Escape'); await waitForDom(() => !document.getElementById('palette').open); }
+  await page.waitForSelector('.palette-item.is-active:has-text("Show the tips again")');
+  await page.keyboard.press('Enter');
+  await waitFor('tips reset', () => readNotes().settings.hintsShown.length === 0);
   const sample = await typeNote('Tips sample', 'A note to find in.');
   const pop = () => page.evaluate(() => { const p = document.getElementById('hintPop'); return p.classList.contains('hidden') ? null : p.textContent; });
   const docked = () => page.evaluate(() => !document.getElementById('app').classList.contains('sidebar-collapsed'));
