@@ -9,7 +9,7 @@ import { VersionClock, DEFAULT_TIMING, uniformTiming } from './version-timing.mt
 import type { VersionTiming } from './version-timing.mts';
 
 const COPY_RETRIES = 8;
-const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
+const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'url', 'mdlock'];
 const LINKED_DIR = '.linked';
 const TREE_EXCLUDE = ['*', '!*/'].concat(NOTE_EXTS.map((ext) => '!*.' + ext), ['.trash/', '.obsidian/']).join('\n') + '\n';
 const STALE_LOCK_MS = 10000;

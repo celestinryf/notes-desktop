@@ -55,6 +55,11 @@ const notesApi = {
     resolvePictures: invoke('notes:resolvePictures'),
     wikiLinkFor: invoke('notes:wikiLinkFor'),
   },
+  pages: {
+    frameUrl: invoke('pages:frameUrl'),
+    probe: invoke('pages:probe'),
+    createLink: invoke('pages:createLink'),
+  },
   signature: {
     get: invoke('signature:get'),
     set: invoke('signature:set'),
@@ -228,6 +233,7 @@ const notesApi = {
     relocked: on('lock:relocked'),
     editCommand: on('app:editCommand'),
     updateStatus: on('update:status'),
+    pageKey: on('page:key'),
   },
 };
 if (isOurPage) contextBridge.exposeInMainWorld('notesApi', notesApi);

@@ -7,13 +7,16 @@ import * as H from '../shared/helpers.mts';
 import { toast } from './toast.ts';
 import { matchingNotes } from './link-choices.ts';
 import { createMathEditor } from './math-editor.ts';
+import { createPageView } from './page-view.ts';
 
 const { isViewerOnlyFile, isPlainTextFile } = H;
 
 export function tableShown() { return !el.csvView.classList.contains('hidden'); }
+export function pageShown() { return !el.pageHost.classList.contains('hidden'); }
 
 export function focusBody() {
   if (tableShown()) el.csvView.focus();
+  else if (pageShown()) el.pageView.focus();
   else if (state.sourceMode || !state.rich) src.focus();
   else state.rich.focus();
 }
@@ -44,12 +47,14 @@ type EditorViewDeps = {
   scopeListToNote: (note: PublicNote | null) => Promise<unknown>,
   selectNoteNow: (id: string) => Promise<unknown>,
   scheduleSave: () => void,
+  flushSave: () => Promise<unknown>,
   runFind: (forward: boolean, fresh?: boolean, quiet?: boolean) => void,
   clearFindHighlights: () => void,
 };
 
-export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights }: EditorViewDeps) {
+export function createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, flushSave, runFind, clearFindHighlights }: EditorViewDeps) {
   const formulas = createMathEditor();
+  const pages = createPageView({ api, editSource: () => { toggleSource(true); } });
 
   function createRichEditor() {
     if (!window.NotesEditor) { toast('Rendered editor failed to load; showing Markdown source.'); applyEditorMode(true); return; }
@@ -253,11 +258,19 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     const none = lockedNow() || isViewerOnlyFile(note);
     const isTable = H.isTableFile(note);
     const table = isTable && !state.sourceMode && !none;
-    el.richEditor.classList.toggle('hidden', none || state.sourceMode || isTable);
+    const page = H.isPageFile(note) && !state.sourceMode && !none;
+    el.richEditor.classList.toggle('hidden', none || state.sourceMode || H.hasOwnView(note));
     el.bodyInput.classList.toggle('hidden', none || !state.sourceMode);
     el.csvView.classList.toggle('hidden', !table);
-    fillPane(table || (!!note && note.fileKind === 'image' && !lockedNow()));
+    el.pageHost.classList.toggle('hidden', !page);
+    fillPane(table || page || (!!note && note.fileKind === 'image' && !lockedNow()));
     if (table && note) renderTable(note);
+    if (page && note) pages.show(note, el.bodyInput.value);
+    else pages.hide();
+  }
+
+  function reloadPage() {
+    if (state.current && pageShown()) pages.show(state.current, el.bodyInput.value, { reload: true });
   }
 
   let tableDrawn: { id: string, text: string } | null = null;
@@ -275,10 +288,15 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     el.editor.classList.toggle('fills-pane', on);
   }
 
+  function sourceButtonWords(note: PublicNote | null) {
+    if (H.isTableFile(note)) return state.sourceMode ? { label: 'Table', what: 'Show as a table' } : { label: 'Text', what: 'Edit as text' };
+    if (H.isWebLinkFile(note)) return state.sourceMode ? { label: 'Page', what: 'Show the page' } : { label: 'Source', what: 'Edit the shortcut' };
+    if (H.isHtmlPageFile(note)) return state.sourceMode ? { label: 'Page', what: 'Show the page' } : { label: 'Source', what: 'Edit the HTML' };
+    return state.sourceMode ? { label: 'Rendered', what: 'Back to the rendered view' } : { label: 'Source', what: 'Show Markdown source' };
+  }
+
   function syncSourceButton() {
-    const table = H.isTableFile(state.current);
-    const label = state.sourceMode ? (table ? 'Table' : 'Rendered') : (table ? 'Text' : 'Source');
-    const what = state.sourceMode ? (table ? 'Show as a table' : 'Back to the rendered view') : (table ? 'Edit as text' : 'Show Markdown source');
+    const { label, what } = sourceButtonWords(state.current);
     setLabel(el.sourceBtn, label);
     el.sourceBtn.setAttribute('aria-label', what);
     el.sourceBtn.title = what + ' (Ctrl+E)';
@@ -300,8 +318,9 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     const next = typeof force === 'boolean' ? force : !state.sourceMode;
     if (isViewerOnlyFile(state.current)) { toast('This file is shown as it is; it has no Markdown view to switch to.'); return; }
     if (next === state.sourceMode) return;
-    if (!next && isPlainTextFile(state.current) && !H.isTableFile(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
-    if (!next && !state.rich && !H.isTableFile(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
+    if (!next && isPlainTextFile(state.current) && !H.hasOwnView(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
+    if (!next && !state.rich && !H.hasOwnView(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
+    if (!next && H.isPageFile(state.current)) { showPageAfterSave(); return; }
     const rich = state.rich;
     if (!next && rich && state.currentId && !isPlainTextFile(state.current)) {
       state.currentLossless = rich.setMarkdown(el.bodyInput.value);
@@ -312,7 +331,16 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
       }
     }
     applyEditorMode(next);
-    if (!H.isTableFile(state.current)) updateSettings({ editorMode: next ? 'source' : 'rendered' });
+    if (!H.hasOwnView(state.current)) updateSettings({ editorMode: next ? 'source' : 'rendered' });
+    focusBody();
+  }
+
+  async function showPageAfterSave() {
+    const id = state.currentId;
+    await flushSave();
+    if (state.currentId !== id || !state.sourceMode) return;
+    pages.hide();
+    applyEditorMode(false);
     focusBody();
   }
 
@@ -373,5 +401,5 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
 
   function tableStatsNow() { return tableStats; }
 
-  return { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen: formulas.isOpen };
+  return { createRichEditor, syncTextViews, reloadPage, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen: formulas.isOpen };
 }

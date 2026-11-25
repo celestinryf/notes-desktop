@@ -20,6 +20,7 @@ import * as H from './shared/helpers.mts';
 import * as convert from './convert.mts';
 import { runWorker } from './run-worker.mts';
 import * as crafts from './craft-host.mts';
+import * as pages from './page-host.mts';
 import { createCraftTrace } from './craft-trace.mts';
 import { ReminderScheduler } from './reminders.mts';
 import { LiveShare } from './live.mts';
@@ -67,9 +68,11 @@ import { DEFAULT_TEX_OPTIONS } from './tex-build.mts';
 const TITLE_BAR_H = 39;
 const APP_ID = 'com.celestinryf.notes';
 const FIRST_PAGE_ROWS = 120;
+const PAGE_PROBE_MS = 3000;
+const pageHost = pages.createPageHost();
 
 app.setName('Notes');
-crafts.registerSchemes(protocol);
+protocol.registerSchemesAsPrivileged([...crafts.privilegedSchemes(), ...pages.privilegedSchemes()]);
 app.setAppUserModelId(APP_ID);
 app.setPath('userData', DATA_DIR);
 
@@ -419,6 +422,23 @@ function main() {
     w.webContents.on('will-navigate', (e, url) => {
       e.preventDefault();
       if (H.isOpenableLink(url)) shell.openExternal(url);
+    });
+    const foreignFrames = new Set<number>();
+    w.webContents.on('will-frame-navigate', (e) => {
+      if (e.isMainFrame) return;
+      const verdict = pages.frameNavigation(e.url, e.frame, foreignFrames);
+      if (verdict === 'allow') return;
+      e.preventDefault();
+      if (verdict === 'external' && H.isOpenableLink(e.url)) shell.openExternal(e.url);
+    });
+    w.webContents.on('before-input-event', (event, input) => {
+      const shortcut = pages.pageShortcut(input);
+      const focused = shortcut ? w.webContents.focusedFrame : null;
+      if (!shortcut || !focused || !pages.isForeignFrame(focused, foreignFrames)) return;
+      const owner = pages.ownerFrame(focused, foreignFrames);
+      if (!owner) return;
+      event.preventDefault();
+      owner.send('page:key', shortcut);
     });
 
     if (process.env.NOTES_APP_DEVTOOLS === '1') w.webContents.openDevTools({ mode: 'detach' });
@@ -830,6 +850,21 @@ function main() {
     shell.showItemInFolder(fullPath);
     return 'Shown in Explorer instead: Notes only opens documents and media itself.';
   }
+  handle('pages:frameUrl', (_e, id) => {
+    const n = store.get(id);
+    return n && n.filePath && H.isHtmlPageFile(n) ? pageHost.pageUrl(n.filePath) : null;
+  });
+  handle('pages:probe', async (_e, url) => {
+    const target = H.loopbackUrl(typeof url === 'string' ? url : '');
+    if (!target) return false;
+    try { await fetch(target, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(PAGE_PROBE_MS) }); return true; }
+    catch (_) { return false; }
+  });
+  handle('pages:createLink', (_e, address, folderId) => {
+    const note = store.createWebLink(typeof address === 'string' ? address : '', typeof folderId === 'string' ? folderId : null);
+    if (note.vaultId) vaults.noteChanged(note.vaultId);
+    return store.publicNote(note);
+  });
   handle('files:openExternal', async (_e, id) => {
     const n = store.get(id);
     if (!n || !n.filePath) return 'No file';
@@ -1817,6 +1852,7 @@ function main() {
   app.whenReady().then(() => {
     const step = (name: string, fn: () => void) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
     step('crafts', () => { craftsReady = crafts.serve(protocol, trace.write); });
+    step('pages', () => { pageHost.serve(protocol); });
     step('theme', applyTheme);
     step('window', createWindow);
     if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });

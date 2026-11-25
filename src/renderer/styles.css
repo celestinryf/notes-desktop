@@ -726,6 +726,10 @@ body.pane-guest .app-sidebar, body.pane-guest .list-pane, body.pane-guest .sideb
 .editor.fills-pane .editor-scroll { overflow: hidden; }
 .csv-view { flex: 0 1 auto; min-height: 0; overflow: auto; border-radius: var(--r-md); }
 .csv-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.page-host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-radius: var(--r-md); overflow: hidden; }
+.page-view { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: #fff; }
+.page-notice { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); padding: var(--s5); border-radius: var(--r-md); background: var(--well); }
+.page-notice-text { margin: 0; max-width: 60ch; color: var(--fg-2); font-size: var(--t-sm); line-height: 1.5; }
 .csv-table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: var(--t-sm); }
 .csv-table th, .csv-table td { max-width: 360px; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; vertical-align: top; background: var(--paper); }
 .csv-table tbody tr:nth-child(even) > * { background: linear-gradient(var(--well), var(--well)), var(--paper); }

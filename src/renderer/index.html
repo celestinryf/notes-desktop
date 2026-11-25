@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http:; frame-src 'self' file: wordcraft: gridcraft:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https: http:; frame-src 'self' file: wordcraft: gridcraft: notespage: http: https:;" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Notes</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css" />
@@ -227,6 +227,13 @@
               <textarea id="bodyInput" class="body-input hidden" placeholder="Markdown source. Ctrl+E switches back to the rendered view." spellcheck="true"></textarea>
               <div id="codeHost" class="code-host"></div>
               <div id="csvView" class="csv-view hidden" tabindex="0" role="region" aria-label="The file as a table"></div>
+              <div id="pageHost" class="page-host hidden">
+                <iframe id="pageView" class="page-view" title="The page" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+                <div id="pageNotice" class="page-notice hidden" role="status">
+                  <p id="pageNoticeText" class="page-notice-text"></p>
+                  <button type="button" class="btn btn-small" id="pageNoticeBtn"></button>
+                </div>
+              </div>
               <div id="pdfEditor" class="pdf-editor hidden">
                 <div class="pdf-toolbar" role="toolbar" aria-label="PDF tools">
                   <button class="tool-btn is-on" data-pdf-mode="select" title="Read: select text and follow links. To move or delete a mark, pick a tool first, then click the mark.">Read</button>
@@ -763,6 +770,21 @@
           <span class="spacer"></span>
           <button type="button" class="btn btn-small" id="signCancelBtn">Cancel</button>
           <button type="submit" class="btn btn-primary btn-small" id="signPlaceBtn">Place</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="webPageDialog" class="modal dialog-small" aria-labelledby="webPageTitle">
+      <form method="dialog" class="dialog-form" id="webPageForm">
+        <h2 class="dialog-title" id="webPageTitle">New web page</h2>
+        <label class="field">
+          <span class="field-label">Address on this computer</span>
+          <input id="webPageInput" class="input" type="text" placeholder="localhost:5173" autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="field-hint" id="webPageHint" role="status"></p>
+        <div class="dialog-actions">
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-small" id="webPageCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-small" id="webPageApplyBtn">Add the page</button>
         </div>
       </form>
     </dialog>

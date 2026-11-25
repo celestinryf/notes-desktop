@@ -132,6 +132,7 @@ interface AppInfo {
   drySpeech: boolean; recoveredNotes: number | null; craftTrace: boolean;
   notesDir: string | null; homeVaultId: string | null; movedToFiles: MovedToFiles | null; filesError: string | null;
 }
+interface PageKey { key: string; code: string; ctrl: boolean; shift: boolean; alt: boolean; reload: boolean }
 interface UpdateStatus { state: 'off' | 'unknown' | 'current' | 'behind' | 'diverged' | 'dirty' | 'error'; message: string; failed: boolean }
 interface MovedToFiles { notesDir: string; notes: number; folders: number; links: number; renamed: { kind: 'note' | 'folder'; from: string; to: string }[]; backupDir: string; at: number }
 interface FilesMove { report: MovedToFiles | null; error: string | null }
@@ -294,6 +295,9 @@ interface IpcContract {
   'files:refresh': (id: string) => { changed: boolean; missing: boolean };
   'files:reveal': (id: string) => void;
   'files:openExternal': (id: string) => string;
+  'pages:frameUrl': (id: string) => string | null;
+  'pages:probe': (url: string) => boolean;
+  'pages:createLink': (address: string, folderId: string | null) => PublicNote | null;
   'files:pdfBytes': (id: string) => Buffer;
   'files:pdfOpen': (id: string) => { bytes: Buffer; marks: import('./shared/pdf-text-marks.mts').PdfTextMark[] };
   'files:versions': (id: string) => FileVersion[];
@@ -379,6 +383,7 @@ interface MainEvents {
   'lock:relocked': [ids: string[]];
   'app:editCommand': [command: 'undo' | 'redo'];
   'update:status': [status: UpdateStatus];
+  'page:key': [key: PageKey];
 }
 type Listener<K extends keyof MainEvents> = (handler: (...args: MainEvents[K]) => void) => () => void;
 
@@ -392,6 +397,7 @@ interface NotesApi {
     resolveLinks: Invoker<'notes:resolveLinks'>; resolvePictures: Invoker<'notes:resolvePictures'>; wikiLinkFor: Invoker<'notes:wikiLinkFor'>;
   };
   signature: { get: Invoker<'signature:get'>; set: Invoker<'signature:set'>; forget: Invoker<'signature:forget'> };
+  pages: { frameUrl: Invoker<'pages:frameUrl'>; probe: Invoker<'pages:probe'>; createLink: Invoker<'pages:createLink'> };
   files: {
     openDialog: Invoker<'files:openDialog'>; link: Invoker<'files:link'>; refresh: Invoker<'files:refresh'>; reveal: Invoker<'files:reveal'>;
     openExternal: Invoker<'files:openExternal'>; pdfBytes: Invoker<'files:pdfBytes'>; pdfOpen: Invoker<'files:pdfOpen'>; savePdf: Invoker<'files:savePdf'>;
@@ -441,7 +447,7 @@ interface NotesApi {
     gitStatus: Listener<'git:status'>; gitPulled: Listener<'git:pulled'>; githubStatus: Listener<'github:status'>; flush: Listener<'app:flush'>; reloaded: Listener<'notes:reloaded'>; vaultStatus: Listener<'vault:status'>;
     botEvent: Listener<'bot:event'>; noteChanged: Listener<'notes:changed'>; stickyChanged: Listener<'sticky:changed'>; stickiesChanged: Listener<'stickies:changed'>;
     openNote: Listener<'app:open-note'>; reminderFired: Listener<'reminder:fired'>; notice: Listener<'app:notice'>; liveStatus: Listener<'live:status'>;
-    relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>; updateStatus: Listener<'update:status'>;
+    relocked: Listener<'lock:relocked'>; editCommand: Listener<'app:editCommand'>; updateStatus: Listener<'update:status'>; pageKey: Listener<'page:key'>;
   };
 }
 

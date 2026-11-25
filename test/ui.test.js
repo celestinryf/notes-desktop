@@ -3224,6 +3224,121 @@ test('the top band matches the window buttons and never runs under them or the o
   }
 });
 
+const pageFrame = (prefix) => page.frames().find((f) => f !== page.mainFrame() && f.url().startsWith(prefix));
+const realKeyIn = (keyCode, modifiers) => app.evaluate(({ BrowserWindow }, k) => {
+  const wc = BrowserWindow.getAllWindows()[0].webContents;
+  wc.sendInputEvent({ type: 'keyDown', keyCode: k.keyCode, modifiers: k.modifiers });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: k.keyCode, modifiers: k.modifiers });
+}, { keyCode, modifiers });
+const pageHtml = (heading) => '<!doctype html><html><head><title>Board</title></head><body><h1 id="h">' + heading + '</h1><ul id="list"></ul><script>'
+  + 'fetch("data/items.json").then((r) => r.json()).then((d) => { for (const t of d.items) { const li = document.createElement("li"); li.textContent = t; document.getElementById("list").appendChild(li); } document.body.dataset.ready = "1"; });'
+  + 'try { localStorage.setItem("k", "v"); document.body.dataset.storage = localStorage.getItem("k"); } catch (e) { document.body.dataset.storage = "blocked"; }'
+  + 'let parentApi = "blocked"; try { parentApi = typeof window.parent.notesApi; } catch (e) {} document.body.dataset.api = typeof window.notesApi + "/" + parentApi;'
+  + '</script></body></html>';
+const headingIn = async (prefix) => { const f = pageFrame(prefix); return f ? f.evaluate(() => (document.getElementById('h') || {}).textContent).catch(() => '') : ''; };
+
+test('an HTML file opens as its page: scripts run, files beside it load, Ctrl+E edits the HTML, and the page follows saves and changes on disk', { timeout: 60000 }, async () => {
+  const errorsBefore = rendererErrors.length;
+  const dir = tmpDir('notes-ui-page-');
+  fs.mkdirSync(path.join(dir, 'data'));
+  fs.writeFileSync(path.join(dir, 'data', 'items.json'), JSON.stringify({ items: ['alpha', 'beta'] }));
+  const file = path.join(dir, 'board.html');
+  fs.writeFileSync(file, pageHtml('Board'));
+  await page.evaluate((p) => window.notesApi.files.link([p]), file);
+  await waitFor('page linked', () => readNotes().notes.some((n) => n.filePath === file));
+  await page.click('.nav-item[data-view="all"]');
+  await waitFor('board.html listed', () => revealRow({ text: 'board.html' }), 8000);
+  await clickRow('board.html');
+  await waitForDom(() => document.getElementById('titleInput').value === 'board.html');
+  await waitForDom(() => !document.getElementById('pageHost').classList.contains('hidden'));
+  assert.equal(await page.$eval('#richEditor', (n) => n.classList.contains('hidden')), true, 'no Markdown editor over the page');
+  assert.equal((await page.textContent('#sourceBtn')).trim(), 'Source');
+  const frame = await waitFor('the page frame', () => pageFrame('notespage://'), 8000);
+  await waitFor('the page script ran and read data/items.json', () => frame.evaluate(() => document.body.dataset.ready === '1'), 8000);
+  assert.deepEqual(await frame.evaluate(() => [...document.querySelectorAll('#list li')].map((li) => li.textContent)), ['alpha', 'beta']);
+  assert.equal(await frame.evaluate(() => document.body.dataset.storage), 'v', 'the page keeps its own storage');
+  assert.equal(await frame.evaluate(() => document.body.dataset.api), 'undefined/blocked', 'the page cannot reach Notes');
+  assert.equal(await frame.evaluate(async () => (await fetch('../outside.txt')).status), 404, 'nothing above the page folder is served');
+
+  await frame.focus('body');
+  await realKeyIn('E', ['control']);
+  await waitForDom(() => document.getElementById('pageHost').classList.contains('hidden') && !document.getElementById('bodyInput').classList.contains('hidden'));
+  assert.equal((await page.textContent('#sourceBtn')).trim(), 'Page', 'Ctrl+E from inside the page reached Notes');
+  await fillBody(pageHtml('Edited'));
+  await page.keyboard.press('Control+e');
+  await waitForDom(() => !document.getElementById('pageHost').classList.contains('hidden'));
+  await waitFor('the edit saved to the file', () => fs.readFileSync(file, 'utf8').includes('Edited'));
+  await waitFor('the page shows the saved edit', async () => (await headingIn('notespage://')) === 'Edited', 8000);
+
+  fs.writeFileSync(file, pageHtml('Outside'));
+  await waitFor('the page follows a change on disk', async () => (await headingIn('notespage://')) === 'Outside', 15000);
+
+  const fileFrames = () => page.frames().filter((f) => f !== page.mainFrame() && f.url().startsWith('file:')).length;
+  const fileFramesBefore = fileFrames();
+  const indexUrl = 'file:///' + path.join(ROOT, 'src', 'renderer', 'index.html').replace(/\\/g, '/') + '?pane=right';
+  await pageFrame('notespage://').evaluate((u) => { const nested = document.createElement('iframe'); nested.src = u; document.body.appendChild(nested); location.href = u; }, indexUrl);
+  await sleep(1500);
+  assert.equal(fileFrames(), fileFramesBefore, 'a page cannot load Notes into itself');
+  assert.ok(pageFrame('notespage://'), 'the page stays where it was');
+  const kept = rendererErrors.slice(errorsBefore).filter((e) => !/Not allowed to load local resource|status of 404/.test(e));
+  rendererErrors.splice(errorsBefore, rendererErrors.length - errorsBefore, ...kept);
+});
+
+test('a web page shortcut shows a page served on this computer, says when nothing answers, and New web page adds one', { timeout: 60000 }, async () => {
+  const http = require('http');
+  const serve = (port) => new Promise((resolve) => {
+    const s = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html', connection: 'close' }); res.end('<!doctype html><title>Dev</title><p id="p">Served</p>'); });
+    s.listen(port || 0, '127.0.0.1', () => resolve(s));
+  });
+  const stop = (s) => new Promise((r) => { s.close(() => r()); s.closeAllConnections(); });
+  const servedText = async (port) => { const f = pageFrame('http://127.0.0.1:' + port); return f ? f.evaluate(() => (document.getElementById('p') || {}).textContent).catch(() => '') : ''; };
+  let server = await serve(0);
+  const port = server.address().port;
+  try {
+    await page.keyboard.press('Control+p');
+    await page.waitForSelector('#palette[open]');
+    await page.keyboard.type('New web page');
+    await waitForDom(() => [...document.querySelectorAll('#paletteList .palette-title')].some((t) => t.textContent.startsWith('New web page')));
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#webPageDialog[open]');
+    await page.fill('#webPageInput', 'example.com');
+    assert.equal(await page.$eval('#webPageApplyBtn', (b) => b.disabled), true, 'a site on the internet is refused');
+    assert.match(await page.textContent('#webPageHint'), /on this computer/);
+    await page.fill('#webPageInput', '127.0.0.1:' + port);
+    assert.equal(await page.$eval('#webPageApplyBtn', (b) => b.disabled), false);
+    await page.click('#webPageApplyBtn');
+    await waitForDom(() => !document.getElementById('webPageDialog').open);
+    const note = await waitFor('the shortcut note', () => readNotes().notes.find((n) => n.filePath && n.filePath.endsWith('.url') && n.body.includes(':' + port)));
+    assert.equal(path.dirname(note.filePath), path.join(dataDir, 'Notes'), 'saved in the notes folder');
+    assert.equal(fs.readFileSync(note.filePath, 'utf8'), '[InternetShortcut]\r\nURL=http://127.0.0.1:' + port + '/\r\n');
+    await waitForDom((t) => document.getElementById('titleInput').value === t, note.title);
+    await waitFor('the served page', async () => (await servedText(port)) === 'Served', 8000);
+
+    await stop(server);
+    await pageFrame('http://127.0.0.1:' + port).focus('body');
+    await realKeyIn('F5', []);
+    await waitForDom(() => !document.getElementById('pageNotice').classList.contains('hidden'));
+    assert.match(await page.textContent('#pageNoticeText'), new RegExp('Nothing answered at 127\\.0\\.0\\.1:' + port));
+    assert.equal((await page.textContent('#pageNoticeBtn')).trim(), 'Try again');
+    server = await serve(port);
+    await page.click('#pageNoticeBtn');
+    await waitForDom(() => document.getElementById('pageNotice').classList.contains('hidden'));
+    await waitFor('served again', async () => (await servedText(port)) === 'Served', 8000);
+
+    await page.click('#titleInput');
+    await page.keyboard.press('Control+e');
+    await waitForDom(() => document.getElementById('pageHost').classList.contains('hidden'));
+    await fillBody('[InternetShortcut]\r\nURL=https://example.com/\r\n');
+    await page.keyboard.press('Control+e');
+    await waitForDom(() => !document.getElementById('pageNotice').classList.contains('hidden'));
+    assert.match(await page.textContent('#pageNoticeText'), /opens example\.com, which is not on this computer/);
+    assert.equal((await page.textContent('#pageNoticeBtn')).trim(), 'Open in browser');
+    assert.equal(pageFrame('https://example.com'), undefined, 'a site on the internet is never loaded');
+  } finally {
+    if (server.listening) await stop(server);
+  }
+});
+
 test('no renderer errors were logged during the run', () => {
   assert.deepEqual(rendererErrors, []);
 });
