@@ -315,6 +315,12 @@ const key = (combo) => async (page) => { await page.keyboard.press(combo); await
 const selectLastLine = async (page) => { await page.click('.rich-editor-content'); await page.keyboard.press('Control+End'); await page.keyboard.press('Shift+Home'); await sleep(200); };
 const linkDialog = (query) => steps(openNote('Ideas for the garden'), selectLastLine, key('Control+k'), async (page) => { if (query) await page.fill('#linkInput', query); await sleep(400); });
 const steps = (...fns) => async (page, app) => { for (const fn of fns) await fn(page, app); };
+const SLOW_HOOKS = path.join(os.tmpdir(), 'notes-shots-slow-hooks');
+const SLOW_HOOKS_ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: SLOW_HOOKS.replace(/\\/g, '/') };
+const slowCommits = (seconds) => async () => {
+  fs.mkdirSync(SLOW_HOOKS, { recursive: true });
+  fs.writeFileSync(path.join(SLOW_HOOKS, 'pre-commit'), '#!/bin/sh\nsleep ' + seconds + '\n');
+};
 const untilStatus = (label) => async (page) => {
   for (let i = 0; i < 60; i++) {
     if (await page.evaluate(() => document.getElementById('historyStatusBtn').textContent.trim()) === label) return;
@@ -365,6 +371,7 @@ const SCENES = {
   'github-code': { about: 'Sync with GitHub, step 1: the one-time code to enter on github.com, Open github.com and Copy code', settings: { gitEnabled: true }, env: { NOTES_APP_DRY_GITHUB: 'code' }, run: steps(key('Control+Shift+b'), async () => { await sleep(600); }, async (page) => { await page.click('#libraryPrimaryBtn'); await sleep(400); }, async (page) => { await page.click('#githubPrimaryBtn'); await sleep(600); }) },
   'github-repo': { about: 'Sync with GitHub, step 2: signed in, choosing a new private repository or an existing one', settings: { gitEnabled: true }, env: { NOTES_APP_DRY_GITHUB: 'signed-in' }, run: steps(key('Control+Shift+b'), async () => { await sleep(600); }, async (page) => { await page.click('#libraryPrimaryBtn'); await sleep(800); }) },
   'settings-history': { about: 'Settings › History with the GitHub account line and its button', settings: { gitEnabled: true }, env: { NOTES_APP_DRY_GITHUB: 'signed-in' }, run: steps(key('Control+,'), async (page) => { await page.click('a[href="#set-history"]'); await sleep(500); }) },
+  'library-saving': { about: 'Save a version while git is slow (a pre-commit hook sleeps): the Saving a version… toast', settings: { gitEnabled: true }, env: Object.assign({ NOTES_APP_GIT_DEBOUNCE_MS: '600000' }, SLOW_HOOKS_ENV), run: steps(slowCommits(6), openNote('Groceries'), typeAtEnd('Lemons', true), key('Control+Shift+b'), async () => { await sleep(1200); }, async (page) => { await page.click('#librarySaveBtn'); await sleep(1000); }) },
   'library-off': { about: 'History and backup with history off: the way to turn it on', run: steps(key('Control+Shift+b'), async () => { await sleep(600); }) },
   'sync-sign-in-rejected': { about: 'Started hidden, as at login: GitHub refuses the kept sign-in in the first sync, the toast with Sign in waits until the window is shown, and the sidebar reads Sign in to sync', settings: { gitEnabled: true }, refusingRemote: true, env: { NOTES_APP_START_HIDDEN: '1', NOTES_APP_DRY_GITHUB: 'rejected', NOTES_APP_GIT_DEBOUNCE_MS: '300' }, run: steps(realFocus, untilStatus('Sign in to sync'), async (page, app) => {
     if (await page.evaluate(() => !document.getElementById('toast').classList.contains('hidden'))) throw new Error('the sign-in toast showed while the window was hidden');
