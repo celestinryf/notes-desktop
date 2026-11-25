@@ -154,3 +154,10 @@ test('a vault scan lists .html pages and .url shortcuts, keeps their text as it 
   await store.scanVault(home.id);
   assert.ok(byName('dev.url'), 'a second scan keeps the shortcut');
 });
+
+test('every kind of note a vault scan lists is also kept in history', () => {
+  const { VAULT_EXT } = require('../../src/store.mts');
+  const { NOTE_EXTS } = require('../../src/gitSync.mts');
+  for (const ext of VAULT_EXT) assert.ok(NOTE_EXTS.includes(ext), ext);
+  assert.ok(VAULT_EXT.has('html') && VAULT_EXT.has('htm') && VAULT_EXT.has('url'));
+});

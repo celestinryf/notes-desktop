@@ -408,8 +408,11 @@ function main() {
     });
     w.on('blur', () => { writeRuntime(); });
 
+    const externalGate = pages.createExternalGate();
+    const openOutside = (url: string) => { if (H.isOpenableLink(url) && externalGate.allow()) shell.openExternal(url); };
+    w.webContents.on('input-event', (_e, input) => { externalGate.input(input.type); });
     w.webContents.setWindowOpenHandler(({ url }) => {
-      if (H.isOpenableLink(url)) shell.openExternal(url);
+      openOutside(url);
       return { action: 'deny' };
     });
     let zoomSaveTimer: NodeJS.Timeout | undefined;
@@ -429,7 +432,11 @@ function main() {
       const verdict = pages.frameNavigation(e.url, e.frame, foreignFrames);
       if (verdict === 'allow') return;
       e.preventDefault();
-      if (verdict === 'external' && H.isOpenableLink(e.url)) shell.openExternal(e.url);
+      if (verdict === 'external') openOutside(e.url);
+    });
+    w.webContents.on('will-redirect', (e) => {
+      if (e.isMainFrame) return;
+      if (pages.frameNavigation(e.url, e.frame, foreignFrames) !== 'allow') e.preventDefault();
     });
     w.webContents.on('before-input-event', (event, input) => {
       const shortcut = pages.pageShortcut(input);
@@ -855,10 +862,7 @@ function main() {
     return n && n.filePath && H.isHtmlPageFile(n) ? pageHost.pageUrl(n.filePath) : null;
   });
   handle('pages:probe', async (_e, url) => {
-    const target = H.loopbackUrl(typeof url === 'string' ? url : '');
-    if (!target) return false;
-    try { await fetch(target, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(PAGE_PROBE_MS) }); return true; }
-    catch (_) { return false; }
+    return pages.probeLocal(typeof url === 'string' ? url : '', fetch, PAGE_PROBE_MS);
   });
   handle('pages:createLink', (_e, address, folderId) => {
     const note = store.createWebLink(typeof address === 'string' ? address : '', typeof folderId === 'string' ? folderId : null);
@@ -1852,7 +1856,11 @@ function main() {
   app.whenReady().then(() => {
     const step = (name: string, fn: () => void) => { try { fn(); } catch (err) { console.error('[startup] ' + name + ' failed:', err); } };
     step('crafts', () => { craftsReady = crafts.serve(protocol, trace.write); });
-    step('pages', () => { pageHost.serve(protocol); });
+    step('pages', () => {
+      pageHost.serve(protocol);
+      session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => { callback(pages.permissionAllowed(permission, details.requestingUrl || '')); });
+      session.defaultSession.setPermissionCheckHandler((_wc, permission, origin, details) => pages.permissionAllowed(permission, details.requestingUrl || origin || ''));
+    });
     step('theme', applyTheme);
     step('window', createWindow);
     if (!win) step('window (defaults)', () => { store.setSettings({ window: null }); createWindow(); });

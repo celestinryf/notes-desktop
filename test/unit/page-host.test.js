@@ -31,22 +31,23 @@ test('pageUrl serves the page from its own folder under a notespage address that
 
 test('fileFor maps addresses to files inside the page folder only', () => {
   const { dir, host, origin } = pageFolder();
-  assert.equal(host.fileFor(origin + '/board.html'), path.join(dir, 'board.html'));
-  assert.equal(host.fileFor(origin + '/data/items.json'), path.join(dir, 'data', 'items.json'));
-  assert.equal(host.fileFor(origin + '/data/odd%20name%20%231.css'), path.join(dir, 'data', 'odd name #1.css'));
-  assert.equal(host.fileFor(origin + '/board.html?x=1#top'), path.join(dir, 'board.html'), 'query and hash do not change the file');
-  assert.equal(host.fileFor(origin + '/../secret.txt'), path.join(dir, 'secret.txt'), 'the URL drops a plain .. before it reaches the folder');
-  assert.equal(host.fileFor(origin + '/%2e%2e/secret.txt'), path.join(dir, 'secret.txt'), 'and an escaped one too');
-  assert.equal(host.fileFor(origin + '/..%2fsecret.txt'), null, 'an escaped slash cannot climb out');
-  assert.equal(host.fileFor(origin + '/data/..%2f..%2fsecret.txt'), null);
-  assert.equal(host.fileFor(origin + '/..%5C..%5Csecret.txt'), null);
-  assert.equal(host.fileFor(origin + '/C:%5CWindows%5Cwin.ini'), null);
-  assert.equal(host.fileFor(origin + '/'), null, 'the folder itself is not a file');
-  assert.equal(host.fileFor(origin + '/bad%zz'), null, 'a broken escape is refused');
-  assert.equal(host.fileFor(origin + '/a%00b'), null);
-  assert.equal(host.fileFor('notespage://' + '0'.repeat(32) + '/board.html'), null, 'a folder never opened is not served');
-  assert.equal(host.fileFor('https://example.com/board.html'), null);
-  assert.equal(host.fileFor('not a url'), null);
+  const fileAt = (u) => { const found = host.fileFor(u); return found ? found.file : null; };
+  assert.equal(fileAt(origin + '/board.html'), path.join(dir, 'board.html'));
+  assert.equal(fileAt(origin + '/data/items.json'), path.join(dir, 'data', 'items.json'));
+  assert.equal(fileAt(origin + '/data/odd%20name%20%231.css'), path.join(dir, 'data', 'odd name #1.css'));
+  assert.equal(fileAt(origin + '/board.html?x=1#top'), path.join(dir, 'board.html'), 'query and hash do not change the file');
+  assert.equal(fileAt(origin + '/../secret.txt'), path.join(dir, 'secret.txt'), 'the URL drops a plain .. before it reaches the folder');
+  assert.equal(fileAt(origin + '/%2e%2e/secret.txt'), path.join(dir, 'secret.txt'), 'and an escaped one too');
+  assert.equal(fileAt(origin + '/..%2fsecret.txt'), null, 'an escaped slash cannot climb out');
+  assert.equal(fileAt(origin + '/data/..%2f..%2fsecret.txt'), null);
+  assert.equal(fileAt(origin + '/..%5C..%5Csecret.txt'), null);
+  assert.equal(fileAt(origin + '/C:%5CWindows%5Cwin.ini'), null);
+  assert.equal(fileAt(origin + '/'), null, 'the folder itself is not a file');
+  assert.equal(fileAt(origin + '/bad%zz'), null, 'a broken escape is refused');
+  assert.equal(fileAt(origin + '/a%00b'), null);
+  assert.equal(fileAt('notespage://' + '0'.repeat(32) + '/board.html'), null, 'a folder never opened is not served');
+  assert.equal(fileAt('https://example.com/board.html'), null);
+  assert.equal(fileAt('not a url'), null);
 });
 
 test('respond returns the file with its type, and 404 for folders, missing files and anything outside', async () => {
@@ -132,4 +133,71 @@ test('the notespage scheme can fetch, stream and keep storage', () => {
   const [scheme] = pages.privilegedSchemes();
   assert.equal(scheme.scheme, pages.SCHEME);
   assert.deepEqual(scheme.privileges, { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true });
+});
+
+test('ownerFrame skips frames inside a page that never loaded a page of their own', () => {
+  const foreign = new Set([3]);
+  const top = frame(1, 'file:///C:/app/index.html');
+  const pageFrame = frame(3, 'notespage://abc/board.html', top);
+  const srcdoc = frame(7, 'about:srcdoc', pageFrame);
+  assert.equal(pages.isForeignFrame(srcdoc, foreign), true);
+  assert.equal(pages.ownerFrame(srcdoc, foreign), top, 'a key pressed in a srcdoc frame still reaches Notes');
+  const rightPane = frame(2, 'file:///C:/app/index.html?pane=right', top);
+  assert.equal(pages.ownerFrame(frame(8, 'about:blank', frame(3, 'notespage://abc/board.html', rightPane)), foreign), rightPane, 'and the right side when the page is there');
+});
+
+test('createExternalGate opens outside only right after the person did something, and not twice in a second', () => {
+  let t = 10_000;
+  const gate = pages.createExternalGate(() => t);
+  assert.equal(gate.allow(), false, 'nothing typed or clicked yet');
+  gate.input('mouseMove');
+  assert.equal(gate.allow(), false, 'moving the mouse is not a request');
+  gate.input('mouseDown');
+  t += 100;
+  assert.equal(gate.allow(), true);
+  t += 200;
+  assert.equal(gate.allow(), false, 'a second open in the same second is dropped');
+  gate.input('keyDown');
+  t += 1500;
+  assert.equal(gate.allow(), true);
+  t += 5000;
+  assert.equal(gate.allow(), false, 'an old click does not count');
+});
+
+test('permissionAllowed keeps Notes as it was and gives pages only fullscreen and copying', () => {
+  for (const url of ['file:///C:/app/index.html', 'wordcraft://app/index.html', '']) assert.equal(pages.permissionAllowed('media', url), true, url || 'no url');
+  for (const url of ['notespage://abc/board.html', 'http://localhost:5173/', 'https://127.0.0.1/']) {
+    assert.equal(pages.permissionAllowed('fullscreen', url), true);
+    assert.equal(pages.permissionAllowed('clipboard-sanitized-write', url), true);
+    for (const p of ['clipboard-read', 'media', 'geolocation', 'notifications', 'openExternal']) assert.equal(pages.permissionAllowed(p, url), false, p + ' for ' + url);
+  }
+});
+
+test('probeLocal says a local server answered for any reply or a certificate it cannot check, and never fetches elsewhere', async () => {
+  const calls = [];
+  const replying = async (url) => { calls.push(url); return new Response('hi', { status: 500 }); };
+  assert.equal(await pages.probeLocal('http://localhost:5173', replying, 1000), true, 'any status is an answer');
+  assert.deepEqual(calls, ['http://localhost:5173/']);
+  const refused = async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) }); };
+  assert.equal(await pages.probeLocal('http://127.0.0.1:9', refused, 1000), false);
+  const selfSigned = async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('self-signed'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' }) }); };
+  assert.equal(await pages.probeLocal('https://localhost:8443', selfSigned, 1000), true);
+  const never = async () => { throw new Error('should not fetch'); };
+  assert.equal(await pages.probeLocal('https://example.com/', never, 1000), false);
+  assert.equal(await pages.probeLocal('not a url', never, 1000), false);
+  assert.equal(await pages.probeLocal('http://app.localhost:5173/', never, 1000), true, 'Chromium resolves *.localhost itself');
+});
+
+test('respond refuses a file reached through a link that leads out of the page folder', { skip: process.platform !== 'win32' && 'junctions are a Windows feature' }, async () => {
+  const { dir, host, origin } = pageFolder();
+  const outside = tmpDir('notes-page-host-secret-');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'secret');
+  fs.symlinkSync(outside, path.join(dir, 'link'), 'junction');
+  assert.ok(host.fileFor(origin + '/link/secret.txt'), 'the path alone looks inside');
+  assert.equal((await host.respond(origin + '/link/secret.txt')).status, 404);
+  fs.mkdirSync(path.join(outside, 'pages'));
+  fs.writeFileSync(path.join(outside, 'pages', 'ok.html'), 'ok');
+  const viaLink = pages.createPageHost();
+  const linkedUrl = viaLink.pageUrl(path.join(dir, 'link', 'pages', 'ok.html'));
+  assert.equal((await viaLink.respond(linkedUrl)).status, 200, 'a page opened through a link is served from where it really is');
 });

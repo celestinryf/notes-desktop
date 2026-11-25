@@ -150,7 +150,7 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
   };
 }
 
-const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'html', 'htm', 'url']);
+const VAULT_EXT = new Set<string>(H.NOTE_FILE_EXT);
 const LOCK_EXT = 'mdlock';
 const LOCKED_NAME = 'Locked note';
 const isLockPath = (p: string | null | undefined) => F.extOf(String(p || '')) === LOCK_EXT;

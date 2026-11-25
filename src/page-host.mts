@@ -13,6 +13,11 @@ function privilegedSchemes(): Electron.CustomScheme[] {
   return [{ scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }];
 }
 
+function isInside(dir: string, file: string) {
+  const inside = path.relative(dir, file);
+  return !!inside && !inside.startsWith('..') && !path.isAbsolute(inside);
+}
+
 function folderKey(dir: string) {
   const resolved = path.resolve(dir);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -38,15 +43,15 @@ function createPageHost() {
     try { rel = decodeURIComponent(parsed.pathname).replace(/^[/\\]+/, ''); } catch (_) { return null; }
     if (!rel || rel.includes('\0')) return null;
     const file = path.resolve(dir, rel);
-    const inside = path.relative(dir, file);
-    if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return null;
-    return file;
+    return isInside(dir, file) ? { dir, file } : null;
   }
 
   async function respond(url: string) {
-    const file = fileFor(url);
-    if (!file) return new Response('Not found', { status: 404 });
+    const found = fileFor(url);
+    if (!found) return new Response('Not found', { status: 404 });
     try {
+      const [realDir, file] = await Promise.all([fs.promises.realpath(found.dir), fs.promises.realpath(found.file)]);
+      if (!isInside(realDir, file)) return new Response('Not found', { status: 404 });
       const stat = await fs.promises.stat(file);
       if (!stat.isFile()) return new Response('Not found', { status: 404 });
       const buf = await fs.promises.readFile(file);
@@ -82,10 +87,56 @@ function isForeignFrame<T extends FrameNode<T>>(frame: T, foreign: Set<number>) 
   return false;
 }
 
-function ownerFrame<T extends FrameNode<T>>(frame: T, foreign: Set<number>) {
+function ownerFrame<T extends FrameNode<T> & { url: string }>(frame: T, foreign: Set<number>) {
   let f: T | null = frame;
-  while (f && foreign.has(f.frameTreeNodeId)) f = f.parent;
+  while (f && (foreign.has(f.frameTreeNodeId) || !/^file:/i.test(f.url))) f = f.parent;
   return f;
+}
+
+const GESTURE_MS = 3000;
+const EXTERNAL_GAP_MS = 1000;
+const GESTURE_INPUTS = new Set(['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'char', 'gestureTap', 'touchStart', 'touchEnd']);
+
+function createExternalGate(now: () => number = Date.now) {
+  let lastInput = -Infinity;
+  let lastOpen = -Infinity;
+  return {
+    input(type: string) { if (GESTURE_INPUTS.has(type)) lastInput = now(); },
+    allow() {
+      const t = now();
+      if (t - lastInput > GESTURE_MS || t - lastOpen < EXTERNAL_GAP_MS) return false;
+      lastOpen = t;
+      return true;
+    },
+  };
+}
+
+type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+const TLS_TROUBLE = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|TLS/;
+
+function errorCode(err: unknown) {
+  const cause = err instanceof Error ? err.cause : null;
+  return cause instanceof Error && 'code' in cause ? String(cause.code) : '';
+}
+
+async function probeLocal(raw: string, fetcher: Fetcher, timeoutMs: number) {
+  const target = loopbackUrl(raw);
+  if (!target) return false;
+  if (new URL(target).hostname.endsWith('.localhost')) return true;
+  try {
+    const res = await fetcher(target, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+    if (res.body) await res.body.cancel().catch(() => {});
+    return true;
+  } catch (err) {
+    return TLS_TROUBLE.test(errorCode(err));
+  }
+}
+
+const PAGE_PERMISSIONS = new Set(['fullscreen', 'clipboard-sanitized-write']);
+
+function permissionAllowed(permission: string, requestingUrl: string) {
+  if (!/^(notespage|https?):/i.test(requestingUrl)) return true;
+  return PAGE_PERMISSIONS.has(permission);
 }
 
 const FORWARDED_CTRL = new Set(['e', 'p', 'n', 'o', 't', 'w', ',', 'tab', '\\']);
@@ -103,5 +154,5 @@ function pageShortcut(input: Pick<Electron.Input, 'type' | 'key' | 'code' | 'con
   return (input.shift ? FORWARDED_CTRL_SHIFT : FORWARDED_CTRL).has(k) ? plain : null;
 }
 
-export { SCHEME, privilegedSchemes, createPageHost, frameNavigation, isForeignFrame, ownerFrame, pageShortcut };
+export { SCHEME, privilegedSchemes, createPageHost, frameNavigation, isForeignFrame, ownerFrame, pageShortcut, createExternalGate, permissionAllowed, probeLocal };
 export type { FrameLike, FrameVerdict };

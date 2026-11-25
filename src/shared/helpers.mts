@@ -520,6 +520,7 @@ function isTableFile(note: FileSource) {
   return !!note && isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
 }
 
+const NOTE_FILE_EXT = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'html', 'htm', 'url'] as const;
 const HTML_PAGE_EXT = new Set(['html', 'htm']);
 const WEB_LINK_EXT = 'url';
 
@@ -730,7 +731,7 @@ export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
   isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, isOpenableLink, gitErrorText, isLinkedNotice,
   fuzzyScore,
-  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTexFile, isTableFile, isHtmlPageFile, isWebLinkFile, isPageFile, hasOwnView, webLinkTarget, webLinkFileText, isLoopbackHost, loopbackUrl, webAddressFrom, localPageAddress, webLinkName, WEB_LINK_EXT, isOoxmlWordFile, imageBaseFor, fileStamp,
+  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTexFile, isTableFile, isHtmlPageFile, isWebLinkFile, isPageFile, hasOwnView, webLinkTarget, webLinkFileText, isLoopbackHost, loopbackUrl, webAddressFrom, localPageAddress, webLinkName, WEB_LINK_EXT, NOTE_FILE_EXT, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, countLines, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,

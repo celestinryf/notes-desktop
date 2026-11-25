@@ -320,7 +320,7 @@ export function createEditorView({ api, refresh, updateStatus, updateSettings, s
     if (next === state.sourceMode) return;
     if (!next && isPlainTextFile(state.current) && !H.hasOwnView(state.current)) { toast('This is a plain-text file, so it is edited as the text it is.'); return; }
     if (!next && !state.rich && !H.hasOwnView(state.current)) { toast('The rendered editor is unavailable; staying in Markdown source.'); return; }
-    if (!next && H.isPageFile(state.current)) { showPageAfterSave(); return; }
+    if (!next && H.isPageFile(state.current)) { showPageAfterSave().catch((err) => toast('Could not save before showing the page: ' + (err.message || err))); return; }
     const rich = state.rich;
     if (!next && rich && state.currentId && !isPlainTextFile(state.current)) {
       state.currentLossless = rich.setMarkdown(el.bodyInput.value);
