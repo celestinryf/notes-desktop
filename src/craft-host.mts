@@ -12,6 +12,9 @@ const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.txt': 'text/plain; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8', '.cjs': 'text/javascript; charset=utf-8', '.map': 'application/json', '.csv': 'text/csv; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
+  '.xml': 'application/xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp',
+  '.woff': 'font/woff', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp4': 'video/mp4', '.webm': 'video/webm', '.pdf': 'application/pdf',
 };
 
 function buildDir(key: string) {
@@ -21,8 +24,8 @@ function buildDir(key: string) {
   return candidates.find((d) => { try { return fs.statSync(path.join(d, 'index.html')).isFile(); } catch (_) { return false; } }) || null;
 }
 
-function registerSchemes(protocol: Electron.Protocol) {
-  protocol.registerSchemesAsPrivileged(KEYS.map((scheme) => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true } })));
+function privilegedSchemes(): Electron.CustomScheme[] {
+  return KEYS.map((scheme) => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true } }));
 }
 
 function resolve(dir: string, url: string) {
@@ -56,4 +59,4 @@ function serve(protocol: Electron.Protocol, trace?: (event: string, fields?: Tra
   return ready;
 }
 
-export { APPS, KEYS, buildDir, registerSchemes, resolve, serve };
+export { APPS, KEYS, MIME, buildDir, privilegedSchemes, resolve, serve };

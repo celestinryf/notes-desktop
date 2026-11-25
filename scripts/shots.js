@@ -128,6 +128,10 @@ Mud on the switchbacks below the ridge; the upper meadow is clear.
 2026-09-27,North loop,8.4,640,"Reopened after the storm; bring water"
 `],
   'csv-wide': ['readings.csv', sampleReadings(150)],
+  html: ['trail-board.html', '<!doctype html><html><head><meta charset="utf-8"><title>Trail board</title><style>body{font:15px system-ui,sans-serif;margin:24px;color:#1d2a22}h1{font-size:22px;margin:0 0 12px}li{padding:6px 0}</style></head>'
+    + '<body><h1>Trail board</h1><ul id="stops"></ul><script>fetch("stops.json").then((r) => r.json()).then((d) => { for (const s of d.stops) { const li = document.createElement("li"); li.textContent = s; document.getElementById("stops").appendChild(li); } });</script></body></html>'],
+  'url-down': ['localhost 59999.url', '[InternetShortcut]\r\nURL=http://localhost:59999/\r\n'],
+  'url-remote': ['example.url', '[InternetShortcut]\r\nURL=https://example.com/\r\n'],
   png: ['ridge.png', samplePng(480, 300), 'image'],
   pdf: ['trail.pdf', samplePdf(), 'pdf'],
   js: ['trail.js', `// Elevation gain over the first loop, in metres.
@@ -518,6 +522,11 @@ const SCENES = {
   dropdown: { about: 'A select open: the note list sort', run: async (page) => { await page.click('#sortSelect'); await sleep(400); } },
   'dropdown-keys': { about: 'A select open, moved through with the keyboard', run: async (page) => { await page.click('#sortSelect'); await sleep(300); await page.keyboard.press('ArrowDown'); await sleep(300); } },
   'dropdown-folder': { about: 'The folder select over a note title, open', run: steps(openNote('Q4 planning'), async (page) => { await page.click('#folderSelect'); await sleep(400); }) },
+  'html-page': { about: 'An HTML file shown as its page: its script ran and filled the list from stops.json beside it', file: 'html', extraFiles: { 'stops.json': JSON.stringify({ stops: ['North loop trailhead', 'Upper meadow', 'Ridge spring'] }) }, run: steps(openNote('trail-board.html'), async () => { await sleep(900); }) },
+  'html-source': { about: 'The same HTML file after Ctrl+E: its source in the code editor, the button reads Page', file: 'html', extraFiles: { 'stops.json': JSON.stringify({ stops: ['North loop trailhead'] }) }, run: steps(openNote('trail-board.html'), async () => { await sleep(600); }, key('Control+e')) },
+  'web-page-down': { about: 'A web page shortcut whose server is not running: the notice and Try again', file: 'url-down', run: steps(openNote('localhost 59999.url'), async () => { await sleep(1200); }) },
+  'web-page-remote': { about: 'A shortcut to a site on the internet: Notes says it shows local pages only, with Open in browser', file: 'url-remote', run: steps(openNote('example.url'), async () => { await sleep(600); }) },
+  'web-page-dialog': { about: 'New web page with an address that is not on this computer: the hint says so and Add the page is off', run: steps(key('Control+p'), async (page) => { await page.keyboard.type('New web page'); await sleep(400); await page.keyboard.press('Enter'); await sleep(400); await page.keyboard.type('example.com'); await sleep(300); }) },
   small: { about: 'A small window (820x560) with a note open', size: { width: 820, height: 560 }, run: openNote('Q4 planning') },
 };
 

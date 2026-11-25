@@ -7,7 +7,7 @@ const TEXT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex'
   'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'csv', 'tsv', 'log',
   'xml', 'html', 'htm', 'svg', 'css', 'scss', 'less', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs',
   'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'swift', 'php', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd', 'sql',
-  'lua', 'luau', 'r', 'm', 'pl', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
+  'lua', 'luau', 'r', 'm', 'pl', 'url', 'gitignore', 'gitattributes', 'editorconfig', 'dockerfile', 'makefile']);
 
 import { extOf, MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, ZIP_DOC_EXT } from './shared/helpers.mts';
 import * as markitdown from './markitdown.mts';

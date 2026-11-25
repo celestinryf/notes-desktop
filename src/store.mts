@@ -150,7 +150,7 @@ function sanitizeVault(raw: unknown, now: number): Vault | null {
   };
 }
 
-const VAULT_EXT = new Set(['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst']);
+const VAULT_EXT = new Set<string>(H.NOTE_FILE_EXT);
 const LOCK_EXT = 'mdlock';
 const LOCKED_NAME = 'Locked note';
 const isLockPath = (p: string | null | undefined) => F.extOf(String(p || '')) === LOCK_EXT;
@@ -2147,6 +2147,31 @@ class Store {
         title: title.trim() ? title : '', body: lock ? '' : text, tags: lock ? tags : FM.noteTags(text), lock,
         folderId: folder ? folder.id : null, filePath: full, fileKind: 'text' as const, fileMtime: F.mtimeOf(full), vaultId: home.id,
       }));
+    } catch (err) {
+      try { fs.rmSync(full); } catch (_) {  }
+      throw err;
+    }
+  }
+
+  createWebLink(address: string, folderId?: string | null): Note {
+    const url = H.loopbackUrl(address);
+    if (!url) throw Object.assign(new Error('Notes shows pages from this computer only, such as http://localhost:5173.'), { code: 'EBADURL' });
+    const home = this.homeVault();
+    const picked = folderId ? this.getFolder(folderId) : null;
+    const folder = picked && picked.vaultId && picked.dirPath ? picked : null;
+    if (!folder && !home) throw new Error('There is no notes folder.');
+    const dir = folder && folder.dirPath ? folder.dirPath : this._homeDir(null);
+    const vaultId = folder ? folder.vaultId : home ? home.id : null;
+    fs.mkdirSync(dir, { recursive: true });
+    const name = uniqueName(dir, H.safeFilename(H.webLinkName(url)), '.' + H.WEB_LINK_EXT);
+    const full = path.join(dir, name);
+    const text = H.webLinkFileText(url);
+    writeFileAtomic(full, text);
+    try {
+      return this.create({
+        title: stem(name), body: text, tags: [], folderId: folder ? folder.id : null,
+        filePath: full, fileKind: 'text', fileMtime: F.mtimeOf(full), vaultId,
+      });
     } catch (err) {
       try { fs.rmSync(full); } catch (_) {  }
       throw err;

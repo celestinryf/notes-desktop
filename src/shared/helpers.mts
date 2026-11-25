@@ -520,6 +520,69 @@ function isTableFile(note: FileSource) {
   return !!note && isPlainTextFile(note) && ['csv', 'tsv'].includes(extOf(note.filePath));
 }
 
+const NOTE_FILE_EXT = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'html', 'htm', 'url'] as const;
+const HTML_PAGE_EXT = new Set(['html', 'htm']);
+const WEB_LINK_EXT = 'url';
+
+function isHtmlPageFile(note: FileSource) {
+  return !!note && isPlainTextFile(note) && HTML_PAGE_EXT.has(extOf(note.filePath));
+}
+
+function isWebLinkFile(note: FileSource) {
+  return !!note && isPlainTextFile(note) && extOf(note.filePath) === WEB_LINK_EXT;
+}
+
+function isPageFile(note: FileSource) {
+  return isHtmlPageFile(note) || isWebLinkFile(note);
+}
+
+function hasOwnView(note: FileSource) {
+  return isTableFile(note) || isPageFile(note);
+}
+
+function webLinkTarget(text: string | null | undefined) {
+  let section = '';
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const heading = /^\s*\[([^\]]*)\]\s*$/.exec(line);
+    if (heading) { section = heading[1].trim().toLowerCase(); continue; }
+    const entry = /^\s*URL\s*=\s*(.*?)\s*$/i.exec(line);
+    if (entry && section === 'internetshortcut' && entry[1]) return entry[1];
+  }
+  return null;
+}
+
+const webLinkFileText = (url: string) => '[InternetShortcut]\r\nURL=' + url + '\r\n';
+
+function isLoopbackHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
+function loopbackUrl(raw: string | null | undefined) {
+  let url: URL;
+  try { url = new URL(String(raw || '').trim()); } catch (_) { return null; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.username || url.password || !isLoopbackHost(url.hostname)) return null;
+  return url.href;
+}
+
+function webAddressFrom(input: string | null | undefined) {
+  const text = String(input || '').trim();
+  if (!text) return '';
+  if (/^\d{1,5}$/.test(text)) return 'http://localhost:' + text;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
+  return 'http://' + text;
+}
+
+const localPageAddress = (input: string | null | undefined) => loopbackUrl(webAddressFrom(input));
+
+function webLinkName(url: string) {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch (_) { return 'Web page'; }
+  const host = parsed.hostname === '[::1]' ? 'localhost' : parsed.hostname;
+  return parsed.port ? host + ' ' + parsed.port : host;
+}
+
 function isOoxmlWordFile(note: FileSource) {
   return !!(note && note.filePath && note.fileKind === 'docx' && OOXML_EXT.has(extOf(note.filePath)));
 }
@@ -668,7 +731,7 @@ export {
   splitFrontMatter, readFrontMatter, frontMatterText, YAML_KEY_LINE,
   isObjectLike, isRecord, GITHUB_CANCELLED, validRepoName, repoNameProblem, isGitHubHttps, githubButtonLabel, accountSentence, isAuthFailure, stringItems, tenths, traceClock, msSince, isRecycleBinPath, isLinkedFile, isOpenableLink, gitErrorText, isLinkedNotice,
   fuzzyScore,
-  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTexFile, isTableFile, isOoxmlWordFile, imageBaseFor, fileStamp,
+  splitAtHeadings, headingTitle, extOf, fileNameOf, isViewerOnlyFile, isPlainTextFile, isNonMarkdownFile, isTexFile, isTableFile, isHtmlPageFile, isWebLinkFile, isPageFile, hasOwnView, webLinkTarget, webLinkFileText, isLoopbackHost, loopbackUrl, webAddressFrom, localPageAddress, webLinkName, WEB_LINK_EXT, NOTE_FILE_EXT, isOoxmlWordFile, imageBaseFor, fileStamp,
   MAX_TEXT_BYTES, WORD_EXT, OOXML_EXT, WORD_TO_DOCX_EXT, IMAGE_EXT, IMAGE_MIME, SHEET_EXT, SHEET_TO_XLSX_EXT, CRAFT_OF, ZIP_DOC_EXT,
   UNTITLED, deriveTitle, firstLine, truncate, snippet, relativeTime, parseTags, toggleTaskAt,
   countWords, countLines, tokenize, searchHay, matchesQuery, sortNotes, outlineRow, listRow, matchExcerpt, parseAccelerator, displayAccelerator,

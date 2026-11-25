@@ -4,12 +4,12 @@ import { run, runBytes, spawnGit, AUTHOR } from './git-run.mts';
 import type { GitRun } from './git-run.mts';
 import { pullInto } from './git-pull.mts';
 import type { PullResult } from './git-pull.mts';
-import { MAX_TEXT_BYTES, isRecord, isAuthFailure } from './shared/helpers.mts';
+import { MAX_TEXT_BYTES, NOTE_FILE_EXT, isRecord, isAuthFailure } from './shared/helpers.mts';
 import { VersionClock, DEFAULT_TIMING, uniformTiming } from './version-timing.mts';
 import type { VersionTiming } from './version-timing.mts';
 
 const COPY_RETRIES = 8;
-const NOTE_EXTS = ['md', 'markdown', 'mdx', 'txt', 'text', 'tex', 'latex', 'bib', 'org', 'rst', 'mdlock'];
+const NOTE_EXTS = [...NOTE_FILE_EXT, 'mdlock'];
 const LINKED_DIR = '.linked';
 const TREE_EXCLUDE = ['*', '!*/'].concat(NOTE_EXTS.map((ext) => '!*.' + ext), ['.trash/', '.obsidian/']).join('\n') + '\n';
 const STALE_LOCK_MS = 10000;
@@ -613,4 +613,4 @@ function parseVersion(chunk: string): RawVersion {
 }
 
 export type { FileCommit, LinkedFile, KeptOut, RawVersion, Pulled };
-export { GitSync, LINKED_DIR, parseVersion };
+export { GitSync, LINKED_DIR, NOTE_EXTS, parseVersion };

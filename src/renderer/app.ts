@@ -31,13 +31,14 @@ import type { TreeItem } from './tree-items.ts';
 import { createStickyButton } from './sticky-button.ts';
 import { createBotPanel } from './bot-panel.ts';
 import { createCodeEditor, editorTookEscape, src } from './code-editor.ts';
-import { createEditorView, tableShown, focusBody, inTextField, bodyHasFocus, autoGrow } from './editor-view.ts';
+import { createEditorView, tableShown, pageShown, focusBody, inTextField, bodyHasFocus, autoGrow } from './editor-view.ts';
 import { createLinkDialog } from './link-dialog.ts';
 import { createVaultsPanel } from './vaults-panel.ts';
 import { createLocking } from './locking.ts';
 import { createAttachments } from './attachments.ts';
 import { createHistoryDialog } from './history-dialog.ts';
 import { createLibraryDialog, statusSentence } from './library-dialog.ts';
+import { createWebPageDialog } from './web-page-dialog.ts';
 import { createGithubDialog } from './github-dialog.ts';
 import { createSpeech } from './speech.ts';
 import { createHints, HINT } from './hints.ts';
@@ -123,7 +124,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     applyEditorLayout(settings);
     if (el.settingsDialog.open && settingsDirty()) previewSettings();
     if (opts && opts.fromPeer) return;
-    if (H.isTableFile(state.current)) return;
+    if (H.hasOwnView(state.current)) return;
     const forcedSource = (state.currentLossless === false && state.lossyOverride !== state.currentId) || !state.rich || isPlainTextFile(state.current);
     const wantSource = settings.editorMode === 'source' || forcedSource;
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
@@ -1760,6 +1761,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (name === 'newNote') newNote({ title: m && typeof m.title === 'string' ? m.title : '' });
     else if (name === 'search') searchList();
     else if (name === 'openFiles') openFiles();
+    else if (name === 'newWebPage') newWebPage();
     else if (name === 'settings') openSettings();
     else if (name === 'newFolder') startCreateFolder(state.view === 'folder' ? state.folderId : null);
     else if (name === 'toggleSidebar') toggleSidebar();
@@ -1938,7 +1940,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     state.currentLossless = lossless;
     state.lossyOverride = null;
     el.bodyInput.placeholder = plainFile ? 'Plain text.' : 'Markdown source. Ctrl+E switches back to the rendered view.';
-    const wantSource = H.isTableFile(note) ? false : (plainFile || settingsNow().editorMode === 'source' || !lossless || !state.rich);
+    const wantSource = H.hasOwnView(note) ? false : (plainFile || settingsNow().editorMode === 'source' || !lossless || !state.rich);
     if (wantSource !== state.sourceMode) applyEditorMode(wantSource);
     if (markdown && !lossless && state.lossyToastFor !== note.id) {
       state.lossyToastFor = note.id;
@@ -1949,7 +1951,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     autoGrow();
     const inTrash = !!note.trashedAt;
     const fileReadOnly = isViewerOnlyFile(note);
-    el.sourceBtn.classList.toggle('hidden', (plainFile && !H.isTableFile(note)) || fileReadOnly);
+    el.sourceBtn.classList.toggle('hidden', (plainFile && !H.hasOwnView(note)) || fileReadOnly);
     syncSourceButton();
     [el.titleInput, el.tagsInput].forEach((i) => { i.readOnly = inTrash; });
     el.bodyInput.readOnly = inTrash || fileReadOnly;
@@ -2068,7 +2070,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   };
   const { openFind, closeFind, runFind, toggleReplace, toggleFindOption, replaceCurrent, replaceAll, clearFindHighlights, scrollTextareaToSelection, printNote, exportOfCurrent } = createFindBar({ api, flushSave, GUEST, onOpen: () => hints.hint(HINT.find, TIPS.find) });
 
-  const { createRichEditor, syncTextViews, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, runFind, clearFindHighlights });
+  const { createRichEditor, syncTextViews, reloadPage, renderTable, tableStatsNow, syncSourceButton, applyEditorMode, toggleSource, followLink, openLinkAtCaret, insertFormula, formulaEditorOpen } = createEditorView({ api, refresh, updateStatus, updateSettings, scopeListToNote, selectNoteNow, scheduleSave, flushSave, runFind, clearFindHighlights });
   const compiling = createCompileControls({ api, flushSave, openFile: (filePath: string) => openFiles([filePath]), showOutput: showBeside, revealInPdf });
 
   async function showBeside(pdfPath: string, manual: boolean) {
@@ -2170,6 +2172,22 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
 
   const { openHistory, restoreVersion, renderKeepOut, toggleKeepOut, recordAgain, changeCompare, stepChange } = createHistoryDialog({ api, flushSave, applyEditorMode, runFind, scheduleSave, reloadFile: () => reloadCurrentFile(true) });
   const github = createGithubDialog({ api, updateSettings, afterRepoSet: () => library.syncNow() });
+  const webPages = createWebPageDialog({
+    api,
+    opened: async (note) => {
+      state.query = '';
+      el.searchInput.value = '';
+      if (state.view === 'trash') { state.view = 'all'; el.navItems.forEach((b) => b.classList.toggle('is-active', b.dataset.view === 'all')); }
+      await refresh({ keepEditor: true });
+      await openNote(note.id, { newTab: true });
+    },
+  });
+
+  async function newWebPage() {
+    await flushSave();
+    webPages.open(state.view === 'folder' ? state.folderId : null);
+  }
+
   const library = createLibraryDialog({
     api, flushSave, updateSettings,
     openGithub: () => github.open(),
@@ -2217,6 +2235,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (note.fileKind !== 'text') return (note.fileKind || 'file').toUpperCase();
     if (!isPlainTextFile(note)) return 'Markdown';
     if (H.isTableFile(note)) return H.extOf(note.filePath).toUpperCase();
+    if (H.isWebLinkFile(note)) return 'Web page';
     return window.NotesCode ? window.NotesCode.languageFor(H.extOf(note.filePath)).name : 'Plain text';
   }
 
@@ -2361,6 +2380,7 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     src.reload(fresh.body);
     if (isViewerOnlyFile(fresh)) { showCode(fresh, true); renderFileRow(fresh); updateStatus(fresh); return; }
     if (H.isTableFile(fresh) && tableShown()) renderTable(fresh);
+    if (H.isPageFile(fresh)) reloadPage();
     if (state.rich && !isPlainTextFile(fresh)) {
       let lossless = state.rich.setMarkdown(fresh.body, { keepSelection: true });
       if (fresh.filePath && !fresh.home && lossless && !state.rich.lastRoundTripExact()) lossless = false;
@@ -3000,7 +3020,9 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     if (noteOpen) syncShareMenu();
     const list = [
       cmd('new-note', 'Create', 'New note', 'square-pen', 'Ctrl+N', side('newNote', newNote)),
-      cmd('open-file', 'Create', 'Open a file as a note…', 'folder-open', 'Ctrl+O', side('openFiles', () => openFiles()), true, 'markdown pdf word docx txt'),
+      cmd('open-file', 'Create', 'Open a file as a note…', 'folder-open', 'Ctrl+O', side('openFiles', () => openFiles()), true, 'markdown pdf word docx txt html'),
+      cmd('new-web-page', 'Create', 'New web page from this computer…', 'globe', '', side('newWebPage', newWebPage), true, 'localhost dev server url local site app port'),
+      cmd('reload-page', 'This note', 'Reload the page', 'refresh-cw', 'F5', () => reloadPage(), noteOpen && pageShown(), 'refresh web html localhost'),
       cmd('new-folder', 'Create', 'New folder', 'folder-plus', 'Ctrl+Shift+N', () => startCreateFolder(state.view === 'folder' ? state.folderId : null), !GUEST),
       cmd('new-book', 'Create', 'New book', 'book-plus', '', () => startCreateFolder(null, true), !GUEST),
       ...([['up', 'Move this folder up', 'arrow-up', 'Alt+Up', 'ArrowUp'], ['down', 'Move this folder down', 'arrow-down', 'Alt+Down', 'ArrowDown'], ['in', 'Move this folder into the folder above', 'arrow-right', 'Alt+Right', 'ArrowRight'], ['out', 'Move this folder out of its folder', 'arrow-left', 'Alt+Left', 'ArrowLeft']] as const)
@@ -3082,11 +3104,16 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
   function onKeydown(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return;
     const ctrl = e.ctrlKey || e.metaKey;
-    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.githubDialog.open || el.signDialog.open;
+    const inDialog = el.palette.open || el.settingsDialog.open || el.splitDialog.open || el.linkDialog.open || el.remindDialog.open || el.lockDialog.open || el.liveDialog.open || el.historyDialog.open || el.libraryDialog.open || el.githubDialog.open || el.signDialog.open || el.webPageDialog.open;
     if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's' && (pdfOpen() || docxOpen())) {
       e.preventDefault();
       if (pdfOpen()) flushPdf({ commit: true, explicit: true });
       if (docxOpen()) flushDocx({ explicit: true });
+      return;
+    }
+    if (!inDialog && pageShown() && ((e.key === 'F5' && !ctrl && !e.altKey) || (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'r'))) {
+      e.preventDefault();
+      reloadPage();
       return;
     }
     if (e.key === 'Escape') {
@@ -3598,6 +3625,11 @@ type Command = { id: string; group: string; title: string; icon?: string; keys: 
     restoreTabs(settings);
     bind();
     library.bind();
+    webPages.bind();
+    api.on.pageKey((k) => {
+      if (k.reload) { reloadPage(); return; }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: k.key, code: k.code, ctrlKey: k.ctrl, shiftKey: k.shift, altKey: k.alt, bubbles: true, cancelable: true }));
+    });
     github.bind();
     bindTabs();
     if (settings.lastFolderId) { state.view = 'folder'; state.folderId = settings.lastFolderId; el.navItems.forEach((b) => b.classList.remove('is-active')); }
